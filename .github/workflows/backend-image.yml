@@ -1,0 +1,80 @@
+name: Build Backend Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag. Leave empty to use the commit SHA."
+        required: false
+        type: string
+      dispatch_deploy:
+        description: "Notify the deploy repository after pushing the image."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/buddy-studdy-backend
+  DEPLOY_REPO: ghkdqhrbals/personal-deploy
+
+jobs:
+  build:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "${TAG}" ]; then
+            TAG="${GITHUB_SHA}"
+          fi
+          echo "IMAGE_TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "IMAGE_REF=${IMAGE_NAME}:${TAG}" >> "${GITHUB_ENV}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.IMAGE_REF }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Notify deploy repository
+        if: inputs.dispatch_deploy == true
+        env:
+          DEPLOY_REPO_DISPATCH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_REPO_DISPATCH_TOKEN}" ]; then
+            echo "Missing DEPLOY_REPO_DISPATCH_TOKEN secret." >&2
+            exit 1
+          fi
+
+          curl -fsSL \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${DEPLOY_REPO_DISPATCH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${DEPLOY_REPO}/dispatches" \
+            -d "{\"event_type\":\"backend-image-published\",\"client_payload\":{\"image\":\"${IMAGE_REF}\",\"sha\":\"${GITHUB_SHA}\"}}"
+

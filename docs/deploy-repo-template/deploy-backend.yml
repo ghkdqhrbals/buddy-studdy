@@ -1,0 +1,112 @@
+name: Deploy Backend to EC2
+
+on:
+  repository_dispatch:
+    types:
+      - backend-image-published
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image ref to deploy."
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+
+    steps:
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          if [ -z "${IMAGE_REF}" ]; then
+            echo "Missing image ref." >&2
+            exit 1
+          fi
+
+      - name: Install SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/buddystuddy-ec2
+          chmod 600 ~/.ssh/buddystuddy-ec2
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          BACKEND_MASTER_KEY: ${{ secrets.BACKEND_MASTER_KEY }}
+          BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
+          APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
+          APNS_ENV: ${{ secrets.APNS_ENV }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/buddystuddy-ec2 "${EC2_USER}@${EC2_HOST}" \
+            "IMAGE_REF='${IMAGE_REF}' \
+             GHCR_USERNAME='${GHCR_USERNAME}' \
+             GHCR_TOKEN='${GHCR_TOKEN}' \
+             BACKEND_MASTER_KEY='${BACKEND_MASTER_KEY}' \
+             BACKEND_API_TOKEN='${BACKEND_API_TOKEN}' \
+             APNS_AUTH_KEY_BASE64='${APNS_AUTH_KEY_BASE64}' \
+             APNS_KEY_ID='${APNS_KEY_ID}' \
+             APNS_TEAM_ID='${APNS_TEAM_ID}' \
+             APNS_BUNDLE_ID='${APNS_BUNDLE_ID}' \
+             APNS_ENV='${APNS_ENV}' \
+             bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          sudo mkdir -p /opt/buddystuddy-backend
+          sudo chown "$USER":"$USER" /opt/buddystuddy-backend
+
+          cd /opt/buddystuddy-backend
+
+          cat > .env <<ENV
+          DATABASE_PATH=/data/buddystuddy.db
+          SCHEDULER_ENABLED=true
+          SCHEDULER_POLL_SECONDS=30
+          OPENAI_MODEL=gpt-5.4
+          BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
+          BACKEND_API_TOKEN=${BACKEND_API_TOKEN}
+          APNS_AUTH_KEY_BASE64=${APNS_AUTH_KEY_BASE64}
+          APNS_KEY_ID=${APNS_KEY_ID}
+          APNS_TEAM_ID=${APNS_TEAM_ID}
+          APNS_BUNDLE_ID=${APNS_BUNDLE_ID}
+          APNS_ENV=${APNS_ENV}
+          ENV
+          chmod 600 .env
+
+          cat > docker-compose.yml <<COMPOSE
+          services:
+            backend:
+              image: ${IMAGE_REF}
+              restart: unless-stopped
+              env_file:
+                - .env
+              ports:
+                - "8080:8080"
+              volumes:
+                - buddystuddy-backend-data:/data
+
+          volumes:
+            buddystuddy-backend-data:
+          COMPOSE
+
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          docker compose pull
+          docker compose up -d
+          docker image prune -f
+          REMOTE
+

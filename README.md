@@ -19,6 +19,7 @@ BuddyStuddy was built to help keep that knowledge fresh through small, repeated 
 - Push delivery for new study questions on iPhone
 - Korean and English app language support
 - OpenAI Responses API integration with the user's own API key
+- Optional Python backend scaffold for true APNs remote push delivery
 
 ## Requirements
 
@@ -62,6 +63,10 @@ Required GitHub Actions secrets:
 - `APPSTORE_CONNECT_PRIVATE_KEY_BASE64`
 
 The workflow builds `StudyMateiOS`, verifies production push and CloudKit entitlements, exports an IPA, keeps the IPA as a short-lived Actions artifact, and uploads it to App Store Connect.
+
+## Backend
+
+The optional push backend lives in `backend/`. It is a Dockerized FastAPI service that can generate scheduled questions and send APNs notifications. Deployment wiring is documented in `docs/BACKEND_APNS_DEPLOYMENT.md`.
 
 ## Website
 

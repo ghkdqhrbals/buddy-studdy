@@ -1,0 +1,15 @@
+services:
+  backend:
+    build: .
+    image: buddystuddy-backend:local
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - buddystuddy-data:/data
+    restart: unless-stopped
+
+volumes:
+  buddystuddy-data:
+
