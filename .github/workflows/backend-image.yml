@@ -54,6 +54,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_REF }}
@@ -77,4 +78,3 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${DEPLOY_REPO}/dispatches" \
             -d "{\"event_type\":\"backend-image-published\",\"client_payload\":{\"image\":\"${IMAGE_REF}\",\"sha\":\"${GITHUB_SHA}\"}}"
-
