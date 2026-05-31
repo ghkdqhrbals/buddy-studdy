@@ -61,12 +61,25 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 2. The workflow builds `backend/Dockerfile`.
 3. The image is pushed to GHCR.
 4. The workflow sends `repository_dispatch` to `ghkdqhrbals/personal-deploy`.
-5. The deploy repository SSHes into EC2, writes `/opt/buddystuddy-backend/.env`, pulls the image, and runs Docker Compose.
+5. The deploy repository SSHes into EC2, writes `/opt/buddystuddy-backend/.env`, pulls the image, and runs Docker.
+6. The backend container stays on a private Docker network.
+7. Nginx is the only public backend entrypoint and publishes HTTPS on host port `443`.
+
+## Public Network Shape
+
+- Public HTTPS: `443 -> nginx -> buddystuddy-backend:8080`
+- Backend app port `8080` is not published on the EC2 host.
+- The current workflow generates a self-signed certificate for deployment smoke testing.
+- Production iOS traffic should use a real domain with a trusted TLS certificate. A self-signed certificate will not be acceptable for normal App Transport Security usage.
+
+Smoke-test the current EC2 deployment with:
+
+```sh
+curl -kfsS https://ec2-13-125-226-24.ap-northeast-2.compute.amazonaws.com/health
+```
 
 ## Open Questions
 
 - Whether the app should send each user's OpenAI API key to the backend, or whether the backend should use one server-owned OpenAI API key.
-- EC2 SSH username and SSH private key.
-- APNs `.p8` auth key and key ID.
+- Real production domain and trusted TLS certificate automation.
 - Whether backend records should sync back into the local app history after a notification is tapped.
-

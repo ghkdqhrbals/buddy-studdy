@@ -45,13 +45,17 @@ docker run --rm -p 8080:8080 --env-file .env -v buddystuddy-data:/data buddystud
 
 ## API
 
+See [API.md](API.md) for request/response examples.
+
 - `GET /health`
 - `POST /v1/devices/register`
 - `PUT /v1/devices/{device_id}/schedule`
 - `DELETE /v1/devices/{device_id}`
+- `POST /v1/admin/scheduler/run-once`
 
 Device schedule updates require:
 
 - `X-Device-Id`
 - `X-Client-Secret`
 
+FastAPI also serves generated API docs at `/docs`, `/redoc`, and `/openapi.json`.

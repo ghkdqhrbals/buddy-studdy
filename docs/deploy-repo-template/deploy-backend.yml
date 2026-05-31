@@ -56,6 +56,7 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/buddystuddy-ec2 "${EC2_USER}@${EC2_HOST}" \
             "IMAGE_REF='${IMAGE_REF}' \
+             EC2_HOST='${EC2_HOST}' \
              GHCR_USERNAME='${GHCR_USERNAME}' \
              GHCR_TOKEN='${GHCR_TOKEN}' \
              BACKEND_MASTER_KEY='${BACKEND_MASTER_KEY}' \
@@ -73,6 +74,8 @@ jobs:
 
           cd /opt/buddystuddy-backend
 
+          mkdir -p nginx/certs
+
           cat > .env <<ENV
           DATABASE_PATH=/data/buddystuddy.db
           SCHEDULER_ENABLED=true
@@ -88,25 +91,75 @@ jobs:
           ENV
           chmod 600 .env
 
-          cat > docker-compose.yml <<COMPOSE
-          services:
-            backend:
-              image: ${IMAGE_REF}
-              restart: unless-stopped
-              env_file:
-                - .env
-              ports:
-                - "8080:8080"
-              volumes:
-                - buddystuddy-backend-data:/data
+          if [ ! -s nginx/certs/server.crt ] || [ ! -s nginx/certs/server.key ]; then
+            openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+              -keyout nginx/certs/server.key \
+              -out nginx/certs/server.crt \
+              -subj "/CN=${EC2_HOST}" \
+              -addext "subjectAltName=DNS:${EC2_HOST}"
+            chmod 600 nginx/certs/server.key
+          fi
 
-          volumes:
-            buddystuddy-backend-data:
-          COMPOSE
+          cat > nginx/nginx.conf <<'NGINX'
+          events {}
 
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-          docker compose pull
-          docker compose up -d
-          docker image prune -f
+          http {
+            server {
+              listen 443 ssl http2;
+              server_name _;
+
+              ssl_certificate /etc/nginx/certs/server.crt;
+              ssl_certificate_key /etc/nginx/certs/server.key;
+
+              client_max_body_size 1m;
+
+              location / {
+                proxy_pass http://buddystuddy-backend:8080;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+            }
+          }
+          NGINX
+
+          echo "${GHCR_TOKEN}" | sudo docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          sudo docker pull "${IMAGE_REF}"
+          sudo docker pull nginx:1.27-alpine
+          sudo docker network create buddystuddy-net >/dev/null 2>&1 || true
+          sudo docker rm -f buddystuddy-nginx buddystuddy-backend >/dev/null 2>&1 || true
+          sudo docker volume create buddystuddy-backend-data >/dev/null
+
+          sudo docker run -d \
+            --name buddystuddy-backend \
+            --network buddystuddy-net \
+            --restart unless-stopped \
+            --env-file .env \
+            -v buddystuddy-backend-data:/data \
+            "${IMAGE_REF}"
+
+          sudo docker run -d \
+            --name buddystuddy-nginx \
+            --network buddystuddy-net \
+            --restart unless-stopped \
+            -p 443:443 \
+            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+            nginx:1.27-alpine
+
+          for attempt in $(seq 1 30); do
+            if curl -kfsS https://127.0.0.1/health; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Backend health check failed after ${attempt} attempts." >&2
+              sudo docker logs buddystuddy-backend || true
+              sudo docker logs buddystuddy-nginx || true
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker image prune -f
           REMOTE
-
