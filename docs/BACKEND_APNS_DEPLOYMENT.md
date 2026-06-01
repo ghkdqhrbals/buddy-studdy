@@ -70,17 +70,20 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 
 - Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystuddy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
-- PostgreSQL port `5432` is published only on EC2 localhost, not on the public interface.
+- PostgreSQL port `5432` is published on the EC2 host for production database access.
 - The workflow requests/renews a Let's Encrypt certificate with the `tls-alpn-01` challenge, so public port `80` is not required.
 - If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
 
-Use an SSH tunnel for database administration:
+Use these connection basics for database administration:
 
-```sh
-ssh -i ~/.ssh/buddystuddy/personal_deploy_ec2 -N -L 15432:127.0.0.1:5432 ec2-user@ec2-3-39-42-28.ap-northeast-2.compute.amazonaws.com
+```text
+host: api.ghkdqhrbals.org
+port: 5432
+database: buddystuddy
+user: buddystuddy
 ```
 
-Then connect a local database client to `127.0.0.1:15432`, database `buddystuddy`, user `buddystuddy`. The password is stored on EC2 at `/opt/buddystuddy-backend/.postgres_password`.
+The password is stored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep the generated password private and restrict the EC2 security group if public access is no longer required.
 
 ## Data Durability
 
