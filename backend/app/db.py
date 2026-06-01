@@ -175,6 +175,9 @@ class Database:
 
         db.execute("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL")
         db.execute("ALTER TABLE questions ALTER COLUMN updated_at SET NOT NULL")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_questions_device_status ON questions(device_id, status, deleted_at)"
+        )
 
     @staticmethod
     def _ensure_sqlite_columns(db: Any) -> None:
@@ -340,7 +343,6 @@ class Database:
             """,
             "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_due_at)",
             "CREATE INDEX IF NOT EXISTS idx_questions_device_created ON questions(device_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_questions_device_status ON questions(device_id, status, deleted_at)",
         ]
 
     def register_device(
