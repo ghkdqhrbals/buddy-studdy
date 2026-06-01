@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import uuid4
+
+from .db import to_iso, utc_now
 
 from .apns import APNsClient, APNsQuestion
 from .config import Settings
@@ -13,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class QuestionScheduler:
+    max_pending_questions = 3
+
     def __init__(self, settings: Settings, database: Database):
         self.settings = settings
         self.database = database
@@ -35,7 +40,22 @@ class QuestionScheduler:
         sent_count = 0
         for row in self.database.due_schedules():
             device_id = row["device_id"]
+            created_record_id: str | None = None
             try:
+                pending_count = self.database.pending_record_count(device_id)
+                if pending_count >= self.max_pending_questions:
+                    self.database.defer_schedule(
+                        device_id=device_id,
+                        minutes=5,
+                        error=f"Pending question limit reached ({pending_count}).",
+                    )
+                    logger.info(
+                        "skipped scheduled question device_id=%s pending=%s",
+                        device_id,
+                        pending_count,
+                    )
+                    continue
+
                 encrypted_key = row["openai_api_key_cipher"]
                 api_key = self.settings.openai_api_key
                 if encrypted_key:
@@ -47,31 +67,48 @@ class QuestionScheduler:
                     api_key=api_key,
                     topic=row["topic"],
                     difficulty_level=row["difficulty_level"],
-                    language=row["language"],
+                    language=row["app_language"] or row["language"],
+                    custom_prompt=row["custom_prompt"] or "",
+                    recent_questions=self.database.recent_questions(device_id),
                 )
-                await self.apns.send_question(
-                    APNsQuestion(
-                        device_token=row["apns_token"],
-                        question=generated.question,
-                        hint=generated.hint,
-                        topic=row["topic"],
-                        difficulty_level=row["difficulty_level"],
-                        language=row["language"],
-                        sound=row["notification_sound"],
-                    )
-                )
-                self.database.mark_sent(
+                record_id = str(uuid4())
+                created_at = utc_now()
+                created_record_id = record_id
+                self.database.create_question(
                     device_id=device_id,
                     topic=row["topic"],
                     difficulty_level=row["difficulty_level"],
-                    interval_minutes=row["interval_minutes"],
-                    scheduled_for=row["next_due_at"],
                     question=generated.question,
-                    hint=generated.hint,
+                    expected_answer_hint=generated.expected_answer_hint,
+                    scheduled_for=row["next_due_at"],
+                    source="scheduled",
+                    status="ungraded",
+                    question_id=record_id,
+                    created_at=created_at,
+                )
+                await self.apns.send_question(
+                    APNsQuestion(
+                        record_id=record_id,
+                        created_at=to_iso(created_at),
+                        device_token=row["apns_token"],
+                        question=generated.question,
+                        expected_answer_hint=generated.expected_answer_hint,
+                        topic=row["topic"],
+                        difficulty_level=row["difficulty_level"],
+                        language=row["app_language"] or row["language"],
+                        sound=row["notification_sound"],
+                    )
+                )
+                self.database.mark_scheduled_delivery(
+                    device_id=device_id,
+                    record_id=record_id,
+                    interval_minutes=row["interval_minutes"],
                 )
                 sent_count += 1
                 logger.info("sent scheduled question device_id=%s", device_id)
             except Exception as error:
+                if created_record_id is not None:
+                    self.database.delete_record(device_id=device_id, record_id=created_record_id)
                 self.database.mark_error(device_id=device_id, error=str(error))
                 logger.warning("scheduled question failed device_id=%s error=%s", device_id, error)
         return sent_count
@@ -89,4 +126,3 @@ class QuestionScheduler:
                 )
             except TimeoutError:
                 pass
-

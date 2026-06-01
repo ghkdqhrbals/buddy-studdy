@@ -31,6 +31,10 @@ class ScheduleRequest(CamelModel):
     enabled: bool = True
     openai_api_key: str | None = Field(default=None, alias="openaiApiKey")
     notification_sound: str | None = Field(default=None, alias="notificationSound")
+    custom_prompt: str = Field(default="", alias="customPrompt", max_length=2000)
+    app_language: str = Field(default="ko", alias="appLanguage")
+    openai_model: str = Field(default="gpt-5.4", alias="openaiModel")
+    max_history_count: int = Field(default=100, alias="maxHistoryCount", ge=10, le=10_000)
 
 
 class ScheduleResponse(CamelModel):
@@ -39,7 +43,63 @@ class ScheduleResponse(CamelModel):
     next_due_at: str | None = Field(alias="nextDueAt")
 
 
+class BackendSettingsResponse(CamelModel):
+    topic: str
+    difficulty_level: int = Field(alias="difficultyLevel")
+    interval_minutes: int = Field(alias="intervalMinutes")
+    enabled: bool
+    notification_sound: str | None = Field(alias="notificationSound")
+    custom_prompt: str = Field(alias="customPrompt")
+    app_language: str = Field(alias="appLanguage")
+    openai_model: str = Field(alias="openaiModel")
+    max_history_count: int = Field(alias="maxHistoryCount")
+    openai_key_configured: bool = Field(alias="openaiKeyConfigured")
+    next_due_at: str | None = Field(alias="nextDueAt")
+    last_error: str | None = Field(alias="lastError")
+
+
 class QuestionPayload(CamelModel):
     question: str
-    hint: str | None = None
+    expected_answer_hint: str | None = Field(default=None, alias="expectedAnswerHint")
 
+
+class GradingPayload(CamelModel):
+    score: int = Field(ge=0, le=100)
+    is_correct: bool = Field(alias="isCorrect")
+    feedback: str
+    explanation: str
+
+
+class QuestionItemResponse(CamelModel):
+    question: str
+    expected_answer_hint: str | None = Field(alias="expectedAnswerHint")
+    created_at: str = Field(alias="createdAt")
+
+
+class StudyRecordResponse(CamelModel):
+    id: str
+    question: QuestionItemResponse
+    answer: str | None
+    grading_result: GradingPayload | None = Field(alias="gradingResult")
+    topic: str
+    difficulty: int
+    answered_at: str | None = Field(alias="answeredAt")
+    status: str
+
+
+class RecordsPageResponse(CamelModel):
+    records: list[StudyRecordResponse]
+    total_count: int = Field(alias="totalCount")
+    limit: int
+    offset: int
+
+
+class BackendSnapshotResponse(CamelModel):
+    settings: BackendSettingsResponse
+    records: list[StudyRecordResponse]
+    total_count: int = Field(alias="totalCount")
+    server_time: str = Field(alias="serverTime")
+
+
+class AnswerRequest(CamelModel):
+    answer: str = Field(min_length=1, max_length=20_000)

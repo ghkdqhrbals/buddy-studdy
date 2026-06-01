@@ -16,6 +16,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     database_path: str
     database_url: str | None
+    allow_sqlite_fallback: bool
     app_host: str
     app_port: int
     scheduler_enabled: bool
@@ -37,9 +38,18 @@ class Settings:
         if not auth_key and auth_key_base64:
             auth_key = base64.b64decode(auth_key_base64).decode("utf-8")
 
+        database_url = os.getenv("DATABASE_URL")
+        allow_sqlite_fallback = _bool_env("ALLOW_SQLITE_FALLBACK", False)
+        if not database_url and not allow_sqlite_fallback:
+            raise RuntimeError(
+                "DATABASE_URL is required. BuddyStuddy backend uses PostgreSQL in production. "
+                "Set ALLOW_SQLITE_FALLBACK=true only for isolated local tests."
+            )
+
         return cls(
             database_path=os.getenv("DATABASE_PATH", "/data/buddystuddy.db"),
-            database_url=os.getenv("DATABASE_URL"),
+            database_url=database_url,
+            allow_sqlite_fallback=allow_sqlite_fallback,
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
             app_port=int(os.getenv("APP_PORT", "8080")),
             scheduler_enabled=_bool_env("SCHEDULER_ENABLED", True),

@@ -1,6 +1,6 @@
-# BuddyStuddy Push Backend API
+# BuddyStuddy Backend API
 
-The backend provides scheduled remote-push question delivery for the iOS app. It is a FastAPI service, so the generated OpenAPI documents are also available at runtime:
+The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, and grading results. It is a FastAPI service, so the generated OpenAPI documents are also available at runtime:
 
 - `GET /docs`
 - `GET /redoc`
@@ -24,7 +24,7 @@ The admin endpoint uses the backend token when `BACKEND_API_TOKEN` is configured
 Authorization: Bearer <BACKEND_API_TOKEN>
 ```
 
-Device schedule and deletion endpoints use the credentials returned during registration:
+Device endpoints use the credentials returned during registration. This is the login-free identity model:
 
 ```http
 X-Device-Id: <deviceId>
@@ -85,7 +85,7 @@ Response:
 
 The app must store both values locally. The backend does not return the client secret again.
 
-### Upsert Schedule
+### Upsert Study Settings And Schedule
 
 ```http
 PUT /v1/devices/{deviceId}/schedule
@@ -103,7 +103,11 @@ Request:
   "intervalMinutes": 60,
   "enabled": true,
   "openaiApiKey": "sk-...",
-  "notificationSound": "default"
+  "notificationSound": "default",
+  "customPrompt": "Ask concise production-oriented questions.",
+  "appLanguage": "ko",
+  "openaiModel": "gpt-5.4",
+  "maxHistoryCount": 100
 }
 ```
 
@@ -115,6 +119,10 @@ Fields:
 - `enabled`: whether scheduled pushes are active.
 - `openaiApiKey`: optional per-device OpenAI API key. If provided, it is encrypted at rest using `BACKEND_MASTER_KEY`.
 - `notificationSound`: optional APNs sound name.
+- `customPrompt`: optional tutor instruction.
+- `appLanguage`: `ko` or `en`. This also controls question/feedback language.
+- `openaiModel`: currently `gpt-5.4`.
+- `maxHistoryCount`: record retention preference from 10 to 10,000.
 
 Response:
 
@@ -125,6 +133,40 @@ Response:
   "nextDueAt": "2026-06-01T12:00:00+00:00"
 }
 ```
+
+### Snapshot
+
+```http
+GET /v1/devices/{deviceId}/snapshot?limit=500&offset=0
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Returns backend settings plus a paged record cache for app startup and pull-to-refresh.
+
+### Records
+
+```http
+GET /v1/devices/{deviceId}/records?limit=100&offset=0
+GET /v1/devices/{deviceId}/records/{recordId}
+PATCH /v1/devices/{deviceId}/records/{recordId}/answer
+POST /v1/devices/{deviceId}/records/{recordId}/answer
+POST /v1/devices/{deviceId}/records/{recordId}/skip
+DELETE /v1/devices/{deviceId}/records/{recordId}
+DELETE /v1/devices/{deviceId}/records
+```
+
+`PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints are soft-delete operations.
+
+### Manual Question
+
+```http
+POST /v1/devices/{deviceId}/questions
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Generates one question using the device settings and stored OpenAI API key, stores it as an ungraded record, and returns that record. The backend enforces a maximum of three ungraded records before creating more.
 
 ### Delete Device
 
@@ -140,7 +182,7 @@ Response:
 204 No Content
 ```
 
-This removes the device, APNs token, schedule, and stored encrypted OpenAI key from the backend.
+This removes the device, APNs token, schedule, stored encrypted OpenAI key, and records from the backend.
 
 ### Run Scheduler Once
 

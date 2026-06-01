@@ -27,6 +27,43 @@ protocol RemotePushBackendClientProtocol {
         apiKey: String?,
         enabled: Bool
     ) async throws
+
+    func fetchSnapshot(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendSnapshot
+
+    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord
+
+    func gradeRecord(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord
+
+    func saveRecordAnswer(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord
+
+    func skipRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord
+
+    func deleteRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws
+
+    func clearRecords(registration: RemotePushRegistration) async throws
+
+    func fetchRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord
 }
 
 @MainActor
@@ -41,6 +78,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     init(baseURL: URL = RemotePushBackendClient.defaultBaseURL, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.session = session
+        decoder.dateDecodingStrategy = .iso8601
     }
 
     func registerDevice(
@@ -82,18 +120,133 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
             openAIAPIKey: apiKey,
-            notificationSound: settings.notificationSound.backendSoundName
+            notificationSound: settings.notificationSound.backendSoundName,
+            customPrompt: settings.customPrompt,
+            appLanguage: settings.appLanguage.backendCode,
+            openAIModel: settings.sanitizedOpenAIModel,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount
         )
-        var request = URLRequest(
+        var request = authenticatedRequest(
+            registration: registration,
             url: endpoint("v1", "devices", registration.deviceID, "schedule")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
-        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         request.httpBody = try encoder.encode(requestBody)
 
         _ = try await perform(request)
+    }
+
+    func fetchSnapshot(
+        registration: RemotePushRegistration,
+        limit: Int = 500,
+        offset: Int = 0
+    ) async throws -> BackendSnapshot {
+        var components = URLComponents(
+            url: endpoint("v1", "devices", registration.deviceID, "snapshot"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)")
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendSnapshot.self, from: data)
+    }
+
+    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "questions")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
+    }
+
+    func gradeRecord(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records", recordID, "answer")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
+    }
+
+    func saveRecordAnswer(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records", recordID, "answer")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
+    }
+
+    func skipRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records", recordID, "skip")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
+    }
+
+    func deleteRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records", recordID)
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
+    }
+
+    func clearRecords(registration: RemotePushRegistration) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records")
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
+    }
+
+    func fetchRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "records", recordID)
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
     }
 
     private func perform(_ request: URLRequest) async throws -> Data {
@@ -114,6 +267,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         components.reduce(baseURL) { partialURL, component in
             partialURL.appendingPathComponent(component)
         }
+    }
+
+    private func authenticatedRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        return request
     }
 
     private struct RegisterDeviceRequest: Encodable {
@@ -141,6 +301,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var enabled: Bool
         var openAIAPIKey: String?
         var notificationSound: String?
+        var customPrompt: String
+        var appLanguage: String
+        var openAIModel: String
+        var maxHistoryCount: Int
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -149,7 +313,52 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case enabled
             case openAIAPIKey = "openaiApiKey"
             case notificationSound
+            case customPrompt
+            case appLanguage
+            case openAIModel
+            case maxHistoryCount
         }
+    }
+
+    private struct AnswerRequest: Encodable {
+        var answer: String
+    }
+}
+
+struct BackendSnapshot: Decodable, Equatable {
+    var settings: BackendStudySettings
+    var records: [StudyRecord]
+    var totalCount: Int
+    var serverTime: Date
+}
+
+struct BackendStudySettings: Decodable, Equatable {
+    var topic: String
+    var difficultyLevel: Int
+    var intervalMinutes: Int
+    var enabled: Bool
+    var notificationSound: String?
+    var customPrompt: String
+    var appLanguage: String
+    var openAIModel: String
+    var maxHistoryCount: Int
+    var openAIKeyConfigured: Bool
+    var nextDueAt: Date?
+    var lastError: String?
+
+    func studySettings(fallback: StudySettings) -> StudySettings {
+        let language = AppLanguage(backendCode: appLanguage) ?? fallback.appLanguage
+        return StudySettings(
+            topic: topic.isEmpty ? fallback.topic : topic,
+            difficulty: Difficulty(level: difficultyLevel),
+            appLanguage: language,
+            language: language.studyLanguage,
+            openAIModel: OpenAIModelOption.supportedIDs.contains(openAIModel) ? openAIModel : fallback.sanitizedOpenAIModel,
+            notificationSound: NotificationSoundOption(backendSoundName: notificationSound) ?? fallback.notificationSound,
+            customPrompt: customPrompt,
+            intervalMinutes: intervalMinutes,
+            maxHistoryCount: maxHistoryCount
+        )
     }
 }
 
@@ -168,6 +377,17 @@ enum RemotePushBackendError: LocalizedError {
 }
 
 private extension AppLanguage {
+    init?(backendCode: String) {
+        switch backendCode {
+        case "ko":
+            self = .korean
+        case "en":
+            self = .english
+        default:
+            return nil
+        }
+    }
+
     var backendCode: String {
         switch self {
         case .korean:
@@ -179,6 +399,27 @@ private extension AppLanguage {
 }
 
 private extension NotificationSoundOption {
+    init?(backendSoundName: String?) {
+        switch backendSoundName {
+        case nil, "default":
+            self = .defaultSound
+        case "none":
+            self = .none
+        case "study_ping.wav":
+            self = .softPing
+        case "study_chime.wav":
+            self = .chime
+        case "study_pop.wav":
+            self = .pop
+        case "study_bell.wav":
+            self = .bell
+        case "study_tap.wav":
+            self = .tap
+        default:
+            return nil
+        }
+    }
+
     var backendSoundName: String? {
         switch self {
         case .defaultSound:

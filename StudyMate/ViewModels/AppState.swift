@@ -66,6 +66,7 @@ final class AppState: ObservableObject {
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
+    @Published var isBackendOpenAIKeyConfigured = false
 
     private let settingsStore: SettingsStore
     private let openAIClient: OpenAIClientProtocol
@@ -248,6 +249,7 @@ final class AppState: ObservableObject {
             await ensureCloudQuestionPushSubscription()
         }
 
+        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
         #if os(macOS)
@@ -262,6 +264,7 @@ final class AppState: ObservableObject {
         }
 
         reloadPersistedState()
+        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -276,6 +279,7 @@ final class AppState: ObservableObject {
         }
 
         reloadPersistedState()
+        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -321,12 +325,93 @@ final class AppState: ObservableObject {
         }
 
         reloadPersistedState()
+        let didRefreshBackend = await refreshBackendSnapshotIfPossible()
         if isCloudSyncEnabled {
             await syncCloudNow()
-        } else {
+        } else if !didRefreshBackend {
             statusMessage = strings.refreshed
             log(.info, "화면 데이터를 새로고침했습니다.")
         }
+    }
+
+    @discardableResult
+    private func refreshBackendSnapshotIfPossible(updateVisibleQuestion: Bool = true) async -> Bool {
+        guard let registration = settingsStore.loadRemotePushRegistration() else {
+            return false
+        }
+
+        do {
+            let snapshot = try await remotePushBackendClient.fetchSnapshot(
+                registration: registration,
+                limit: settings.sanitizedMaxHistoryCount,
+                offset: 0
+            )
+            applyBackendSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
+            statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
+            log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(snapshot.records.count)")
+            return true
+        } catch {
+            log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func applyBackendSnapshot(_ snapshot: BackendSnapshot, updateVisibleQuestion: Bool) {
+        let sanitizedSettings = normalizedSettings(snapshot.settings.studySettings(fallback: settings))
+        let localCurrentQuestion = currentQuestion
+        let localLastAnswer = lastAnswer
+        let localGradingResult = gradingResult
+
+        settings = sanitizedSettings
+        if !isEditingSettings {
+            draftSettings = sanitizedSettings
+        }
+        isRunning = snapshot.settings.enabled
+        savedSettings = sanitizedSettings
+
+        settingsStore.saveSettings(sanitizedSettings)
+        settingsStore.saveIsRunning(snapshot.settings.enabled)
+        settingsStore.replaceStudyRecords(snapshot.records)
+        studyRecords = settingsStore.loadStudyRecords()
+
+        if snapshot.settings.openAIKeyConfigured {
+            isBackendOpenAIKeyConfigured = true
+            hasAPIKeyError = false
+            if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               errorMessage == strings.apiKeyEmptyDetailed {
+                errorMessage = nil
+            }
+        } else if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isBackendOpenAIKeyConfigured = false
+            hasAPIKeyError = true
+        } else {
+            isBackendOpenAIKeyConfigured = false
+        }
+
+        guard updateVisibleQuestion else {
+            currentQuestion = localCurrentQuestion
+            lastAnswer = localLastAnswer
+            gradingResult = localGradingResult
+            settingsStore.saveQuestion(localCurrentQuestion)
+            settingsStore.saveLastAnswer(localLastAnswer)
+            settingsStore.saveGradingResult(localGradingResult)
+            restartTimer()
+            return
+        }
+
+        let visibleRecord = localCurrentQuestion.flatMap { studyRecord(matching: $0) } ??
+            studyRecords
+                .filter { $0.gradingResult == nil }
+                .sorted { $0.question.createdAt > $1.question.createdAt }
+                .first
+
+        currentQuestion = visibleRecord?.question
+        lastAnswer = visibleRecord?.answer ?? ""
+        gradingResult = visibleRecord?.gradingResult
+        settingsStore.saveQuestion(currentQuestion)
+        settingsStore.saveLastAnswer(lastAnswer)
+        settingsStore.saveGradingResult(gradingResult)
+        restartTimer()
     }
 
     private func reloadPersistedState(restartTimerAfterReload: Bool = true) {
@@ -374,6 +459,10 @@ final class AppState: ObservableObject {
     private func validateAPIKeyOnStartup() async {
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAPIKey.isEmpty else {
+            if settingsStore.loadRemotePushRegistration() != nil, !hasAPIKeyError {
+                log(.info, "로컬 API 키는 비어 있지만 백엔드에 키가 설정되어 있어 시작 검증을 건너뜁니다.")
+                return
+            }
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
             log(.warning, "시작 시 API 키 검증을 건너뛰었습니다. API 키가 비어 있습니다.")
@@ -521,6 +610,7 @@ final class AppState: ObservableObject {
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
         } else if didAPIKeyChange || !hasAPIKeyError {
+            isBackendOpenAIKeyConfigured = true
             errorMessage = nil
         }
         statusMessage = "설정을 저장했습니다."
@@ -661,6 +751,11 @@ final class AppState: ObservableObject {
             isGeneratingQuestion = false
         }
 
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            await generateBackendQuestion(registration: registration, manual: manual)
+            return
+        }
+
         guard await canCreateQuestionAfterGlobalPendingCheck(
             reason: "새 질문 생성",
             updateVisibleQuestion: manual
@@ -709,9 +804,55 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool) async {
+        guard await canCreateQuestionAfterGlobalPendingCheck(
+            reason: "백엔드 새 질문 생성",
+            updateVisibleQuestion: manual
+        ) else {
+            return
+        }
+
+        errorMessage = nil
+        statusMessage = manual ? "질문을 생성 중입니다." : "예약된 질문을 확인 중입니다."
+        log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
+
+        do {
+            let record = try await remotePushBackendClient.createQuestion(registration: registration)
+            settingsStore.appendQuestionToHistory(record.question)
+            settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+            studyRecords = settingsStore.loadStudyRecords()
+
+            let shouldActivateQuestion = manual || !hasActiveUngradedCurrentQuestion
+            if shouldActivateQuestion {
+                currentQuestion = record.question
+                gradingResult = record.gradingResult
+                lastAnswer = record.answer ?? ""
+                settingsStore.saveQuestion(record.question)
+                settingsStore.saveGradingResult(record.gradingResult)
+                settingsStore.saveLastAnswer(record.answer ?? "")
+            }
+
+            hasAPIKeyError = false
+            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 미제출 목록에 추가됐습니다."
+            log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
+            await syncRemotePushScheduleIfPossible(reason: "manual-question")
+        } catch {
+            handleOpenAIError(error)
+            statusMessage = nil
+            log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
+        }
+    }
+
     @discardableResult
     private func generateDueQuestionIfNeeded(reason: String) async -> Bool {
         guard hasCompletedOnboarding, isRunning else {
+            return false
+        }
+
+        if settingsStore.loadRemotePushRegistration() != nil {
+            await syncRemotePushScheduleIfPossible(reason: reason)
+            await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+            log(.info, "백엔드 스케줄러가 예약 질문을 담당하므로 로컬 타이머 생성을 건너뛰었습니다. reason=\(reason)")
             return false
         }
 
@@ -747,6 +888,12 @@ final class AppState: ObservableObject {
         reloadPersistedState(restartTimerAfterReload: false)
 
         guard hasCompletedOnboarding, isRunning else {
+            return 0
+        }
+
+        if settingsStore.loadRemotePushRegistration() != nil {
+            await syncRemotePushScheduleIfPossible(reason: "background")
+            log(.info, "백엔드/APNs 스케줄러가 잠금화면 질문을 담당하므로 로컬 예약 알림 준비를 건너뛰었습니다.")
             return 0
         }
 
@@ -1104,6 +1251,24 @@ final class AppState: ObservableObject {
         studyRecords = settingsStore.loadStudyRecords()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
 
+        if let registration = settingsStore.loadRemotePushRegistration(),
+           let record = studyRecord(matching: currentQuestion) {
+            do {
+                let updatedRecord = try await remotePushBackendClient.gradeRecord(
+                    registration: registration,
+                    recordID: record.id,
+                    answer: trimmedAnswer
+                )
+                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+                await syncRemotePushScheduleIfPossible(reason: "grade")
+                return
+            } catch {
+                handleOpenAIError(error)
+                statusMessage = nil
+                return
+            }
+        }
+
         do {
             let result = try await openAIClient.gradeAnswer(
                 question: currentQuestion,
@@ -1131,6 +1296,21 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func applyGradedRecord(_ record: StudyRecord, answer: String) {
+        currentQuestion = record.question
+        lastAnswer = answer
+        gradingResult = record.gradingResult
+        settingsStore.saveQuestion(record.question)
+        settingsStore.saveLastAnswer(answer)
+        settingsStore.saveGradingResult(record.gradingResult)
+        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        notificationService.cancelQuestionNotification(for: record.question)
+        studyRecords = settingsStore.loadStudyRecords()
+        hasAPIKeyError = false
+        statusMessage = "채점이 완료됐습니다."
+        log(.info, "백엔드에서 답변을 채점했습니다. score=\(record.gradingResult?.score ?? 0)")
+    }
+
     func gradeRecord(_ record: StudyRecord, answer: String) async {
         let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAnswer.isEmpty else {
@@ -1156,6 +1336,24 @@ final class AppState: ObservableObject {
             intervalMinutes: settings.sanitizedIntervalMinutes,
             maxHistoryCount: settings.sanitizedMaxHistoryCount
         )
+
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            do {
+                let updatedRecord = try await remotePushBackendClient.gradeRecord(
+                    registration: registration,
+                    recordID: record.id,
+                    answer: trimmedAnswer
+                )
+                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+                await syncRemotePushScheduleIfPossible(reason: "grade-record")
+                markCloudDataChanged()
+                return
+            } catch {
+                handleOpenAIError(error)
+                statusMessage = nil
+                return
+            }
+        }
 
         do {
             let result = try await openAIClient.gradeAnswer(
@@ -1257,6 +1455,17 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         log(.info, "미제출 질문을 넘겼습니다.")
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            Task {
+                do {
+                    _ = try await remotePushBackendClient.skipRecord(registration: registration, recordID: record.id)
+                    await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+                    await syncRemotePushScheduleIfPossible(reason: "skip")
+                } catch {
+                    log(.warning, "백엔드 미제출 질문 넘기기 실패: \(error.localizedDescription)")
+                }
+            }
+        }
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
@@ -1319,6 +1528,30 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
+    func openRecordFromNotification(
+        recordID: String?,
+        questionCreatedAt: TimeInterval?,
+        replyText: String? = nil
+    ) -> Bool {
+        if let recordID,
+           settingsStore.loadRemotePushRegistration() != nil {
+            selectedTab = .study
+            notificationLandingMessage = strings.openingNotificationQuestion
+            statusMessage = strings.openingNotificationQuestion
+            Task {
+                await handleBackendRecordPush(
+                    recordID: recordID,
+                    openStudy: true,
+                    replyText: replyText
+                )
+            }
+            return true
+        }
+
+        return openRecordFromNotification(questionCreatedAt: questionCreatedAt, replyText: replyText)
+    }
+
+    @discardableResult
     func openRecordFromNotification(questionCreatedAt: TimeInterval?, replyText: String? = nil) -> Bool {
         studyRecords = settingsStore.loadStudyRecords()
 
@@ -1362,7 +1595,74 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func saveNotificationReplyFromNotification(questionCreatedAt: TimeInterval?, replyText: String?) -> Bool {
+    func handleBackendRecordPush(recordID: String, openStudy: Bool, replyText: String? = nil) async -> Bool {
+        guard let registration = settingsStore.loadRemotePushRegistration() else {
+            log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
+            return false
+        }
+
+        do {
+            var record = try await remotePushBackendClient.fetchRecord(
+                registration: registration,
+                recordID: recordID
+            )
+
+            let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmedReply.isEmpty, record.gradingResult == nil {
+                record = try await remotePushBackendClient.saveRecordAnswer(
+                    registration: registration,
+                    recordID: recordID,
+                    answer: trimmedReply
+                )
+            }
+
+            settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+            studyRecords = settingsStore.loadStudyRecords()
+
+            if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
+                lastAnswer = record.answer ?? lastAnswer
+                gradingResult = record.gradingResult
+                settingsStore.saveLastAnswer(lastAnswer)
+                settingsStore.saveGradingResult(gradingResult)
+            }
+
+            if openStudy {
+                selectStudyRecord(record)
+                notificationLandingMessage = nil
+                statusMessage = trimmedReply.isEmpty ? "알림에서 열린 질문입니다." : "알림 답장을 기록에 저장했습니다."
+            } else if !trimmedReply.isEmpty {
+                statusMessage = "알림 답장을 기록에 저장했습니다."
+            }
+
+            log(.info, "백엔드 push record를 처리했습니다. recordID=\(recordID), openStudy=\(openStudy)")
+            return true
+        } catch {
+            if openStudy {
+                showNotificationQuestionUnavailable(preserveCurrentQuestion: true)
+            }
+            log(.warning, "백엔드 push record 처리 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    @discardableResult
+    func saveNotificationReplyFromNotification(
+        recordID: String? = nil,
+        questionCreatedAt: TimeInterval?,
+        replyText: String?
+    ) -> Bool {
+        if let recordID,
+           settingsStore.loadRemotePushRegistration() != nil {
+            Task {
+                await handleBackendRecordPush(
+                    recordID: recordID,
+                    openStudy: false,
+                    replyText: replyText
+                )
+            }
+            return true
+        }
+
         studyRecords = settingsStore.loadStudyRecords()
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1530,6 +1830,16 @@ final class AppState: ObservableObject {
         notificationLandingMessage = nil
         statusMessage = "학습 기록을 삭제했습니다."
         log(.warning, "학습 기록을 모두 삭제했습니다.")
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            Task {
+                do {
+                    try await remotePushBackendClient.clearRecords(registration: registration)
+                    await syncRemotePushScheduleIfPossible(reason: "clear-records")
+                } catch {
+                    log(.warning, "백엔드 학습 기록 전체삭제 실패: \(error.localizedDescription)")
+                }
+            }
+        }
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
@@ -1551,6 +1861,17 @@ final class AppState: ObservableObject {
 
         statusMessage = "기록을 삭제했습니다."
         log(.info, "학습 기록을 1개 삭제했습니다.")
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            Task {
+                do {
+                    try await remotePushBackendClient.deleteRecord(registration: registration, recordID: record.id)
+                    await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+                    await syncRemotePushScheduleIfPossible(reason: "delete-record")
+                } catch {
+                    log(.warning, "백엔드 학습 기록 삭제 실패: \(error.localizedDescription)")
+                }
+            }
+        }
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
@@ -1910,6 +2231,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "device-token"
             )
+            await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         } catch {
             log(.warning, "서버 push 백엔드 등록 실패: \(error.localizedDescription)")
         }
@@ -1935,7 +2257,7 @@ final class AppState: ObservableObject {
         reason: String
     ) async throws {
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shouldEnableRemotePush = isRunning && !trimmedAPIKey.isEmpty
+        let shouldEnableRemotePush = isRunning && (!trimmedAPIKey.isEmpty || isBackendOpenAIKeyConfigured)
         try await remotePushBackendClient.updateSchedule(
             registration: registration,
             settings: settings,
@@ -2475,6 +2797,16 @@ final class AppState: ObservableObject {
         record.answeredAt ?? record.question.createdAt
     }
 
+    private func mergeBackendRecord(_ record: StudyRecord, into records: [StudyRecord]) -> [StudyRecord] {
+        var merged = records.filter { $0.id != record.id && !studyRecordMatches($0, question: record.question) }
+        merged.append(record)
+        return Array(
+            merged
+                .sorted { studyRecordSortDate($0) < studyRecordSortDate($1) }
+                .suffix(settings.sanitizedMaxHistoryCount)
+        )
+    }
+
     private func cloudSyncFailureMessage(for error: Error) -> String {
         switch CloudSyncErrorClassifier.kind(for: error) {
         case .quotaExceeded:
@@ -2725,6 +3057,19 @@ final class AppState: ObservableObject {
                     lowercasedBody.contains("incorrect api key") ||
                     lowercasedBody.contains("unauthorized")
             default:
+                return false
+            }
+        }
+
+        if let backendError = error as? RemotePushBackendError {
+            switch backendError {
+            case .httpStatus(let status, let body):
+                let lowercasedBody = body.lowercased()
+                return status == 401 ||
+                    status == 403 ||
+                    lowercasedBody.contains("api key") ||
+                    lowercasedBody.contains("unauthorized")
+            case .invalidResponse:
                 return false
             }
         }

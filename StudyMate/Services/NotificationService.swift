@@ -16,6 +16,7 @@ enum StudyNotificationAction {
     static let ignore = "STUDY_QUESTION_IGNORE"
     static let otherAnswer = "STUDY_QUESTION_OTHER_ANSWER"
     static let questionCreatedAt = "questionCreatedAt"
+    static let recordID = "recordId"
 }
 
 enum StudyNotificationRouting {
@@ -30,6 +31,31 @@ enum StudyNotificationRouting {
 }
 
 enum StudyNotificationPayload {
+    static func backendRecordID(from userInfo: [AnyHashable: Any]) -> String? {
+        let candidateKeys = [
+            StudyNotificationAction.recordID,
+            "recordID",
+            "recordId",
+            "id"
+        ]
+
+        for key in candidateKeys {
+            if let value = stringValue(userInfo[key]) {
+                return value
+            }
+        }
+
+        for dictionary in cloudKitDictionaries(from: userInfo) {
+            for key in candidateKeys {
+                if let value = stringValue(dictionary[key]) {
+                    return value
+                }
+            }
+        }
+
+        return nil
+    }
+
     static func questionCreatedAt(from userInfo: [AnyHashable: Any]) -> TimeInterval? {
         let candidateKeys = [
             StudyNotificationAction.questionCreatedAt,
@@ -182,11 +208,30 @@ enum StudyNotificationPayload {
             return doubleValue
         }
 
+        if let string = value as? String,
+           let date = ISO8601DateFormatter.studyMateDate(from: string) {
+            return date.timeIntervalSince1970
+        }
+
         if let date = value as? Date {
             return date.timeIntervalSince1970
         }
 
         return nil
+    }
+}
+
+private extension ISO8601DateFormatter {
+    static func studyMateDate(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractionalFormatter.date(from: value)
     }
 }
 
@@ -445,6 +490,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
     private struct PendingLocalNotificationResponse {
         var actionIdentifier: String
+        var recordID: String?
         var questionCreatedAt: TimeInterval?
         var replyText: String?
         var openStudy: Bool
@@ -460,6 +506,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     @MainActor
     func enqueueLocalResponse(
         actionIdentifier: String,
+        recordID: String?,
         questionCreatedAt: TimeInterval?,
         replyText: String?,
         openStudy: Bool
@@ -467,6 +514,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         pendingLocalResponses.append(
             PendingLocalNotificationResponse(
                 actionIdentifier: actionIdentifier,
+                recordID: recordID,
                 questionCreatedAt: questionCreatedAt,
                 replyText: replyText,
                 openStudy: openStudy
@@ -494,12 +542,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             if response.openStudy {
                 handle(
                     actionIdentifier: response.actionIdentifier,
+                    recordID: response.recordID,
                     questionCreatedAt: response.questionCreatedAt,
                     replyText: response.replyText
                 )
             } else {
                 handleQuietly(
                     actionIdentifier: response.actionIdentifier,
+                    recordID: response.recordID,
                     questionCreatedAt: response.questionCreatedAt,
                     replyText: response.replyText
                 )
@@ -563,6 +613,16 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
                     openStudy: false
                 )
             }
+        } else if StudyNotificationPayload.backendRecordID(
+            from: notification.request.content.userInfo
+        ) != nil {
+            let userInfo = notification.request.content.userInfo
+            Task { @MainActor in
+                await StudyRemoteNotificationBridge.shared.handleRemoteNotification(
+                    userInfo: userInfo,
+                    openStudy: false
+                )
+            }
         }
         #endif
 
@@ -580,6 +640,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let actionIdentifier = response.actionIdentifier
         let replyText = (response as? UNTextInputNotificationResponse)?.userText
         let userInfo = response.notification.request.content.userInfo
+        let recordID = StudyNotificationPayload.backendRecordID(from: userInfo)
         let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo)
 
         #if os(iOS)
@@ -601,6 +662,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         Task { @MainActor in
             StudyNotificationDelegate.shared.enqueueLocalResponse(
                 actionIdentifier: actionIdentifier,
+                recordID: recordID,
                 questionCreatedAt: questionCreatedAt,
                 replyText: replyText,
                 openStudy: shouldOpenStudy
@@ -611,6 +673,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         Task { @MainActor in
             StudyNotificationDelegate.shared.handle(
                 actionIdentifier: actionIdentifier,
+                recordID: recordID,
                 questionCreatedAt: questionCreatedAt,
                 replyText: replyText
             )
@@ -620,11 +683,12 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     }
 
     @MainActor
-    func handle(actionIdentifier: String, questionCreatedAt: TimeInterval?, replyText: String?) {
+    func handle(actionIdentifier: String, recordID: String?, questionCreatedAt: TimeInterval?, replyText: String?) {
         guard let appState else {
             pendingLocalResponses.append(
                 PendingLocalNotificationResponse(
                     actionIdentifier: actionIdentifier,
+                    recordID: recordID,
                     questionCreatedAt: questionCreatedAt,
                     replyText: replyText,
                     openStudy: true
@@ -639,14 +703,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             appState.logRemoteNotificationEvent("알림 응답을 무시했습니다.")
 
         case StudyNotificationAction.reply:
-            let didOpen = appState.openRecordFromNotification(questionCreatedAt: questionCreatedAt, replyText: replyText)
+            let didOpen = appState.openRecordFromNotification(recordID: recordID, questionCreatedAt: questionCreatedAt, replyText: replyText)
             appState.logRemoteNotificationEvent("알림 답장 랜딩 처리: didOpen=\(didOpen), createdAt=\(questionCreatedAt?.description ?? "-")")
             #if os(macOS)
             StudyWindowPresenter.shared.show(appState: appState)
             #endif
 
         case StudyNotificationAction.otherAnswer:
-            let didOpen = appState.openRecordFromNotification(questionCreatedAt: questionCreatedAt)
+            let didOpen = appState.openRecordFromNotification(recordID: recordID, questionCreatedAt: questionCreatedAt)
             appState.statusMessage = "다른 응답을 입력하세요."
             appState.logRemoteNotificationEvent("알림 다른 응답 랜딩 처리: didOpen=\(didOpen), createdAt=\(questionCreatedAt?.description ?? "-")")
             #if os(macOS)
@@ -654,14 +718,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             #endif
 
         case UNNotificationDefaultActionIdentifier:
-            let didOpen = appState.openRecordFromNotification(questionCreatedAt: questionCreatedAt)
+            let didOpen = appState.openRecordFromNotification(recordID: recordID, questionCreatedAt: questionCreatedAt)
             appState.logRemoteNotificationEvent("알림 기본 탭 랜딩 처리: didOpen=\(didOpen), createdAt=\(questionCreatedAt?.description ?? "-")")
             #if os(macOS)
             StudyWindowPresenter.shared.show(appState: appState)
             #endif
 
         default:
-            let didOpen = appState.openRecordFromNotification(questionCreatedAt: questionCreatedAt)
+            let didOpen = appState.openRecordFromNotification(recordID: recordID, questionCreatedAt: questionCreatedAt)
             appState.logRemoteNotificationEvent("알림 action 랜딩 처리: action=\(actionIdentifier), didOpen=\(didOpen), createdAt=\(questionCreatedAt?.description ?? "-")")
             #if os(macOS)
             StudyWindowPresenter.shared.show(appState: appState)
@@ -670,11 +734,12 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     }
 
     @MainActor
-    private func handleQuietly(actionIdentifier: String, questionCreatedAt: TimeInterval?, replyText: String?) {
+    private func handleQuietly(actionIdentifier: String, recordID: String?, questionCreatedAt: TimeInterval?, replyText: String?) {
         guard let appState else {
             pendingLocalResponses.append(
                 PendingLocalNotificationResponse(
                     actionIdentifier: actionIdentifier,
+                    recordID: recordID,
                     questionCreatedAt: questionCreatedAt,
                     replyText: replyText,
                     openStudy: false
@@ -689,6 +754,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
         case StudyNotificationAction.reply:
             let didSave = appState.saveNotificationReplyFromNotification(
+                recordID: recordID,
                 questionCreatedAt: questionCreatedAt,
                 replyText: replyText
             )
@@ -901,11 +967,16 @@ final class StudyRemoteNotificationBridge {
         )
 
         guard didHandle else {
+            let recordID = StudyNotificationPayload.backendRecordID(from: userInfo)
             if let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo) {
-                return appState.openRecordFromNotification(questionCreatedAt: questionCreatedAt, replyText: replyText)
+                return appState.openRecordFromNotification(
+                    recordID: recordID,
+                    questionCreatedAt: questionCreatedAt,
+                    replyText: replyText
+                )
             }
 
-            appState.openRecordFromNotification(questionCreatedAt: nil, replyText: replyText)
+            appState.openRecordFromNotification(recordID: recordID, questionCreatedAt: nil, replyText: replyText)
             appState.logRemoteNotificationEvent(
                 "CloudKit push 알림 payload를 라우팅하지 못했습니다. keys=\(StudyNotificationPayload.keySummary(from: userInfo))",
                 isWarning: true
@@ -932,6 +1003,14 @@ final class StudyRemoteNotificationBridge {
                 )
             )
             return false
+        }
+
+        if let recordID = StudyNotificationPayload.backendRecordID(from: userInfo) {
+            return await appState.handleBackendRecordPush(
+                recordID: recordID,
+                openStudy: openStudy,
+                replyText: replyText
+            )
         }
 
         guard let recordName = Self.cloudQuestionPushRecordName(from: userInfo) else {

@@ -11,9 +11,11 @@ from .config import Settings
 
 @dataclass(frozen=True)
 class APNsQuestion:
+    record_id: str
+    created_at: str
     device_token: str
     question: str
-    hint: str | None
+    expected_answer_hint: str | None
     topic: str
     difficulty_level: int
     language: str
@@ -48,7 +50,7 @@ class APNsClient:
                 "subtitle": f"{item.topic} · Level {item.difficulty_level}",
                 "body": body,
             },
-            "category": "STUDY_QUESTION",
+            "category": "STUDY_QUESTION_CATEGORY",
             "thread-id": "StudyMate.question",
         }
         if item.sound and item.sound != "none":
@@ -58,8 +60,11 @@ class APNsClient:
 
         payload = {
             "aps": aps,
+            "recordId": item.record_id,
+            "questionCreatedAt": item.created_at,
+            "createdAt": item.created_at,
             "question": item.question,
-            "hint": item.hint,
+            "expectedAnswerHint": item.expected_answer_hint,
             "topic": item.topic,
             "difficultyLevel": item.difficulty_level,
         }

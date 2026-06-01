@@ -1,13 +1,14 @@
-# BuddyStuddy Push Backend
+# BuddyStuddy Backend
 
-Python/FastAPI backend for scheduled APNs question delivery.
+Python/FastAPI backend for BuddyStuddy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
 
-This backend is intentionally separate from the local-first app. It exists only for the case where the user wants lock-screen question delivery even after the iOS app is suspended or force-quit.
+This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this PostgreSQL-backed service.
 
 ## What It Does
 
 - Stores APNs device tokens.
-- Stores a per-device study schedule.
+- Stores per-device study settings and schedule.
+- Stores study records, answer drafts, skipped/deleted states, and grading results.
 - Generates due questions with OpenAI.
 - Sends APNs remote notifications to iPhone.
 - Runs in Docker with PostgreSQL stored on a mounted volume.
@@ -23,7 +24,8 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: `production` for App Store/TestFlight, `sandbox` for debug builds.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
-- `DATABASE_URL`: PostgreSQL connection string. If omitted, the backend falls back to local SQLite for development.
+- `DATABASE_URL`: required PostgreSQL connection string.
+- `ALLOW_SQLITE_FALLBACK`: optional. Set to `true` only for isolated local tests. Production must not use SQLite.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -36,6 +38,8 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+
+Local runs also need a PostgreSQL `DATABASE_URL`, or explicit `ALLOW_SQLITE_FALLBACK=true` for throwaway tests.
 
 ## Docker
 
@@ -58,7 +62,11 @@ See [API.md](API.md) for request/response examples.
 - `GET /health`
 - `POST /v1/devices/register`
 - `PUT /v1/devices/{device_id}/schedule`
-- `DELETE /v1/devices/{device_id}`
+- `GET /v1/devices/{device_id}/snapshot`
+- `POST /v1/devices/{device_id}/questions`
+- `GET /v1/devices/{device_id}/records`
+- `POST /v1/devices/{device_id}/records/{record_id}/answer`
+- `DELETE /v1/devices/{device_id}/records/{record_id}`
 - `POST /v1/admin/scheduler/run-once`
 
 Device schedule updates require:
