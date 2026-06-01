@@ -119,23 +119,13 @@ def migrate(sqlite_path: Path) -> None:
                 db.execute(
                     """
                     INSERT INTO questions (
-                        id, device_id, question, hint, topic, difficulty_level,
-                        scheduled_for, sent_at, status, error, created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(id) DO UPDATE SET
-                        device_id = excluded.device_id,
-                        question = excluded.question,
-                        hint = excluded.hint,
-                        topic = excluded.topic,
-                        difficulty_level = excluded.difficulty_level,
-                        scheduled_for = excluded.scheduled_for,
-                        sent_at = excluded.sent_at,
-                        status = excluded.status,
-                        error = excluded.error,
-                        created_at = excluded.created_at
+                        device_id, question, hint, topic, difficulty_level,
+                        scheduled_for, sent_at, status, error, answer, score,
+                        is_correct, feedback, explanation, answered_at, graded_at,
+                        skipped_at, deleted_at, source, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        row["id"],
                         row["device_id"],
                         row["question"],
                         row["hint"],
@@ -145,7 +135,18 @@ def migrate(sqlite_path: Path) -> None:
                         row["sent_at"],
                         row["status"],
                         _value(row, "error"),
+                        _value(row, "answer"),
+                        _value(row, "score"),
+                        _value(row, "is_correct"),
+                        _value(row, "feedback"),
+                        _value(row, "explanation"),
+                        _value(row, "answered_at"),
+                        _value(row, "graded_at"),
+                        _value(row, "skipped_at"),
+                        _value(row, "deleted_at"),
+                        _value(row, "source", "scheduled"),
                         row["created_at"],
+                        _value(row, "updated_at", row["created_at"]),
                     ),
                 )
         print(

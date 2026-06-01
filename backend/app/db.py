@@ -78,12 +78,14 @@ class Database:
     def init(self) -> None:
         with self._lock, self.connect() as db:
             if self.is_postgres:
+                self._rebuild_empty_legacy_postgres_schema(db)
                 for statement in self._postgres_schema():
                     db.execute(statement)
                 self._ensure_postgres_timestamp_columns(db)
                 self._ensure_postgres_columns(db)
             else:
                 db.executescript(self._sqlite_schema())
+                self._rebuild_empty_legacy_sqlite_schema(db)
                 self._ensure_sqlite_columns(db)
 
     def _timestamp(self, value: datetime) -> datetime | str:
@@ -96,6 +98,65 @@ class Database:
         if value is None:
             return None
         return to_iso(as_utc_datetime(value))
+
+    @staticmethod
+    def _record_id_value(record_id: str | int) -> int | None:
+        try:
+            return int(str(record_id))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _rebuild_empty_legacy_postgres_schema(db: Any) -> None:
+        tables = ("questions", "schedules", "devices")
+        existing_tables = {
+            row["table_name"]
+            for row in db.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = ANY(%s)
+                """,
+                (list(tables),),
+            ).fetchall()
+        }
+        if not existing_tables:
+            return
+
+        needs_rebuild = False
+        for table in existing_tables:
+            row = db.execute(
+                """
+                SELECT data_type, is_identity, column_default
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = %s AND column_name = 'id'
+                """,
+                (table,),
+            ).fetchone()
+            if row is None:
+                needs_rebuild = True
+                break
+            is_integer = row["data_type"] in {"integer", "bigint"}
+            is_generated = row["is_identity"] == "YES" or bool(row["column_default"])
+            if not is_integer or not is_generated:
+                needs_rebuild = True
+                break
+
+        if not needs_rebuild:
+            return
+
+        for table in tables:
+            if table not in existing_tables:
+                continue
+            count_row = db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
+            if int(count_row["count"]) > 0:
+                raise RuntimeError(
+                    "Legacy schema uses non-autoincrement IDs. Clear backend data before applying "
+                    "the autoincrement schema migration."
+                )
+
+        for table in tables:
+            db.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
     @staticmethod
     def _ensure_postgres_timestamp_columns(db: Any) -> None:
@@ -210,11 +271,52 @@ class Database:
         db.execute("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''")
 
     @staticmethod
+    def _rebuild_empty_legacy_sqlite_schema(db: Any) -> None:
+        tables = ("questions", "schedules", "devices")
+        existing_tables = {
+            row["name"]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('questions', 'schedules', 'devices')"
+            ).fetchall()
+        }
+        if not existing_tables:
+            return
+
+        needs_rebuild = False
+        for table in existing_tables:
+            id_column = None
+            for row in db.execute(f"PRAGMA table_info({table})").fetchall():
+                if row["name"] == "id":
+                    id_column = row
+                    break
+            if id_column is None or id_column["pk"] != 1 or id_column["type"].upper() != "INTEGER":
+                needs_rebuild = True
+                break
+
+        if not needs_rebuild:
+            return
+
+        for table in tables:
+            if table not in existing_tables:
+                continue
+            count_row = db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
+            if int(count_row["count"]) > 0:
+                raise RuntimeError(
+                    "Legacy SQLite schema uses non-autoincrement IDs. Clear local backend data before applying "
+                    "the autoincrement schema migration."
+                )
+
+        for table in tables:
+            db.execute(f"DROP TABLE IF EXISTS {table}")
+        db.executescript(Database._sqlite_schema())
+
+    @staticmethod
     def _sqlite_schema() -> str:
         return """
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS devices (
-            device_id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL UNIQUE,
             client_secret_hash TEXT NOT NULL,
             apns_token TEXT NOT NULL,
             platform TEXT NOT NULL,
@@ -227,7 +329,8 @@ class Database:
         );
 
         CREATE TABLE IF NOT EXISTS schedules (
-            device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL UNIQUE REFERENCES devices(device_id) ON DELETE CASCADE,
             topic TEXT NOT NULL,
             difficulty_level INTEGER NOT NULL,
             interval_minutes INTEGER NOT NULL,
@@ -246,7 +349,7 @@ class Database:
         );
 
         CREATE TABLE IF NOT EXISTS questions (
-            id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
             question TEXT NOT NULL,
             hint TEXT,
@@ -283,7 +386,8 @@ class Database:
         return [
             """
             CREATE TABLE IF NOT EXISTS devices (
-                device_id TEXT PRIMARY KEY,
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                device_id TEXT NOT NULL UNIQUE,
                 client_secret_hash TEXT NOT NULL,
                 apns_token TEXT NOT NULL,
                 platform TEXT NOT NULL,
@@ -297,7 +401,8 @@ class Database:
             """,
             """
             CREATE TABLE IF NOT EXISTS schedules (
-                device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                device_id TEXT NOT NULL UNIQUE REFERENCES devices(device_id) ON DELETE CASCADE,
                 topic TEXT NOT NULL,
                 difficulty_level INTEGER NOT NULL,
                 interval_minutes INTEGER NOT NULL,
@@ -317,7 +422,7 @@ class Database:
             """,
             """
             CREATE TABLE IF NOT EXISTS questions (
-                id TEXT PRIMARY KEY,
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
                 question TEXT NOT NULL,
                 hint TEXT,
@@ -586,6 +691,9 @@ class Database:
         return [self.study_record_response(row) for row in rows], int(total_row["count"] if total_row else 0)
 
     def get_record(self, device_id: str, record_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
         deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
         with self._lock, self.connect() as db:
             row = db.execute(
@@ -596,7 +704,7 @@ class Database:
                     WHERE device_id = ? AND id = ? {deleted_clause}
                     """
                 ),
-                (device_id, record_id),
+                (device_id, row_id),
             ).fetchone()
         return self.study_record_response(row) if row is not None else None
 
@@ -611,48 +719,73 @@ class Database:
         sent_at: datetime | str | None = None,
         source: str = "manual",
         status: str = "ungraded",
-        question_id: str | None = None,
         created_at: datetime | str | None = None,
     ) -> dict[str, Any]:
         created_dt = as_utc_datetime(created_at) if created_at is not None else utc_now()
         scheduled_dt = as_utc_datetime(scheduled_for) if scheduled_for is not None else created_dt
         sent_dt = as_utc_datetime(sent_at) if sent_at is not None else None
-        row_id = question_id or str(uuid4())
         created = self._timestamp(created_dt)
         scheduled = self._timestamp(scheduled_dt)
         sent = self._timestamp(sent_dt) if sent_dt is not None else None
         with self._lock, self.connect() as db:
-            db.execute(
-                self._sql(
+            if self.is_postgres:
+                row = db.execute(
                     """
                     INSERT INTO questions (
-                        id, device_id, question, hint, topic, difficulty_level,
+                        device_id, question, hint, topic, difficulty_level,
                         scheduled_for, sent_at, status, source, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                     """
-                ),
-                (
-                    row_id,
-                    device_id,
-                    question,
-                    expected_answer_hint,
-                    topic,
-                    difficulty_level,
-                    scheduled,
-                    sent,
-                    status,
-                    source,
-                    created,
-                    created,
-                ),
-            )
+                    ,
+                    (
+                        device_id,
+                        question,
+                        expected_answer_hint,
+                        topic,
+                        difficulty_level,
+                        scheduled,
+                        sent,
+                        status,
+                        source,
+                        created,
+                        created,
+                    ),
+                ).fetchone()
+                row_id = row["id"]
+            else:
+                cursor = db.execute(
+                    """
+                    INSERT INTO questions (
+                        device_id, question, hint, topic, difficulty_level,
+                        scheduled_for, sent_at, status, source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        device_id,
+                        question,
+                        expected_answer_hint,
+                        topic,
+                        difficulty_level,
+                        scheduled,
+                        sent,
+                        status,
+                        source,
+                        created,
+                        created,
+                    ),
+                )
+                row_id = cursor.lastrowid
 
-        record = self.get_record(device_id, row_id)
+        record = self.get_record(device_id, str(row_id))
         if record is None:
             raise RuntimeError("Inserted question could not be loaded.")
         return record
 
     def set_record_answer(self, device_id: str, record_id: str, answer: str) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
         now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             db.execute(
@@ -663,7 +796,7 @@ class Database:
                     WHERE device_id = ? AND id = ? AND deleted_at IS NULL
                     """
                 ),
-                (answer, now, now, device_id, record_id),
+                (answer, now, now, device_id, row_id),
             )
         return self.get_record(device_id, record_id)
 
@@ -677,6 +810,9 @@ class Database:
         feedback: str,
         explanation: str,
     ) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
         now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             db.execute(
@@ -699,12 +835,15 @@ class Database:
                     now,
                     now,
                     device_id,
-                    record_id,
+                    row_id,
                 ),
             )
         return self.get_record(device_id, record_id)
 
     def skip_record(self, device_id: str, record_id: str) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
         now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             db.execute(
@@ -715,11 +854,14 @@ class Database:
                     WHERE device_id = ? AND id = ? AND deleted_at IS NULL AND score IS NULL
                     """
                 ),
-                (now, now, device_id, record_id),
+                (now, now, device_id, row_id),
             )
         return self.get_record(device_id, record_id)
 
     def delete_record(self, device_id: str, record_id: str) -> None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return
         now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             db.execute(
@@ -730,7 +872,7 @@ class Database:
                     WHERE device_id = ? AND id = ?
                     """
                 ),
-                (now, now, device_id, record_id),
+                (now, now, device_id, row_id),
             )
 
     def clear_records(self, device_id: str) -> None:
@@ -774,7 +916,7 @@ class Database:
             }
 
         return {
-            "id": row["id"],
+            "id": str(row["id"]),
             "question": {
                 "question": row["question"],
                 "expectedAnswerHint": row["hint"],
@@ -820,7 +962,6 @@ class Database:
         scheduled_for: datetime | str,
         question: str,
         expected_answer_hint: str | None,
-        question_id: str | None = None,
         created_at: datetime | str | None = None,
     ) -> dict[str, Any]:
         now_dt = utc_now()
@@ -828,32 +969,55 @@ class Database:
         next_due_at = self._timestamp(now_dt + timedelta(minutes=interval_minutes))
         created_dt = as_utc_datetime(created_at) if created_at is not None else now_dt
         created = self._timestamp(created_dt)
-        row_id = question_id or str(uuid4())
         with self._lock, self.connect() as db:
-            db.execute(
-                self._sql(
+            if self.is_postgres:
+                row = db.execute(
                     """
                 INSERT INTO questions (
-                    id, device_id, question, hint, topic, difficulty_level,
+                    device_id, question, hint, topic, difficulty_level,
                     scheduled_for, sent_at, status, source, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """
-                ),
-                (
-                    row_id,
-                    device_id,
-                    question,
-                    expected_answer_hint,
-                    topic,
-                    difficulty_level,
-                    scheduled_for,
-                    now,
-                    "ungraded",
-                    "scheduled",
-                    created,
-                    created,
-                ),
-            )
+                    ,
+                    (
+                        device_id,
+                        question,
+                        expected_answer_hint,
+                        topic,
+                        difficulty_level,
+                        scheduled_for,
+                        now,
+                        "ungraded",
+                        "scheduled",
+                        created,
+                        created,
+                    ),
+                ).fetchone()
+                row_id = row["id"]
+            else:
+                cursor = db.execute(
+                    """
+                INSERT INTO questions (
+                    device_id, question, hint, topic, difficulty_level,
+                    scheduled_for, sent_at, status, source, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        device_id,
+                        question,
+                        expected_answer_hint,
+                        topic,
+                        difficulty_level,
+                        scheduled_for,
+                        now,
+                        "ungraded",
+                        "scheduled",
+                        created,
+                        created,
+                    ),
+                )
+                row_id = cursor.lastrowid
             db.execute(
                 self._sql(
                     """
@@ -864,12 +1028,15 @@ class Database:
                 ),
                 (next_due_at, now, now, device_id),
             )
-        record = self.get_record(device_id, row_id)
+        record = self.get_record(device_id, str(row_id))
         if record is None:
             raise RuntimeError("Inserted scheduled question could not be loaded.")
         return record
 
     def mark_scheduled_delivery(self, device_id: str, record_id: str, interval_minutes: int) -> None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return
         now_dt = utc_now()
         now = self._timestamp(now_dt)
         next_due_at = self._timestamp(now_dt + timedelta(minutes=interval_minutes))
@@ -882,7 +1049,7 @@ class Database:
                     WHERE device_id = ? AND id = ?
                     """
                 ),
-                (now, now, device_id, record_id),
+                (now, now, device_id, row_id),
             )
             db.execute(
                 self._sql(

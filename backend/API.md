@@ -156,6 +156,7 @@ DELETE /v1/devices/{deviceId}/records/{recordId}
 DELETE /v1/devices/{deviceId}/records
 ```
 
+Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints are soft-delete operations.
 
 ### Manual Question

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import uuid4
 
 from .db import to_iso, utc_now
 
@@ -71,10 +70,8 @@ class QuestionScheduler:
                     custom_prompt=row["custom_prompt"] or "",
                     recent_questions=self.database.recent_questions(device_id),
                 )
-                record_id = str(uuid4())
                 created_at = utc_now()
-                created_record_id = record_id
-                self.database.create_question(
+                record = self.database.create_question(
                     device_id=device_id,
                     topic=row["topic"],
                     difficulty_level=row["difficulty_level"],
@@ -83,12 +80,12 @@ class QuestionScheduler:
                     scheduled_for=row["next_due_at"],
                     source="scheduled",
                     status="ungraded",
-                    question_id=record_id,
                     created_at=created_at,
                 )
+                created_record_id = record["id"]
                 await self.apns.send_question(
                     APNsQuestion(
-                        record_id=record_id,
+                        record_id=record["id"],
                         created_at=to_iso(created_at),
                         device_token=row["apns_token"],
                         environment=row["apns_environment"],
@@ -102,7 +99,7 @@ class QuestionScheduler:
                 )
                 self.database.mark_scheduled_delivery(
                     device_id=device_id,
-                    record_id=record_id,
+                    record_id=record["id"],
                     interval_minutes=row["interval_minutes"],
                 )
                 sent_count += 1

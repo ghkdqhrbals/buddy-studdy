@@ -9,6 +9,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores APNs device tokens.
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
+- Uses database-generated autoincrement `id` primary keys on every backend table.
 - Generates due questions with OpenAI.
 - Sends APNs remote notifications to iPhone.
 - Runs in Docker with PostgreSQL stored on a mounted volume.
