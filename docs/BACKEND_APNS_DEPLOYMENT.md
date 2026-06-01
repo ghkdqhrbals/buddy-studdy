@@ -47,6 +47,9 @@ Deploy repository:
 - `GHCR_TOKEN`: GitHub token with `read:packages`.
 - `BACKEND_MASTER_KEY`: random base64 key for encrypting stored OpenAI keys.
 - `BACKEND_API_TOKEN`: optional token required by registration/admin endpoints.
+- `POSTGRES_DB`: `buddystuddy`.
+- `POSTGRES_USER`: `buddystuddy`.
+- `POSTGRES_PASSWORD`: production PostgreSQL password.
 - `APNS_AUTH_KEY_BASE64`: base64 encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
@@ -83,7 +86,7 @@ database: buddystuddy
 user: buddystuddy
 ```
 
-The password is stored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep the generated password private and restrict the EC2 security group if public access is no longer required.
+The password is managed through the deploy repository `POSTGRES_PASSWORD` secret and mirrored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
 
 ## Data Durability
 
