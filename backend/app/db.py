@@ -242,6 +242,24 @@ class Database:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_questions_device_status ON questions(device_id, status, deleted_at)"
         )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_visible_created
+            ON questions(device_id, deleted_at, created_at DESC)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_pending
+            ON questions(device_id, deleted_at, skipped_at, score, status)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_scored_activity
+            ON questions(device_id, deleted_at, score, answered_at, created_at)
+            """
+        )
 
     @staticmethod
     def _ensure_sqlite_columns(db: Any) -> None:
@@ -272,6 +290,24 @@ class Database:
                 if column not in existing:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         db.execute("UPDATE questions SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''")
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_visible_created
+            ON questions(device_id, deleted_at, created_at DESC)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_pending
+            ON questions(device_id, deleted_at, skipped_at, score, status)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_scored_activity
+            ON questions(device_id, deleted_at, score, answered_at, created_at)
+            """
+        )
 
     @staticmethod
     def _rebuild_empty_legacy_sqlite_schema(db: Any) -> None:
@@ -382,6 +418,12 @@ class Database:
             ON questions(device_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_questions_device_status
             ON questions(device_id, status, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_questions_device_visible_created
+            ON questions(device_id, deleted_at, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_questions_device_pending
+            ON questions(device_id, deleted_at, skipped_at, score, status);
+        CREATE INDEX IF NOT EXISTS idx_questions_device_scored_activity
+            ON questions(device_id, deleted_at, score, answered_at, created_at);
         """
 
     @staticmethod
@@ -451,6 +493,19 @@ class Database:
             """,
             "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_due_at)",
             "CREATE INDEX IF NOT EXISTS idx_questions_device_created ON questions(device_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_questions_device_status ON questions(device_id, status, deleted_at)",
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_visible_created
+            ON questions(device_id, deleted_at, created_at DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_pending
+            ON questions(device_id, deleted_at, skipped_at, score, status)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_questions_device_scored_activity
+            ON questions(device_id, deleted_at, score, answered_at, created_at)
+            """,
         ]
 
     def register_device(
