@@ -11,6 +11,14 @@ class OpenAIQuestionClient:
     def __init__(self, model: str):
         self.model = model
 
+    async def validate_api_key(self, api_key: str) -> None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+
     async def generate_question(
         self,
         api_key: str,

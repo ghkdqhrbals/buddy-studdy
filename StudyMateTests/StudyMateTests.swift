@@ -45,7 +45,7 @@ final class StudyMateTests: XCTestCase {
         }
 
         let store = SettingsStore(defaults: defaults)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         appState.skipOnboarding()
 
@@ -65,7 +65,7 @@ final class StudyMateTests: XCTestCase {
         }
 
         let store = SettingsStore(defaults: defaults)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         let settings = StudySettings(
             topic: "Redis",
             difficulty: .level6,
@@ -169,7 +169,7 @@ final class StudyMateTests: XCTestCase {
             studyRecords: [record]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -195,7 +195,7 @@ final class StudyMateTests: XCTestCase {
         store.saveAPIKey("sk-local")
         store.saveSettings(StudySettings(topic: "SwiftUI", difficulty: .level5, customPrompt: "질문", intervalMinutes: 12))
         let syncService = FakeCloudSyncService(remoteSnapshot: nil)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -216,7 +216,7 @@ final class StudyMateTests: XCTestCase {
         store.saveIsCloudSyncEnabled(true)
         store.saveSettings(StudySettings(topic: "SwiftUI", difficulty: .level5, customPrompt: "질문", intervalMinutes: 12))
         let syncService = FakeCloudSyncService(remoteSnapshot: nil, saveError: CKError(.quotaExceeded))
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -261,7 +261,7 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -304,7 +304,7 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -344,7 +344,7 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -379,7 +379,7 @@ final class StudyMateTests: XCTestCase {
             studyRecords: []
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -420,7 +420,7 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -462,7 +462,7 @@ final class StudyMateTests: XCTestCase {
             studyRecords: remoteRecords
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         appState.deleteStudyRecord(deletedRecord)
         await appState.syncCloudNow()
@@ -507,7 +507,7 @@ final class StudyMateTests: XCTestCase {
             studyRecords: [deletedRecord, keptRecord]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -552,7 +552,6 @@ final class StudyMateTests: XCTestCase {
         )
         let appState = AppState(
             settingsStore: store,
-            openAIClient: SpyOpenAIClient(),
             cloudSyncService: FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
         )
 
@@ -576,20 +575,16 @@ final class StudyMateTests: XCTestCase {
         store.saveAPIKey("sk-local")
         store.saveSettings(StudySettings(topic: "iPhone", difficulty: .level5, customPrompt: "짧게", intervalMinutes: 15))
 
-        let question = QuestionItem(
-            question: "iPhone 단독 실행 질문",
-            expectedAnswerHint: nil,
-            createdAt: Date(timeIntervalSinceNow: -1)
-        )
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResult = GeneratedQuestionResult(question: question, responseID: "resp_phone")
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         let didUpdate = await appState.handleBackgroundRefresh()
 
-        XCTAssertTrue(didUpdate)
-        XCTAssertEqual(client.generateCallCount, 1)
-        XCTAssertEqual(appState.currentQuestion?.question, "iPhone 단독 실행 질문")
+        XCTAssertFalse(didUpdate)
+        XCTAssertEqual(backend.registeredAPNSTokens, [nil])
+        XCTAssertEqual(backend.updateScheduleCallCount, 1)
+        XCTAssertEqual(backend.createQuestionCallCount, 0)
+        XCTAssertNil(appState.currentQuestion)
     }
 
     @MainActor
@@ -611,7 +606,7 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(settings)
         store.appendStudyRecord(question: latestQuestion, settings: settings)
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         XCTAssertEqual(
             appState.backgroundRefreshEarliestBeginDate(now: now).timeIntervalSince1970,
@@ -648,9 +643,14 @@ final class StudyMateTests: XCTestCase {
         store.updateStudyRecordAnswer(question: activeQuestion, answer: "작성 중인 답변")
         store.saveLastAnswer("작성 중인 답변")
 
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResult = GeneratedQuestionResult(question: scheduledQuestion, responseID: "resp_scheduled")
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "101",
+            question: scheduledQuestion,
+            topic: "Redis",
+            difficulty: .level5
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.generateQuestion(manual: false)
 
@@ -687,16 +687,18 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(settings)
         store.appendStudyRecord(question: existingQuestion, settings: settings)
 
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResults = [
-            GeneratedQuestionResult(question: existingQuestion, responseID: "resp_duplicate"),
-            GeneratedQuestionResult(question: newQuestion, responseID: "resp_new")
-        ]
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "201",
+            question: newQuestion,
+            topic: "Redis",
+            difficulty: .level5
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.generateQuestion()
 
-        XCTAssertEqual(client.generateCallCount, 2)
+        XCTAssertEqual(backend.createQuestionCallCount, 1)
         XCTAssertEqual(appState.studyRecords.filter { $0.question.question == existingQuestion.question }.count, 1)
         XCTAssertTrue(appState.studyRecords.contains { $0.question.question == newQuestion.question })
         XCTAssertEqual(appState.currentQuestion?.question, newQuestion.question)
@@ -721,15 +723,20 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(settings)
         store.appendStudyRecord(question: existingQuestion, settings: settings)
 
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResult = GeneratedQuestionResult(question: existingQuestion, responseID: "resp_duplicate")
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "301",
+            question: existingQuestion,
+            topic: "Redis",
+            difficulty: .level5
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.generateQuestion()
 
-        XCTAssertEqual(client.generateCallCount, 5)
+        XCTAssertEqual(backend.createQuestionCallCount, 1)
         XCTAssertEqual(appState.studyRecords.count, 1)
-        XCTAssertEqual(appState.statusMessage, appState.strings.duplicateQuestionSkipped)
+        XCTAssertEqual(appState.currentQuestion?.question, existingQuestion.question)
     }
 
     @MainActor
@@ -774,7 +781,7 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -823,7 +830,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "question-300000",
@@ -860,7 +867,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
         appState.selectedTab = .records
 
         let didHandle = await appState.handleCloudQuestionPush(
@@ -893,16 +900,25 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: "데이터 경쟁",
             createdAt: Date(timeIntervalSince1970: 200)
         )
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResult = GeneratedQuestionResult(question: question, responseID: "resp_1")
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "401",
+            question: question,
+            topic: "Swift",
+            difficulty: .level6
+        )
         let syncService = FakeCloudSyncService(remoteSnapshot: nil)
-        let appState = AppState(settingsStore: store, openAIClient: client, cloudSyncService: syncService)
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: backend,
+            cloudSyncService: syncService
+        )
 
         await appState.generateQuestion()
 
-        XCTAssertEqual(syncService.savedQuestionPushes.count, 1)
-        XCTAssertEqual(syncService.savedQuestionPushes.first?.question, question)
-        XCTAssertEqual(syncService.savedQuestionPushes.first?.settings.topic, "Swift")
+        XCTAssertEqual(backend.createQuestionCallCount, 1)
+        XCTAssertEqual(syncService.savedQuestionPushes.count, 0)
+        XCTAssertEqual(appState.currentQuestion?.question, question.question)
     }
 
     @MainActor
@@ -940,7 +956,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "question-300000",
@@ -1075,7 +1091,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.appendStudyRecord(question: existingQuestion, settings: settings)
         let syncService = FakeCloudSyncService(remoteSnapshot: nil)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "missing-question",
@@ -1119,7 +1135,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "question-300000",
@@ -1172,7 +1188,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
         appState.selectStudyRecord(activeRecord)
         appState.updateAnswer("기존 답변 초안")
 
@@ -1438,14 +1454,14 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveAPIKey("sk-existing")
-        let client = SpyOpenAIClient()
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         appState.settings.topic = "Changed topic"
 
         await appState.saveSettingsAndValidateAPIKey()
 
-        XCTAssertEqual(client.validateCallCount, 0)
+        XCTAssertEqual(backend.validateCallCount, 0)
         XCTAssertEqual(store.loadSettings().topic, "Changed topic")
         XCTAssertEqual(store.loadAPIKey(), "sk-existing")
     }
@@ -1460,7 +1476,7 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveAPIKey("sk-existing")
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         let savedTopic = appState.settings.topic
 
         appState.beginSettingsEditing()
@@ -1485,8 +1501,8 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveAPIKey("sk-existing")
-        let client = SpyOpenAIClient()
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         appState.beginSettingsEditing()
         appState.draftSettings.topic = "Saved draft topic"
@@ -1496,7 +1512,7 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertEqual(appState.settings.topic, "Saved draft topic")
         XCTAssertEqual(store.loadSettings().topic, "Saved draft topic")
-        XCTAssertEqual(client.validateCallCount, 0)
+        XCTAssertEqual(backend.validateCallCount, 0)
         XCTAssertFalse(appState.hasUnsavedSettingsChanges)
     }
 
@@ -1510,15 +1526,15 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveAPIKey("sk-old")
-        let client = SpyOpenAIClient()
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         appState.apiKey = "  sk-new  "
 
         await appState.saveSettingsAndValidateAPIKey()
 
-        XCTAssertEqual(client.validateCallCount, 1)
-        XCTAssertEqual(client.validatedAPIKeys, ["sk-new"])
+        XCTAssertEqual(backend.validateCallCount, 1)
+        XCTAssertEqual(backend.scheduledAPIKeys.last ?? nil, "sk-new")
         XCTAssertEqual(store.loadAPIKey(), "sk-new")
     }
 
@@ -1626,7 +1642,7 @@ final class StudyMateTests: XCTestCase {
             store.appendAppLog(AppLogEntry(level: .info, message: "Log \(index)"))
         }
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         appState.loadAppLogPage(2)
 
         XCTAssertEqual(appState.appLogPage, 2)
@@ -1652,7 +1668,7 @@ final class StudyMateTests: XCTestCase {
             store.appendAppLog(AppLogEntry(level: .info, message: "Log \(index)"))
         }
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         XCTAssertEqual(appState.appLogPage, 0)
         XCTAssertEqual(appState.appLogPageCount, 4)
@@ -1732,7 +1748,7 @@ final class StudyMateTests: XCTestCase {
             createdAt: Date()
         )
         store.appendStudyRecord(question: question, settings: settings)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         appState.openRecordFromNotification(
             questionCreatedAt: question.createdAt.timeIntervalSince1970,
@@ -1776,7 +1792,7 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: deletedQuestion, settings: settings)
         store.appendStudyRecord(question: remainingQuestion, settings: settings)
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         let deletedRecord = store.loadStudyRecords().first {
             $0.question.createdAt == deletedQuestion.createdAt
         }
@@ -1827,7 +1843,7 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: deletedQuestion, settings: settings)
         store.appendStudyRecord(question: activeQuestion, settings: settings)
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         guard let deletedRecord = store.loadStudyRecords().first(where: { $0.question == deletedQuestion }),
               let activeRecord = store.loadStudyRecords().first(where: { $0.question == activeQuestion }) else {
             XCTFail("Expected records to exist before deleting one.")
@@ -1872,7 +1888,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.appendStudyRecord(question: activeQuestion, settings: settings)
 
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         guard let activeRecord = store.loadStudyRecords().first(where: { $0.question == activeQuestion }) else {
             XCTFail("Expected active record to exist.")
             return
@@ -1908,7 +1924,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveQuestion(skippedQuestion)
         store.appendStudyRecord(question: skippedQuestion, settings: settings)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         appState.skipCurrentQuestion()
         let didOpen = appState.openRecordFromNotification(
@@ -1946,7 +1962,7 @@ final class StudyMateTests: XCTestCase {
         store.updateStudyRecordAnswer(question: question, answer: "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.")
 
         let record = store.loadStudyRecords()[0]
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
 
         appState.selectStudyRecord(record)
 
@@ -1983,13 +1999,21 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: question, settings: settings)
         store.saveLastAnswer("")
 
-        let client = SpyOpenAIClient()
-        client.gradingResult = GradingResult(score: 88, isCorrect: true, feedback: "좋아요.", explanation: "핵심을 설명했습니다.")
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        backend.gradeRecordResult = StudyRecord(
+            id: store.loadStudyRecords().first?.id ?? "501",
+            question: question,
+            answer: "TCP는 연결형이고 UDP는 비연결형입니다.",
+            gradingResult: GradingResult(score: 88, isCorrect: true, feedback: "좋아요.", explanation: "핵심을 설명했습니다."),
+            topic: "네트워크",
+            difficulty: .intermediate,
+            answeredAt: Date()
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.gradeCurrentAnswer(answer: "TCP는 연결형이고 UDP는 비연결형입니다.")
 
-        XCTAssertEqual(client.gradedAnswers, ["TCP는 연결형이고 UDP는 비연결형입니다."])
+        XCTAssertEqual(backend.gradedAnswers, ["TCP는 연결형이고 UDP는 비연결형입니다."])
         XCTAssertEqual(appState.lastAnswer, "TCP는 연결형이고 UDP는 비연결형입니다.")
         XCTAssertEqual(store.loadStudyRecords().first?.answer, "TCP는 연결형이고 UDP는 비연결형입니다.")
         XCTAssertEqual(store.loadStudyRecords().first?.gradingResult?.score, 88)
@@ -2004,7 +2028,7 @@ final class StudyMateTests: XCTestCase {
         }
 
         let store = SettingsStore(defaults: defaults)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         XCTAssertTrue(appState.studyRecords.isEmpty)
 
         let settings = StudySettings(
@@ -2062,7 +2086,7 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: newerQuestion, settings: settings)
 
         let newerRecord = store.loadStudyRecords().last!
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         appState.selectStudyRecord(newerRecord)
 
         appState.skipCurrentQuestion()
@@ -2105,7 +2129,7 @@ final class StudyMateTests: XCTestCase {
         let records = store.loadStudyRecords()
         let skippedRecord = records.first { $0.question == skippedQuestion }!
         let currentRecord = records.first { $0.question == currentQuestion }!
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient())
+        let appState = AppState(settingsStore: store)
         appState.selectStudyRecord(currentRecord)
 
         appState.skipPendingQuestion(skippedRecord)
@@ -2142,14 +2166,14 @@ final class StudyMateTests: XCTestCase {
             store.appendStudyRecord(question: question, settings: settings)
         }
 
-        let client = SpyOpenAIClient()
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.generateQuestion()
 
         XCTAssertTrue(appState.hasReachedPendingQuestionLimit)
         XCTAssertEqual(appState.statusMessage, appState.strings.pendingQuestionLimitTitle)
-        XCTAssertEqual(client.generateCallCount, 0)
+        XCTAssertEqual(backend.createQuestionCallCount, 0)
         XCTAssertEqual(appState.pendingStudyRecords.count, 3)
     }
 
@@ -2188,13 +2212,13 @@ final class StudyMateTests: XCTestCase {
         store.saveGradingResult(nil)
         store.saveLastAnswer("")
 
-        let client = SpyOpenAIClient()
-        let appState = AppState(settingsStore: store, openAIClient: client)
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         await appState.generateQuestion()
 
         XCTAssertTrue(appState.hasReachedPendingQuestionLimit)
-        XCTAssertEqual(client.generateCallCount, 0)
+        XCTAssertEqual(backend.createQuestionCallCount, 0)
         XCTAssertEqual(appState.pendingStudyRecords.count, 3)
         XCTAssertEqual(store.loadStudyRecords().count, 2)
     }
@@ -2237,7 +2261,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "question-100000",
@@ -2287,7 +2311,7 @@ final class StudyMateTests: XCTestCase {
             }
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -2346,16 +2370,16 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: $0, topic: "CloudKit", difficulty: .level5)
             }
         )
-        let client = SpyOpenAIClient()
+        let backend = FakeRemotePushBackendClient()
         let appState = AppState(
             settingsStore: store,
-            openAIClient: client,
+            remotePushBackendClient: backend,
             cloudSyncService: FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
         )
 
         await appState.generateQuestion()
 
-        XCTAssertEqual(client.generateCallCount, 0)
+        XCTAssertEqual(backend.createQuestionCallCount, 0)
         XCTAssertEqual(appState.pendingStudyRecords.count, 5)
         XCTAssertEqual(appState.statusMessage, appState.strings.pendingQuestionLimitTitle)
     }
@@ -2416,18 +2440,27 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: nil,
             createdAt: Date(timeIntervalSince1970: 200)
         )
-        let client = SpyOpenAIClient()
-        client.generatedQuestionResult = GeneratedQuestionResult(question: generatedQuestion, responseID: "resp_new")
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "601",
+            question: generatedQuestion,
+            topic: "CloudKit",
+            difficulty: .level5
+        )
         let syncService = FakeCloudSyncService(remoteSnapshot: nil)
         syncService.fetchSnapshots = [nil, nil, remoteSnapshot]
-        let appState = AppState(settingsStore: store, openAIClient: client, cloudSyncService: syncService)
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: backend,
+            cloudSyncService: syncService
+        )
 
         await appState.generateQuestion(manual: false)
 
-        XCTAssertEqual(client.generateCallCount, 1)
-        XCTAssertGreaterThan(appState.pendingStudyRecords.count, AppState.maxPendingQuestionCount)
+        XCTAssertEqual(backend.createQuestionCallCount, 1)
+        XCTAssertTrue(appState.studyRecords.contains { $0.question == generatedQuestion })
         XCTAssertEqual(syncService.savedQuestionPushes.count, 0)
-        XCTAssertEqual(appState.statusMessage, appState.strings.pendingQuestionLimitTitle)
+        XCTAssertEqual(appState.statusMessage, "새 질문이 준비됐습니다.")
     }
 
     @MainActor
@@ -2491,7 +2524,7 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
             recordName: "question-300000",
@@ -2545,7 +2578,7 @@ final class StudyMateTests: XCTestCase {
             studyRecords: []
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -2592,7 +2625,7 @@ final class StudyMateTests: XCTestCase {
             }
         )
         let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
-        let appState = AppState(settingsStore: store, openAIClient: SpyOpenAIClient(), cloudSyncService: syncService)
+        let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
@@ -2983,43 +3016,154 @@ final class StudyMateTests: XCTestCase {
 }
 
 @MainActor
-private final class SpyOpenAIClient: OpenAIClientProtocol {
-    var lastUsage: OpenAIUsage?
-    var validateCallCount = 0
-    var validatedAPIKeys: [String] = []
-    var generateCallCount = 0
-    var generatedQuestionResult: GeneratedQuestionResult?
-    var generatedQuestionResults: [GeneratedQuestionResult] = []
-    var gradingResult: GradingResult?
+private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol {
+    var registration = RemotePushRegistration(
+        deviceID: "device-test",
+        clientSecret: "secret-test",
+        apnsToken: ""
+    )
+    var registeredAPNSTokens: [String?] = []
+    var updatedAPNSTokens: [String] = []
+    var updateScheduleCallCount = 0
+    var scheduledAPIKeys: [String?] = []
+    var createQuestionCallCount = 0
+    var createQuestionResult: StudyRecord?
+    var createQuestionResults: [StudyRecord] = []
+    var gradeRecordCallCount = 0
     var gradedAnswers: [String] = []
+    var gradeRecordResult: StudyRecord?
+    var validateCallCount = 0
 
-    func validateAPIKey(_ apiKey: String) async throws {
-        validateCallCount += 1
-        validatedAPIKeys.append(apiKey)
+    func registerDevice(
+        apnsToken: String?,
+        language: AppLanguage,
+        timezone: String,
+        apnsEnvironment: String
+    ) async throws -> RemotePushRegistration {
+        registeredAPNSTokens.append(apnsToken)
+        registration.apnsToken = apnsToken ?? ""
+        return registration
     }
 
-    func generateQuestion(
+    func updatePushToken(
+        registration: RemotePushRegistration,
+        apnsToken: String,
+        apnsEnvironment: String
+    ) async throws -> RemotePushRegistration {
+        updatedAPNSTokens.append(apnsToken)
+        self.registration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: apnsToken
+        )
+        return self.registration
+    }
+
+    func updateSchedule(
+        registration: RemotePushRegistration,
         settings: StudySettings,
-        recentQuestions: [QuestionItem],
-        previousResponseID: String?,
-        apiKey: String
-    ) async throws -> GeneratedQuestionResult {
-        generateCallCount += 1
-        if !generatedQuestionResults.isEmpty {
-            return generatedQuestionResults.removeFirst()
-        }
-        if let generatedQuestionResult {
-            return generatedQuestionResult
-        }
-        throw OpenAIClientError.invalidResponse
+        apiKey: String?,
+        enabled: Bool
+    ) async throws {
+        updateScheduleCallCount += 1
+        scheduledAPIKeys.append(apiKey)
     }
 
-    func gradeAnswer(question: QuestionItem, answer: String, settings: StudySettings, apiKey: String) async throws -> GradingResult {
-        gradedAnswers.append(answer)
-        if let gradingResult {
-            return gradingResult
+    func fetchSnapshot(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendSnapshot {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus {
+        BackendAPIStatus(
+            openAIKeyConfigured: scheduledAPIKeys.contains { ($0 ?? "").isEmpty == false },
+            openAIModel: StudySettings.defaultOpenAIModel,
+            usageURL: URL(string: "https://platform.openai.com/usage")!,
+            billingURL: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!,
+            creditsURL: URL(string: "https://platform.openai.com/settings/organization/billing/credit-grants")!
+        )
+    }
+
+    func validateAPIKey(registration: RemotePushRegistration) async throws -> BackendAPIValidation {
+        validateCallCount += 1
+        return BackendAPIValidation(
+            openAIKeyConfigured: true,
+            isValid: true,
+            openAIModel: StudySettings.defaultOpenAIModel
+        )
+    }
+
+    func fetchStats(
+        registration: RemotePushRegistration,
+        period: BackendStatsPeriod,
+        startAt: Date?,
+        endAt: Date?,
+        search: String,
+        sort: BackendStatsSort,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendStats {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
+        createQuestionCallCount += 1
+        if !createQuestionResults.isEmpty {
+            return createQuestionResults.removeFirst()
         }
-        throw OpenAIClientError.invalidResponse
+        if let createQuestionResult {
+            return createQuestionResult
+        }
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func gradeRecord(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord {
+        gradeRecordCallCount += 1
+        gradedAnswers.append(answer)
+        if let gradeRecordResult {
+            return gradeRecordResult
+        }
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func saveRecordAnswer(
+        registration: RemotePushRegistration,
+        recordID: String,
+        answer: String
+    ) async throws -> StudyRecord {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func skipRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func deleteRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws {}
+
+    func clearRecords(registration: RemotePushRegistration) async throws {}
+
+    func fetchRecord(
+        registration: RemotePushRegistration,
+        recordID: String
+    ) async throws -> StudyRecord {
+        throw RemotePushBackendError.invalidResponse
     }
 }
 

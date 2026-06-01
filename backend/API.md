@@ -58,7 +58,7 @@ Request:
 
 ```json
 {
-  "apnsToken": "apns-device-token",
+  "apnsToken": "apns-device-token-or-empty-string",
   "platform": "ios",
   "apnsEnvironment": "production",
   "language": "ko",
@@ -68,7 +68,7 @@ Request:
 
 Fields:
 
-- `apnsToken`: APNs device token. Minimum length is 32 characters.
+- `apnsToken`: optional APNs device token. Send an empty string when the app needs a backend identity before notification registration completes.
 - `platform`: client platform. Current app sends `ios`.
 - `apnsEnvironment`: `production` for TestFlight/App Store, `sandbox` for debug builds.
 - `language`: `ko` or `en`.
@@ -84,6 +84,26 @@ Response:
 ```
 
 The app must store both values locally. The backend does not return the client secret again.
+
+### Update Push Token
+
+```http
+PUT /v1/devices/{deviceId}/push-token
+Content-Type: application/json
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Request:
+
+```json
+{
+  "apnsToken": "apns-device-token",
+  "apnsEnvironment": "production"
+}
+```
+
+Use this after iOS returns an APNs token for an already registered backend device. This preserves the same backend identity instead of creating a second device.
 
 ### Upsert Study Settings And Schedule
 
@@ -156,6 +176,26 @@ X-Client-Secret: <clientSecret>
 ```
 
 Returns whether the device has an encrypted OpenAI API key configured, the selected model, and OpenAI usage/billing links.
+
+### Validate API Key
+
+```http
+POST /v1/devices/{deviceId}/api/validate
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Validates the device's stored regular OpenAI API key through the backend and returns:
+
+```json
+{
+  "openaiKeyConfigured": true,
+  "isValid": true,
+  "openaiModel": "gpt-5.4"
+}
+```
+
+The iOS/macOS apps must not validate keys by calling OpenAI directly.
 
 ### Snapshot
 

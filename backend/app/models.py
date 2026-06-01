@@ -12,7 +12,7 @@ class HealthResponse(CamelModel):
 
 
 class DeviceRegisterRequest(CamelModel):
-    apns_token: str = Field(alias="apnsToken", min_length=32)
+    apns_token: str = Field(default="", alias="apnsToken", max_length=512)
     platform: str = "ios"
     apns_environment: str = Field(default="production", alias="apnsEnvironment")
     language: str = "ko"
@@ -43,6 +43,11 @@ class ScheduleResponse(CamelModel):
     next_due_at: str | None = Field(alias="nextDueAt")
 
 
+class PushTokenRequest(CamelModel):
+    apns_token: str = Field(alias="apnsToken", min_length=32, max_length=512)
+    apns_environment: str = Field(default="production", alias="apnsEnvironment")
+
+
 class BackendSettingsResponse(CamelModel):
     topic: str
     difficulty_level: int = Field(alias="difficultyLevel")
@@ -64,6 +69,12 @@ class APIStatusResponse(CamelModel):
     usage_url: str = Field(alias="usageUrl")
     billing_url: str = Field(alias="billingUrl")
     credits_url: str = Field(alias="creditsUrl")
+
+
+class APIValidationResponse(CamelModel):
+    openai_key_configured: bool = Field(alias="openaiKeyConfigured")
+    is_valid: bool = Field(alias="isValid")
+    openai_model: str = Field(alias="openaiModel")
 
 
 class QuestionPayload(CamelModel):

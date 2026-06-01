@@ -17,7 +17,7 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 
 - iOS app built with SwiftUI `TabView`.
 - macOS menu bar app built with SwiftUI `MenuBarExtra`, currently kept in the repository with public release paused.
-- Shared model, storage, OpenAI, notification, and CloudKit sync services.
+- Shared model, storage, backend API, notification, and CloudKit sync services.
 
 ## Release Scope
 
@@ -35,7 +35,7 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 
 ### Study
 
-1. User receives or manually creates a study question.
+1. User receives or manually creates a study question through the backend.
 2. User writes an answer draft that is preserved automatically.
 3. User can reveal the hint on demand.
 4. User submits for grading.
@@ -61,26 +61,27 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 ### Settings
 
 1. Study settings appear first.
-2. OpenAI API key and model are managed separately from study settings.
+2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
 4. iCloud sync is shown as a single compact footer row at the bottom.
 5. Developer logs are hidden unless debugging mode is enabled.
 
 ### Sync And Push
 
-1. CloudKit sync stores settings, current question, draft answer, records, history, and the regular OpenAI API key.
-2. Only the regular OpenAI API key is supported for sync.
-3. Question push records are used for iPhone delivery.
-4. iPhone subscribes to question push records and receives CloudKit/APNs notifications.
-5. Push arrival syncs data without opening a new answer page unless the user taps the notification.
-6. On iPhone, lock-screen delivery uses at most one pending scheduled local notification prepared before suspension; exact background network generation is not guaranteed by iOS.
-7. Server-scheduled APNs delivery is handled by the Python backend at `https://api.ghkdqhrbals.org`.
+1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in PostgreSQL.
+2. CloudKit snapshot sync remains for legacy cross-device continuity, including the regular OpenAI API key, but generated and graded records should flow through the backend.
+3. Only the regular OpenAI API key is supported; admin keys are not supported.
+4. The app does not call OpenAI directly. API-key validation, question generation, and grading go through `https://api.ghkdqhrbals.org`.
+5. Server-scheduled APNs delivery is handled by the Python backend. It generates each due question, stores it before push delivery, then sends the APNs alert.
+6. Push arrival syncs data without opening a new answer page unless the user taps the notification.
+7. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
 
 ## Non-Goals
 
 - Guaranteeing real-time push delivery independent of iCloud/APNs behavior.
 - Storing OpenAI billing balance locally as an authoritative source.
 - Supporting more app languages than Korean and English in the current version.
+- Calling OpenAI directly from the iOS or macOS app.
 
 ## Current UX Backlog
 

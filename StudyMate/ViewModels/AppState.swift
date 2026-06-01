@@ -70,7 +70,6 @@ final class AppState: ObservableObject {
     @Published var isBackendOpenAIKeyConfigured = false
 
     private let settingsStore: SettingsStore
-    private let openAIClient: OpenAIClientProtocol
     private let remotePushBackendClient: RemotePushBackendClientProtocol
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -182,7 +181,6 @@ final class AppState: ObservableObject {
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
-        openAIClient: OpenAIClientProtocol? = nil,
         remotePushBackendClient: RemotePushBackendClientProtocol = RemotePushBackendClient(),
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
@@ -215,7 +213,6 @@ final class AppState: ObservableObject {
         self.cloudLastSyncedAt = loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
-        self.openAIClient = openAIClient ?? OpenAIClient()
         self.remotePushBackendClient = remotePushBackendClient
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -461,11 +458,16 @@ final class AppState: ObservableObject {
 
     private func validateAPIKeyOnStartup() async {
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAPIKey.isEmpty else {
-            if settingsStore.loadRemotePushRegistration() != nil, !hasAPIKeyError {
-                log(.info, "로컬 API 키는 비어 있지만 백엔드에 키가 설정되어 있어 시작 검증을 건너뜁니다.")
-                return
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "startup-api-validation") else {
+            if trimmedAPIKey.isEmpty {
+                hasAPIKeyError = true
+                errorMessage = strings.apiKeyEmptyDetailed
             }
+            log(.warning, "백엔드 등록이 없어 시작 시 API 키 검증을 완료하지 못했습니다.")
+            return
+        }
+
+        guard !trimmedAPIKey.isEmpty || isBackendOpenAIKeyConfigured else {
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
             log(.warning, "시작 시 API 키 검증을 건너뛰었습니다. API 키가 비어 있습니다.")
@@ -473,15 +475,21 @@ final class AppState: ObservableObject {
         }
 
         isValidatingAPIKey = true
-        log(.info, "시작 시 OpenAI API 키를 검증합니다.")
+        log(.info, "시작 시 백엔드에서 OpenAI API 키를 검증합니다.")
 
         do {
-            try await openAIClient.validateAPIKey(trimmedAPIKey)
+            try await updateBackendSettings(
+                registration: registration,
+                reason: "startup-api-validation",
+                includeAPIKey: !trimmedAPIKey.isEmpty && !isBackendOpenAIKeyConfigured
+            )
+            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
             hasAPIKeyError = false
             if errorMessage?.contains("API 키") == true {
                 errorMessage = nil
             }
-            log(.info, "시작 시 OpenAI API 키 검증에 성공했습니다.")
+            isBackendOpenAIKeyConfigured = true
+            log(.info, "시작 시 백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
             handleOpenAIError(error)
         }
@@ -558,10 +566,19 @@ final class AppState: ObservableObject {
         errorMessage = nil
 
         do {
-            try await openAIClient.validateAPIKey(trimmedAPIKey)
+            guard let registration = await backendRegistrationForOpenAIRequests(reason: "onboarding-api-validation") else {
+                throw RemotePushBackendError.invalidResponse
+            }
+            try await updateBackendSettings(
+                registration: registration,
+                reason: "onboarding-api-validation",
+                includeAPIKey: true
+            )
+            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
             hasAPIKeyError = false
             statusMessage = strings.onboardingCompleted
-            log(.info, "온보딩 완료 후 OpenAI API 키 검증에 성공했습니다.")
+            isBackendOpenAIKeyConfigured = true
+            log(.info, "온보딩 완료 후 백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
             handleOpenAIError(error)
             statusMessage = nil
@@ -658,10 +675,19 @@ final class AppState: ObservableObject {
         errorMessage = nil
 
         do {
-            try await openAIClient.validateAPIKey(trimmedAPIKey)
+            guard let registration = await backendRegistrationForOpenAIRequests(reason: "settings-api-validation") else {
+                throw RemotePushBackendError.invalidResponse
+            }
+            try await updateBackendSettings(
+                registration: registration,
+                reason: "settings-api-validation",
+                includeAPIKey: true
+            )
+            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
             hasAPIKeyError = false
             statusMessage = "설정을 저장했고 API 키도 확인했습니다."
-            log(.info, "OpenAI API 키 검증에 성공했습니다.")
+            isBackendOpenAIKeyConfigured = true
+            log(.info, "백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
             handleOpenAIError(error)
             statusMessage = nil
@@ -754,57 +780,14 @@ final class AppState: ObservableObject {
             isGeneratingQuestion = false
         }
 
-        if let registration = settingsStore.loadRemotePushRegistration() {
-            await generateBackendQuestion(registration: registration, manual: manual)
-            return
-        }
-
-        guard await canCreateQuestionAfterGlobalPendingCheck(
-            reason: "새 질문 생성",
-            updateVisibleQuestion: manual
-        ) else {
-            return
-        }
-
-        errorMessage = nil
-        statusMessage = manual ? "질문을 생성 중입니다." : "예약된 질문을 생성 중입니다."
-        log(.info, "새 질문 생성 요청을 전송합니다. topic=\(settings.topic), difficulty=\(settings.difficulty.level), model=\(settings.sanitizedOpenAIModel)")
-
-        do {
-            let shouldActivateQuestion = manual || !hasActiveUngradedCurrentQuestion
-            let question = try await createAndStoreQuestion(activate: shouldActivateQuestion)
-            guard await syncGeneratedQuestionIfNeeded(
-                question,
-                updateVisibleQuestion: shouldActivateQuestion
-            ) else {
-                return
-            }
-            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 미제출 목록에 추가됐습니다."
-            log(.info, "질문을 생성했습니다: \(question.question)")
-            let didScheduleNotification = await notificationService.showQuestionNotification(
-                question: question,
-                title: strings.notificationTitle,
-                subtitle: notificationSubtitle,
-                sound: settings.notificationSound,
-                language: settings.appLanguage,
-                deliveryDate: nil
-            )
-            if !didScheduleNotification {
-                statusMessage = strings.testNotificationFailed
-                log(.warning, "질문 알림을 표시하지 못했습니다. 알림 권한 또는 시스템 설정을 확인하세요.")
-            }
-            await saveQuestionPushIfNeeded(question)
-            markCloudDataChanged()
-        } catch QuestionGenerationSkip.pendingLimit {
-            showPendingQuestionLimitStatus(reason: "질문 저장")
-        } catch QuestionGenerationSkip.duplicateQuestion {
-            statusMessage = strings.duplicateQuestionSkipped
-            log(.warning, "OpenAI가 기존 질문과 중복되는 질문을 반복 생성해 저장하지 않았습니다.")
-        } catch {
-            handleOpenAIError(error)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: manual ? "manual-question" : "scheduled-question") else {
             statusMessage = nil
-            log(.error, "질문 생성에 실패했습니다: \(error.localizedDescription)")
+            errorMessage = "백엔드 등록이 없어 질문을 생성할 수 없습니다. 네트워크와 알림 권한을 확인한 뒤 다시 시도하세요."
+            log(.warning, "백엔드 등록이 없어 질문 생성을 중단했습니다.")
+            return
         }
+
+        await generateBackendQuestion(registration: registration, manual: manual)
     }
 
     private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool) async {
@@ -852,38 +835,15 @@ final class AppState: ObservableObject {
             return false
         }
 
-        if settingsStore.loadRemotePushRegistration() != nil {
-            await syncRemotePushScheduleIfPossible(reason: reason)
-            await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
-            log(.info, "백엔드 스케줄러가 예약 질문을 담당하므로 로컬 타이머 생성을 건너뛰었습니다. reason=\(reason)")
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: reason) else {
+            log(.warning, "백엔드 등록이 없어 \(reason) 예약 질문 확인을 건너뛰었습니다.")
             return false
         }
 
-        refreshStudyProgressFromStore()
-
-        guard apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-            log(.warning, "API 키가 비어 있어 \(reason) 예약 질문 생성을 건너뛰었습니다.")
-            return false
-        }
-
-        guard !hasAPIKeyError else {
-            log(.warning, "API 키 오류가 있어 \(reason) 예약 질문 생성을 건너뛰었습니다.")
-            return false
-        }
-
-        guard !hasReachedPendingQuestionLimit else {
-            showPendingQuestionLimitStatus(reason: "\(reason) 예약 질문 생성")
-            return false
-        }
-
-        guard isQuestionDue(now: Date()) else {
-            return false
-        }
-
-        let latestBeforeGeneration = latestQuestionCreatedAt
-        log(.info, "\(reason) 기준 질문 간격이 지나 새 질문을 생성합니다.")
-        await generateQuestion(manual: false)
-        return latestQuestionCreatedAt != latestBeforeGeneration
+        await syncRemotePushScheduleIfPossible(reason: reason)
+        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+        log(.info, "백엔드 스케줄러가 예약 질문을 담당하므로 로컬 OpenAI 생성을 수행하지 않았습니다. reason=\(reason), deviceID=\(registration.deviceID)")
+        return false
     }
 
     @discardableResult
@@ -894,112 +854,19 @@ final class AppState: ObservableObject {
             return 0
         }
 
-        if settingsStore.loadRemotePushRegistration() != nil {
-            await syncRemotePushScheduleIfPossible(reason: "background")
-            log(.info, "백엔드/APNs 스케줄러가 잠금화면 질문을 담당하므로 로컬 예약 알림 준비를 건너뛰었습니다.")
-            return 0
-        }
-
-        guard !isGeneratingQuestion else {
-            log(.info, "질문 생성 중이라 잠금화면용 예약 질문 준비를 건너뛰었습니다.")
-            return 0
-        }
-
-        guard apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-            log(.warning, "API 키가 비어 있어 잠금화면용 예약 질문 준비를 건너뛰었습니다.")
-            return 0
-        }
-
-        guard !hasAPIKeyError else {
-            log(.warning, "API 키 오류가 있어 잠금화면용 예약 질문 준비를 건너뛰었습니다.")
-            return 0
-        }
-
-        guard await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage) else {
-            log(.warning, "알림 권한이 없어 잠금화면용 예약 질문 준비를 건너뛰었습니다.")
-            return 0
-        }
-
-        if isCloudSyncEnabled {
-            await syncCloudNow(updateVisibleQuestion: false)
-            await ensureCloudQuestionPushSubscription()
-        }
-        refreshStudyProgressFromStore()
-
-        let pendingScheduledNotificationCount = await notificationService.pendingQuestionNotificationCount()
-        guard pendingScheduledNotificationCount == 0 else {
-            log(.info, "이미 예약된 질문 알림이 있어 잠금화면용 예약 질문 준비를 건너뛰었습니다. pendingNotifications=\(pendingScheduledNotificationCount)")
-            return 0
-        }
-
-        guard pendingQuestionCount < Self.maxPendingQuestionCount else {
-            showPendingQuestionLimitStatus(reason: "잠금화면용 예약 질문 준비")
-            return 0
-        }
-
-        let now = Date()
-        let deliveryDate = max(nextQuestionDueDate(now: now), now.addingTimeInterval(2))
-        guard shouldPrepareBackgroundQuestionNotification(now: now) else {
-            return 0
-        }
-
         guard !isExpired() else {
-            log(.warning, "iOS background 시간이 만료되어 잠금화면용 예약 질문 준비를 중단했습니다.")
+            log(.warning, "iOS background 시간이 만료되어 백엔드 예약 확인을 중단했습니다.")
             return 0
         }
 
-        isGeneratingQuestion = true
-        defer {
-            isGeneratingQuestion = false
-        }
-
-        do {
-            let question = try await createAndStoreQuestion(activate: false)
-            guard await syncGeneratedQuestionIfNeeded(question, updateVisibleQuestion: false) else {
-                return 0
-            }
-
-            let didScheduleNotification = await notificationService.showQuestionNotification(
-                question: question,
-                title: strings.notificationTitle,
-                subtitle: notificationSubtitle,
-                sound: settings.notificationSound,
-                language: settings.appLanguage,
-                deliveryDate: deliveryDate
-            )
-
-            guard didScheduleNotification else {
-                log(.warning, "잠금화면용 질문 알림 예약에 실패했습니다.")
-                return 0
-            }
-
-            lastBackgroundQuestionPreparationAt = now
-            statusMessage = "잠금화면용 질문 1개를 예약했습니다."
-            log(
-                .info,
-                "잠금화면용 예약 질문을 1개 준비했습니다. deliveryAt=\(deliveryDate), pending=\(pendingQuestionCount)"
-            )
-            markCloudDataChanged()
-            return 1
-        } catch QuestionGenerationSkip.pendingLimit {
-            showPendingQuestionLimitStatus(reason: "잠금화면용 예약 질문 저장")
-            return 0
-        } catch {
-            handleOpenAIError(error)
-            statusMessage = nil
-            log(.error, "잠금화면용 예약 질문 준비에 실패했습니다: \(error.localizedDescription)")
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "background") else {
+            log(.warning, "백엔드 등록이 없어 잠금화면 질문 준비를 건너뛰었습니다.")
             return 0
         }
-    }
 
-    private func shouldPrepareBackgroundQuestionNotification(now: Date) -> Bool {
-        if let lastBackgroundQuestionPreparationAt,
-           now.timeIntervalSince(lastBackgroundQuestionPreparationAt) < 30 {
-            log(.info, "백그라운드 질문 준비가 너무 자주 호출되어 건너뛰었습니다.")
-            return false
-        }
-
-        return true
+        await syncRemotePushScheduleIfPossible(reason: "background")
+        log(.info, "백엔드/APNs 스케줄러가 잠금화면 질문을 담당합니다. 로컬 OpenAI 질문 생성은 수행하지 않았습니다. deviceID=\(registration.deviceID)")
+        return 0
     }
 
     private func canCreateQuestionAfterGlobalPendingCheck(
@@ -1079,115 +946,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func createAndStoreQuestion(activate: Bool) async throws -> QuestionItem {
-        await refreshGlobalStudyProgressFromStore(updateVisibleQuestion: activate)
-        guard !hasReachedPendingQuestionLimit else {
-            throw QuestionGenerationSkip.pendingLimit
-        }
-
-        let generated = try await generateUniqueQuestion()
-        let question = generated.question
-
-        await refreshGlobalStudyProgressFromStore(updateVisibleQuestion: activate)
-        guard !hasReachedPendingQuestionLimit else {
-            throw QuestionGenerationSkip.pendingLimit
-        }
-        guard !Self.isDuplicate(question, in: previousQuestionsForGeneration()) else {
-            throw QuestionGenerationSkip.duplicateQuestion
-        }
-
-        settingsStore.appendQuestionToHistory(question)
-        settingsStore.appendStudyRecord(question: question, settings: settings)
-        settingsStore.saveQuestionResponseID(generated.responseID)
-
-        if activate {
-            currentQuestion = question
-            gradingResult = nil
-            lastAnswer = ""
-            settingsStore.saveQuestion(question)
-            settingsStore.saveGradingResult(nil)
-            settingsStore.saveLastAnswer("")
-        }
-
-        studyRecords = settingsStore.loadStudyRecords()
-        hasAPIKeyError = false
-
-        return question
-    }
-
-    private func syncGeneratedQuestionIfNeeded(
-        _ question: QuestionItem,
-        updateVisibleQuestion: Bool = true
-    ) async -> Bool {
-        guard isCloudSyncEnabled else {
-            return true
-        }
-
-        markCloudDataDirtyWithoutScheduling()
-        await syncCloudNow(updateVisibleQuestion: updateVisibleQuestion)
-        refreshStudyProgressFromStore()
-
-        if isCloudSyncEnabled, hasCloudSyncError {
-            log(.warning, "질문은 로컬에 저장했지만 iCloud 동기화에 실패했습니다.")
-            return true
-        }
-
-        if pendingQuestionCount > Self.maxPendingQuestionCount {
-            log(.warning, "iCloud 동기화 후 미채점 질문이 \(pendingQuestionCount)개입니다. 기존 데이터는 보존하고 이후 새 질문 생성을 막습니다.")
-            showPendingQuestionLimitStatus(reason: "iCloud 동기화 후 질문 알림 전송")
-            return false
-        }
-
-        return true
-    }
-
-    private func generateUniqueQuestion() async throws -> GeneratedQuestionResult {
-        var previousQuestions = previousQuestionsForGeneration()
-
-        for _ in 0..<5 {
-            let generated = try await openAIClient.generateQuestion(
-                settings: settings,
-                recentQuestions: Array(previousQuestions.suffix(80)),
-                previousResponseID: settingsStore.loadQuestionResponseID(),
-                apiKey: apiKey
-            )
-
-            if !Self.isDuplicate(generated.question, in: previousQuestions) {
-                return generated
-            }
-
-            previousQuestions.append(generated.question)
-            log(.warning, "생성된 질문이 기존 질문과 중복되어 다시 생성합니다.")
-        }
-
-        throw QuestionGenerationSkip.duplicateQuestion
-    }
-
-    private func previousQuestionsForGeneration() -> [QuestionItem] {
-        var questions = settingsStore.loadQuestionHistory()
-        questions.append(contentsOf: settingsStore.loadStudyRecords().map(\.question))
-
-        if let currentQuestion {
-            questions.append(currentQuestion)
-        }
-
-        var questionsByKey: [String: QuestionItem] = [:]
-        for question in questions {
-            let key = SettingsStore.normalizedQuestionText(question.question)
-            guard !key.isEmpty else {
-                continue
-            }
-
-            if let existingQuestion = questionsByKey[key] {
-                questionsByKey[key] = question.createdAt >= existingQuestion.createdAt ? question : existingQuestion
-            } else {
-                questionsByKey[key] = question
-            }
-        }
-
-        return questionsByKey.values.sorted { $0.createdAt < $1.createdAt }
-    }
-
     private var notificationSubtitle: String {
         let topic = settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
         let difficulty = settings.difficulty.displayName(language: settings.appLanguage)
@@ -1254,45 +1012,28 @@ final class AppState: ObservableObject {
         studyRecords = settingsStore.loadStudyRecords()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
 
-        if let registration = settingsStore.loadRemotePushRegistration(),
-           let record = studyRecord(matching: currentQuestion) {
-            do {
-                let updatedRecord = try await remotePushBackendClient.gradeRecord(
-                    registration: registration,
-                    recordID: record.id,
-                    answer: trimmedAnswer
-                )
-                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
-                await syncRemotePushScheduleIfPossible(reason: "grade")
-                return
-            } catch {
-                handleOpenAIError(error)
-                statusMessage = nil
-                return
-            }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-current-answer") else {
+            errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
+            statusMessage = nil
+            log(.warning, "백엔드 등록이 없어 현재 질문 채점을 중단했습니다.")
+            return
+        }
+
+        guard let record = studyRecord(matching: currentQuestion) else {
+            errorMessage = "이 질문은 백엔드 기록에 없어 채점할 수 없습니다. 새 질문을 다시 생성하세요."
+            statusMessage = nil
+            log(.warning, "현재 질문에 매칭되는 백엔드 기록이 없어 채점을 중단했습니다.")
+            return
         }
 
         do {
-            let result = try await openAIClient.gradeAnswer(
-                question: currentQuestion,
-                answer: trimmedAnswer,
-                settings: settings,
-                apiKey: apiKey
+            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+                registration: registration,
+                recordID: record.id,
+                answer: trimmedAnswer
             )
-            gradingResult = result
-            settingsStore.saveGradingResult(result)
-            settingsStore.saveLastAnswer(trimmedAnswer)
-            settingsStore.updateStudyRecord(
-                question: currentQuestion,
-                answer: trimmedAnswer,
-                gradingResult: result
-            )
-            notificationService.cancelQuestionNotification(for: currentQuestion)
-            studyRecords = settingsStore.loadStudyRecords()
-            hasAPIKeyError = false
-            statusMessage = "채점이 완료됐습니다."
-            log(.info, "현재 질문 답변을 채점했습니다. score=\(result.score)")
-            markCloudDataChanged()
+            applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+            await syncRemotePushScheduleIfPossible(reason: "grade")
         } catch {
             handleOpenAIError(error)
             statusMessage = nil
@@ -1329,59 +1070,21 @@ final class AppState: ObservableObject {
         statusMessage = "기록의 답변을 채점 중입니다."
         log(.info, "기록 답변 채점 요청을 전송합니다.")
 
-        let gradingSettings = StudySettings(
-            topic: record.topic.isEmpty ? settings.topic : record.topic,
-            difficulty: record.difficulty,
-            appLanguage: settings.appLanguage,
-            language: settings.appLanguage.studyLanguage,
-            openAIModel: settings.sanitizedOpenAIModel,
-            customPrompt: settings.customPrompt,
-            intervalMinutes: settings.sanitizedIntervalMinutes,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
-        )
-
-        if let registration = settingsStore.loadRemotePushRegistration() {
-            do {
-                let updatedRecord = try await remotePushBackendClient.gradeRecord(
-                    registration: registration,
-                    recordID: record.id,
-                    answer: trimmedAnswer
-                )
-                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
-                await syncRemotePushScheduleIfPossible(reason: "grade-record")
-                markCloudDataChanged()
-                return
-            } catch {
-                handleOpenAIError(error)
-                statusMessage = nil
-                return
-            }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-record") else {
+            errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
+            statusMessage = nil
+            log(.warning, "백엔드 등록이 없어 기록 채점을 중단했습니다.")
+            return
         }
 
         do {
-            let result = try await openAIClient.gradeAnswer(
-                question: record.question,
-                answer: trimmedAnswer,
-                settings: gradingSettings,
-                apiKey: apiKey
+            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+                registration: registration,
+                recordID: record.id,
+                answer: trimmedAnswer
             )
-
-            currentQuestion = record.question
-            lastAnswer = trimmedAnswer
-            gradingResult = result
-            settingsStore.saveQuestion(record.question)
-            settingsStore.saveLastAnswer(trimmedAnswer)
-            settingsStore.saveGradingResult(result)
-            settingsStore.updateStudyRecord(
-                question: record.question,
-                answer: trimmedAnswer,
-                gradingResult: result
-            )
-            notificationService.cancelQuestionNotification(for: record.question)
-            studyRecords = settingsStore.loadStudyRecords()
-            hasAPIKeyError = false
-            statusMessage = "채점이 완료됐습니다."
-            log(.info, "기록 답변을 채점했습니다. score=\(result.score)")
+            applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+            await syncRemotePushScheduleIfPossible(reason: "grade-record")
             markCloudDataChanged()
         } catch {
             handleOpenAIError(error)
@@ -2209,6 +1912,62 @@ final class AppState: ObservableObject {
         await generateDueQuestionIfNeeded(reason: "timer")
     }
 
+    private func backendRegistrationForOpenAIRequests(reason: String) async -> RemotePushRegistration? {
+        if let registration = settingsStore.loadRemotePushRegistration() {
+            return registration
+        }
+
+        do {
+            let registration = try await remotePushBackendClient.registerDevice(
+                apnsToken: nil,
+                language: settings.appLanguage,
+                timezone: TimeZone.current.identifier,
+                apnsEnvironment: Self.backendAPNSEnvironment
+            )
+            settingsStore.saveRemotePushRegistration(registration)
+            log(.info, "OpenAI 요청용 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
+            try await updateBackendSettings(
+                registration: registration,
+                reason: reason,
+                includeAPIKey: true
+            )
+            return registration
+        } catch {
+            log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func updateBackendSettings(
+        registration: RemotePushRegistration,
+        reason: String,
+        includeAPIKey: Bool = false
+    ) async throws {
+        let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasRemoteUsableKey = !trimmedAPIKey.isEmpty || isBackendOpenAIKeyConfigured
+        let hasPushToken = !registration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let shouldEnableRemotePush = isRunning && hasPushToken && hasRemoteUsableKey
+        let shouldUploadAPIKey = !trimmedAPIKey.isEmpty && (includeAPIKey || !isBackendOpenAIKeyConfigured)
+        try await remotePushBackendClient.updateSchedule(
+            registration: registration,
+            settings: settings,
+            apiKey: shouldUploadAPIKey ? trimmedAPIKey : nil,
+            enabled: shouldEnableRemotePush
+        )
+        if shouldUploadAPIKey {
+            isBackendOpenAIKeyConfigured = true
+        }
+        log(.info, "백엔드 학습 설정을 동기화했습니다. reason=\(reason), pushEnabled=\(shouldEnableRemotePush), apiKeyUploaded=\(shouldUploadAPIKey)")
+    }
+
+    private static var backendAPNSEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+
     #if os(iOS)
     func registerRemotePushDeviceToken(_ deviceToken: Data) async {
         let token = Self.hexDeviceToken(deviceToken)
@@ -2219,18 +1978,26 @@ final class AppState: ObservableObject {
             if let existingRegistration,
                existingRegistration.apnsToken == token {
                 registration = existingRegistration
+            } else if let existingRegistration {
+                registration = try await remotePushBackendClient.updatePushToken(
+                    registration: existingRegistration,
+                    apnsToken: token,
+                    apnsEnvironment: Self.backendAPNSEnvironment
+                )
+                settingsStore.saveRemotePushRegistration(registration)
+                log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
             } else {
                 registration = try await remotePushBackendClient.registerDevice(
                     apnsToken: token,
                     language: settings.appLanguage,
                     timezone: TimeZone.current.identifier,
-                    apnsEnvironment: Self.apnsEnvironment
+                    apnsEnvironment: Self.backendAPNSEnvironment
                 )
                 settingsStore.saveRemotePushRegistration(registration)
                 log(.info, "서버 push 백엔드에 iPhone 기기를 등록했습니다.")
             }
 
-            try await updateRemotePushSchedule(
+            try await updateBackendSettings(
                 registration: registration,
                 reason: "device-token"
             )
@@ -2246,36 +2013,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await updateRemotePushSchedule(
+            try await updateBackendSettings(
                 registration: registration,
                 reason: reason
             )
         } catch {
             log(.warning, "서버 push 일정 동기화 실패: \(error.localizedDescription)")
         }
-    }
-
-    private func updateRemotePushSchedule(
-        registration: RemotePushRegistration,
-        reason: String
-    ) async throws {
-        let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shouldEnableRemotePush = isRunning && (!trimmedAPIKey.isEmpty || isBackendOpenAIKeyConfigured)
-        try await remotePushBackendClient.updateSchedule(
-            registration: registration,
-            settings: settings,
-            apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey,
-            enabled: shouldEnableRemotePush
-        )
-        log(.info, "서버 push 일정을 동기화했습니다. reason=\(reason), enabled=\(shouldEnableRemotePush)")
-    }
-
-    private static var apnsEnvironment: String {
-        #if DEBUG
-        return "sandbox"
-        #else
-        return "production"
-        #endif
     }
 
     private static func hexDeviceToken(_ token: Data) -> String {
@@ -3048,22 +2792,6 @@ final class AppState: ObservableObject {
     }
 
     nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
-        if let clientError = error as? OpenAIClientError {
-            switch clientError {
-            case .missingAPIKey:
-                return true
-            case .httpError(let status, let body):
-                let lowercasedBody = body.lowercased()
-                return status == 401 ||
-                    status == 403 ||
-                    lowercasedBody.contains("invalid api key") ||
-                    lowercasedBody.contains("incorrect api key") ||
-                    lowercasedBody.contains("unauthorized")
-            default:
-                return false
-            }
-        }
-
         if let backendError = error as? RemotePushBackendError {
             switch backendError {
             case .httpStatus(let status, let body):

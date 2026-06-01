@@ -504,6 +504,20 @@ class Database:
             )
             return True
 
+    def update_device_push_token(self, device_id: str, apns_token: str, apns_environment: str) -> None:
+        now = self._timestamp(utc_now())
+        with self._lock, self.connect() as db:
+            db.execute(
+                self._sql(
+                    """
+                    UPDATE devices
+                    SET apns_token = ?, apns_environment = ?, updated_at = ?, last_seen_at = ?
+                    WHERE device_id = ?
+                    """
+                ),
+                (apns_token, apns_environment, now, now, device_id),
+            )
+
     def upsert_schedule(
         self,
         device_id: str,
@@ -1287,6 +1301,42 @@ class Database:
                     """
                 ),
                 (next_due_at, now, now, device_id),
+            )
+
+    def mark_scheduled_question_created_without_delivery(
+        self,
+        device_id: str,
+        record_id: str,
+        interval_minutes: int,
+        error: str,
+    ) -> None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            self.mark_error(device_id=device_id, error=error)
+            return
+        now_dt = utc_now()
+        now = self._timestamp(now_dt)
+        next_due_at = self._timestamp(now_dt + timedelta(minutes=interval_minutes))
+        with self._lock, self.connect() as db:
+            db.execute(
+                self._sql(
+                    """
+                    UPDATE questions
+                    SET updated_at = ?
+                    WHERE device_id = ? AND id = ?
+                    """
+                ),
+                (now, device_id, row_id),
+            )
+            db.execute(
+                self._sql(
+                    """
+                    UPDATE schedules
+                    SET next_due_at = ?, last_error = ?, updated_at = ?
+                    WHERE device_id = ?
+                    """
+                ),
+                (next_due_at, error[:500], now, device_id),
             )
 
     def mark_error(self, device_id: str, error: str, retry_minutes: int = 5) -> None:

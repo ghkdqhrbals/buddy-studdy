@@ -15,9 +15,15 @@ struct RemotePushRegistration: Codable, Equatable {
 @MainActor
 protocol RemotePushBackendClientProtocol {
     func registerDevice(
-        apnsToken: String,
+        apnsToken: String?,
         language: AppLanguage,
         timezone: String,
+        apnsEnvironment: String
+    ) async throws -> RemotePushRegistration
+
+    func updatePushToken(
+        registration: RemotePushRegistration,
+        apnsToken: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration
 
@@ -37,6 +43,8 @@ protocol RemotePushBackendClientProtocol {
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
 
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus
+
+    func validateAPIKey(registration: RemotePushRegistration) async throws -> BackendAPIValidation
 
     func fetchStats(
         registration: RemotePushRegistration,
@@ -97,13 +105,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     func registerDevice(
-        apnsToken: String,
+        apnsToken: String?,
         language: AppLanguage,
         timezone: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
         let requestBody = RegisterDeviceRequest(
-            apnsToken: apnsToken,
+            apnsToken: apnsToken ?? "",
             platform: "ios",
             apnsEnvironment: apnsEnvironment,
             language: language.backendCode,
@@ -119,6 +127,31 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return RemotePushRegistration(
             deviceID: response.deviceID,
             clientSecret: response.clientSecret,
+            apnsToken: apnsToken ?? ""
+        )
+    }
+
+    func updatePushToken(
+        registration: RemotePushRegistration,
+        apnsToken: String,
+        apnsEnvironment: String
+    ) async throws -> RemotePushRegistration {
+        let requestBody = PushTokenRequest(
+            apnsToken: apnsToken,
+            apnsEnvironment: apnsEnvironment
+        )
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "push-token")
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(requestBody)
+
+        _ = try await perform(request)
+        return RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
             apnsToken: apnsToken
         )
     }
@@ -193,6 +226,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendAPIStatus.self, from: data)
+    }
+
+    func validateAPIKey(registration: RemotePushRegistration) async throws -> BackendAPIValidation {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "api", "validate")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(BackendAPIValidation.self, from: data)
     }
 
     func fetchStats(
@@ -359,6 +402,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var timezone: String
     }
 
+    private struct PushTokenRequest: Encodable {
+        var apnsToken: String
+        var apnsEnvironment: String
+    }
+
     private struct RegisterDeviceResponse: Decodable {
         var deviceID: String
         var clientSecret: String
@@ -422,6 +470,18 @@ struct BackendAPIStatus: Decodable, Equatable {
         case usageURL = "usageUrl"
         case billingURL = "billingUrl"
         case creditsURL = "creditsUrl"
+    }
+}
+
+struct BackendAPIValidation: Decodable, Equatable {
+    var openAIKeyConfigured: Bool
+    var isValid: Bool
+    var openAIModel: String
+
+    enum CodingKeys: String, CodingKey {
+        case openAIKeyConfigured = "openaiKeyConfigured"
+        case isValid
+        case openAIModel = "openaiModel"
     }
 }
 

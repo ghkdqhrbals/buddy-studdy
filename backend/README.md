@@ -62,10 +62,12 @@ See [API.md](API.md) for request/response examples.
 
 - `GET /health`
 - `POST /v1/devices/register`
+- `PUT /v1/devices/{device_id}/push-token`
 - `PUT /v1/devices/{device_id}/schedule`
 - `GET /v1/devices/{device_id}/settings`
 - `PUT /v1/devices/{device_id}/settings`
 - `GET /v1/devices/{device_id}/api`
+- `POST /v1/devices/{device_id}/api/validate`
 - `GET /v1/devices/{device_id}/snapshot`
 - `GET /v1/devices/{device_id}/stats`
 - `POST /v1/devices/{device_id}/questions`
@@ -80,3 +82,5 @@ Device schedule updates require:
 - `X-Client-Secret`
 
 FastAPI also serves generated API docs at `/docs`, `/redoc`, and `/openapi.json`.
+
+Client apps should not call OpenAI directly. They should register a backend device, upload settings/API key to this service, and use the question/grading endpoints.

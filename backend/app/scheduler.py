@@ -55,6 +55,15 @@ class QuestionScheduler:
                     )
                     continue
 
+                if not str(row["apns_token"] or "").strip():
+                    self.database.defer_schedule(
+                        device_id=device_id,
+                        minutes=5,
+                        error="No APNs token configured for schedule.",
+                    )
+                    logger.info("skipped scheduled question without apns token device_id=%s", device_id)
+                    continue
+
                 encrypted_key = row["openai_api_key_cipher"]
                 api_key = self.settings.openai_api_key
                 if encrypted_key:
@@ -106,8 +115,14 @@ class QuestionScheduler:
                 logger.info("sent scheduled question device_id=%s", device_id)
             except Exception as error:
                 if created_record_id is not None:
-                    self.database.delete_record(device_id=device_id, record_id=created_record_id)
-                self.database.mark_error(device_id=device_id, error=str(error))
+                    self.database.mark_scheduled_question_created_without_delivery(
+                        device_id=device_id,
+                        record_id=created_record_id,
+                        interval_minutes=row["interval_minutes"],
+                        error=str(error),
+                    )
+                else:
+                    self.database.mark_error(device_id=device_id, error=str(error))
                 logger.warning("scheduled question failed device_id=%s error=%s", device_id, error)
         return sent_count
 

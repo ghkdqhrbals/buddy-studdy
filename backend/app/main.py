@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
+import httpx
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -12,12 +13,14 @@ from .crypto import KeyCipher
 from .db import Database, as_utc_datetime, utc_now
 from .models import (
     APIStatusResponse,
+    APIValidationResponse,
     AnswerRequest,
     BackendSnapshotResponse,
     BackendSettingsResponse,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     HealthResponse,
+    PushTokenRequest,
     RecordsPageResponse,
     ScheduleRequest,
     ScheduleResponse,
@@ -131,6 +134,21 @@ async def register_device(payload: DeviceRegisterRequest) -> DeviceRegisterRespo
     return DeviceRegisterResponse(deviceId=device_id, clientSecret=client_secret)
 
 
+@app.put("/v1/devices/{device_id}/push-token", status_code=status.HTTP_204_NO_CONTENT)
+async def update_push_token(
+    device_id: str,
+    payload: PushTokenRequest,
+    authenticated_device_id: str = Depends(verify_device),
+) -> Response:
+    require_matching_device(device_id, authenticated_device_id)
+    database.update_device_push_token(
+        device_id=device_id,
+        apns_token=payload.apns_token,
+        apns_environment=payload.apns_environment,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.put("/v1/devices/{device_id}/schedule", response_model=ScheduleResponse)
 async def upsert_schedule(
     device_id: str,
@@ -184,6 +202,36 @@ async def get_api_status(
 ) -> APIStatusResponse:
     require_matching_device(device_id, authenticated_device_id)
     return APIStatusResponse.model_validate(database.api_status_response(database.get_schedule(device_id)))
+
+
+@app.post("/v1/devices/{device_id}/api/validate", response_model=APIValidationResponse)
+async def validate_api_key(
+    device_id: str,
+    authenticated_device_id: str = Depends(verify_device),
+) -> APIValidationResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    schedule = database.get_schedule(device_id)
+    if schedule is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
+
+    try:
+        api_key = device_api_key(schedule)
+    except RuntimeError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+    try:
+        await openai_for_schedule(schedule).validate_api_key(api_key)
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"OpenAI API key validation failed: HTTP {error.response.status_code}.",
+        ) from error
+
+    return APIValidationResponse(
+        openaiKeyConfigured=True,
+        isValid=True,
+        openaiModel=(schedule["openai_model"] or settings.openai_model),
+    )
 
 
 @app.get("/v1/devices/{device_id}/snapshot", response_model=BackendSnapshotResponse)

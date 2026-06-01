@@ -2,13 +2,13 @@
 
 ## Overview
 
-BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app remains local-first for study records and day-to-day UI state: SQLite/UserDefaults hold the working state, OpenAI is called directly from the client with the user's API key, and CloudKit provides iCloud sync. A separate Python backend exists only for scheduled APNs delivery when the iOS app cannot run in the background. Internal target names, bundle identifiers, background task identifiers, and CloudKit record types retain `StudyMate` to avoid breaking existing installs and iCloud data.
+BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app keeps a local cache for UI responsiveness, drafts, and recoverability, but production question generation, answer grading, API-key validation, scheduled delivery, settings, records, and statistics are owned by the Python backend. The app never calls OpenAI directly; OpenAI requests are made only from the backend using the user's stored API key. CloudKit remains available for legacy snapshot sync, but backend persistence is the source of truth for new generated and graded records. Internal target names, bundle identifiers, background task identifiers, and CloudKit record types retain `StudyMate` to avoid breaking existing installs and iCloud data.
 
 ## Targets
 
 - `StudyMateiOS`: iOS app and current public release target.
 - `StudyMate`: macOS menu bar app, currently not shipped publicly while macOS update/sync UX is paused.
-- `StudyMateTests`: unit tests for storage, OpenAI parsing, sync behavior, notification routing, and statistics logic.
+- `StudyMateTests`: unit tests for storage, OpenAI prompt/parsing helpers, backend routing, sync behavior, notification routing, and statistics logic.
 
 ## Main Modules
 
@@ -20,7 +20,7 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
 - `ViewModels/AppState.swift`
   - Main `ObservableObject`.
   - Owns runtime state, drafts, selected tab, sync state, pending question limits, logs, and user actions.
-  - Coordinates OpenAI calls, local persistence, CloudKit sync, notifications, and timers.
+  - Coordinates backend API calls, local persistence, CloudKit sync, notifications, and timers.
 
 - `Services/SettingsStore.swift`
   - Local persistence facade.
@@ -28,9 +28,9 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
   - Caps logs at 1000 and records at the configured history limit.
 
 - `Services/OpenAIClient.swift`
-  - Uses OpenAI Responses API for question generation and grading.
-  - Uses the configured supported model list from `OpenAIModelOption`.
-  - Keeps OpenAI usage, cost, and billing management as external OpenAI Platform links.
+  - Contains shared prompt/body/parsing helpers only.
+  - It has no runtime networking methods; app-side OpenAI network calls are intentionally unavailable.
+  - Uses the configured supported model list from `OpenAIModelOption` for settings validation and backend payloads.
 
 - `Services/CloudSyncService.swift`
   - Uses the private iCloud database.
@@ -46,6 +46,8 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.
   - Uses a private Dockerized PostgreSQL container with a persistent named volume.
+  - Calls OpenAI for API-key validation, question generation, and answer grading.
+  - Stores generated questions in PostgreSQL before sending APNs notifications.
 
 - `Views`
   - `StudyView`: active question and pending question workflow.
@@ -57,31 +59,35 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
 ## Data Flow
 
 ```text
-Timer / manual action / background refresh
+Manual action / pull-to-refresh / backend scheduled interval
 -> AppState.generateQuestion
--> OpenAIClient.generateQuestion
--> SettingsStore appends question history and StudyRecord
+-> RemotePushBackendClient.createQuestion
+-> backend POST /v1/devices/{deviceId}/questions
+-> backend calls OpenAI and stores an ungraded StudyRecord in PostgreSQL
+-> SettingsStore caches the returned StudyRecord
 -> current question updates only when it is safe to activate
--> NotificationService displays local notification
--> CloudSyncService saves sync snapshot / question push record
+-> APNs notification is sent by the backend for scheduled questions
 ```
 
 ```text
 User answer
 -> AppState saves answer draft
 -> AppState.gradeCurrentAnswer or gradeRecord
--> OpenAIClient.gradeAnswer
+-> RemotePushBackendClient.gradeRecord
+-> backend calls OpenAI and persists score, feedback, and explanation
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records
--> CloudKit snapshot sync is scheduled
+-> backend stats are refreshed from PostgreSQL records
 ```
 
 ## Sync Model
 
 - Sync is snapshot based, not event sourced.
 - The newest CloudKit snapshot usually wins, but local records are merged to avoid losing device-specific history.
-- API key sync is supported for the regular OpenAI key.
-- Only the regular OpenAI API key is supported by the app.
+- API key sync is supported for the regular OpenAI key; admin keys are not supported.
+- Backend settings sync uploads the regular OpenAI API key only when it changes or when backend settings need to be initialized.
+- A backend device registration can be created without an APNs token so manual question generation, grading, settings, records, and stats can work before notification permission/token delivery.
+- When APNs token registration later succeeds, the existing backend device is updated instead of creating a separate backend identity.
 - If a local ungraded current question has an answer draft, remote current questions do not replace the active answer page.
 
 ## Push Model
@@ -92,7 +98,8 @@ User answer
 - Mac creates question push records after question generation.
 - iPhone receives the CloudKit/APNs notification, fetches the record, syncs, and opens the question only when the user taps or replies.
 - iPhone app timers only run while the app process is active. For locked/background delivery, the app opportunistically pre-generates at most one pending question notification when entering background and schedules it for the configured interval. If a question notification is already pending, it does not create another. `BGAppRefresh` is also requested at the next due date, but iOS does not guarantee exact wake-up timing.
-- The Python backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, and sends APNs alerts on the configured interval.
+- The Python backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, and sends APNs alerts on the configured interval.
+- Scheduled delivery requires an APNs token. If a backend device exists without a token, the scheduler defers the due item instead of generating an undeliverable push.
 
 ## Topic Statistics
 
