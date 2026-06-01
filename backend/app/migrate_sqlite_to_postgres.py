@@ -36,7 +36,11 @@ def migrate(sqlite_path: Path) -> None:
     target = Database(path=settings.database_path, url=settings.database_url)
     target.init()
 
-    source = sqlite3.connect(sqlite_path)
+    try:
+        source = sqlite3.connect(f"file:{sqlite_path.as_posix()}?mode=ro", uri=True)
+    except sqlite3.OperationalError as error:
+        print(f"SQLite source could not be opened. Migration skipped: {error}")
+        return
     source.row_factory = sqlite3.Row
     try:
         devices = _load_rows(source, "devices")
