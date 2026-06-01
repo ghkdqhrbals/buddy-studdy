@@ -40,7 +40,7 @@ App repository:
 
 Deploy repository:
 
-- `EC2_HOST`: `ec2-13-125-226-24.ap-northeast-2.compute.amazonaws.com`
+- `EC2_HOST`: current EC2 public DNS, for example `ec2-3-39-42-28.ap-northeast-2.compute.amazonaws.com`
 - `EC2_USER`: usually `ubuntu` or `ec2-user`, depending on the AMI.
 - `EC2_SSH_PRIVATE_KEY`: private SSH key for the EC2 instance.
 - `GHCR_USERNAME`: GitHub username with image pull access.
@@ -70,9 +70,17 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 
 - Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystuddy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
-- PostgreSQL port `5432` is not published on the EC2 host.
+- PostgreSQL port `5432` is published only on EC2 localhost, not on the public interface.
 - The workflow requests/renews a Let's Encrypt certificate with the `tls-alpn-01` challenge, so public port `80` is not required.
 - If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
+
+Use an SSH tunnel for database administration:
+
+```sh
+ssh -i ~/.ssh/buddystuddy/personal_deploy_ec2 -N -L 15432:127.0.0.1:5432 ec2-user@ec2-3-39-42-28.ap-northeast-2.compute.amazonaws.com
+```
+
+Then connect a local database client to `127.0.0.1:15432`, database `buddystuddy`, user `buddystuddy`. The password is stored on EC2 at `/opt/buddystuddy-backend/.postgres_password`.
 
 ## Data Durability
 

@@ -29,8 +29,8 @@ def migrate(sqlite_path: Path) -> None:
         print("DATABASE_URL is not set. SQLite migration skipped.")
         return
 
-    if not sqlite_path.exists():
-        print(f"SQLite source does not exist: {sqlite_path}")
+    if not sqlite_path.is_file():
+        print(f"SQLite source file does not exist. Migration skipped: {sqlite_path}")
         return
 
     target = Database(path=settings.database_path, url=settings.database_url)
