@@ -22,7 +22,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_KEY_ID`: Apple APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
-- `APNS_ENV`: `production` for App Store/TestFlight, `sandbox` for debug builds.
+- `APNS_ENV`: fallback APNs environment. Scheduled delivery uses each registered device's `apnsEnvironment`, so one backend can serve both debug `sandbox` tokens and TestFlight/App Store `production` tokens.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
 - `DATABASE_URL`: required PostgreSQL connection string.
 - `ALLOW_SQLITE_FALLBACK`: optional. Set to `true` only for isolated local tests. Production must not use SQLite.

@@ -14,6 +14,7 @@ class APNsQuestion:
     record_id: str
     created_at: str
     device_token: str
+    environment: str
     question: str
     expected_answer_hint: str | None
     topic: str
@@ -69,7 +70,8 @@ class APNsClient:
             "difficultyLevel": item.difficulty_level,
         }
 
-        url = f"{self.settings.apns_host}/3/device/{item.device_token}"
+        apns_host = self.settings.apns_host_for_environment(item.environment)
+        url = f"{apns_host}/3/device/{item.device_token}"
         headers = {
             "authorization": f"bearer {self._token()}",
             "apns-topic": self.settings.apns_bundle_id,

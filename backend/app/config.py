@@ -67,7 +67,11 @@ class Settings:
 
     @property
     def apns_host(self) -> str:
-        if self.apns_env == "sandbox":
+        return self.apns_host_for_environment(self.apns_env)
+
+    @staticmethod
+    def apns_host_for_environment(environment: str | None) -> str:
+        if (environment or "").strip().lower() == "sandbox":
             return "https://api.sandbox.push.apple.com"
         return "https://api.push.apple.com"
 

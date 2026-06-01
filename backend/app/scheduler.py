@@ -91,6 +91,7 @@ class QuestionScheduler:
                         record_id=record_id,
                         created_at=to_iso(created_at),
                         device_token=row["apns_token"],
+                        environment=row["apns_environment"],
                         question=generated.question,
                         expected_answer_hint=generated.expected_answer_hint,
                         topic=row["topic"],
