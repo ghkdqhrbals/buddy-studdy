@@ -47,14 +47,17 @@ Deploy repository:
 - `GHCR_TOKEN`: GitHub token with `read:packages`.
 - `BACKEND_MASTER_KEY`: random base64 key for encrypting stored OpenAI keys.
 - `BACKEND_API_TOKEN`: optional token required by registration/admin endpoints.
-- `POSTGRES_DB`: `buddystuddy`.
-- `POSTGRES_USER`: `buddystuddy`.
-- `POSTGRES_PASSWORD`: production PostgreSQL password.
 - `APNS_AUTH_KEY_BASE64`: base64 encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: `production` for TestFlight/App Store.
+
+PostgreSQL credentials are managed in AWS Secrets Manager, not GitHub Actions Secrets.
+
+- AWS Secrets Manager secret: `buddystuddy/prod/postgres`.
+- EC2 instance profile: `BuddyStuddyEC2SecretsProfile`.
+- Required EC2 IAM actions: `secretsmanager:GetSecretValue`, `secretsmanager:DescribeSecret`.
 
 The AWS access key is not required for the SSH-based deployment workflow. If an AWS API based deployment is preferred, use a narrow IAM role and rotate any credentials that were pasted into chat.
 
@@ -86,7 +89,7 @@ database: buddystuddy
 user: buddystuddy
 ```
 
-The password is managed through the deploy repository `POSTGRES_PASSWORD` secret and mirrored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
+The password is managed through AWS Secrets Manager at `buddystuddy/prod/postgres` and mirrored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
 
 ## Data Durability
 
