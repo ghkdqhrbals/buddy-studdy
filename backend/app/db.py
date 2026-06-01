@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import math
+import re
 import secrets
 import sqlite3
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -623,6 +626,15 @@ class Database:
             "lastError": row["last_error"],
         }
 
+    def api_status_response(self, row: Any | None) -> dict[str, Any]:
+        return {
+            "openaiKeyConfigured": bool(row["openai_api_key_cipher"]) if row is not None else False,
+            "openaiModel": (row["openai_model"] if row is not None else None) or "gpt-5.4",
+            "usageUrl": "https://platform.openai.com/usage",
+            "billingUrl": "https://platform.openai.com/settings/organization/billing/overview",
+            "creditsUrl": "https://platform.openai.com/settings/organization/billing/credit-grants",
+        }
+
     def pending_record_count(self, device_id: str) -> int:
         with self._lock, self.connect() as db:
             row = db.execute(
@@ -689,6 +701,221 @@ class Database:
                 (device_id, limit, offset),
             ).fetchall()
         return [self.study_record_response(row) for row in rows], int(total_row["count"] if total_row else 0)
+
+    def stats_response(
+        self,
+        device_id: str,
+        start_at: datetime | str | None = None,
+        end_at: datetime | str | None = None,
+        search: str = "",
+        sort: str = "level",
+        limit: int = 8,
+        offset: int = 0,
+        fallback_topic: str = "Study",
+    ) -> dict[str, Any]:
+        clauses = [
+            "device_id = ?",
+            "deleted_at IS NULL",
+            "score IS NOT NULL",
+        ]
+        params: list[Any] = [device_id]
+        if start_at is not None:
+            clauses.append("COALESCE(answered_at, created_at) >= ?")
+            params.append(self._timestamp(as_utc_datetime(start_at)))
+        if end_at is not None:
+            clauses.append("COALESCE(answered_at, created_at) < ?")
+            params.append(self._timestamp(as_utc_datetime(end_at)))
+
+        where_clause = " AND ".join(clauses)
+        with self._lock, self.connect() as db:
+            rows = db.execute(
+                self._sql(
+                    f"""
+                    SELECT *
+                    FROM questions
+                    WHERE {where_clause}
+                    ORDER BY COALESCE(answered_at, created_at) ASC
+                    """
+                ),
+                tuple(params),
+            ).fetchall()
+
+        records = [self.study_record_response(row) for row in rows]
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for record in records:
+            key = self._topic_key(record["topic"], fallback_topic)
+            grouped.setdefault(key, []).append(record)
+
+        query = search.strip()
+        query_text = query.casefold()
+        query_key = self._topic_key(query, "") if query else ""
+        topics = []
+        for topic_key, topic_records in grouped.items():
+            stat = self._topic_stat(topic_key, topic_records, fallback_topic)
+            if stat is None:
+                continue
+            if query and not (
+                query_text in stat["topic"].casefold()
+                or any(query_text in alias.casefold() for alias in stat["topicAliases"])
+                or query_key in stat["topicKey"]
+            ):
+                continue
+            topics.append(stat)
+
+        topics.sort(key=self._topic_sort_key(sort))
+        total_topics = len(topics)
+        paged_topics = topics[offset : offset + limit]
+        return {
+            "totalResponses": len(records),
+            "totalTopics": total_topics,
+            "topics": paged_topics,
+            "limit": limit,
+            "offset": offset,
+            "generatedAt": self._response_timestamp(utc_now()),
+        }
+
+    @classmethod
+    def _topic_stat(
+        cls,
+        topic_key: str,
+        records: list[dict[str, Any]],
+        fallback_topic: str,
+    ) -> dict[str, Any] | None:
+        scored = [
+            (record, record["gradingResult"]["score"])
+            for record in records
+            if record.get("gradingResult") is not None
+        ]
+        if not scored:
+            return None
+
+        scores = [max(0, min(100, int(score))) for _, score in scored]
+        correct_count = sum(1 for record, _ in scored if record["gradingResult"].get("isCorrect") is True)
+        latest_at = max(cls._stats_date(record) for record, _ in scored)
+        return {
+            "topicKey": topic_key,
+            "topic": cls._preferred_topic([record for record, _ in scored], fallback_topic),
+            "topicAliases": cls._topic_aliases([record for record, _ in scored], fallback_topic),
+            "count": len(scores),
+            "average": round(sum(scores) / len(scores)),
+            "best": max(scores),
+            "correctRate": round(correct_count / len(scores) * 100),
+            "levelRange": cls._level_range([record for record, _ in scored], scores),
+            "latestAt": to_iso(latest_at),
+            "records": [record for record, _ in scored],
+        }
+
+    @staticmethod
+    def _topic_sort_key(sort: str):
+        normalized = sort.strip().lower()
+        if normalized == "recent":
+            return lambda stat: (-as_utc_datetime(stat["latestAt"]).timestamp(), stat["topic"].casefold())
+        if normalized == "name":
+            return lambda stat: (stat["topic"].casefold(),)
+        if normalized == "count":
+            return lambda stat: (-stat["count"], stat["topic"].casefold())
+        return lambda stat: (-stat["levelRange"]["centerLevel"], -stat["count"], stat["topic"].casefold())
+
+    @classmethod
+    def _topic_key(cls, topic: str, fallback_topic: str) -> str:
+        display = (topic or "").strip() or fallback_topic
+        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", display)
+        expanded = re.sub(r"([A-Za-z])([0-9])", r"\1 \2", expanded)
+        expanded = re.sub(r"([0-9])([A-Za-z])", r"\1 \2", expanded)
+        folded = unicodedata.normalize("NFKD", expanded).casefold()
+        key = "".join(character for character in folded if character.isalpha() or character.isnumeric())
+        return key or "study"
+
+    @staticmethod
+    def _display_topic(topic: str, fallback_topic: str) -> str:
+        trimmed = (topic or "").strip()
+        return trimmed or fallback_topic
+
+    @classmethod
+    def _preferred_topic(cls, records: list[dict[str, Any]], fallback_topic: str) -> str:
+        summaries: dict[str, dict[str, Any]] = {}
+        for record in records:
+            name = cls._display_topic(record["topic"], fallback_topic)
+            key = unicodedata.normalize("NFKD", name).casefold()
+            latest = cls._stats_date(record)
+            if key in summaries:
+                summaries[key]["count"] += 1
+                summaries[key]["latest"] = max(summaries[key]["latest"], latest)
+            else:
+                summaries[key] = {"name": name, "count": 1, "latest": latest}
+        if not summaries:
+            return fallback_topic
+        return sorted(
+            summaries.values(),
+            key=lambda item: (-item["count"], -item["latest"].timestamp(), len(item["name"]), item["name"].casefold()),
+        )[0]["name"]
+
+    @classmethod
+    def _topic_aliases(cls, records: list[dict[str, Any]], fallback_topic: str) -> list[str]:
+        names = {cls._display_topic(record["topic"], fallback_topic) for record in records}
+        return sorted(names, key=str.casefold)
+
+    @staticmethod
+    def _stats_date(record: dict[str, Any]) -> datetime:
+        return as_utc_datetime(record["answeredAt"] or record["question"]["createdAt"])
+
+    @classmethod
+    def _level_range(cls, records: list[dict[str, Any]], scores: list[int]) -> dict[str, Any]:
+        estimates = [
+            cls._estimated_level(record["difficulty"], score)
+            for record, score in zip(records, scores, strict=False)
+        ]
+        center_level = sum(estimates) / len(estimates)
+        if len(estimates) > 1:
+            variance = sum((estimate - center_level) ** 2 for estimate in estimates) / (len(estimates) - 1)
+        else:
+            variance = 0
+        evidence_spread = math.sqrt(variance)
+        sample_uncertainty = 0.9 / math.sqrt(len(estimates))
+        conflict_uncertainty = evidence_spread * 0.55
+        minimum_half_width = cls._minimum_half_width(len(estimates))
+        half_width = min(4.0, max(minimum_half_width, sample_uncertainty + conflict_uncertainty))
+        average = round(sum(scores) / len(scores))
+        return cls._make_level_range(center_level, average, len(scores), half_width)
+
+    @staticmethod
+    def _estimated_level(difficulty: int, score: int) -> float:
+        level_value = float(difficulty) + (float(max(0, min(100, score))) - 70) / 35
+        return min(max(level_value, 1), 10)
+
+    @staticmethod
+    def _minimum_half_width(sample_count: int) -> float:
+        if sample_count >= 8:
+            return 0.3
+        if sample_count >= 4:
+            return 0.45
+        return 0.65
+
+    @classmethod
+    def _make_level_range(
+        cls,
+        center_level: float,
+        average: int,
+        sample_count: int,
+        half_width: float,
+    ) -> dict[str, Any]:
+        clamped_center = min(max(center_level, 1), 10)
+        lower_level = max(1, clamped_center - half_width)
+        upper_level = min(10, clamped_center + half_width)
+        lower_bound = cls._progress_for_level_value(lower_level)
+        upper_bound = max(lower_bound + 0.025, cls._progress_for_level_value(upper_level))
+        return {
+            "level": round(clamped_center),
+            "average": average,
+            "sampleCount": sample_count,
+            "centerLevel": clamped_center,
+            "lowerBound": lower_bound,
+            "upperBound": min(1, upper_bound),
+        }
+
+    @staticmethod
+    def _progress_for_level_value(level_value: float) -> float:
+        return min(max((level_value - 0.5) / 10, 0), 1)
 
     def get_record(self, device_id: str, record_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
         row_id = self._record_id_value(record_id)

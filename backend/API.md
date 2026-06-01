@@ -89,6 +89,7 @@ The app must store both values locally. The backend does not return the client s
 
 ```http
 PUT /v1/devices/{deviceId}/schedule
+PUT /v1/devices/{deviceId}/settings
 Content-Type: application/json
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
@@ -110,6 +111,8 @@ Request:
   "maxHistoryCount": 100
 }
 ```
+
+`/settings` is the clearer settings endpoint. `/schedule` remains as a backward-compatible alias.
 
 Fields:
 
@@ -134,6 +137,26 @@ Response:
 }
 ```
 
+### Settings
+
+```http
+GET /v1/devices/{deviceId}/settings
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Returns the same backend settings object used in the startup snapshot.
+
+### API Status
+
+```http
+GET /v1/devices/{deviceId}/api
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Returns whether the device has an encrypted OpenAI API key configured, the selected model, and OpenAI usage/billing links.
+
 ### Snapshot
 
 ```http
@@ -143,6 +166,7 @@ X-Client-Secret: <clientSecret>
 ```
 
 Returns backend settings plus a paged record cache for app startup and pull-to-refresh.
+The snapshot also includes `api` and `stats` objects so clients can render API status and topic statistics without recomputing them locally.
 
 ### Records
 
@@ -158,6 +182,25 @@ DELETE /v1/devices/{deviceId}/records
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints are soft-delete operations.
+
+### Statistics
+
+```http
+GET /v1/devices/{deviceId}/stats?period=all&sort=level&limit=8&offset=0
+GET /v1/devices/{deviceId}/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Query fields:
+
+- `period`: `all`, `today`, `last7`, `last30`, or `last90`.
+- `startAt` / `endAt`: optional ISO-8601 UTC date bounds. These override `period`.
+- `search`: optional topic search.
+- `sort`: `level`, `recent`, `name`, or `count`.
+- `limit` / `offset`: topic pagination.
+
+The response is topic-first and includes total response/topic counts, topic aliases, level range, correct rate, and the records for each returned topic.
 
 ### Manual Question
 

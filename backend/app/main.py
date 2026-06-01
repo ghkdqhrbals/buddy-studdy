@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import logging
 
@@ -8,16 +9,19 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 
 from .config import Settings
 from .crypto import KeyCipher
-from .db import Database, utc_now
+from .db import Database, as_utc_datetime, utc_now
 from .models import (
+    APIStatusResponse,
     AnswerRequest,
     BackendSnapshotResponse,
+    BackendSettingsResponse,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     HealthResponse,
     RecordsPageResponse,
     ScheduleRequest,
     ScheduleResponse,
+    StatsResponse,
     StudyRecordResponse,
 )
 from .openai_client import OpenAIQuestionClient
@@ -86,6 +90,27 @@ def openai_for_schedule(schedule_row) -> OpenAIQuestionClient:
     return OpenAIQuestionClient(model or settings.openai_model)
 
 
+def stats_window(period: str, start_at: str | None, end_at: str | None) -> tuple[object | None, object | None]:
+    if start_at or end_at:
+        return (
+            as_utc_datetime(start_at) if start_at else None,
+            as_utc_datetime(end_at) if end_at else None,
+        )
+
+    now = utc_now()
+    normalized = period.strip().lower()
+    if normalized == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(days=1)
+    if normalized == "last7":
+        return now - timedelta(days=7), None
+    if normalized == "last30":
+        return now - timedelta(days=30), None
+    if normalized == "last90":
+        return now - timedelta(days=90), None
+    return None, None
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(ok=True)
@@ -134,6 +159,33 @@ async def upsert_schedule(
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
 
+@app.get("/v1/devices/{device_id}/settings", response_model=BackendSettingsResponse)
+async def get_settings(
+    device_id: str,
+    authenticated_device_id: str = Depends(verify_device),
+) -> BackendSettingsResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    return BackendSettingsResponse.model_validate(database.schedule_settings_response(database.get_schedule(device_id)))
+
+
+@app.put("/v1/devices/{device_id}/settings", response_model=ScheduleResponse)
+async def put_settings(
+    device_id: str,
+    payload: ScheduleRequest,
+    authenticated_device_id: str = Depends(verify_device),
+) -> ScheduleResponse:
+    return await upsert_schedule(device_id, payload, authenticated_device_id)
+
+
+@app.get("/v1/devices/{device_id}/api", response_model=APIStatusResponse)
+async def get_api_status(
+    device_id: str,
+    authenticated_device_id: str = Depends(verify_device),
+) -> APIStatusResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    return APIStatusResponse.model_validate(database.api_status_response(database.get_schedule(device_id)))
+
+
 @app.get("/v1/devices/{device_id}/snapshot", response_model=BackendSnapshotResponse)
 async def get_snapshot(
     device_id: str,
@@ -144,9 +196,12 @@ async def get_snapshot(
     require_matching_device(device_id, authenticated_device_id)
     schedule = database.get_schedule(device_id)
     records, total_count = database.list_records(device_id, limit=limit, offset=offset)
+    stats = database.stats_response(device_id=device_id, limit=8, offset=0)
     return BackendSnapshotResponse(
         settings=database.schedule_settings_response(schedule),
+        api=database.api_status_response(schedule),
         records=records,
+        stats=stats,
         totalCount=total_count,
         serverTime=database._response_timestamp(utc_now()),
     )
@@ -162,6 +217,33 @@ async def list_records(
     require_matching_device(device_id, authenticated_device_id)
     records, total_count = database.list_records(device_id, limit=limit, offset=offset)
     return RecordsPageResponse(records=records, totalCount=total_count, limit=limit, offset=offset)
+
+
+@app.get("/v1/devices/{device_id}/stats", response_model=StatsResponse)
+async def get_stats(
+    device_id: str,
+    authenticated_device_id: str = Depends(verify_device),
+    period: str = Query(default="all", pattern="^(all|today|last7|last30|last90)$"),
+    start_at: str | None = Query(default=None, alias="startAt"),
+    end_at: str | None = Query(default=None, alias="endAt"),
+    search: str = Query(default="", max_length=120),
+    sort: str = Query(default="level", pattern="^(level|recent|name|count)$"),
+    limit: int = Query(default=8, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> StatsResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    start, end = stats_window(period, start_at, end_at)
+    return StatsResponse.model_validate(
+        database.stats_response(
+            device_id=device_id,
+            start_at=start,
+            end_at=end,
+            search=search,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+    )
 
 
 @app.get("/v1/devices/{device_id}/records/{record_id}", response_model=StudyRecordResponse)

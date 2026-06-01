@@ -63,7 +63,11 @@ See [API.md](API.md) for request/response examples.
 - `GET /health`
 - `POST /v1/devices/register`
 - `PUT /v1/devices/{device_id}/schedule`
+- `GET /v1/devices/{device_id}/settings`
+- `PUT /v1/devices/{device_id}/settings`
+- `GET /v1/devices/{device_id}/api`
 - `GET /v1/devices/{device_id}/snapshot`
+- `GET /v1/devices/{device_id}/stats`
 - `POST /v1/devices/{device_id}/questions`
 - `GET /v1/devices/{device_id}/records`
 - `POST /v1/devices/{device_id}/records/{record_id}/answer`

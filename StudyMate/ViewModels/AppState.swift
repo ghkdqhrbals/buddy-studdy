@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
     @Published var isGradingAnswer = false
     @Published var isRunning: Bool
     @Published var studyRecords: [StudyRecord]
+    @Published var backendStats: BackendStats?
     @Published var hasAPIKeyError = false
     @Published var isValidatingAPIKey = false
     @Published var appLogs: [AppLogEntry]
@@ -200,6 +201,7 @@ final class AppState: ObservableObject {
         self.gradingResult = settingsStore.loadGradingResult()
         self.isRunning = settingsStore.loadIsRunning()
         self.studyRecords = settingsStore.loadStudyRecords()
+        self.backendStats = nil
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
         self.savedSettings = loadedSettings
@@ -373,8 +375,9 @@ final class AppState: ObservableObject {
         settingsStore.saveIsRunning(snapshot.settings.enabled)
         settingsStore.replaceStudyRecords(snapshot.records)
         studyRecords = settingsStore.loadStudyRecords()
+        backendStats = snapshot.stats
 
-        if snapshot.settings.openAIKeyConfigured {
+        if snapshot.api?.openAIKeyConfigured == true || snapshot.settings.openAIKeyConfigured {
             isBackendOpenAIKeyConfigured = true
             hasAPIKeyError = false
             if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

@@ -34,6 +34,21 @@ protocol RemotePushBackendClientProtocol {
         offset: Int
     ) async throws -> BackendSnapshot
 
+    func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
+
+    func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus
+
+    func fetchStats(
+        registration: RemotePushRegistration,
+        period: BackendStatsPeriod,
+        startAt: Date?,
+        endAt: Date?,
+        search: String,
+        sort: BackendStatsSort,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendStats
+
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord
 
     func gradeRecord(
@@ -160,6 +175,64 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendSnapshot.self, from: data)
     }
 
+    func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "settings")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudySettings.self, from: data)
+    }
+
+    func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("v1", "devices", registration.deviceID, "api")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendAPIStatus.self, from: data)
+    }
+
+    func fetchStats(
+        registration: RemotePushRegistration,
+        period: BackendStatsPeriod = .all,
+        startAt: Date? = nil,
+        endAt: Date? = nil,
+        search: String = "",
+        sort: BackendStatsSort = .level,
+        limit: Int = 8,
+        offset: Int = 0
+    ) async throws -> BackendStats {
+        var components = URLComponents(
+            url: endpoint("v1", "devices", registration.deviceID, "stats"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "period", value: period.rawValue),
+            URLQueryItem(name: "search", value: search),
+            URLQueryItem(name: "sort", value: sort.rawValue),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)")
+        ]
+        if let startAt {
+            queryItems.append(URLQueryItem(name: "startAt", value: Self.dateFormatter.string(from: startAt)))
+        }
+        if let endAt {
+            queryItems.append(URLQueryItem(name: "endAt", value: Self.dateFormatter.string(from: endAt)))
+        }
+        components?.queryItems = queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStats.self, from: data)
+    }
+
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
@@ -276,6 +349,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return request
     }
 
+    private static let dateFormatter = ISO8601DateFormatter()
+
     private struct RegisterDeviceRequest: Encodable {
         var apnsToken: String
         var platform: String
@@ -327,9 +402,75 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
 struct BackendSnapshot: Decodable, Equatable {
     var settings: BackendStudySettings
+    var api: BackendAPIStatus?
     var records: [StudyRecord]
+    var stats: BackendStats?
     var totalCount: Int
     var serverTime: Date
+}
+
+struct BackendAPIStatus: Decodable, Equatable {
+    var openAIKeyConfigured: Bool
+    var openAIModel: String
+    var usageURL: URL
+    var billingURL: URL
+    var creditsURL: URL
+
+    enum CodingKeys: String, CodingKey {
+        case openAIKeyConfigured = "openaiKeyConfigured"
+        case openAIModel = "openaiModel"
+        case usageURL = "usageUrl"
+        case billingURL = "billingUrl"
+        case creditsURL = "creditsUrl"
+    }
+}
+
+enum BackendStatsPeriod: String {
+    case all
+    case today
+    case last7
+    case last30
+    case last90
+}
+
+enum BackendStatsSort: String {
+    case level
+    case recent
+    case name
+    case count
+}
+
+struct BackendStats: Decodable, Equatable {
+    var totalResponses: Int
+    var totalTopics: Int
+    var topics: [BackendTopicStats]
+    var limit: Int
+    var offset: Int
+    var generatedAt: Date
+}
+
+struct BackendTopicStats: Decodable, Equatable, Identifiable {
+    var topicKey: String
+    var topic: String
+    var topicAliases: [String]
+    var count: Int
+    var average: Int
+    var best: Int
+    var correctRate: Int
+    var levelRange: BackendTopicLevelRange
+    var latestAt: Date
+    var records: [StudyRecord]
+
+    var id: String { topicKey }
+}
+
+struct BackendTopicLevelRange: Decodable, Equatable {
+    var level: Int
+    var average: Int
+    var sampleCount: Int
+    var centerLevel: Double
+    var lowerBound: Double
+    var upperBound: Double
 }
 
 struct BackendStudySettings: Decodable, Equatable {

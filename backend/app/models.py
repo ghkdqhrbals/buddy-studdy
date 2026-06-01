@@ -58,6 +58,14 @@ class BackendSettingsResponse(CamelModel):
     last_error: str | None = Field(alias="lastError")
 
 
+class APIStatusResponse(CamelModel):
+    openai_key_configured: bool = Field(alias="openaiKeyConfigured")
+    openai_model: str = Field(alias="openaiModel")
+    usage_url: str = Field(alias="usageUrl")
+    billing_url: str = Field(alias="billingUrl")
+    credits_url: str = Field(alias="creditsUrl")
+
+
 class QuestionPayload(CamelModel):
     question: str
     expected_answer_hint: str | None = Field(default=None, alias="expectedAnswerHint")
@@ -94,9 +102,42 @@ class RecordsPageResponse(CamelModel):
     offset: int
 
 
+class TopicLevelRangeResponse(CamelModel):
+    level: int
+    average: int
+    sample_count: int = Field(alias="sampleCount")
+    center_level: float = Field(alias="centerLevel")
+    lower_bound: float = Field(alias="lowerBound")
+    upper_bound: float = Field(alias="upperBound")
+
+
+class TopicStatsResponse(CamelModel):
+    topic_key: str = Field(alias="topicKey")
+    topic: str
+    topic_aliases: list[str] = Field(alias="topicAliases")
+    count: int
+    average: int
+    best: int
+    correct_rate: int = Field(alias="correctRate")
+    level_range: TopicLevelRangeResponse = Field(alias="levelRange")
+    latest_at: str = Field(alias="latestAt")
+    records: list[StudyRecordResponse]
+
+
+class StatsResponse(CamelModel):
+    total_responses: int = Field(alias="totalResponses")
+    total_topics: int = Field(alias="totalTopics")
+    topics: list[TopicStatsResponse]
+    limit: int
+    offset: int
+    generated_at: str = Field(alias="generatedAt")
+
+
 class BackendSnapshotResponse(CamelModel):
     settings: BackendSettingsResponse
+    api: APIStatusResponse
     records: list[StudyRecordResponse]
+    stats: StatsResponse
     total_count: int = Field(alias="totalCount")
     server_time: str = Field(alias="serverTime")
 
