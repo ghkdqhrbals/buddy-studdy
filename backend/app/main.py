@@ -18,7 +18,7 @@ from .scheduler import QuestionScheduler
 
 
 settings = Settings.load()
-database = Database(settings.database_path)
+database = Database(path=settings.database_path, url=settings.database_url)
 scheduler: QuestionScheduler | None = None
 
 
@@ -64,7 +64,6 @@ async def health() -> HealthResponse:
 @app.post(
     "/v1/devices/register",
     response_model=DeviceRegisterResponse,
-    dependencies=[Depends(verify_backend_token)],
 )
 async def register_device(payload: DeviceRegisterRequest) -> DeviceRegisterResponse:
     device_id, client_secret = database.register_device(

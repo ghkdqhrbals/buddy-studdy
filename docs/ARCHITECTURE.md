@@ -2,7 +2,7 @@
 
 ## Overview
 
-BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app is intentionally local-first: SQLite/UserDefaults hold the working state, OpenAI is called directly from the client with the user's API key, and CloudKit provides iCloud sync plus iPhone push delivery without a custom backend. Internal target names, bundle identifiers, background task identifiers, and CloudKit record types retain `StudyMate` to avoid breaking existing installs and iCloud data.
+BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app remains local-first for study records and day-to-day UI state: SQLite/UserDefaults hold the working state, OpenAI is called directly from the client with the user's API key, and CloudKit provides iCloud sync. A separate Python backend exists only for scheduled APNs delivery when the iOS app cannot run in the background. Internal target names, bundle identifiers, background task identifiers, and CloudKit record types retain `StudyMate` to avoid breaking existing installs and iCloud data.
 
 ## Targets
 
@@ -40,6 +40,12 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
 
 - `Services/NotificationService.swift`
   - Handles local notifications, notification actions, iOS remote notification bridge, and macOS study window foregrounding.
+
+- `backend/`
+  - FastAPI APNs push backend.
+  - Public base URL: `https://api.ghkdqhrbals.org`.
+  - Runs behind Nginx on host port `443`.
+  - Uses a private Dockerized PostgreSQL container with a persistent named volume.
 
 - `Views`
   - `StudyView`: active question and pending question workflow.
@@ -86,6 +92,7 @@ User answer
 - Mac creates question push records after question generation.
 - iPhone receives the CloudKit/APNs notification, fetches the record, syncs, and opens the question only when the user taps or replies.
 - iPhone app timers only run while the app process is active. For locked/background delivery, the app opportunistically pre-generates at most one pending question notification when entering background and schedules it for the configured interval. If a question notification is already pending, it does not create another. `BGAppRefresh` is also requested at the next due date, but iOS does not guarantee exact wake-up timing.
+- The Python backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, and sends APNs alerts on the configured interval.
 
 ## Topic Statistics
 

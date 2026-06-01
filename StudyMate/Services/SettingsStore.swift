@@ -22,6 +22,7 @@ final class SettingsStore {
         static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
+        static let remotePushRegistration = "remotePushRegistration"
     }
 
     private let defaults: UserDefaults
@@ -330,6 +331,25 @@ final class SettingsStore {
             defaults.removeObject(forKey: Keys.apiKey)
         } else {
             defaults.set(trimmedKey, forKey: Keys.apiKey)
+        }
+    }
+
+    func loadRemotePushRegistration() -> RemotePushRegistration? {
+        guard let data = defaults.data(forKey: Keys.remotePushRegistration) else {
+            return nil
+        }
+
+        return try? decoder.decode(RemotePushRegistration.self, from: data)
+    }
+
+    func saveRemotePushRegistration(_ registration: RemotePushRegistration?) {
+        guard let registration else {
+            defaults.removeObject(forKey: Keys.remotePushRegistration)
+            return
+        }
+
+        if let data = try? encoder.encode(registration) {
+            defaults.set(data, forKey: Keys.remotePushRegistration)
         }
     }
 

@@ -62,24 +62,33 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 3. The image is pushed to GHCR.
 4. The workflow sends `repository_dispatch` to `ghkdqhrbals/personal-deploy`.
 5. The deploy repository SSHes into EC2, writes `/opt/buddystuddy-backend/.env`, pulls the image, and runs Docker.
-6. The backend container stays on a private Docker network.
-7. Nginx is the only public backend entrypoint and publishes HTTPS on host port `443`.
+6. PostgreSQL runs as a separate Docker container with a persistent named volume.
+7. The backend container stays on a private Docker network.
+8. Nginx is the only public backend entrypoint and publishes HTTPS on host port `443`.
 
 ## Public Network Shape
 
-- Public HTTPS: `443 -> nginx -> buddystuddy-backend:8080`
+- Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystuddy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
-- The current workflow generates a self-signed certificate for deployment smoke testing.
-- Production iOS traffic should use a real domain with a trusted TLS certificate. A self-signed certificate will not be acceptable for normal App Transport Security usage.
+- PostgreSQL port `5432` is not published on the EC2 host.
+- The workflow requests/renews a Let's Encrypt certificate with the `tls-alpn-01` challenge, so public port `80` is not required.
+- If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
+
+## Data Durability
+
+- PostgreSQL data is stored in the `buddystuddy-postgres-data` Docker volume.
+- The previous SQLite volume `buddystuddy-backend-data` is never deleted by the workflow.
+- During deployment, the backend image runs `python -m app.migrate_sqlite_to_postgres /legacy/buddystuddy.db` once against the old SQLite volume. Inserts are idempotent, so retrying the workflow does not duplicate rows.
+- Containers use `--restart unless-stopped` so backend, Nginx, and PostgreSQL restart after daemon or instance reboot.
 
 Smoke-test the current EC2 deployment with:
 
 ```sh
-curl -kfsS https://ec2-13-125-226-24.ap-northeast-2.compute.amazonaws.com/health
+curl -fsS https://api.ghkdqhrbals.org/health
 ```
 
 ## Open Questions
 
 - Whether the app should send each user's OpenAI API key to the backend, or whether the backend should use one server-owned OpenAI API key.
-- Real production domain and trusted TLS certificate automation.
+- DNS for `api.ghkdqhrbals.org` must point to the EC2 host for trusted certificate issuance.
 - Whether backend records should sync back into the local app history after a notification is tapped.

@@ -74,10 +74,10 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 4. iPhone subscribes to question push records and receives CloudKit/APNs notifications.
 5. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 6. On iPhone, lock-screen delivery uses at most one pending scheduled local notification prepared before suspension; exact background network generation is not guaranteed by iOS.
+7. Server-scheduled APNs delivery is handled by the Python backend at `https://api.ghkdqhrbals.org`.
 
 ## Non-Goals
 
-- Running a custom backend server.
 - Guaranteeing real-time push delivery independent of iCloud/APNs behavior.
 - Storing OpenAI billing balance locally as an authoritative source.
 - Supporting more app languages than Korean and English in the current version.

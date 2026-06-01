@@ -712,6 +712,7 @@ final class StudyRemoteNotificationBridge {
 
     private weak var appState: AppState?
     private var pendingNotifications: [PendingRemoteNotification] = []
+    private var pendingDeviceToken: Data?
 
     private struct PendingRemoteNotification {
         var userInfo: [AnyHashable: Any]
@@ -725,6 +726,7 @@ final class StudyRemoteNotificationBridge {
     func configure(appState: AppState) {
         self.appState = appState
         processPendingNotificationsIfActive()
+        processPendingDeviceTokenIfNeeded()
     }
 
     func enqueueNotificationResponse(
@@ -799,9 +801,11 @@ final class StudyRemoteNotificationBridge {
     }
 
     func didRegisterForRemoteNotifications(deviceToken: Data) {
+        pendingDeviceToken = deviceToken
         appState?.logRemoteNotificationEvent(
             "iPhone push 등록 성공: tokenBytes=\(deviceToken.count)"
         )
+        processPendingDeviceTokenIfNeeded()
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
@@ -809,6 +813,17 @@ final class StudyRemoteNotificationBridge {
             "iPhone push 등록 실패: \(error.localizedDescription)",
             isWarning: true
         )
+    }
+
+    private func processPendingDeviceTokenIfNeeded() {
+        guard let pendingDeviceToken, let appState else {
+            return
+        }
+
+        self.pendingDeviceToken = nil
+        Task { @MainActor in
+            await appState.registerRemotePushDeviceToken(pendingDeviceToken)
+        }
     }
 
     @discardableResult

@@ -69,6 +69,7 @@ final class AppState: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let openAIClient: OpenAIClientProtocol
+    private let remotePushBackendClient: RemotePushBackendClientProtocol
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
@@ -180,6 +181,7 @@ final class AppState: ObservableObject {
     init(
         settingsStore: SettingsStore = SettingsStore(),
         openAIClient: OpenAIClientProtocol? = nil,
+        remotePushBackendClient: RemotePushBackendClientProtocol = RemotePushBackendClient(),
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
@@ -211,6 +213,7 @@ final class AppState: ObservableObject {
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
         self.openAIClient = openAIClient ?? OpenAIClient()
+        self.remotePushBackendClient = remotePushBackendClient
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         if !hasCompletedOnboarding {
@@ -529,6 +532,7 @@ final class AppState: ObservableObject {
 
         Task {
             await ensureCloudQuestionPushSubscription()
+            await syncRemotePushScheduleIfPossible(reason: "settings")
         }
     }
 
@@ -580,6 +584,10 @@ final class AppState: ObservableObject {
         log(.info, running ? "질문 타이머를 실행했습니다." : "질문 타이머를 중지했습니다.")
         markCloudDataChanged()
         restartTimer()
+
+        Task {
+            await syncRemotePushScheduleIfPossible(reason: "running")
+        }
     }
 
     func setTimerInterval(_ minutes: Int) {
@@ -591,6 +599,10 @@ final class AppState: ObservableObject {
         log(.info, "질문 간격을 \(settings.intervalMinutes)분으로 변경했습니다.")
         markCloudDataChanged()
         restartTimer()
+
+        Task {
+            await syncRemotePushScheduleIfPossible(reason: "timer")
+        }
     }
 
     func updateAppLanguage(_ language: AppLanguage) {
@@ -625,6 +637,10 @@ final class AppState: ObservableObject {
         statusMessage = language == .korean ? "앱 언어를 한국어로 설정했습니다." : "App language set to English."
         log(.info, "앱 언어를 \(language.rawValue)로 변경했습니다.")
         markCloudDataChanged()
+
+        Task {
+            await syncRemotePushScheduleIfPossible(reason: "language")
+        }
     }
 
     func generateQuestion(manual: Bool = true) async {
@@ -1868,6 +1884,81 @@ final class AppState: ObservableObject {
 
         await generateDueQuestionIfNeeded(reason: "timer")
     }
+
+    #if os(iOS)
+    func registerRemotePushDeviceToken(_ deviceToken: Data) async {
+        let token = Self.hexDeviceToken(deviceToken)
+        do {
+            let existingRegistration = settingsStore.loadRemotePushRegistration()
+            let registration: RemotePushRegistration
+
+            if let existingRegistration,
+               existingRegistration.apnsToken == token {
+                registration = existingRegistration
+            } else {
+                registration = try await remotePushBackendClient.registerDevice(
+                    apnsToken: token,
+                    language: settings.appLanguage,
+                    timezone: TimeZone.current.identifier,
+                    apnsEnvironment: Self.apnsEnvironment
+                )
+                settingsStore.saveRemotePushRegistration(registration)
+                log(.info, "서버 push 백엔드에 iPhone 기기를 등록했습니다.")
+            }
+
+            try await updateRemotePushSchedule(
+                registration: registration,
+                reason: "device-token"
+            )
+        } catch {
+            log(.warning, "서버 push 백엔드 등록 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func syncRemotePushScheduleIfPossible(reason: String) async {
+        guard let registration = settingsStore.loadRemotePushRegistration() else {
+            return
+        }
+
+        do {
+            try await updateRemotePushSchedule(
+                registration: registration,
+                reason: reason
+            )
+        } catch {
+            log(.warning, "서버 push 일정 동기화 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func updateRemotePushSchedule(
+        registration: RemotePushRegistration,
+        reason: String
+    ) async throws {
+        let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldEnableRemotePush = isRunning && !trimmedAPIKey.isEmpty
+        try await remotePushBackendClient.updateSchedule(
+            registration: registration,
+            settings: settings,
+            apiKey: trimmedAPIKey.isEmpty ? nil : trimmedAPIKey,
+            enabled: shouldEnableRemotePush
+        )
+        log(.info, "서버 push 일정을 동기화했습니다. reason=\(reason), enabled=\(shouldEnableRemotePush)")
+    }
+
+    private static var apnsEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+
+    private static func hexDeviceToken(_ token: Data) -> String {
+        token.map { String(format: "%02x", $0) }.joined()
+    }
+    #else
+    private func syncRemotePushScheduleIfPossible(reason: String) async {}
+    #endif
 
     private func ensureCloudQuestionPushSubscription() async {
         #if os(iOS)

@@ -10,7 +10,7 @@ This backend is intentionally separate from the local-first app. It exists only 
 - Stores a per-device study schedule.
 - Generates due questions with OpenAI.
 - Sends APNs remote notifications to iPhone.
-- Runs in Docker with SQLite stored on a mounted volume.
+- Runs in Docker with PostgreSQL stored on a mounted volume.
 
 ## Runtime Secrets
 
@@ -22,7 +22,8 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: `production` for App Store/TestFlight, `sandbox` for debug builds.
-- `BACKEND_API_TOKEN`: optional shared token required for registration if set.
+- `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
+- `DATABASE_URL`: PostgreSQL connection string. If omitted, the backend falls back to local SQLite for development.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -41,6 +42,13 @@ uvicorn app.main:app --reload
 ```sh
 docker build -t buddystuddy-backend ./backend
 docker run --rm -p 8080:8080 --env-file .env -v buddystuddy-data:/data buddystuddy-backend
+```
+
+For a local PostgreSQL-backed stack:
+
+```sh
+cd backend
+docker compose up --build
 ```
 
 ## API

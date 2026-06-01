@@ -7,8 +7,11 @@ import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 from uuid import uuid4
+
+import psycopg
+from psycopg.rows import dict_row
 
 
 def utc_now() -> datetime:
@@ -28,74 +31,152 @@ def hash_secret(value: str) -> str:
 
 
 class Database:
-    def __init__(self, path: str):
+    def __init__(self, path: str, url: str | None = None):
         self.path = path
+        self.url = url
         self._lock = threading.RLock()
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def connect(self) -> Iterator[Any]:
+        if self.url:
+            connection = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10)
+            try:
+                yield connection
+                connection.commit()
+            finally:
+                connection.close()
+            return
+
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection
             connection.commit()
         finally:
             connection.close()
 
+    @property
+    def is_postgres(self) -> bool:
+        return bool(self.url)
+
+    def _sql(self, query: str) -> str:
+        if not self.is_postgres:
+            return query
+        return query.replace("?", "%s")
+
     def init(self) -> None:
         with self._lock, self.connect() as db:
-            db.executescript(
-                """
-                PRAGMA journal_mode = WAL;
-                CREATE TABLE IF NOT EXISTS devices (
-                    device_id TEXT PRIMARY KEY,
-                    client_secret_hash TEXT NOT NULL,
-                    apns_token TEXT NOT NULL,
-                    platform TEXT NOT NULL,
-                    apns_environment TEXT NOT NULL,
-                    language TEXT NOT NULL,
-                    timezone TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL
-                );
+            if self.is_postgres:
+                for statement in self._postgres_schema():
+                    db.execute(statement)
+            else:
+                db.executescript(self._sqlite_schema())
 
-                CREATE TABLE IF NOT EXISTS schedules (
-                    device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
-                    topic TEXT NOT NULL,
-                    difficulty_level INTEGER NOT NULL,
-                    interval_minutes INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL,
-                    notification_sound TEXT,
-                    openai_api_key_cipher TEXT,
-                    next_due_at TEXT,
-                    last_sent_at TEXT,
-                    last_error TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
+    @staticmethod
+    def _sqlite_schema() -> str:
+        return """
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS devices (
+            device_id TEXT PRIMARY KEY,
+            client_secret_hash TEXT NOT NULL,
+            apns_token TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            apns_environment TEXT NOT NULL,
+            language TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        );
 
-                CREATE TABLE IF NOT EXISTS questions (
-                    id TEXT PRIMARY KEY,
-                    device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
-                    question TEXT NOT NULL,
-                    hint TEXT,
-                    topic TEXT NOT NULL,
-                    difficulty_level INTEGER NOT NULL,
-                    scheduled_for TEXT NOT NULL,
-                    sent_at TEXT,
-                    status TEXT NOT NULL,
-                    error TEXT,
-                    created_at TEXT NOT NULL
-                );
+        CREATE TABLE IF NOT EXISTS schedules (
+            device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+            topic TEXT NOT NULL,
+            difficulty_level INTEGER NOT NULL,
+            interval_minutes INTEGER NOT NULL,
+            enabled INTEGER NOT NULL,
+            notification_sound TEXT,
+            openai_api_key_cipher TEXT,
+            next_due_at TEXT,
+            last_sent_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
 
-                CREATE INDEX IF NOT EXISTS idx_schedules_due
-                    ON schedules(enabled, next_due_at);
-                CREATE INDEX IF NOT EXISTS idx_questions_device_created
-                    ON questions(device_id, created_at);
-                """
+        CREATE TABLE IF NOT EXISTS questions (
+            id TEXT PRIMARY KEY,
+            device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+            question TEXT NOT NULL,
+            hint TEXT,
+            topic TEXT NOT NULL,
+            difficulty_level INTEGER NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            sent_at TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_schedules_due
+            ON schedules(enabled, next_due_at);
+        CREATE INDEX IF NOT EXISTS idx_questions_device_created
+            ON questions(device_id, created_at);
+        """
+
+    @staticmethod
+    def _postgres_schema() -> list[str]:
+        return [
+            """
+            CREATE TABLE IF NOT EXISTS devices (
+                device_id TEXT PRIMARY KEY,
+                client_secret_hash TEXT NOT NULL,
+                apns_token TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                apns_environment TEXT NOT NULL,
+                language TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
             )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS schedules (
+                device_id TEXT PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
+                topic TEXT NOT NULL,
+                difficulty_level INTEGER NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                enabled BOOLEAN NOT NULL,
+                notification_sound TEXT,
+                openai_api_key_cipher TEXT,
+                next_due_at TEXT,
+                last_sent_at TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS questions (
+                id TEXT PRIMARY KEY,
+                device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+                question TEXT NOT NULL,
+                hint TEXT,
+                topic TEXT NOT NULL,
+                difficulty_level INTEGER NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                sent_at TEXT,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_due_at)",
+            "CREATE INDEX IF NOT EXISTS idx_questions_device_created ON questions(device_id, created_at)",
+        ]
 
     def register_device(
         self,
@@ -110,12 +191,14 @@ class Database:
         client_secret = secrets.token_urlsafe(32)
         with self._lock, self.connect() as db:
             db.execute(
-                """
+                self._sql(
+                    """
                 INSERT INTO devices (
                     device_id, client_secret_hash, apns_token, platform,
                     apns_environment, language, timezone, created_at, updated_at, last_seen_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                ),
                 (
                     device_id,
                     hash_secret(client_secret),
@@ -135,13 +218,13 @@ class Database:
         now = to_iso(utc_now())
         with self._lock, self.connect() as db:
             row = db.execute(
-                "SELECT client_secret_hash FROM devices WHERE device_id = ?",
+                self._sql("SELECT client_secret_hash FROM devices WHERE device_id = ?"),
                 (device_id,),
             ).fetchone()
             if row is None or row["client_secret_hash"] != hash_secret(client_secret):
                 return False
             db.execute(
-                "UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE device_id = ?",
+                self._sql("UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE device_id = ?"),
                 (now, now, device_id),
             )
             return True
@@ -161,7 +244,7 @@ class Database:
         next_due_at = to_iso(now_dt + timedelta(minutes=interval_minutes)) if enabled else None
         with self._lock, self.connect() as db:
             existing = db.execute(
-                "SELECT openai_api_key_cipher FROM schedules WHERE device_id = ?",
+                self._sql("SELECT openai_api_key_cipher FROM schedules WHERE device_id = ?"),
                 (device_id,),
             ).fetchone()
             cipher = openai_api_key_cipher
@@ -169,7 +252,8 @@ class Database:
                 cipher = existing["openai_api_key_cipher"]
 
             db.execute(
-                """
+                self._sql(
+                    """
                 INSERT INTO schedules (
                     device_id, topic, difficulty_level, interval_minutes, enabled,
                     notification_sound, openai_api_key_cipher, next_due_at,
@@ -185,13 +269,14 @@ class Database:
                     next_due_at = excluded.next_due_at,
                     updated_at = excluded.updated_at,
                     last_error = NULL
-                """,
+                """
+                ),
                 (
                     device_id,
                     topic,
                     difficulty_level,
                     interval_minutes,
-                    1 if enabled else 0,
+                    enabled if self.is_postgres else 1 if enabled else 0,
                     notification_sound,
                     cipher,
                     next_due_at,
@@ -203,25 +288,27 @@ class Database:
 
     def delete_device(self, device_id: str) -> None:
         with self._lock, self.connect() as db:
-            db.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+            db.execute(self._sql("DELETE FROM devices WHERE device_id = ?"), (device_id,))
 
-    def due_schedules(self, limit: int = 25) -> list[sqlite3.Row]:
+    def due_schedules(self, limit: int = 25) -> list[Any]:
         now = to_iso(utc_now())
         with self._lock, self.connect() as db:
             return list(
                 db.execute(
-                    """
+                    self._sql(
+                        """
                     SELECT
                         d.device_id, d.apns_token, d.apns_environment, d.language, d.timezone,
                         s.topic, s.difficulty_level, s.interval_minutes, s.notification_sound,
                         s.openai_api_key_cipher, s.next_due_at
                     FROM schedules s
                     JOIN devices d ON d.device_id = s.device_id
-                    WHERE s.enabled = 1 AND s.next_due_at IS NOT NULL AND s.next_due_at <= ?
+                    WHERE s.enabled = ? AND s.next_due_at IS NOT NULL AND s.next_due_at <= ?
                     ORDER BY s.next_due_at ASC
                     LIMIT ?
-                    """,
-                    (now, limit),
+                    """
+                    ),
+                    (True if self.is_postgres else 1, now, limit),
                 )
             )
 
@@ -240,12 +327,14 @@ class Database:
         next_due_at = to_iso(now_dt + timedelta(minutes=interval_minutes))
         with self._lock, self.connect() as db:
             db.execute(
-                """
+                self._sql(
+                    """
                 INSERT INTO questions (
                     id, device_id, question, hint, topic, difficulty_level,
                     scheduled_for, sent_at, status, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                ),
                 (
                     str(uuid4()),
                     device_id,
@@ -260,11 +349,13 @@ class Database:
                 ),
             )
             db.execute(
-                """
+                self._sql(
+                    """
                 UPDATE schedules
                 SET next_due_at = ?, last_sent_at = ?, last_error = NULL, updated_at = ?
                 WHERE device_id = ?
-                """,
+                """
+                ),
                 (next_due_at, now, now, device_id),
             )
 
@@ -274,11 +365,12 @@ class Database:
         retry_at = to_iso(now_dt + timedelta(minutes=retry_minutes))
         with self._lock, self.connect() as db:
             db.execute(
-                """
+                self._sql(
+                    """
                 UPDATE schedules
                 SET next_due_at = ?, last_error = ?, updated_at = ?
                 WHERE device_id = ?
-                """,
+                """
+                ),
                 (retry_at, error[:500], now, device_id),
             )
-

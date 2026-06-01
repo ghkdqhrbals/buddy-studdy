@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      BACKEND_DOMAIN: api.ghkdqhrbals.org
 
     steps:
       - name: Validate input
@@ -60,6 +61,7 @@ jobs:
             "${EC2_USER}@${EC2_HOST}" \
             "IMAGE_REF='${IMAGE_REF}' \
              EC2_HOST='${EC2_HOST}' \
+             BACKEND_DOMAIN='${BACKEND_DOMAIN}' \
              GHCR_USERNAME='${GHCR_USERNAME}' \
              GHCR_TOKEN='${GHCR_TOKEN}' \
              BACKEND_MASTER_KEY='${BACKEND_MASTER_KEY}' \
@@ -77,10 +79,19 @@ jobs:
 
           cd /opt/buddystuddy-backend
 
-          mkdir -p nginx/certs
+          mkdir -p nginx/certs letsencrypt
+
+          POSTGRES_DB=buddystuddy
+          POSTGRES_USER=buddystuddy
+          if [ ! -s .postgres_password ]; then
+            openssl rand -hex 32 > .postgres_password
+            chmod 600 .postgres_password
+          fi
+          POSTGRES_PASSWORD="$(cat .postgres_password)"
+          DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@buddystuddy-db:5432/${POSTGRES_DB}"
 
           cat > .env <<ENV
-          DATABASE_PATH=/data/buddystuddy.db
+          DATABASE_URL=${DATABASE_URL}
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_SECONDS=30
           OPENAI_MODEL=gpt-5.4
@@ -94,54 +105,122 @@ jobs:
           ENV
           chmod 600 .env
 
-          if [ ! -s nginx/certs/server.crt ] || [ ! -s nginx/certs/server.key ]; then
-            openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-              -keyout nginx/certs/server.key \
-              -out nginx/certs/server.crt \
-              -subj "/CN=${EC2_HOST}" \
-              -addext "subjectAltName=DNS:${EC2_HOST}"
-            chmod 600 nginx/certs/server.key
-          fi
-
-          cat > nginx/nginx.conf <<'NGINX'
-          events {}
-
-          http {
-            server {
-              listen 443 ssl http2;
-              server_name _;
-
-              ssl_certificate /etc/nginx/certs/server.crt;
-              ssl_certificate_key /etc/nginx/certs/server.key;
-
-              client_max_body_size 1m;
-
-              location / {
-                proxy_pass http://buddystuddy-backend:8080;
-                proxy_http_version 1.1;
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-            }
-          }
-          NGINX
+          cat > db.env <<ENV
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          ENV
+          chmod 600 db.env
 
           echo "${GHCR_TOKEN}" | sudo docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           sudo docker pull "${IMAGE_REF}"
           sudo docker pull nginx:1.27-alpine
+          sudo docker pull postgres:16-alpine
+          sudo docker pull certbot/certbot:v2.11.0
           sudo docker network create buddystuddy-net >/dev/null 2>&1 || true
-          sudo docker rm -f buddystuddy-nginx buddystuddy-backend >/dev/null 2>&1 || true
-          sudo docker volume create buddystuddy-backend-data >/dev/null
+          sudo docker volume create buddystuddy-postgres-data >/dev/null
+
+          sudo docker rm -f buddystuddy-nginx buddystuddy-backend buddystuddy-db >/dev/null 2>&1 || true
+          sudo docker run -d \
+            --name buddystuddy-db \
+            --network buddystuddy-net \
+            --restart unless-stopped \
+            --env-file db.env \
+            -v buddystuddy-postgres-data:/var/lib/postgresql/data \
+            --health-cmd "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" \
+            --health-interval 10s \
+            --health-timeout 5s \
+            --health-retries 5 \
+            postgres:16-alpine
+
+          for attempt in $(seq 1 60); do
+            if sudo docker exec buddystuddy-db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "PostgreSQL did not become ready." >&2
+              sudo docker logs buddystuddy-db || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          if sudo docker volume inspect buddystuddy-backend-data >/dev/null 2>&1; then
+            sudo docker run --rm \
+              --network buddystuddy-net \
+              --env-file .env \
+              -v buddystuddy-backend-data:/legacy:ro \
+              "${IMAGE_REF}" \
+              python -m app.migrate_sqlite_to_postgres /legacy/buddystuddy.db
+          fi
 
           sudo docker run -d \
             --name buddystuddy-backend \
             --network buddystuddy-net \
             --restart unless-stopped \
             --env-file .env \
-            -v buddystuddy-backend-data:/data \
             "${IMAGE_REF}"
+
+          SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
+          SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
+          if [ ! -s "letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem" ]; then
+            if ! sudo docker run --rm \
+              -p 443:443 \
+              -v "$PWD/letsencrypt:/etc/letsencrypt" \
+              certbot/certbot:v2.11.0 certonly \
+              --standalone \
+              --preferred-challenges tls-alpn-01 \
+              -d "${BACKEND_DOMAIN}" \
+              --agree-tos \
+              --non-interactive \
+              --register-unsafely-without-email; then
+              echo "Let's Encrypt certificate issuance failed. Falling back to a temporary self-signed certificate." >&2
+            fi
+          else
+            sudo docker run --rm \
+              -p 443:443 \
+              -v "$PWD/letsencrypt:/etc/letsencrypt" \
+              certbot/certbot:v2.11.0 renew \
+              --standalone \
+              --preferred-challenges tls-alpn-01 \
+              --quiet || true
+          fi
+
+          if [ ! -s "letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem" ]; then
+            openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
+              -keyout nginx/certs/server.key \
+              -out nginx/certs/server.crt \
+              -subj "/CN=${BACKEND_DOMAIN}" \
+              -addext "subjectAltName=DNS:${BACKEND_DOMAIN}"
+            chmod 600 nginx/certs/server.key
+            SSL_CERTIFICATE="/etc/nginx/certs/server.crt"
+            SSL_CERTIFICATE_KEY="/etc/nginx/certs/server.key"
+          fi
+
+          cat > nginx/nginx.conf <<NGINX
+          events {}
+
+          http {
+            server {
+              listen 443 ssl http2;
+              server_name ${BACKEND_DOMAIN};
+
+              ssl_certificate ${SSL_CERTIFICATE};
+              ssl_certificate_key ${SSL_CERTIFICATE_KEY};
+
+              client_max_body_size 1m;
+
+              location / {
+                proxy_pass http://buddystuddy-backend:8080;
+                proxy_http_version 1.1;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+            }
+          }
+          NGINX
 
           sudo docker run -d \
             --name buddystuddy-nginx \
@@ -150,6 +229,7 @@ jobs:
             -p 443:443 \
             -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+            -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
             nginx:1.27-alpine
 
           for attempt in $(seq 1 30); do

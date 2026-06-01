@@ -4,4 +4,4 @@ httpx[http2]==0.28.1
 pydantic==2.10.4
 PyJWT==2.10.1
 cryptography==44.0.0
-
+psycopg[binary]==3.2.3

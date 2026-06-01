@@ -11,14 +11,14 @@ The backend provides scheduled remote-push question delivery for the iOS app. It
 Production EC2 deployment:
 
 ```text
-https://ec2-13-125-226-24.ap-northeast-2.compute.amazonaws.com
+https://api.ghkdqhrbals.org
 ```
 
-The current EC2 workflow creates a self-signed HTTPS certificate for deployment verification. iOS production clients should use a real domain with a trusted TLS certificate before this URL is enabled in the app.
+The EC2 workflow serves this domain through Nginx on public port `443`.
 
 ## Authentication
 
-Registration and admin endpoints use the optional backend token when `BACKEND_API_TOKEN` is configured:
+The admin endpoint uses the backend token when `BACKEND_API_TOKEN` is configured:
 
 ```http
 Authorization: Bearer <BACKEND_API_TOKEN>
@@ -52,7 +52,6 @@ Response:
 ```http
 POST /v1/devices/register
 Content-Type: application/json
-Authorization: Bearer <BACKEND_API_TOKEN>
 ```
 
 Request:
@@ -176,4 +175,3 @@ Common statuses:
 - `401`: missing or invalid backend/device credentials.
 - `403`: authenticated device does not match the path `deviceId`.
 - `422`: request body failed validation.
-

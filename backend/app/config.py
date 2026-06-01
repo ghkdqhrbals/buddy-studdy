@@ -15,6 +15,7 @@ def _bool_env(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     database_path: str
+    database_url: str | None
     app_host: str
     app_port: int
     scheduler_enabled: bool
@@ -38,6 +39,7 @@ class Settings:
 
         return cls(
             database_path=os.getenv("DATABASE_PATH", "/data/buddystuddy.db"),
+            database_url=os.getenv("DATABASE_URL"),
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
             app_port=int(os.getenv("APP_PORT", "8080")),
             scheduler_enabled=_bool_env("SCHEDULER_ENABLED", True),
@@ -72,4 +74,3 @@ class Settings:
         ]
         if missing:
             raise RuntimeError(f"Missing APNs settings: {', '.join(missing)}")
-

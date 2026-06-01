@@ -51,9 +51,9 @@ class APNsClient:
             "category": "STUDY_QUESTION",
             "thread-id": "StudyMate.question",
         }
-        if item.sound:
+        if item.sound and item.sound != "none":
             aps["sound"] = item.sound
-        else:
+        elif item.sound is None:
             aps["sound"] = "default"
 
         payload = {
@@ -76,4 +76,3 @@ class APNsClient:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code >= 300:
                 raise RuntimeError(f"APNs failed: {response.status_code} {response.text}")
-
