@@ -71,7 +71,7 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 - Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystuddy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
 - PostgreSQL port `5432` is published on the EC2 host for production database access.
-- The workflow requests/renews a Let's Encrypt certificate with the `tls-alpn-01` challenge, so public port `80` is not required.
+- The workflow requests/renews a Let's Encrypt certificate with the `http-01` challenge, so public port `80` is used temporarily during certificate issuance.
 - If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
 
 Use these connection basics for database administration:
