@@ -22,7 +22,9 @@ def to_iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
 
-def from_iso(value: str) -> datetime:
+def as_utc_datetime(value: datetime | str) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC)
     return datetime.fromisoformat(value).astimezone(UTC)
 
 
@@ -40,6 +42,7 @@ class Database:
     def connect(self) -> Iterator[Any]:
         if self.url:
             connection = psycopg.connect(self.url, row_factory=dict_row, connect_timeout=10)
+            connection.execute("SET TIME ZONE 'UTC'")
             try:
                 yield connection
                 connection.commit()
@@ -71,8 +74,47 @@ class Database:
             if self.is_postgres:
                 for statement in self._postgres_schema():
                     db.execute(statement)
+                self._ensure_postgres_timestamp_columns(db)
             else:
                 db.executescript(self._sqlite_schema())
+
+    def _timestamp(self, value: datetime) -> datetime | str:
+        value = value.astimezone(UTC)
+        if self.is_postgres:
+            return value
+        return to_iso(value)
+
+    def _response_timestamp(self, value: datetime | str | None) -> str | None:
+        if value is None:
+            return None
+        return to_iso(as_utc_datetime(value))
+
+    @staticmethod
+    def _ensure_postgres_timestamp_columns(db: Any) -> None:
+        timestamp_columns = {
+            "devices": ["created_at", "updated_at", "last_seen_at"],
+            "schedules": ["next_due_at", "last_sent_at", "created_at", "updated_at"],
+            "questions": ["scheduled_for", "sent_at", "created_at"],
+        }
+        for table, columns in timestamp_columns.items():
+            for column in columns:
+                row = db.execute(
+                    """
+                    SELECT data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+                    """,
+                    (table, column),
+                ).fetchone()
+                if row is None or row["data_type"] == "timestamp with time zone":
+                    continue
+                db.execute(
+                    f"""
+                    ALTER TABLE {table}
+                    ALTER COLUMN {column} TYPE TIMESTAMPTZ
+                    USING {column}::timestamptz
+                    """
+                )
 
     @staticmethod
     def _sqlite_schema() -> str:
@@ -138,9 +180,9 @@ class Database:
                 apns_environment TEXT NOT NULL,
                 language TEXT NOT NULL,
                 timezone TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                last_seen_at TIMESTAMPTZ NOT NULL
             )
             """,
             """
@@ -152,11 +194,11 @@ class Database:
                 enabled BOOLEAN NOT NULL,
                 notification_sound TEXT,
                 openai_api_key_cipher TEXT,
-                next_due_at TEXT,
-                last_sent_at TEXT,
+                next_due_at TIMESTAMPTZ,
+                last_sent_at TIMESTAMPTZ,
                 last_error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
             )
             """,
             """
@@ -167,11 +209,11 @@ class Database:
                 hint TEXT,
                 topic TEXT NOT NULL,
                 difficulty_level INTEGER NOT NULL,
-                scheduled_for TEXT NOT NULL,
-                sent_at TEXT,
+                scheduled_for TIMESTAMPTZ NOT NULL,
+                sent_at TIMESTAMPTZ,
                 status TEXT NOT NULL,
                 error TEXT,
-                created_at TEXT NOT NULL
+                created_at TIMESTAMPTZ NOT NULL
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_due_at)",
@@ -186,7 +228,7 @@ class Database:
         language: str,
         timezone: str,
     ) -> tuple[str, str]:
-        now = to_iso(utc_now())
+        now = self._timestamp(utc_now())
         device_id = str(uuid4())
         client_secret = secrets.token_urlsafe(32)
         with self._lock, self.connect() as db:
@@ -215,7 +257,7 @@ class Database:
         return device_id, client_secret
 
     def authenticate_device(self, device_id: str, client_secret: str) -> bool:
-        now = to_iso(utc_now())
+        now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             row = db.execute(
                 self._sql("SELECT client_secret_hash FROM devices WHERE device_id = ?"),
@@ -240,8 +282,9 @@ class Database:
         notification_sound: str | None,
     ) -> str | None:
         now_dt = utc_now()
-        now = to_iso(now_dt)
-        next_due_at = to_iso(now_dt + timedelta(minutes=interval_minutes)) if enabled else None
+        now = self._timestamp(now_dt)
+        next_due_dt = now_dt + timedelta(minutes=interval_minutes) if enabled else None
+        next_due_at = self._timestamp(next_due_dt) if next_due_dt is not None else None
         with self._lock, self.connect() as db:
             existing = db.execute(
                 self._sql("SELECT openai_api_key_cipher FROM schedules WHERE device_id = ?"),
@@ -284,14 +327,14 @@ class Database:
                     now,
                 ),
             )
-        return next_due_at
+        return self._response_timestamp(next_due_at)
 
     def delete_device(self, device_id: str) -> None:
         with self._lock, self.connect() as db:
             db.execute(self._sql("DELETE FROM devices WHERE device_id = ?"), (device_id,))
 
     def due_schedules(self, limit: int = 25) -> list[Any]:
-        now = to_iso(utc_now())
+        now = self._timestamp(utc_now())
         with self._lock, self.connect() as db:
             return list(
                 db.execute(
@@ -318,13 +361,13 @@ class Database:
         topic: str,
         difficulty_level: int,
         interval_minutes: int,
-        scheduled_for: str,
+        scheduled_for: datetime | str,
         question: str,
         hint: str | None,
     ) -> None:
         now_dt = utc_now()
-        now = to_iso(now_dt)
-        next_due_at = to_iso(now_dt + timedelta(minutes=interval_minutes))
+        now = self._timestamp(now_dt)
+        next_due_at = self._timestamp(now_dt + timedelta(minutes=interval_minutes))
         with self._lock, self.connect() as db:
             db.execute(
                 self._sql(
@@ -361,8 +404,8 @@ class Database:
 
     def mark_error(self, device_id: str, error: str, retry_minutes: int = 5) -> None:
         now_dt = utc_now()
-        now = to_iso(now_dt)
-        retry_at = to_iso(now_dt + timedelta(minutes=retry_minutes))
+        now = self._timestamp(now_dt)
+        retry_at = self._timestamp(now_dt + timedelta(minutes=retry_minutes))
         with self._lock, self.connect() as db:
             db.execute(
                 self._sql(
