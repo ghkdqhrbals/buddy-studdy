@@ -13,6 +13,7 @@ final class SettingsStore {
         static let gradingResult = "gradingResult"
         static let lastAnswer = "lastAnswer"
         static let isRunning = "isRunning"
+        static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
         static let apiKey = "openAIAPIKey"
         static let questionResponseID = "questionResponseID"
         static let appLogs = "appLogs"
@@ -319,6 +320,15 @@ final class SettingsStore {
 
     func saveIsRunning(_ isRunning: Bool) {
         defaults.set(isRunning, forKey: Keys.isRunning)
+    }
+
+    func saveExplicitIsRunning(_ isRunning: Bool) {
+        saveIsRunning(isRunning)
+        defaults.set(true, forKey: Keys.hasExplicitRunningPreference)
+    }
+
+    func hasExplicitRunningPreference() -> Bool {
+        defaults.bool(forKey: Keys.hasExplicitRunningPreference)
     }
 
     func loadAPIKey() -> String {

@@ -534,16 +534,43 @@ class Database:
     ) -> str | None:
         now_dt = utc_now()
         now = self._timestamp(now_dt)
-        next_due_dt = now_dt + timedelta(minutes=interval_minutes) if enabled else None
-        next_due_at = self._timestamp(next_due_dt) if next_due_dt is not None else None
         with self._lock, self.connect() as db:
             existing = db.execute(
-                self._sql("SELECT openai_api_key_cipher FROM schedules WHERE device_id = ?"),
+                self._sql(
+                    """
+                    SELECT
+                        topic, difficulty_level, interval_minutes, enabled,
+                        notification_sound, custom_prompt, app_language, openai_model,
+                        max_history_count, openai_api_key_cipher, next_due_at
+                    FROM schedules
+                    WHERE device_id = ?
+                    """
+                ),
                 (device_id,),
             ).fetchone()
             cipher = openai_api_key_cipher
             if cipher is None and existing is not None:
                 cipher = existing["openai_api_key_cipher"]
+
+            preserve_existing_due = False
+            if enabled and existing is not None and bool(existing["enabled"]) and existing["next_due_at"] is not None:
+                preserve_existing_due = (
+                    existing["topic"] == topic
+                    and int(existing["difficulty_level"]) == difficulty_level
+                    and int(existing["interval_minutes"]) == interval_minutes
+                    and (existing["notification_sound"] or None) == notification_sound
+                    and (existing["custom_prompt"] or "") == custom_prompt
+                    and (existing["app_language"] or "") == app_language
+                    and (existing["openai_model"] or "") == openai_model
+                    and int(existing["max_history_count"]) == max_history_count
+                )
+
+            if not enabled:
+                next_due_at = None
+            elif preserve_existing_due:
+                next_due_at = existing["next_due_at"]
+            else:
+                next_due_at = self._timestamp(now_dt + timedelta(minutes=interval_minutes))
 
             db.execute(
                 self._sql(

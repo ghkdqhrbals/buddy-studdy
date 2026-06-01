@@ -197,7 +197,15 @@ final class AppState: ObservableObject {
         self.currentQuestion = settingsStore.loadQuestion()
         self.lastAnswer = settingsStore.loadLastAnswer()
         self.gradingResult = settingsStore.loadGradingResult()
-        self.isRunning = settingsStore.loadIsRunning()
+        let loadedIsRunning = settingsStore.loadIsRunning()
+        let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
+            && !loadedIsRunning
+            && !settingsStore.hasExplicitRunningPreference()
+            && !loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.isRunning = shouldRecoverLegacyRunningState ? true : loadedIsRunning
+        if shouldRecoverLegacyRunningState {
+            settingsStore.saveIsRunning(true)
+        }
         self.studyRecords = settingsStore.loadStudyRecords()
         self.backendStats = nil
         self.apiKey = loadedAPIKey
@@ -215,6 +223,10 @@ final class AppState: ObservableObject {
         self.cloudSyncService = cloudSyncService
         self.remotePushBackendClient = remotePushBackendClient
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if shouldRecoverLegacyRunningState {
+            log(.info, "백엔드 schedule 상태로 인해 저장된 이전 일시정지 값을 실행 상태로 복구했습니다.")
+        }
 
         if !hasCompletedOnboarding {
             log(.info, "첫 실행 온보딩이 필요합니다.")
@@ -365,14 +377,16 @@ final class AppState: ObservableObject {
         if !isEditingSettings {
             draftSettings = sanitizedSettings
         }
-        isRunning = snapshot.settings.enabled
         savedSettings = sanitizedSettings
 
         settingsStore.saveSettings(sanitizedSettings)
-        settingsStore.saveIsRunning(snapshot.settings.enabled)
         settingsStore.replaceStudyRecords(snapshot.records)
         studyRecords = settingsStore.loadStudyRecords()
         backendStats = snapshot.stats
+
+        if snapshot.settings.enabled != isRunning {
+            log(.info, "백엔드 schedule enabled=\(snapshot.settings.enabled) 상태를 확인했습니다. 사용자 running 설정은 \(isRunning) 상태로 유지합니다.")
+        }
 
         if snapshot.api?.openAIKeyConfigured == true || snapshot.settings.openAIKeyConfigured {
             isBackendOpenAIKeyConfigured = true
@@ -698,7 +712,7 @@ final class AppState: ObservableObject {
 
     func setRunning(_ running: Bool) {
         isRunning = running
-        settingsStore.saveIsRunning(running)
+        settingsStore.saveExplicitIsRunning(running)
         statusMessage = running ? "질문 타이머가 실행 중입니다." : "질문 타이머를 일시정지했습니다."
         log(.info, running ? "질문 타이머를 실행했습니다." : "질문 타이머를 중지했습니다.")
         markCloudDataChanged()
