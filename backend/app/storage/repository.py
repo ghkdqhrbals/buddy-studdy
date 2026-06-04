@@ -95,7 +95,10 @@ class Database:
 
     def _create_engine(self):
         if self.url:
-            return create_engine(self.url, future=True)
+            normalized_url = self.url
+            if normalized_url.startswith("postgresql://"):
+                normalized_url = normalized_url.replace("postgresql://", "postgresql+psycopg://", 1)
+            return create_engine(normalized_url, future=True)
 
         db_path = Path(self.path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
