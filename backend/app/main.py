@@ -15,6 +15,7 @@ from .models import (
     APIStatusResponse,
     APIValidationResponse,
     AnswerRequest,
+    CommunityQuestionsResponse,
     BackendSnapshotResponse,
     BackendSettingsResponse,
     DeviceRegisterRequest,
@@ -23,11 +24,13 @@ from .models import (
     PushTokenRequest,
     RecordsPageResponse,
     ScheduleRequest,
+    OpenAIModelOptionResponse,
     ScheduleResponse,
     StatsResponse,
     StudyRecordResponse,
 )
 from .openai_client import OpenAIQuestionClient
+from .openai_models import DEFAULT_OPENAI_MODEL, OPENAI_MODEL_OPTIONS, normalize_openai_model
 from .scheduler import QuestionScheduler
 
 
@@ -89,8 +92,8 @@ def device_api_key(schedule_row) -> str:
 
 
 def openai_for_schedule(schedule_row) -> OpenAIQuestionClient:
-    model = schedule_row["openai_model"] if schedule_row is not None else settings.openai_model
-    return OpenAIQuestionClient(model or settings.openai_model)
+    model = (schedule_row["openai_model"] if schedule_row is not None else settings.openai_model)
+    return OpenAIQuestionClient(normalize_openai_model(model or DEFAULT_OPENAI_MODEL))
 
 
 def stats_window(period: str, start_at: str | None, end_at: str | None) -> tuple[object | None, object | None]:
@@ -117,6 +120,18 @@ def stats_window(period: str, start_at: str | None, end_at: str | None) -> tuple
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(ok=True)
+
+
+@app.get("/v1/openai/models", response_model=list[OpenAIModelOptionResponse])
+async def list_openai_models() -> list[OpenAIModelOptionResponse]:
+    return [
+        OpenAIModelOptionResponse(
+            id=option.id,
+            displayName=option.display_name,
+            supportsTextVerbosity=option.supports_text_verbosity,
+        )
+        for option in OPENAI_MODEL_OPTIONS
+    ]
 
 
 @app.post(
@@ -173,6 +188,7 @@ async def upsert_schedule(
         app_language=payload.app_language,
         openai_model=payload.openai_model,
         max_history_count=payload.max_history_count,
+        is_question_public=payload.is_question_public,
     )
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
@@ -339,6 +355,7 @@ async def create_question(
         difficulty_level=schedule["difficulty_level"],
         question=generated.question,
         expected_answer_hint=generated.expected_answer_hint,
+        is_public=bool(schedule.get("is_question_public", True)),
         source="manual",
     )
     database.defer_schedule(device_id, minutes=schedule["interval_minutes"])
@@ -420,6 +437,22 @@ async def skip_record(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
     return StudyRecordResponse.model_validate(updated)
+
+
+@app.get("/v1/public/questions", response_model=CommunityQuestionsResponse)
+async def list_public_questions(
+    topic: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    exclude_device_id: str | None = Query(default=None, alias="excludeDeviceId"),
+) -> CommunityQuestionsResponse:
+    questions, total = database.list_public_questions(
+        exclude_device_id=exclude_device_id or "",
+        limit=limit,
+        offset=offset,
+        topic=topic,
+    )
+    return CommunityQuestionsResponse(questions=questions, totalCount=total, limit=limit, offset=offset)
 
 
 @app.delete("/v1/devices/{device_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)

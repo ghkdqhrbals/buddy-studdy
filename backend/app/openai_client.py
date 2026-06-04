@@ -4,12 +4,13 @@ import json
 
 import httpx
 
+from .openai_models import normalize_openai_model
 from .models import GradingPayload, QuestionPayload
 
 
 class OpenAIQuestionClient:
     def __init__(self, model: str):
-        self.model = model
+        self.model = normalize_openai_model(model)
 
     async def validate_api_key(self, api_key: str) -> None:
         async with httpx.AsyncClient(timeout=15) as client:

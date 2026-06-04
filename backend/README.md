@@ -10,6 +10,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
+- Uses SQLAlchemy ORM with repository methods; JPA 감각의 `save`/`insert`/`delete`도 래퍼로 제공됩니다.
 - Generates due questions with OpenAI.
 - Sends APNs remote notifications to iPhone.
 - Runs in Docker with PostgreSQL stored on a mounted volume.
@@ -55,6 +56,39 @@ For a local PostgreSQL-backed stack:
 cd backend
 docker compose up --build
 ```
+
+## Local Testing (TDD)
+
+```sh
+cd backend
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+pytest
+```
+
+The tests cover repository behavior and topic-statistic business rules in isolation,
+using ephemeral SQLite databases and real ORM models.
+
+`@transactional` decorator is also available for service-style methods. If the wrapped
+method accepts a `session` parameter, it gets a SQLAlchemy session injected:
+
+```python
+from app.storage import transactional
+
+
+class RecordService:
+    def __init__(self, db: Database):
+        self.db = db
+
+    @transactional
+    def record_and_answer(self, question_id: str, session):
+        session.query(... )...
+```
+
+`Database.connect()` is a transaction boundary using an SQLAlchemy session
+(commit on normal exit, rollback on exception). For readability in JPA-style code,
+you can use `Database.transactional()` as an explicit block.
 
 ## API
 

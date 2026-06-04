@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from .db import to_iso, utc_now
+from .openai_models import normalize_openai_model
 
 from .apns import APNsClient, APNsQuestion
 from .config import Settings
@@ -21,10 +22,19 @@ class QuestionScheduler:
         self.settings = settings
         self.database = database
         self.cipher = KeyCipher(settings.backend_master_key)
-        self.openai = OpenAIQuestionClient(settings.openai_model)
+        self._openai_clients: dict[str, OpenAIQuestionClient] = {}
         self.apns = APNsClient(settings)
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
+
+    def _openai_for_model(self, model: str) -> OpenAIQuestionClient:
+        model_id = normalize_openai_model(model)
+        client = self._openai_clients.get(model_id)
+        if client is not None:
+            return client
+        client = OpenAIQuestionClient(model_id)
+        self._openai_clients[model_id] = client
+        return client
 
     def start(self) -> None:
         if self._task is None:
@@ -71,7 +81,8 @@ class QuestionScheduler:
                 if not api_key:
                     raise RuntimeError("No OpenAI API key configured for schedule.")
 
-                generated = await self.openai.generate_question(
+                model = normalize_openai_model(row.get("openai_model") or self.settings.openai_model)
+                generated = await self._openai_for_model(model).generate_question(
                     api_key=api_key,
                     topic=row["topic"],
                     difficulty_level=row["difficulty_level"],
@@ -86,6 +97,7 @@ class QuestionScheduler:
                     difficulty_level=row["difficulty_level"],
                     question=generated.question,
                     expected_answer_hint=generated.expected_answer_hint,
+                    is_public=row["is_question_public"],
                     scheduled_for=row["next_due_at"],
                     source="scheduled",
                     status="ungraded",

@@ -144,7 +144,84 @@ Fields:
 - `notificationSound`: optional APNs sound name.
 - `customPrompt`: optional tutor instruction.
 - `appLanguage`: `ko` or `en`. This also controls question/feedback language.
-- `openaiModel`: currently `gpt-5.4`.
+- `openaiModel`: selected model. Defaults to `gpt-5.4`.
+
+The `/v1/openai/models` endpoint returns all supported model IDs and metadata:
+
+```http
+GET /v1/openai/models
+```
+
+Response:
+
+```json
+[
+  {
+    "id": "gpt-5.5",
+    "displayName": "GPT-5.5",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5.4",
+    "displayName": "GPT-5.4",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5.2",
+    "displayName": "GPT-5.2",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5.1",
+    "displayName": "GPT-5.1",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5",
+    "displayName": "GPT-5",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5-mini",
+    "displayName": "GPT-5 mini",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-5-nano",
+    "displayName": "GPT-5 nano",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-4.1",
+    "displayName": "GPT-4.1",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-4.1-mini",
+    "displayName": "GPT-4.1 mini",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-4.1-nano",
+    "displayName": "GPT-4.1 nano",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-4o",
+    "displayName": "GPT-4o",
+    "supportsTextVerbosity": true
+  },
+  {
+    "id": "gpt-4o-mini",
+    "displayName": "GPT-4o mini",
+    "supportsTextVerbosity": true
+  }
+]
+```
+
+The catalog is maintained from the OpenAI documentation and intentionally includes
+non-exhaustive, commonly usable Responses API models. If your key has access to
+additional model IDs, the API will still accept them and route them through directly.
 - `maxHistoryCount`: record retention preference from 10 to 10,000.
 
 Response:

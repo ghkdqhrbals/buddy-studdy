@@ -4,6 +4,8 @@ import base64
 import os
 from dataclasses import dataclass
 
+from .openai_models import DEFAULT_OPENAI_MODEL
+
 
 def _bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -54,7 +56,7 @@ class Settings:
             app_port=int(os.getenv("APP_PORT", "8080")),
             scheduler_enabled=_bool_env("SCHEDULER_ENABLED", True),
             scheduler_poll_seconds=max(5, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4"),
+            openai_model=os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             backend_api_token=os.getenv("BACKEND_API_TOKEN"),
             backend_master_key=os.getenv("BACKEND_MASTER_KEY"),

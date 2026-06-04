@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .openai_models import DEFAULT_OPENAI_MODEL, normalize_openai_model
 
 
 class CamelModel(BaseModel):
@@ -33,8 +35,14 @@ class ScheduleRequest(CamelModel):
     notification_sound: str | None = Field(default=None, alias="notificationSound")
     custom_prompt: str = Field(default="", alias="customPrompt", max_length=2000)
     app_language: str = Field(default="ko", alias="appLanguage")
-    openai_model: str = Field(default="gpt-5.4", alias="openaiModel")
+    openai_model: str = Field(default=DEFAULT_OPENAI_MODEL, alias="openaiModel")
     max_history_count: int = Field(default=100, alias="maxHistoryCount", ge=10, le=10_000)
+    is_question_public: bool = Field(default=True, alias="isQuestionPublic")
+
+    @field_validator("openai_model")
+    @classmethod
+    def normalize_openai_model(cls, value: str) -> str:
+        return normalize_openai_model(value)
 
 
 class ScheduleResponse(CamelModel):
@@ -58,9 +66,27 @@ class BackendSettingsResponse(CamelModel):
     app_language: str = Field(alias="appLanguage")
     openai_model: str = Field(alias="openaiModel")
     max_history_count: int = Field(alias="maxHistoryCount")
+    is_question_public: bool = Field(alias="isQuestionPublic")
     openai_key_configured: bool = Field(alias="openaiKeyConfigured")
     next_due_at: str | None = Field(alias="nextDueAt")
     last_error: str | None = Field(alias="lastError")
+
+
+class CommunityQuestionResponse(CamelModel):
+    id: str
+    question: str
+    topic: str
+    difficulty_level: int = Field(alias="difficultyLevel")
+    status: str
+    source: str
+    created_at: str = Field(alias="createdAt")
+
+
+class CommunityQuestionsResponse(CamelModel):
+    questions: list[CommunityQuestionResponse]
+    total_count: int = Field(alias="totalCount")
+    limit: int
+    offset: int
 
 
 class APIStatusResponse(CamelModel):
@@ -75,6 +101,12 @@ class APIValidationResponse(CamelModel):
     openai_key_configured: bool = Field(alias="openaiKeyConfigured")
     is_valid: bool = Field(alias="isValid")
     openai_model: str = Field(alias="openaiModel")
+
+
+class OpenAIModelOptionResponse(CamelModel):
+    id: str
+    display_name: str = Field(alias="displayName")
+    supports_text_verbosity: bool = Field(alias="supportsTextVerbosity")
 
 
 class QuestionPayload(CamelModel):
