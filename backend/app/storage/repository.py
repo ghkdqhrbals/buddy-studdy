@@ -108,6 +108,11 @@ class Database:
     def is_postgres(self) -> bool:
         return bool(self.url)
 
+    def _boolean_default_sql(self, value: bool) -> str:
+        if self.engine.dialect.name == "postgresql":
+            return "TRUE" if value else "FALSE"
+        return "1" if value else "0"
+
     @contextmanager
     def connect(self) -> Iterator[Session]:
         with self._lock:
@@ -174,14 +179,20 @@ class Database:
                 schedule_columns = {column["name"] for column in inspector.get_columns("schedules")}
                 if "is_question_public" not in schedule_columns:
                     session.execute(
-                        text("ALTER TABLE schedules ADD COLUMN is_question_public BOOLEAN NOT NULL DEFAULT 1")
+                        text(
+                            "ALTER TABLE schedules ADD COLUMN is_question_public "
+                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
+                        )
                     )
 
             if "questions" in table_names:
                 question_columns = {column["name"] for column in inspector.get_columns("questions")}
                 if "is_public" not in question_columns:
                     session.execute(
-                        text("ALTER TABLE questions ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT 1")
+                        text(
+                            "ALTER TABLE questions ADD COLUMN is_public "
+                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
+                        )
                     )
 
             if "idx_questions_public" not in {idx["name"] for idx in inspector.get_indexes("questions")}:

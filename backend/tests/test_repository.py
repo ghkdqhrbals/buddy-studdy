@@ -1,9 +1,19 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 from app.storage.models import Device, Schedule, UTC
 from app.storage.repository import Database, transactional
+
+
+def test_boolean_default_sql_uses_database_dialect(db: Database):
+    assert db._boolean_default_sql(True) == "1"
+    assert db._boolean_default_sql(False) == "0"
+
+    db.engine = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    assert db._boolean_default_sql(True) == "TRUE"
+    assert db._boolean_default_sql(False) == "FALSE"
 
 
 def test_device_registration_and_authentication(db):
