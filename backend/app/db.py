@@ -7,7 +7,7 @@ across the backend package.
 
 from __future__ import annotations
 
-from .storage.models import as_utc_datetime, utc_now
+from .storage.models import as_utc_datetime, to_iso, utc_now
 from .storage.repository import Database, transactional
 
-__all__ = ["Database", "transactional", "as_utc_datetime", "utc_now"]
+__all__ = ["Database", "transactional", "as_utc_datetime", "to_iso", "utc_now"]
