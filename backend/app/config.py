@@ -32,6 +32,8 @@ class Settings:
     apns_team_id: str | None
     apns_bundle_id: str
     apns_env: str
+    enable_openapi_docs: bool
+    openapi_access_token: str | None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -65,6 +67,8 @@ class Settings:
             apns_team_id=os.getenv("APNS_TEAM_ID"),
             apns_bundle_id=os.getenv("APNS_BUNDLE_ID", "io.github.ghkdqhrbals.StudyMate"),
             apns_env=os.getenv("APNS_ENV", "production").strip().lower(),
+            enable_openapi_docs=_bool_env("ENABLE_OPENAPI_DOCS", False),
+            openapi_access_token=os.getenv("OPENAPI_ACCESS_TOKEN"),
         )
 
     @property

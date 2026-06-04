@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 def _docs_urls() -> tuple[str | None, str | None, str | None]:
-    if not settings.enable_openapi_docs:
+    if not getattr(settings, "enable_openapi_docs", False):
         return None, None, None
     return "/docs", "/redoc", "/openapi.json"
 
@@ -84,7 +84,9 @@ async def support_legacy_api_prefix(request: Request, call_next):
 
 @app.middleware("http")
 async def protect_openapi_docs(request: Request, call_next):
-    if request.url.path in {"/docs", "/redoc", "/openapi.json"} and settings.enable_openapi_docs:
+    if request.url.path in {"/docs", "/redoc", "/openapi.json"} and getattr(
+        settings, "enable_openapi_docs", False
+    ):
         if not settings.openapi_access_token:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
