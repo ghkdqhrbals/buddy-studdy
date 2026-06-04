@@ -7,6 +7,7 @@ import httpx
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from .config import Settings
 from .crypto import KeyCipher
@@ -40,6 +41,12 @@ scheduler: QuestionScheduler | None = None
 logger = logging.getLogger(__name__)
 
 
+def _docs_urls() -> tuple[str | None, str | None, str | None]:
+    if not settings.enable_openapi_docs:
+        return None, None, None
+    return "/docs", "/redoc", "/openapi.json"
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global scheduler
@@ -54,7 +61,42 @@ async def lifespan(_: FastAPI):
             await scheduler.stop()
 
 
-app = FastAPI(title="BuddyStuddy Push Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="BuddyStuddy Push Backend",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url=_docs_urls()[0],
+    redoc_url=_docs_urls()[1],
+    openapi_url=_docs_urls()[2],
+)
+
+
+@app.middleware("http")
+async def support_legacy_api_prefix(request: Request, call_next):
+    path = request.url.path
+    if path == "/v1":
+        request.scope["path"] = "/api/v1"
+    elif path.startswith("/v1/"):
+        request.scope["path"] = "/api/v1" + path[3:]
+    request.scope["raw_path"] = request.scope["path"].encode("utf-8")
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def protect_openapi_docs(request: Request, call_next):
+    if request.url.path in {"/docs", "/redoc", "/openapi.json"} and settings.enable_openapi_docs:
+        if not settings.openapi_access_token:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "OpenAPI access token is not configured."},
+            )
+        token = request.query_params.get("token") or request.headers.get("x-openapi-token")
+        if token != settings.openapi_access_token:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "OpenAPI access token is required."},
+            )
+    return await call_next(request)
 
 
 def verify_backend_token(authorization: str | None = Header(default=None)) -> None:
@@ -118,11 +160,12 @@ def stats_window(period: str, start_at: str | None, end_at: str | None) -> tuple
 
 
 @app.get("/health", response_model=HealthResponse)
+@app.get("/api/v1/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(ok=True)
 
 
-@app.get("/v1/openai/models", response_model=list[OpenAIModelOptionResponse])
+@app.get("/api/v1/openai/models", response_model=list[OpenAIModelOptionResponse])
 async def list_openai_models() -> list[OpenAIModelOptionResponse]:
     return [
         OpenAIModelOptionResponse(
@@ -135,7 +178,7 @@ async def list_openai_models() -> list[OpenAIModelOptionResponse]:
 
 
 @app.post(
-    "/v1/devices/register",
+    "/api/v1/devices/register",
     response_model=DeviceRegisterResponse,
 )
 async def register_device(payload: DeviceRegisterRequest) -> DeviceRegisterResponse:
@@ -149,7 +192,7 @@ async def register_device(payload: DeviceRegisterRequest) -> DeviceRegisterRespo
     return DeviceRegisterResponse(deviceId=device_id, clientSecret=client_secret)
 
 
-@app.put("/v1/devices/{device_id}/push-token", status_code=status.HTTP_204_NO_CONTENT)
+@app.put("/api/v1/devices/{device_id}/push-token", status_code=status.HTTP_204_NO_CONTENT)
 async def update_push_token(
     device_id: str,
     payload: PushTokenRequest,
@@ -164,7 +207,7 @@ async def update_push_token(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.put("/v1/devices/{device_id}/schedule", response_model=ScheduleResponse)
+@app.put("/api/v1/devices/{device_id}/schedule", response_model=ScheduleResponse)
 async def upsert_schedule(
     device_id: str,
     payload: ScheduleRequest,
@@ -193,7 +236,7 @@ async def upsert_schedule(
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
 
-@app.get("/v1/devices/{device_id}/settings", response_model=BackendSettingsResponse)
+@app.get("/api/v1/devices/{device_id}/settings", response_model=BackendSettingsResponse)
 async def get_settings(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -202,7 +245,7 @@ async def get_settings(
     return BackendSettingsResponse.model_validate(database.schedule_settings_response(database.get_schedule(device_id)))
 
 
-@app.put("/v1/devices/{device_id}/settings", response_model=ScheduleResponse)
+@app.put("/api/v1/devices/{device_id}/settings", response_model=ScheduleResponse)
 async def put_settings(
     device_id: str,
     payload: ScheduleRequest,
@@ -211,7 +254,7 @@ async def put_settings(
     return await upsert_schedule(device_id, payload, authenticated_device_id)
 
 
-@app.get("/v1/devices/{device_id}/api", response_model=APIStatusResponse)
+@app.get("/api/v1/devices/{device_id}/api", response_model=APIStatusResponse)
 async def get_api_status(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -220,7 +263,7 @@ async def get_api_status(
     return APIStatusResponse.model_validate(database.api_status_response(database.get_schedule(device_id)))
 
 
-@app.post("/v1/devices/{device_id}/api/validate", response_model=APIValidationResponse)
+@app.post("/api/v1/devices/{device_id}/api/validate", response_model=APIValidationResponse)
 async def validate_api_key(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -250,7 +293,7 @@ async def validate_api_key(
     )
 
 
-@app.get("/v1/devices/{device_id}/snapshot", response_model=BackendSnapshotResponse)
+@app.get("/api/v1/devices/{device_id}/snapshot", response_model=BackendSnapshotResponse)
 async def get_snapshot(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -271,7 +314,7 @@ async def get_snapshot(
     )
 
 
-@app.get("/v1/devices/{device_id}/records", response_model=RecordsPageResponse)
+@app.get("/api/v1/devices/{device_id}/records", response_model=RecordsPageResponse)
 async def list_records(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -283,7 +326,7 @@ async def list_records(
     return RecordsPageResponse(records=records, totalCount=total_count, limit=limit, offset=offset)
 
 
-@app.get("/v1/devices/{device_id}/stats", response_model=StatsResponse)
+@app.get("/api/v1/devices/{device_id}/stats", response_model=StatsResponse)
 async def get_stats(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -310,7 +353,7 @@ async def get_stats(
     )
 
 
-@app.get("/v1/devices/{device_id}/records/{record_id}", response_model=StudyRecordResponse)
+@app.get("/api/v1/devices/{device_id}/records/{record_id}", response_model=StudyRecordResponse)
 async def get_record(
     device_id: str,
     record_id: str,
@@ -323,7 +366,7 @@ async def get_record(
     return StudyRecordResponse.model_validate(record)
 
 
-@app.post("/v1/devices/{device_id}/questions", response_model=StudyRecordResponse)
+@app.post("/api/v1/devices/{device_id}/questions", response_model=StudyRecordResponse)
 async def create_question(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -362,7 +405,7 @@ async def create_question(
     return StudyRecordResponse.model_validate(record)
 
 
-@app.post("/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
+@app.post("/api/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
 async def answer_record(
     device_id: str,
     record_id: str,
@@ -404,7 +447,7 @@ async def answer_record(
     return StudyRecordResponse.model_validate(updated)
 
 
-@app.patch("/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
+@app.patch("/api/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
 async def save_record_answer(
     device_id: str,
     record_id: str,
@@ -426,7 +469,7 @@ async def save_record_answer(
     return StudyRecordResponse.model_validate(updated)
 
 
-@app.post("/v1/devices/{device_id}/records/{record_id}/skip", response_model=StudyRecordResponse)
+@app.post("/api/v1/devices/{device_id}/records/{record_id}/skip", response_model=StudyRecordResponse)
 async def skip_record(
     device_id: str,
     record_id: str,
@@ -439,7 +482,7 @@ async def skip_record(
     return StudyRecordResponse.model_validate(updated)
 
 
-@app.get("/v1/public/questions", response_model=CommunityQuestionsResponse)
+@app.get("/api/v1/public/questions", response_model=CommunityQuestionsResponse)
 async def list_public_questions(
     topic: str | None = Query(default=None, max_length=120),
     limit: int = Query(default=20, ge=1, le=100),
@@ -455,7 +498,7 @@ async def list_public_questions(
     return CommunityQuestionsResponse(questions=questions, totalCount=total, limit=limit, offset=offset)
 
 
-@app.delete("/v1/devices/{device_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/api/v1/devices/{device_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_record(
     device_id: str,
     record_id: str,
@@ -466,7 +509,7 @@ async def delete_record(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.delete("/v1/devices/{device_id}/records", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/api/v1/devices/{device_id}/records", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_records(
     device_id: str,
     authenticated_device_id: str = Depends(verify_device),
@@ -477,7 +520,7 @@ async def clear_records(
 
 
 @app.delete(
-    "/v1/devices/{device_id}",
+    "/api/v1/devices/{device_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
@@ -490,7 +533,7 @@ async def delete_device(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.post("/v1/admin/scheduler/run-once", dependencies=[Depends(verify_backend_token)])
+@app.post("/api/v1/admin/scheduler/run-once", dependencies=[Depends(verify_backend_token)])
 async def run_scheduler_once(request: Request) -> dict:
     if scheduler is not None:
         count = await scheduler.run_once()
