@@ -10,14 +10,14 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 - Never steal the user's current answer draft when a new question arrives.
 - Prefer compact, predictable controls over decorative UI.
 - Treat statistics as the core feedback loop.
-- Make cross-device sync understandable and recoverable.
+- Make backend sync understandable and recoverable.
 - Keep settings simple enough to scan repeatedly.
 
 ## Supported Platforms
 
 - iOS app built with SwiftUI `TabView`.
 - macOS menu bar app built with SwiftUI `MenuBarExtra`, currently kept in the repository with public release paused.
-- Shared model, storage, backend API, notification, and CloudKit sync services.
+- Shared model, storage, backend API, and notification services.
 
 ## Release Scope
 
@@ -63,14 +63,14 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 1. Study settings appear first.
 2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
-4. iCloud sync is shown as a single compact footer row at the bottom.
-5. Developer logs are hidden unless debugging mode is enabled.
+4. Question visibility is explicit and defaults to private.
+5. User-facing debugging logs are not provided.
 
 ### Sync And Push
 
 1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in PostgreSQL.
 2. The app keeps records only as an in-memory view cache during a running session. It must not persist study records in a local SQLite database.
-3. CloudKit snapshot sync remains for legacy cross-device continuity, including the regular OpenAI API key, but generated and graded records should flow through the backend.
+3. iCloud/CloudKit sync is no longer exposed or enabled; backend persistence is the active sync path.
 4. Only the regular OpenAI API key is supported; admin keys are not supported.
 5. The app does not call OpenAI directly. API-key validation, question generation, and grading go through `https://api.ghkdqhrbals.org`.
 6. Server-scheduled APNs delivery is handled by the Python backend. It generates each due question, stores it before push delivery, then sends the APNs alert.
@@ -87,14 +87,13 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 
 ## Non-Goals
 
-- Guaranteeing real-time push delivery independent of iCloud/APNs behavior.
+- Guaranteeing real-time push delivery independent of APNs behavior.
 - Storing OpenAI billing balance locally as an authoritative source.
 - Supporting more app languages than Korean and English in the current version.
 - Calling OpenAI directly from the iOS or macOS app.
 
 ## Current UX Backlog
 
-- Add a clearer sync diagnostics panel for iCloud account, quota, schema, and permission failures.
 - Add optional topic merge review so users can rename or split automatically grouped topics.
 - Add a compact "next best question" recommendation based on topic range uncertainty.
 - Add export for records and topic stats.

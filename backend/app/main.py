@@ -529,7 +529,7 @@ async def create_question(
         difficulty_level=schedule["difficulty_level"],
         question=generated.question,
         expected_answer_hint=generated.expected_answer_hint,
-        is_public=bool(schedule.get("is_question_public", True)),
+        is_public=bool(schedule.get("is_question_public", False)),
         source="manual",
     )
     database.defer_schedule(device_id, minutes=schedule["interval_minutes"])
