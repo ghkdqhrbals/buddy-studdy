@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import timedelta
+import json
+import time
 
 import httpx
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from starlette.concurrency import iterate_in_threadpool
 
 from .config import Settings
 from .crypto import KeyCipher
 from .db import Database, as_utc_datetime, utc_now
+from .request_logging import build_error_response_log, build_request_log, build_response_log
 from .models import (
     APIStatusResponse,
     APIValidationResponse,
@@ -76,6 +80,51 @@ app = FastAPI(
     redoc_url=_docs_urls()[1],
     openapi_url=_docs_urls()[2],
 )
+
+
+@app.middleware("http")
+async def log_api_request_response(request: Request, call_next):
+    started = time.perf_counter()
+    request_body = await request.body()
+
+    async def receive():
+        return {"type": "http.request", "body": request_body, "more_body": False}
+
+    request._receive = receive  # noqa: SLF001 - Starlette middleware needs to replay the consumed body.
+    logger.info(
+        "api_request %s",
+        json.dumps(build_request_log(request, request_body), ensure_ascii=False, separators=(",", ":")),
+    )
+
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "api_response %s",
+            json.dumps(
+                build_error_response_log(request, error, duration_ms),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+        raise
+
+    response_body = b""
+    async for chunk in response.body_iterator:
+        response_body += chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8")
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "api_response %s",
+        json.dumps(
+            build_response_log(request, response, response_body, duration_ms),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+    response.body_iterator = iterate_in_threadpool(iter([response_body]))
+    return response
 
 
 @app.middleware("http")
