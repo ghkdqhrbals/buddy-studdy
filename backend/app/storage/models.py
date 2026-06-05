@@ -19,6 +19,8 @@ class Device(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(191), unique=True, nullable=False, index=True)
     client_secret_hash: Mapped[str] = mapped_column(String(191), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    google_session_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     apns_token: Mapped[str] = mapped_column(String(191), nullable=False)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     apns_environment: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -41,6 +43,34 @@ class Device(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    user: Mapped["User | None"] = relationship("User", back_populates="devices")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    google_sub: Mapped[str] = mapped_column(String(191), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    bio: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    devices: Mapped[list[Device]] = relationship("Device", back_populates="user")
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    question_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="SET NULL"), nullable=True, index=True)
+    reporter_device_id: Mapped[str | None] = mapped_column(String(191), nullable=True, index=True)
+    reporter_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason: Mapped[str] = mapped_column(String(120), nullable=False)
+    message: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
 class Schedule(Base):
@@ -62,7 +92,7 @@ class Schedule(Base):
     app_language: Mapped[str] = mapped_column(String(16), nullable=False, default="ko")
     openai_model: Mapped[str] = mapped_column(String(64), nullable=False, default=DEFAULT_OPENAI_MODEL)
     max_history_count: Mapped[int] = mapped_column(nullable=False, default=100)
-    is_question_public: Mapped[bool] = mapped_column(nullable=False, default=True)
+    is_question_public: Mapped[bool] = mapped_column(nullable=False, default=False)
     openai_api_key_cipher: Mapped[str | None] = mapped_column(nullable=True)
     next_due_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -101,7 +131,7 @@ class Question(Base):
     skipped_at: Mapped[datetime | None] = mapped_column(nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="scheduled")
-    is_public: Mapped[bool] = mapped_column(nullable=False, default=True)
+    is_public: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 

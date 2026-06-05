@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.storage.models import Device, Schedule, UTC
+from app.storage.models import Device, Schedule, UTC, as_utc_datetime
 from app.storage.repository import Database, transactional
 
 
@@ -135,6 +135,90 @@ def test_questions_and_grading_flow(db: Database):
     assert graded["gradingResult"]["score"] == 92
 
 
+def test_google_profile_is_attached_to_public_questions(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-profile",
+        platform="ios",
+        apns_environment="production",
+        language="ko",
+        timezone="Asia/Seoul",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    assert not db.device_has_user(device_id)
+
+    profile = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="google-sub-1",
+        email="tester@example.com",
+        display_name="테스터",
+        avatar_url="https://example.com/avatar.png",
+    )
+    assert profile is not None
+    assert profile["displayName"] == "테스터"
+    assert db.device_has_user(device_id)
+    assert db.get_device_profile(device_id) is not None
+
+    created = db.create_question(
+        device_id=device_id,
+        topic="SwiftUI",
+        difficulty_level=5,
+        question="ViewBuilder는 언제 쓰나요?",
+        source="manual",
+        is_public=True,
+    )
+    questions, total = db.list_public_questions(exclude_device_id="", limit=10, offset=0)
+    assert total == 1
+    assert questions[0]["id"] == created["id"]
+    assert questions[0]["author"]["displayName"] == "테스터"
+
+    with db.connect() as session:
+        device = session.query(Device).filter(Device.device_id == device_id).first()
+        assert device is not None
+        assert device.google_session_expires_at is not None
+        assert as_utc_datetime(device.google_session_expires_at) > datetime.now(UTC) + timedelta(days=89)
+        device.google_session_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert not db.device_has_user(device_id)
+    assert db.get_device_profile(device_id) is None
+
+
+def test_report_question_is_persisted(db: Database):
+    reporter_id, reporter_secret = db.register_device(
+        apns_token="token-reporter",
+        platform="ios",
+        apns_environment="production",
+        language="ko",
+        timezone="Asia/Seoul",
+    )
+    author_id, _ = db.register_device(
+        apns_token="token-author",
+        platform="ios",
+        apns_environment="production",
+        language="ko",
+        timezone="Asia/Seoul",
+    )
+    assert db.authenticate_device(reporter_id, reporter_secret)
+
+    created = db.create_question(
+        device_id=author_id,
+        topic="Security",
+        difficulty_level=4,
+        question="Bad public question",
+        source="manual",
+        is_public=True,
+    )
+
+    report = db.create_report(
+        reporter_device_id=reporter_id,
+        question_id=created["id"],
+        reason="부적절한 질문",
+        message="확인 필요",
+    )
+    assert report is not None
+    assert report["reason"] == "부적절한 질문"
+    assert report["reporterDeviceId"] == reporter_id
+
+
 def test_pending_count_tracks_only_unanswered_or_unguarded_questions(db: Database):
     device_id, client_secret = db.register_device(
         apns_token="token-7",
@@ -247,6 +331,8 @@ def test_due_schedules(db: Database):
     due_rows = db.due_schedules(limit=10)
     assert len(due_rows) == 1
     assert due_rows[0]["device_id"] == device_id
+    assert due_rows[0]["next_due_at"] is not None
+    assert due_rows[0]["next_due_at"] <= datetime.now(UTC)
 
 
 def test_transactional_context_rolls_back_on_exception(db: Database):
@@ -583,6 +669,18 @@ def test_public_questions_filters_and_paginates(db: Database):
     )
     assert db.authenticate_device(device_a, secret_a)
     assert db.authenticate_device(device_b, secret_b)
+    db.link_google_user_to_device(
+        device_id=device_a,
+        google_sub="public-author-a",
+        email="author-a@example.com",
+        display_name="Author A",
+    )
+    db.link_google_user_to_device(
+        device_id=device_b,
+        google_sub="public-author-b",
+        email="author-b@example.com",
+        display_name="Author B",
+    )
 
     hidden = db.create_question(
         device_id=device_a,
@@ -608,6 +706,21 @@ def test_public_questions_filters_and_paginates(db: Database):
         expected_answer_hint="python",
         is_public=True,
     )
+    unlinked_device, _ = db.register_device(
+        apns_token="token-unlinked-public",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    unlinked_public = db.create_question(
+        device_id=unlinked_device,
+        topic="Swift",
+        difficulty_level=6,
+        question="Unlinked public question",
+        expected_answer_hint="swift",
+        is_public=True,
+    )
 
     # Excluding device A should hide A's own public question.
     questions, total = db.list_public_questions(exclude_device_id=device_a, limit=20, offset=0)
@@ -631,3 +744,4 @@ def test_public_questions_filters_and_paginates(db: Database):
     assert len(page_one) == 1
     assert len(page_two) == 1
     assert page_one[0]["id"] != page_two[0]["id"]
+    assert unlinked_public["id"] not in {page_one[0]["id"], page_two[0]["id"]}

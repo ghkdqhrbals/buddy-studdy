@@ -220,15 +220,83 @@ enum NotificationSoundOption: String, CaseIterable, Codable, Identifiable {
 }
 
 enum AppTab: Int, Hashable {
+    case home
     case study
     case settings
     case records
     case statistics
 }
 
+struct HomeStudyRoute: Identifiable, Hashable {
+    let id = UUID()
+    var categoryID: String?
+}
+
 struct FocusedRecordRequest: Equatable {
     var token = UUID()
     var recordID: String
+}
+
+struct StudyCategory: Codable, Equatable, Identifiable {
+    var id: String
+    var title: String
+    var difficulty: Difficulty
+    var customPrompt: String
+    var openAIModel: String
+    var createdAt: Date
+
+    init(
+        id: String = UUID().uuidString,
+        title: String,
+        difficulty: Difficulty = .beginner,
+        customPrompt: String = StudySettings.defaultCustomPrompt,
+        openAIModel: String = StudySettings.defaultOpenAIModel,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.difficulty = difficulty
+        self.customPrompt = customPrompt
+        self.openAIModel = openAIModel
+        self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case difficulty
+        case customPrompt
+        case openAIModel
+        case createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        title = try container.decode(String.self, forKey: .title)
+        difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? .beginner
+        customPrompt = try container.decodeIfPresent(String.self, forKey: .customPrompt) ?? StudySettings.defaultCustomPrompt
+        openAIModel = try container.decodeIfPresent(String.self, forKey: .openAIModel) ?? StudySettings.defaultOpenAIModel
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+
+    var normalizedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var normalizedCustomPrompt: String {
+        let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? StudySettings.defaultCustomPrompt : trimmed
+    }
+
+    var sanitizedOpenAIModel: String {
+        let trimmedModel = openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard OpenAIModelOption.all.contains(where: { $0.id == trimmedModel }) else {
+            return StudySettings.defaultOpenAIModel
+        }
+
+        return trimmedModel
+    }
 }
 
 extension AppLanguage {
@@ -244,6 +312,30 @@ extension AppLanguage {
 
 struct StudySettings: Codable, Equatable {
     static let defaultOpenAIModel = "gpt-5.4"
+    static let fallbackTopic = "내 학습"
+    static let fallbackTopicEnglish = "My Study"
+    static let defaultCustomPrompt = "짧고 명확하게 질문하세요. 사용자가 답하기 좋은 한 문제만 내세요."
+    private static let fallbackCategoryCreatedAt = Date(timeIntervalSince1970: 0)
+    private static let fallbackTopicIDByLanguage: [AppLanguage: String] = [
+        .korean: "builtin-study-category-default-ko",
+        .english: "builtin-study-category-default-en"
+    ]
+
+    static func fallbackTopic(for appLanguage: AppLanguage) -> String {
+        appLanguage == .english ? fallbackTopicEnglish : fallbackTopic
+    }
+
+    static func fallbackTopicID(for appLanguage: AppLanguage) -> String {
+        fallbackTopicIDByLanguage[appLanguage] ?? "builtin-study-category-default"
+    }
+
+    static func deterministicFallbackCategoryID(for appLanguage: AppLanguage) -> String {
+        fallbackTopicID(for: appLanguage)
+    }
+
+    static func localizedFallbackTopic(for appLanguage: AppLanguage) -> String {
+        fallbackTopic(for: appLanguage)
+    }
 
     var topic: String
     var difficulty: Difficulty
@@ -254,6 +346,9 @@ struct StudySettings: Codable, Equatable {
     var customPrompt: String
     var intervalMinutes: Int
     var maxHistoryCount: Int
+    var isQuestionPublic: Bool
+    var studyCategories: [StudyCategory]
+    var selectedStudyCategoryID: String?
 
     init(
         topic: String,
@@ -264,17 +359,44 @@ struct StudySettings: Codable, Equatable {
         notificationSound: NotificationSoundOption = .defaultSound,
         customPrompt: String,
         intervalMinutes: Int,
-        maxHistoryCount: Int = 100
+        maxHistoryCount: Int = 100,
+        isQuestionPublic: Bool = false,
+        studyCategories: [StudyCategory] = [],
+        selectedStudyCategoryID: String? = nil
     ) {
-        self.topic = topic
-        self.difficulty = difficulty
+        let languageFallback = Self.fallbackTopic(for: appLanguage)
+        let resolvedTopic = Self.normalizedString(topic, fallback: languageFallback)
+        let categoryFallback = studyCategories.isEmpty ? languageFallback : languageFallback
+        let normalizedCategories = Self.normalizedCategories(
+            categories: studyCategories,
+            fallbackTopic: categoryFallback,
+            fallbackTitle: languageFallback
+        )
+        let activeCategoryID = Self.activeCategoryID(
+            selected: selectedStudyCategoryID,
+            in: normalizedCategories
+        )
+        let effectiveTopic = Self.resolveActiveTopic(
+            topic: resolvedTopic,
+            categories: normalizedCategories,
+            selectedCategoryID: activeCategoryID,
+            fallbackTitle: Self.localizedFallbackTopic(for: appLanguage)
+        )
+
+        let activeCategory = normalizedCategories.first { $0.id == activeCategoryID }
+
+        self.topic = effectiveTopic
+        self.difficulty = activeCategory?.difficulty ?? difficulty
         self.appLanguage = appLanguage
         self.language = language
-        self.openAIModel = openAIModel
+        self.openAIModel = activeCategory?.sanitizedOpenAIModel ?? openAIModel
         self.notificationSound = notificationSound
-        self.customPrompt = customPrompt
+        self.customPrompt = activeCategory?.normalizedCustomPrompt ?? customPrompt
         self.intervalMinutes = intervalMinutes
         self.maxHistoryCount = maxHistoryCount
+        self.isQuestionPublic = isQuestionPublic
+        self.studyCategories = normalizedCategories
+        self.selectedStudyCategoryID = activeCategoryID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -287,27 +409,77 @@ struct StudySettings: Codable, Equatable {
         case customPrompt
         case intervalMinutes
         case maxHistoryCount
+        case isQuestionPublic
+        case studyCategories
+        case selectedStudyCategoryID
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        topic = try container.decode(String.self, forKey: .topic)
-        difficulty = try container.decode(Difficulty.self, forKey: .difficulty)
+        let rawTopic = try container.decode(String.self, forKey: .topic)
+        let decodedDifficulty = try container.decode(Difficulty.self, forKey: .difficulty)
         appLanguage = try container.decodeIfPresent(AppLanguage.self, forKey: .appLanguage) ?? .korean
         language = try container.decodeIfPresent(StudyLanguage.self, forKey: .language) ?? .korean
         openAIModel = try container.decodeIfPresent(String.self, forKey: .openAIModel) ?? Self.defaultOpenAIModel
         notificationSound = try container.decodeIfPresent(NotificationSoundOption.self, forKey: .notificationSound) ?? .defaultSound
-        customPrompt = try container.decode(String.self, forKey: .customPrompt)
+        let decodedCustomPrompt = try container.decode(String.self, forKey: .customPrompt)
         intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? 100
+        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? false
+
+        let decodedCategories = try container.decodeIfPresent([StudyCategory].self, forKey: .studyCategories) ?? []
+        let resolvedTopic = Self.normalizedString(rawTopic, fallback: Self.fallbackTopic(for: appLanguage))
+        let languageFallback = Self.fallbackTopic(for: appLanguage)
+        let categoryFallback = decodedCategories.isEmpty ? languageFallback : languageFallback
+        let decodedSelectedID = try container.decodeIfPresent(String.self, forKey: .selectedStudyCategoryID)
+        let resolvedCategories = Self.normalizedCategories(
+            categories: decodedCategories,
+            fallbackTopic: categoryFallback,
+            fallbackTitle: languageFallback
+        )
+        let selectedID = Self.activeCategoryID(
+            selected: decodedSelectedID,
+            in: resolvedCategories
+        )
+
+        let activeCategory = resolvedCategories.first { $0.id == selectedID }
+
+        topic = Self.resolveActiveTopic(
+            topic: resolvedTopic,
+            categories: resolvedCategories,
+            selectedCategoryID: selectedID,
+            fallbackTitle: languageFallback
+        )
+        difficulty = activeCategory?.difficulty ?? decodedDifficulty
+        customPrompt = activeCategory?.normalizedCustomPrompt ?? decodedCustomPrompt
+        studyCategories = resolvedCategories
+        selectedStudyCategoryID = selectedID
     }
 
     static let `default` = StudySettings(
-        topic: "Swift",
+        topic: fallbackTopic(for: .korean),
         difficulty: .beginner,
-        customPrompt: "짧고 명확하게 질문하세요. 사용자가 답하기 좋은 한 문제만 내세요.",
+        customPrompt: defaultCustomPrompt,
         intervalMinutes: 15
     )
+
+    func category(for id: String?) -> StudyCategory? {
+        guard let id else {
+            return nil
+        }
+
+        return studyCategories.first { $0.id == id }
+    }
+
+    var activeCategory: StudyCategory? {
+        category(for: selectedStudyCategoryID)
+    }
+
+    var effectiveTopic: String {
+        activeCategory?.normalizedTitle.isEmpty == true
+            ? Self.fallbackTopic(for: appLanguage)
+            : activeCategory?.normalizedTitle ?? topic
+    }
 
     var sanitizedIntervalMinutes: Int {
         min(max(intervalMinutes, 1), 240)
@@ -319,11 +491,191 @@ struct StudySettings: Codable, Equatable {
 
     var sanitizedOpenAIModel: String {
         let trimmedModel = openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard OpenAIModelOption.supportedIDs.contains(trimmedModel) else {
+        guard OpenAIModelOption.all.contains(where: { $0.id == trimmedModel }) else {
             return Self.defaultOpenAIModel
         }
 
         return trimmedModel
+    }
+
+    static func normalizedCategories(
+        categories: [StudyCategory],
+        fallbackTopic: String,
+        fallbackTitle: String
+    ) -> [StudyCategory] {
+        let fallback = normalizedString(fallbackTopic, fallback: fallbackTitle)
+        var result: [StudyCategory] = []
+        var seen: Set<String> = []
+        let fallbackKey = normalizedCategoryKey(fallback)
+
+        for category in categories {
+            let title = normalizedString(category.title, fallback: "")
+            guard !title.isEmpty else {
+                continue
+            }
+
+            let key = Self.normalizedCategoryKey(title)
+            guard key != fallbackKey else {
+                continue
+            }
+
+            guard !seen.contains(key) else {
+                continue
+            }
+
+            seen.insert(key)
+            result.append(
+                StudyCategory(
+                    id: category.id.isEmpty ? UUID().uuidString : category.id,
+                    title: title,
+                    difficulty: category.difficulty,
+                    customPrompt: category.normalizedCustomPrompt,
+                    openAIModel: category.sanitizedOpenAIModel,
+                    createdAt: category.createdAt
+                )
+            )
+        }
+
+        return result
+    }
+
+    static func activeCategoryID(
+        selected: String?,
+        in categories: [StudyCategory]
+    ) -> String? {
+        guard let selected,
+              categories.contains(where: { $0.id == selected }) else {
+            return nil
+        }
+
+        return selected
+    }
+
+    static func resolveActiveTopic(
+        topic: String,
+        categories: [StudyCategory],
+        selectedCategoryID: String?,
+        fallbackTitle: String
+    ) -> String {
+        let normalizedTopic = normalizedString(topic, fallback: fallbackTitle)
+        let selectedCategoryTitle = categories
+            .first { $0.id == selectedCategoryID }?
+            .normalizedTitle
+
+        let fallback = normalizedCategoryTitle(
+            from: normalizedTopic,
+            fallbackTitle: fallbackTitle
+        )
+
+        if let selectedCategoryTitle, !selectedCategoryTitle.isEmpty {
+            return selectedCategoryTitle
+        }
+
+        return fallback
+    }
+
+    private static func normalizedCategoryTitle(
+        from text: String,
+        fallbackTitle: String
+    ) -> String {
+        normalizedString(text, fallback: fallbackTitle)
+    }
+
+    private static func normalizedString(_ text: String, fallback: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private static func normalizedCategoryKey(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
+    }
+
+    func withStudyCategories(_ categories: [StudyCategory], selectedID: String? = nil) -> StudySettings {
+        let fallbackTitle = Self.fallbackTopic(for: appLanguage)
+        let categoryFallback = fallbackTitle
+        let resolved = Self.normalizedCategories(
+            categories: categories,
+            fallbackTopic: categoryFallback,
+            fallbackTitle: fallbackTitle
+        )
+        let resolvedSelectedID = Self.activeCategoryID(selected: selectedID, in: resolved)
+        let resolvedTopic = Self.resolveActiveTopic(
+            topic: topic,
+            categories: resolved,
+            selectedCategoryID: resolvedSelectedID,
+            fallbackTitle: fallbackTitle
+        )
+        let activeCategory = resolved.first { $0.id == resolvedSelectedID }
+
+        return StudySettings(
+            topic: resolvedTopic,
+            difficulty: activeCategory?.difficulty ?? difficulty,
+            appLanguage: appLanguage,
+            language: language,
+            openAIModel: activeCategory?.sanitizedOpenAIModel ?? openAIModel,
+            notificationSound: notificationSound,
+            customPrompt: activeCategory?.normalizedCustomPrompt ?? customPrompt,
+            intervalMinutes: intervalMinutes,
+            maxHistoryCount: maxHistoryCount,
+            isQuestionPublic: isQuestionPublic,
+            studyCategories: resolved,
+            selectedStudyCategoryID: resolvedSelectedID
+        )
+    }
+
+    func withSelectedCategoryID(_ categoryID: String?) -> StudySettings {
+        let fallbackTitle = Self.fallbackTopic(for: appLanguage)
+        let categoryFallback = fallbackTitle
+        let normalizedCategories = Self.normalizedCategories(
+            categories: studyCategories,
+            fallbackTopic: categoryFallback,
+            fallbackTitle: fallbackTitle
+        )
+        let resolvedCategoryID = Self.activeCategoryID(selected: categoryID, in: normalizedCategories)
+        let resolvedTopic = Self.resolveActiveTopic(
+            topic: topic,
+            categories: normalizedCategories,
+            selectedCategoryID: resolvedCategoryID,
+            fallbackTitle: fallbackTitle
+        )
+        let activeCategory = normalizedCategories.first { $0.id == resolvedCategoryID }
+
+        return StudySettings(
+            topic: resolvedTopic,
+            difficulty: activeCategory?.difficulty ?? difficulty,
+            appLanguage: appLanguage,
+            language: language,
+            openAIModel: activeCategory?.sanitizedOpenAIModel ?? openAIModel,
+            notificationSound: notificationSound,
+            customPrompt: activeCategory?.normalizedCustomPrompt ?? customPrompt,
+            intervalMinutes: intervalMinutes,
+            maxHistoryCount: maxHistoryCount,
+            isQuestionPublic: isQuestionPublic,
+            studyCategories: normalizedCategories,
+            selectedStudyCategoryID: resolvedCategoryID
+        )
+    }
+
+    func withQuestionPrivacy(_ isQuestionPublic: Bool) -> StudySettings {
+        StudySettings(
+            topic: topic,
+            difficulty: difficulty,
+            appLanguage: appLanguage,
+            language: language,
+            openAIModel: openAIModel,
+            notificationSound: notificationSound,
+            customPrompt: customPrompt,
+            intervalMinutes: intervalMinutes,
+            maxHistoryCount: maxHistoryCount,
+            isQuestionPublic: isQuestionPublic,
+            studyCategories: studyCategories,
+            selectedStudyCategoryID: selectedStudyCategoryID
+        )
     }
 }
 
@@ -333,12 +685,20 @@ struct OpenAIModelOption: Identifiable, Equatable {
     var supportsTextVerbosity: Bool
 
     static let all: [OpenAIModelOption] = [
-        OpenAIModelOption(id: "gpt-5.4", displayName: "GPT-5.4", supportsTextVerbosity: true)
+        OpenAIModelOption(id: "gpt-5.5", displayName: "GPT-5.5", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5.4", displayName: "GPT-5.4", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5.2", displayName: "GPT-5.2", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5.2-pro", displayName: "GPT-5.2 pro", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5.1", displayName: "GPT-5.1", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5", displayName: "GPT-5", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5-mini", displayName: "GPT-5 mini", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-5-nano", displayName: "GPT-5 nano", supportsTextVerbosity: true),
+        OpenAIModelOption(id: "gpt-4.1", displayName: "GPT-4.1", supportsTextVerbosity: false),
+        OpenAIModelOption(id: "gpt-4.1-mini", displayName: "GPT-4.1 mini", supportsTextVerbosity: false),
+        OpenAIModelOption(id: "gpt-4.1-nano", displayName: "GPT-4.1 nano", supportsTextVerbosity: false),
+        OpenAIModelOption(id: "gpt-4o", displayName: "GPT-4o", supportsTextVerbosity: false),
+        OpenAIModelOption(id: "gpt-4o-mini", displayName: "GPT-4o mini", supportsTextVerbosity: false),
     ]
-
-    static var supportedIDs: Set<String> {
-        Set(all.map(\.id))
-    }
 
     static func supportsTextVerbosity(modelID: String) -> Bool {
         all.first { $0.id == modelID }?.supportsTextVerbosity ?? false
@@ -603,6 +963,7 @@ struct CloudSyncSnapshot: Codable, Equatable {
     var schemaVersion: Int
     var updatedAt: Date
     var apiKey: String?
+    var apiKeyUpdatedAt: Date?
     var settings: StudySettings
     var currentQuestion: QuestionItem?
     var questionHistory: [QuestionItem]
@@ -618,6 +979,7 @@ struct CloudSyncSnapshot: Codable, Equatable {
         case schemaVersion
         case updatedAt
         case apiKey
+        case apiKeyUpdatedAt
         case settings
         case currentQuestion
         case questionHistory
@@ -631,9 +993,10 @@ struct CloudSyncSnapshot: Codable, Equatable {
     }
 
     init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         updatedAt: Date,
         apiKey: String? = nil,
+        apiKeyUpdatedAt: Date? = nil,
         settings: StudySettings,
         currentQuestion: QuestionItem?,
         questionHistory: [QuestionItem],
@@ -648,6 +1011,7 @@ struct CloudSyncSnapshot: Codable, Equatable {
         self.schemaVersion = schemaVersion
         self.updatedAt = updatedAt
         self.apiKey = apiKey
+        self.apiKeyUpdatedAt = apiKeyUpdatedAt
         self.settings = settings
         self.currentQuestion = currentQuestion
         self.questionHistory = questionHistory
@@ -666,6 +1030,7 @@ struct CloudSyncSnapshot: Codable, Equatable {
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey)
+        apiKeyUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .apiKeyUpdatedAt)
         settings = try container.decode(StudySettings.self, forKey: .settings)
         currentQuestion = try container.decodeIfPresent(QuestionItem.self, forKey: .currentQuestion)
         questionHistory = try container.decodeIfPresent([QuestionItem].self, forKey: .questionHistory) ?? []
@@ -713,6 +1078,69 @@ struct AppLogPage: Equatable {
     }
 }
 
+struct APITrafficLogEntry: Equatable, Identifiable {
+    var id: String
+    var createdAt: Date
+    var method: String
+    var url: String
+    var statusCode: Int?
+    var durationMS: Double
+    var requestHeaders: String
+    var requestBody: String
+    var responseBody: String
+    var error: String?
+    var isError: Bool
+
+    init(
+        id: String = UUID().uuidString,
+        createdAt: Date = Date(),
+        method: String,
+        url: String,
+        statusCode: Int? = nil,
+        durationMS: Double = 0,
+        requestHeaders: String = "",
+        requestBody: String = "",
+        responseBody: String = "",
+        error: String? = nil,
+        isError: Bool = false
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.method = method
+        self.url = url
+        self.statusCode = statusCode
+        self.durationMS = durationMS
+        self.requestHeaders = requestHeaders
+        self.requestBody = requestBody
+        self.responseBody = responseBody
+        self.error = error
+        self.isError = isError
+    }
+}
+
+extension APITrafficLogEntry {
+    var headerSummary: String {
+        statusCode.map { "\(method) \(url) [\($0)]" } ?? "\(method) \(url)"
+    }
+
+    var shortError: String {
+        error ?? "No error"
+    }
+
+    var durationText: String {
+        String(format: "%.0fms", durationMS)
+    }
+
+    var compactSummary: String {
+        "\(headerSummary) in \(durationText)"
+    }
+}
+
+enum APITrafficNotification {
+    static let didReceiveLog = Notification.Name("studyAPITrafficDidReceiveLog")
+    static let userInfoKey = "studyAPITrafficLogEntry"
+}
+
 enum LogLevel: String, Codable, CaseIterable {
     case info
     case warning
@@ -753,9 +1181,13 @@ struct AppStrings {
     }
 
     var tabStudy: String { text("학습", "Study") }
+    var tabHome: String { text("홈", "Home") }
     var tabSettings: String { text("설정", "Settings") }
     var tabRecords: String { text("기록", "Records") }
     var tabStatistics: String { text("통계", "Stats") }
+    func homePath(_ category: String) -> String {
+        category
+    }
     var onboardingTitle: String { text("BuddyStuddy 시작하기", "Set Up BuddyStuddy") }
     var onboardingSubtitle: String {
         text(
@@ -778,6 +1210,8 @@ struct AppStrings {
             "The API key is stored in this Mac's app settings. You can change it later in Settings > Secrets."
         )
     }
+    var onboardingCreateAPIKeyHelp: String { text("OpenAI 키가 없다면", "If you don't have an OpenAI key") }
+    var onboardingCreateAPIKeyAction: String { text("여기서 키 발급하기", "Create a key here") }
     var onboardingStart: String { text("시작하기", "Start") }
     var onboardingSkip: String { text("나중에 설정", "Set Up Later") }
     var onboardingCompleted: String { text("온보딩을 완료했습니다.", "Onboarding complete.") }
@@ -804,7 +1238,7 @@ struct AppStrings {
     }
     var reply: String { text("답장", "Reply") }
     var send: String { text("보내기", "Send") }
-    var answerPlaceholder: String { text("답변 입력", "Enter answer") }
+    var answerPlaceholder: String { text("답변작성", "Write answer") }
     var otherAnswer: String { text("다른 응답", "Other Answer") }
     var ignore: String { text("무시", "Ignore") }
     var openStudy: String { text("학습 열기...", "Open Study...") }
@@ -824,13 +1258,24 @@ struct AppStrings {
 
     var checking: String { text("확인 중", "Checking") }
     var save: String { text("저장", "Save") }
+    var cancel: String { text("취소", "Cancel") }
+    var pasteboardChecking: String { text("클립보드에서 키를 확인 중입니다.", "Checking clipboard for API key.") }
     var saved: String { text("저장됨", "Saved") }
     var done: String { text("완료", "Done") }
+    var add: String { text("추가", "Add") }
+    var refresh: String { text("새로고침", "Refresh") }
     var refreshed: String { text("새로고침했습니다.", "Refreshed.") }
     var apiKey: String { text("API 키", "API key") }
     var openAIAPIKey: String { text("OpenAI API 키", "OpenAI API key") }
     var hide: String { text("숨기기", "Hide") }
     var show: String { text("보기", "Show") }
+    var openAIAPIKeyCopied: String {
+        text("OpenAI API 키를 붙여넣었습니다.", "OpenAI API key pasted.")
+    }
+
+    var openAIAPIKeyMissing: String {
+        text("클립보드에 OpenAI 키가 없습니다.", "No OpenAI key in clipboard.")
+    }
     var apiKeyEmpty: String { text("API 키를 입력하세요.", "Enter an API key.") }
     var apiKeyCheck: String { text("API 키를 확인하세요.", "Check the API key.") }
     var apiKeyEmptyDetailed: String { text("API 키가 비어 있습니다. Settings > Secrets에서 OpenAI API 키를 입력하세요.", "API key is empty. Enter an OpenAI API key in Settings > Secrets.") }
@@ -977,6 +1422,7 @@ struct AppStrings {
     var automaticallyCheckForUpdates: String { text("자동으로 업데이트 확인", "Automatically check for updates") }
     var automaticallyDownloadUpdates: String { text("가능하면 자동으로 다운로드", "Automatically download updates when available") }
     var checkForUpdates: String { text("업데이트 확인...", "Check for Updates...") }
+    var edit: String { text("편집", "Edit") }
     var updateHelp: String {
         text("GitHub Releases에 새 DMG가 올라오면 BuddyStuddy가 업데이트를 안내합니다.", "BuddyStuddy checks GitHub Releases and offers updates when a new DMG is available.")
     }
@@ -998,6 +1444,27 @@ struct AppStrings {
         text("앱 제거 실패: \(reason)", "Uninstall failed: \(reason)")
     }
     var studySettings: String { text("학습 설정", "Study Settings") }
+    var studyCategories: String { text("내 학습", "My Studies") }
+    var editCategories: String { text("학습 편집", "Edit Studies") }
+    var studyCategory: String { text("학습", "Study") }
+    var newStudyCategory: String { text("학습 추가", "Add Study") }
+    var editStudyCategory: String { text("학습 편집", "Edit Study") }
+    var activeStudy: String { text("활성 학습", "Active Study") }
+    var activateStudy: String { text("활성화", "Activate") }
+    var enterStudyTopic: String { text("선택한 학습 시작", "Open selected study") }
+    var noStudyCategoryHelp: String { text("학습을 하나 이상 추가하세요.", "Add at least one study.") }
+    var currentStudyCategory: String { text("현재 학습", "Current Study") }
+    var studyProfileHelp: String {
+        text("각 학습마다 주제, 난이도, 프롬프트를 따로 저장합니다. 질문 간격은 설정에서 공통으로 관리합니다.", "Each study keeps its own topic, difficulty, and prompt. Question interval is shared in Settings.")
+    }
+    var editInHome: String { text("홈에서 관리", "Manage in Home") }
+    var questionVisibility: String { text("질문 공개", "Question Visibility") }
+    var questionVisibilityHelp: String {
+        text(
+            "로그인한 사용자에게만 공개됩니다. OFF로 설정하면 내가 생성한 질문이 커뮤니티에 노출되지 않습니다.",
+            "Visible only to signed-in users. When off, your generated questions are not shown in the community feed."
+        )
+    }
     var appLanguage: String { text("언어", "Language") }
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
@@ -1013,9 +1480,16 @@ struct AppStrings {
     }
     var deleteRecords: String { text("기록 전체삭제", "Delete All Records") }
     var deleteRecordsHelp: String { text("저장된 질문, 답변, 채점 기록을 모두 삭제합니다.", "Delete all saved questions, answers, and grading results.") }
+    var recordSettings: String { text("기록 설정", "Record Settings") }
     var debuggingMode: String { text("디버깅 모드", "Debugging Mode") }
+    var paste: String { text("붙여넣기", "Paste") }
     var debuggingHelp: String { text("켜면 Developer 로그를 확인할 수 있습니다.", "When enabled, Developer logs are available.") }
     var developerOptions: String { text("개발자 옵션", "Developer Options") }
+    var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
+    var requestLabel: String { text("요청", "Request") }
+    var responseLabel: String { text("응답", "Response") }
+    var statusLabel: String { text("상태", "Status") }
+    var durationLabel: String { text("소요", "Duration") }
     var apiStatus: String { text("API 상태", "API Status") }
     var apiKeyErrorDetected: String { text("API 키 오류가 감지됐습니다.", "An API key error was detected.") }
     var apiKeyNoError: String { text("API 키 오류가 없습니다.", "No API key error.") }
@@ -1035,10 +1509,7 @@ struct AppStrings {
     var averageScoreShort: String { text("평균", "Average") }
     var noScoreShort: String { text("-", "-") }
     var draftSaved: String { text("초안 자동 저장됨", "Draft auto-saved") }
-    var clearAnswer: String { text("답변 지우기", "Clear Answer") }
     var continueOldestPending: String { text("오래된 질문 이어하기", "Continue Oldest") }
-    var copyAnswer: String { text("답변 복사", "Copy Answer") }
-    var copiedToClipboard: String { text("클립보드에 복사했습니다.", "Copied to clipboard.") }
     var pendingQuestions: String { text("미제출 질문", "Pending Questions") }
     func pendingQuestionCount(_ count: Int) -> String { text("\(count)개 대기 중", "\(count) pending") }
     var pendingQuestionLimitTitle: String { text("미채점 질문이 3개입니다.", "There are 3 ungraded questions.") }
@@ -1094,7 +1565,7 @@ struct AppStrings {
     var noRecords: String { text("기록 없음", "No Records") }
     var noRecordsDescription: String { text("질문을 생성하고 답변을 채점하면 기록이 쌓입니다.", "Records appear after you create questions and grade answers.") }
     var deleteRecordHelp: String { text("기록 삭제", "Delete Record") }
-    var studyFallback: String { text("학습", "Study") }
+    var studyFallback: String { text("내 학습", "My Study") }
     var ungraded: String { text("미채점", "Ungraded") }
     func answerPrefix(_ answer: String) -> String { text("답변: \(answer)", "Answer: \(answer)") }
 
@@ -1114,7 +1585,38 @@ struct AppStrings {
     var trend: String { text("변화", "Trend") }
     var period: String { text("기간", "Period") }
     var topicSearch: String { text("주제 검색", "Search Topics") }
+    var topic: String { text("주제", "Topic") }
     var topicBrowser: String { text("주제 탐색", "Topic Browser") }
+    var communityFeed: String { text("다른 사용자 질문", "Community Questions") }
+    var communityQuestion: String { text("공개 질문", "Community Question") }
+    var communityLogin: String { text("로그인", "Sign In") }
+    var communityLogout: String { text("로그아웃", "Sign Out") }
+    var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
+    var communitySignedOut: String { text("다른 사용자 질문 기능을 껐습니다.", "Community questions are disabled.") }
+    var communityLoginHelp: String {
+        text(
+            "로그인하면 다른 사용자들이 공개한 질문을 검색하고 볼 수 있습니다. 로그인 전에는 내 질문이 공개되지 않습니다.",
+            "Sign in to search and view questions shared by other users. Your questions are private until you sign in."
+        )
+    }
+    var communitySearchHelp: String { text("주제 키워드로 검색해 공개된 질문을 확인하세요.", "Search topic keywords and view public questions.") }
+    var noCommunityQuestions: String { text("표시할 공개 질문이 없습니다.", "No public questions to display.") }
+    var communityQuestionLimit: String { text("최대 20개씩 표시됩니다.", "Showing up to 20 questions at a time.") }
+    var communityUnavailable: String { text("다른 사용자 질문 기능을 현재 사용할 수 없습니다.", "Community questions are currently unavailable.") }
+    var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
+    var profile: String { text("프로필", "Profile") }
+    var profileDisplayName: String { text("이름", "Name") }
+    var profileBio: String { text("소개말", "Bio") }
+    var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
+    var report: String { text("신고", "Report") }
+    var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
+    var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }
+    var googleLoginSetupRequired: String {
+        text(
+            "Google Login은 OAuth 클라이언트 설정 후 활성화됩니다.",
+            "Google Login becomes available after OAuth client configuration."
+        )
+    }
     var topicRangeHelpTitle: String { text("Range 계산 방식", "How Range Works") }
     var topicRangeHelpBody: String {
         text(

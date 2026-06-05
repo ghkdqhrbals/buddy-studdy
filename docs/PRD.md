@@ -69,12 +69,21 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 ### Sync And Push
 
 1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in PostgreSQL.
-2. CloudKit snapshot sync remains for legacy cross-device continuity, including the regular OpenAI API key, but generated and graded records should flow through the backend.
-3. Only the regular OpenAI API key is supported; admin keys are not supported.
-4. The app does not call OpenAI directly. API-key validation, question generation, and grading go through `https://api.ghkdqhrbals.org`.
-5. Server-scheduled APNs delivery is handled by the Python backend. It generates each due question, stores it before push delivery, then sends the APNs alert.
-6. Push arrival syncs data without opening a new answer page unless the user taps the notification.
-7. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
+2. The app keeps records only as an in-memory view cache during a running session. It must not persist study records in a local SQLite database.
+3. CloudKit snapshot sync remains for legacy cross-device continuity, including the regular OpenAI API key, but generated and graded records should flow through the backend.
+4. Only the regular OpenAI API key is supported; admin keys are not supported.
+5. The app does not call OpenAI directly. API-key validation, question generation, and grading go through `https://api.ghkdqhrbals.org`.
+6. Server-scheduled APNs delivery is handled by the Python backend. It generates each due question, stores it before push delivery, then sends the APNs alert.
+7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
+8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
+
+### Community
+
+1. Community questions are available only after Google Login.
+2. A signed-in user can maintain a public profile with display name and a short bio.
+3. Public community questions include the author's public profile so users can understand who shared the question.
+4. Question-publicity defaults to private for non-signed-in users.
+5. Users can report public questions. Reports are persisted by the backend and may be forwarded to the operator email when SMTP is configured.
 
 ## Non-Goals
 
@@ -90,3 +99,4 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 - Add a compact "next best question" recommendation based on topic range uncertainty.
 - Add export for records and topic stats.
 - Add explicit conflict UI when two devices edit the same answer draft.
+- Add service-error compensation that does not invent scores: missed scheduled question catch-up, streak freeze for backend/API outages, and automatic retry priority after failed grading.

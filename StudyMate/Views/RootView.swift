@@ -9,7 +9,14 @@ struct RootView: View {
         if !appState.hasCompletedOnboarding {
             OnboardingView()
         } else {
-            TabView(selection: $appState.selectedTab) {
+            TabView(selection: settingsAwareSelectedTab) {
+                HomeView()
+                    .contentPadding()
+                    .tabItem {
+                        Label(strings.tabHome, systemImage: "house.fill")
+                    }
+                    .tag(AppTab.home)
+
                 StudyView()
                     .contentPadding()
                     .tabItem {
@@ -40,6 +47,231 @@ struct RootView: View {
             .frame(maxHeight: .infinity)
         }
     }
+
+    private var settingsAwareSelectedTab: Binding<AppTab> {
+        Binding(
+            get: { appState.selectedTab },
+            set: { newTab in
+                appState.setSelectedTab(newTab)
+            }
+        )
+    }
+}
+
+private struct HomeView: View {
+    @EnvironmentObject private var appState: AppState
+    #if os(iOS)
+    @State private var editMode: EditMode = .inactive
+    #else
+    @State private var isEditingCategories = false
+    #endif
+
+    private var isCategoryEditing: Bool {
+        #if os(iOS)
+        editMode.isEditing
+        #else
+        isEditingCategories
+        #endif
+    }
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strings.studyCategories)
+                    .font(.headline)
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    #if os(iOS)
+                    Button {
+                        withAnimation {
+                            editMode = editMode.isEditing ? .inactive : .active
+                        }
+                    } label: {
+                        Text(editMode.isEditing ? strings.done : strings.edit)
+                    }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    #endif
+                }
+            }
+            .padding(.vertical, 8)
+
+            VStack(spacing: 10) {
+                List {
+                    Section(strings.studyCategories) {
+                        ForEach(appState.studyCategoriesForDisplay) { category in
+                            HomeCategoryRow(
+                                title: category.title,
+                                isSelected: appState.selectedStudyCategoryIDForDisplay == category.id
+                            )
+                            .contentShape(Rectangle())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .onTapGesture {
+                                guard !isCategoryEditing else {
+                                    return
+                                }
+
+                                appState.selectStudyCategory(category.id)
+                            }
+                            .overlay(alignment: .leading) {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                            }
+                        }
+                        .onDelete(perform: appState.deleteStudyCategories)
+                        .onMove(perform: appState.moveStudyCategories)
+                    }
+
+                    CommunityFeedSection()
+                }
+                .listStyle(.inset)
+                .searchable(text: $appState.communitySearchText, prompt: strings.topicSearch)
+                #if os(iOS)
+                .environment(\.editMode, $editMode)
+                #endif
+                .onAppear {
+                    appState.refreshCommunityQuestions(userInitiated: false)
+                }
+                .onSubmit(of: .search) {
+                    appState.refreshCommunityQuestions(userInitiated: true)
+                }
+                .onChange(of: appState.communitySearchText) { _, newValue in
+                    if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        appState.refreshCommunityQuestions(userInitiated: false)
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+}
+
+private struct HomeCategoryRow: View {
+    var title: String
+    var isSelected: Bool
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isSelected {
+                Text("•")
+                    .font(.title3.bold())
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct CommunityFeedSection: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        let strings = appState.strings
+
+        Section {
+            Button {
+                appState.refreshCommunityQuestions(userInitiated: true)
+            } label: {
+                Label(strings.refresh, systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+            .disabled(appState.isLoadingCommunityQuestions)
+
+            if let message = appState.communityErrorMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if appState.isLoadingCommunityQuestions {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            }
+
+            if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
+                ContentUnavailableView(
+                    strings.noCommunityQuestions,
+                    systemImage: "person.3.fill",
+                    description: Text(strings.communitySearchHelp)
+                )
+                .frame(minHeight: 120)
+            } else {
+                ForEach(appState.communityQuestions) { question in
+                    CommunityQuestionRow(question: question)
+                        .onAppear {
+                            appState.shouldLoadNextCommunityQuestion(after: question.id)
+                        }
+                }
+
+                if appState.canLoadCommunityQuestions {
+                    Button(strings.nextPage) {
+                        Task {
+                            await appState.loadNextCommunityPage()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(appState.isLoadingCommunityQuestions)
+                }
+            }
+        } header: {
+            Text(strings.communityFeed)
+        } footer: {
+            if !appState.communityQuestions.isEmpty {
+                Text(strings.communityQuestionLimit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct CommunityQuestionRow: View {
+    var question: CommunityQuestion
+
+    private static let statusDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(question.question)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Text(question.topic.isEmpty ? "Swift" : question.topic)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text("Lv.\(question.difficultyLevel)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text(Self.statusDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 4)
+            }
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 private struct OnboardingView: View {
@@ -58,7 +290,7 @@ private struct OnboardingView: View {
     }
 
     private var canStart: Bool {
-        !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isCompleting
+        !isCompleting
     }
 
     var body: some View {
@@ -115,6 +347,14 @@ private struct OnboardingView: View {
                             }
                             .textFieldStyle(.roundedBorder)
 
+                            Button(strings.paste) {
+                                Task {
+                                    if let key = await appState.readClipboardOpenAIAPIKeyForSettingsPaste() {
+                                        apiKey = key
+                                    }
+                                }
+                            }
+
                             Button(showsAPIKey ? strings.hide : strings.show) {
                                 showsAPIKey.toggle()
                             }
@@ -124,6 +364,14 @@ private struct OnboardingView: View {
                         Text(strings.onboardingAPIKeyHelp)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        HStack(spacing: 4) {
+                            Text(strings.onboardingCreateAPIKeyHelp)
+                                .font(.caption)
+
+                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/settings/organization/api-keys")!)
+                                .font(.caption)
+                        }
                     }
 
                     OnboardingSection(title: strings.onboardingStudySetup) {
@@ -206,8 +454,11 @@ private struct OnboardingView: View {
     }
 
     private var pendingSettings: StudySettings {
-        StudySettings(
-            topic: topic.trimmingCharacters(in: .whitespacesAndNewlines),
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTopic = trimmedTopic.isEmpty ? StudySettings.fallbackTopic(for: language) : trimmedTopic
+
+        return StudySettings(
+            topic: resolvedTopic,
             difficulty: Difficulty(level: difficultyLevel),
             appLanguage: language,
             language: language.studyLanguage,
@@ -215,7 +466,15 @@ private struct OnboardingView: View {
             notificationSound: appState.settings.notificationSound,
             customPrompt: appState.settings.customPrompt,
             intervalMinutes: intervalMinutes,
-            maxHistoryCount: appState.settings.sanitizedMaxHistoryCount
+            maxHistoryCount: appState.settings.sanitizedMaxHistoryCount,
+            studyCategories: [
+                StudyCategory(
+                    title: resolvedTopic,
+                    difficulty: Difficulty(level: difficultyLevel),
+                    customPrompt: appState.settings.customPrompt
+                )
+            ],
+            selectedStudyCategoryID: nil
         )
     }
 
@@ -226,7 +485,10 @@ private struct OnboardingView: View {
 
         language = appState.settings.appLanguage
         apiKey = appState.apiKey
-        topic = appState.settings.topic
+        let fallbackTopic = StudySettings.fallbackTopic(for: language)
+        topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallbackTopic
+            : appState.settings.topic
         difficultyLevel = appState.settings.difficulty.level
         intervalMinutes = appState.settings.sanitizedIntervalMinutes
         didSeedFields = true

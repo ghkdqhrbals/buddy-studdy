@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StudyView: View {
     @EnvironmentObject private var appState: AppState
+    var preferredCategoryID: String? = nil
     @State private var showsHint = false
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
@@ -22,22 +23,22 @@ struct StudyView: View {
 
                 StudySettingsSummarySection(
                     topic: studyTopicLabel(strings: strings),
-                    level: appState.settings.difficulty.displayName(language: appState.settings.appLanguage),
+                    level: selectedDifficulty.displayName(language: appState.settings.appLanguage),
                     interval: strings.minuteLabel(appState.settings.sanitizedIntervalMinutes),
                     strings: strings
                 )
 
                 Divider()
 
-                if appState.currentQuestion != nil,
+                if selectedCurrentQuestion != nil,
                    let notificationLandingMessage = appState.notificationLandingMessage {
                     notificationLandingInlineView(message: notificationLandingMessage, strings: strings)
                 }
 
-                if !appState.pendingStudyRecords.isEmpty {
+                if !visiblePendingRecords.isEmpty {
                     PendingQuestionsSection(
-                        records: appState.pendingStudyRecords,
-                        currentQuestion: appState.currentQuestion,
+                        records: visiblePendingRecords,
+                        currentQuestion: selectedCurrentQuestion,
                         strings: strings
                     ) { record in
                         appState.selectStudyRecord(record)
@@ -51,121 +52,24 @@ struct StudyView: View {
                 }
 
                 Group {
-                    if let question = appState.currentQuestion {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(strings.question)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Text(question.question)
-                                .font(.body)
-                                .textSelection(.enabled)
-
-                            if let hint = question.expectedAnswerHint,
-                               !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Button {
-                                        showsHint.toggle()
-                                    } label: {
-                                        Label(showsHint ? strings.hideHint : strings.showHint, systemImage: "lightbulb")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .font(.caption)
-
-                                    if showsHint {
-                                        Text(hint)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                            .lineLimit(nil)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                .padding(.top, 4)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let question = selectedCurrentQuestion {
+                        StudyConversationSection(
+                            question: question,
+                            draftAnswer: $draftAnswer,
+                            showsHint: $showsHint,
+                            gradingResult: appState.gradingResult,
+                            isGradingAnswer: appState.isGradingAnswer,
+                            canSubmitAnswer: canSubmitAnswer,
+                            strings: strings,
+                            answerEditor: {
+                                answerEditor()
+                            },
+                            onSubmit: submitCurrentAnswer
+                        )
                     } else {
                         noQuestionView(strings: strings)
                         .frame(maxWidth: .infinity, minHeight: 140)
                     }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(strings.answer)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(strings.draftSaved)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-
-                        Spacer()
-
-                        if !draftAnswer.isEmpty {
-                            Button(strings.copyAnswer) {
-                                appState.copyToClipboard(draftAnswer)
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-
-                            Button(strings.clearAnswer) {
-                                draftAnswer = ""
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                        }
-                    }
-
-                    answerEditor()
-                }
-
-                HStack {
-                    Spacer()
-
-                    Button {
-                        submitCurrentAnswer()
-                    } label: {
-                        if appState.isGradingAnswer {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Label(strings.gradeAnswer, systemImage: "checkmark.seal")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSubmitAnswer)
-                }
-
-                if let result = appState.gradingResult {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label(result.gradeTitle(strings: strings), systemImage: result.gradeIconName)
-                            Spacer()
-                            Text("\(result.score)/100")
-                                .font(.headline)
-                        }
-
-                        Text(result.feedback)
-                            .font(.body)
-                        Text(result.explanation)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(12)
-                    .background(Color.secondary.opacity(0.045))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding(.top, 10)
@@ -175,11 +79,7 @@ struct StudyView: View {
         }
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if isAnswerEditorFocused {
-                keyboardAnswerActionBar(strings: strings)
-            }
-        }
+        .keyboardDoneToolbar(strings.done)
         #endif
         .refreshable {
             await appState.refreshVisibleData()
@@ -209,14 +109,77 @@ struct StudyView: View {
     }
 
     private var canSubmitAnswer: Bool {
-        appState.currentQuestion != nil &&
+        selectedCurrentQuestion != nil &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !appState.isGradingAnswer
     }
 
+    private var selectedCurrentQuestion: QuestionItem? {
+        guard let currentQuestion = appState.currentQuestion else {
+            return nil
+        }
+
+        guard preferredCategoryID != nil else {
+            return currentQuestion
+        }
+
+        let selectedTopicKey = normalizedTopicKey(selectedTopic)
+        if let currentRecord = appState.studyRecords.last(where: { record in
+            questionMatches(record.question, currentQuestion)
+        }) {
+            return normalizedTopicKey(currentRecord.topic) == selectedTopicKey ? currentQuestion : nil
+        }
+
+        return normalizedTopicKey(appState.settings.topic) == selectedTopicKey ? currentQuestion : nil
+    }
+
+    private var selectedDifficulty: Difficulty {
+        if let preferredCategoryID,
+           let category = appState.settings.category(for: preferredCategoryID) {
+            return category.difficulty
+        }
+
+        return appState.settings.difficulty
+    }
+
     private func studyTopicLabel(strings: AppStrings) -> String {
-        let topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let topic = selectedTopic.trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? strings.studyFallback : topic
+    }
+
+    private var selectedTopic: String {
+        if let preferredCategoryID,
+           let category = appState.settings.category(for: preferredCategoryID) {
+            return category.title
+        }
+
+        let topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        return topic.isEmpty ? appState.strings.studyFallback : topic
+    }
+
+    private var visiblePendingRecords: [StudyRecord] {
+        guard preferredCategoryID != nil else {
+            return appState.pendingStudyRecords
+        }
+
+        let normalizedSelectedTopic = normalizedTopicKey(selectedTopic)
+        return appState.pendingStudyRecords.filter {
+            normalizedTopicKey($0.topic) == normalizedSelectedTopic
+        }
+    }
+
+    private func normalizedTopicKey(_ topic: String) -> String {
+        topic
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
+    }
+
+    private func questionMatches(_ lhs: QuestionItem, _ rhs: QuestionItem) -> Bool {
+        lhs.createdAt == rhs.createdAt ||
+            SettingsStore.normalizedQuestionText(lhs.question) == SettingsStore.normalizedQuestionText(rhs.question)
     }
 
     @ViewBuilder
@@ -332,12 +295,14 @@ struct StudyView: View {
         #if os(iOS)
         AnswerEditor(
             text: $draftAnswer,
+            placeholder: appState.strings.answerPlaceholder,
             minHeight: 96,
             isFocused: $isAnswerEditorFocused
         )
         #else
         AnswerEditor(
             text: $draftAnswer,
+            placeholder: appState.strings.answerPlaceholder,
             minHeight: 96
         )
         #endif
@@ -352,41 +317,168 @@ struct StudyView: View {
             await appState.gradeCurrentAnswer(answer: draftAnswer)
         }
     }
+}
 
-    #if os(iOS)
-    private func keyboardAnswerActionBar(strings: AppStrings) -> some View {
-        HStack(spacing: 12) {
-            Button(strings.done) {
-                isAnswerEditorFocused = false
-            }
-            .buttonStyle(.bordered)
+private struct StudyConversationSection<AnswerEditorContent: View>: View {
+    var question: QuestionItem
+    @Binding var draftAnswer: String
+    @Binding var showsHint: Bool
+    var gradingResult: GradingResult?
+    var isGradingAnswer: Bool
+    var canSubmitAnswer: Bool
+    var strings: AppStrings
+    @ViewBuilder var answerEditor: () -> AnswerEditorContent
+    var onSubmit: () -> Void
 
-            Spacer(minLength: 8)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            StudyChatBubble(role: .tutor) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(question.question)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
 
-            Button {
-                submitCurrentAnswer()
-            } label: {
-                if appState.isGradingAnswer {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Label(strings.gradeAnswer, systemImage: "checkmark.seal")
+                    hintView
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!canSubmitAnswer)
+
+            StudyChatBubble(role: .learner) {
+                answerEditor()
+            }
+
+            HStack {
+                Spacer()
+
+                Button {
+                    onSubmit()
+                } label: {
+                    if isGradingAnswer {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(strings.gradeAnswer, systemImage: "checkmark.seal")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSubmitAnswer)
+            }
+
+            if let gradingResult {
+                StudyChatBubble(role: .tutor) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label(gradingResult.gradeTitle(strings: strings), systemImage: gradingResult.gradeIconName)
+                            Spacer(minLength: 12)
+                            Text("\(gradingResult.score)/100")
+                                .font(.headline)
+                        }
+
+                        Text(gradingResult.feedback)
+                            .font(.body)
+                        Text(gradingResult.explanation)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(.bar)
-        .overlay(alignment: .top) {
-            Divider()
-        }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
-    #endif
+
+    @ViewBuilder
+    private var hintView: some View {
+        if let hint = question.expectedAnswerHint,
+           !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    showsHint.toggle()
+                } label: {
+                    Label(showsHint ? strings.hideHint : strings.showHint, systemImage: "lightbulb")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.white)
+                .tint(.white)
+
+                if showsHint {
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+}
+
+private enum StudyChatBubbleRole: Equatable {
+    case tutor
+    case learner
+
+    var frameAlignment: Alignment {
+        switch self {
+        case .tutor:
+            .leading
+        case .learner:
+            .trailing
+        }
+    }
+
+    var bubbleColor: Color {
+        switch self {
+        case .tutor:
+            Color.green
+        case .learner:
+            Color.clear
+        }
+    }
+
+    var borderColor: Color {
+        switch self {
+        case .tutor:
+            Color.green.opacity(0.0)
+        case .learner:
+            Color.clear
+        }
+    }
+}
+
+private struct StudyChatBubble<Content: View>: View {
+    var role: StudyChatBubbleRole
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if role == .learner {
+                Spacer(minLength: 34)
+            }
+
+            if role == .learner {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                content()
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(role.bubbleColor)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(role.borderColor, lineWidth: 1)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            if role == .tutor {
+                Spacer(minLength: 34)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: role.frameAlignment)
+    }
 }
 
 private struct StudySettingsSummarySection: View {
@@ -441,12 +533,13 @@ private struct StudySummaryMetric: View {
 
 private struct AnswerEditor: View {
     @Binding var text: String
+    var placeholder: String
     var minHeight: CGFloat
     #if os(iOS)
     var isFocused: FocusState<Bool>.Binding
     #endif
 
-    private let editorInset = EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
+    private let editorInset = EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
 
     var body: some View {
         let editor = TextEditor(text: $text)
@@ -454,16 +547,38 @@ private struct AnswerEditor: View {
             .scrollContentBackground(.hidden)
             .padding(editorInset)
             .frame(minHeight: minHeight)
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.24))
+            .background(editorBackground)
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, editorInset.top + 8)
+                        .padding(.leading, editorInset.leading + 5)
+                        .allowsHitTesting(false)
+                }
             }
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
         #if os(iOS)
         editor
             .focused(isFocused)
         #else
         editor
+        #endif
+    }
+
+    private var editorBackground: Color {
+        #if os(iOS)
+        Color(.secondarySystemBackground)
+        #elseif os(macOS)
+        Color(nsColor: .textBackgroundColor)
+        #else
+        Color.secondary.opacity(0.04)
         #endif
     }
 }
@@ -474,8 +589,6 @@ private struct PendingQuestionsSection: View {
     var strings: AppStrings
     var onSelect: (StudyRecord) -> Void
     var onSkip: (StudyRecord) -> Void
-
-    @State private var openSwipeRecordID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -493,40 +606,32 @@ private struct PendingQuestionsSection: View {
 
             VStack(spacing: 4) {
                 #if os(iOS)
-                ForEach(records) { record in
-                    let isSelected = isCurrent(record)
-                    let skipAction: () -> Void = {
-                        openSwipeRecordID = nil
-                        onSkip(record)
-                    }
+                List {
+                    ForEach(records) { record in
+                        let isSelected = isCurrent(record)
 
-                    SwipeRevealRow(
-                        isOpen: Binding(
-                            get: { openSwipeRecordID == record.id },
-                            set: { openSwipeRecordID = $0 ? record.id : nil }
-                        ),
-                        actionWidth: 82,
-                        onTap: {
-                            if let openSwipeRecordID, openSwipeRecordID != record.id {
-                                closeOpenSwipe(animated: true)
-                                return
-                            }
-
-                            onSelect(record)
-                        },
-                        onFullSwipe: skipAction
-                    ) {
                         PendingQuestionRow(record: record, strings: strings, isSelected: isSelected)
-                    } action: {
-                        SwipeActionButton(title: strings.skipQuestion, systemImage: "forward.end.fill", tint: .orange)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onSelect(record)
+                            }
+                        .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                onSkip(record)
+                            } label: {
+                                Label(strings.skipQuestion, systemImage: "forward.end.fill")
+                            }
+                            .tint(.orange)
+                        }
                     }
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity,
-                            removal: .opacity.combined(with: .move(edge: .leading))
-                        )
-                    )
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(records.count) * 52)
                 #else
                 ForEach(records) { record in
                     let isSelected = isCurrent(record)
@@ -541,12 +646,6 @@ private struct PendingQuestionsSection: View {
                 #endif
             }
         }
-        .onChange(of: records.map(\.id)) {
-            if let openSwipeRecordID,
-               !records.contains(where: { $0.id == openSwipeRecordID }) {
-                self.openSwipeRecordID = nil
-            }
-        }
     }
 
     private func isCurrent(_ record: StudyRecord) -> Bool {
@@ -557,24 +656,6 @@ private struct PendingQuestionsSection: View {
         return record.question.createdAt == currentQuestion.createdAt ||
             SettingsStore.normalizedQuestionText(record.question.question) ==
             SettingsStore.normalizedQuestionText(currentQuestion.question)
-    }
-
-    private func closeOpenSwipe(animated: Bool) {
-        guard openSwipeRecordID != nil else {
-            return
-        }
-
-        if animated {
-            withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-                openSwipeRecordID = nil
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                openSwipeRecordID = nil
-            }
-        }
     }
 
 }

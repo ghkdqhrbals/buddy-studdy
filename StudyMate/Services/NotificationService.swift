@@ -28,6 +28,25 @@ enum StudyNotificationRouting {
     static func shouldOpenStudyImmediately(actionIdentifier: String) -> Bool {
         actionIdentifier == UNNotificationDefaultActionIdentifier
     }
+
+    static func shouldOpenStudyImmediately(
+        actionIdentifier: String,
+        isApplicationInactive: Bool
+    ) -> Bool {
+        shouldOpenStudyImmediately(actionIdentifier: actionIdentifier) && isApplicationInactive
+    }
+
+    #if os(iOS)
+    static func shouldOpenStudyImmediately(
+        actionIdentifier: String,
+        applicationState: UIApplication.State
+    ) -> Bool {
+        shouldOpenStudyImmediately(
+            actionIdentifier: actionIdentifier,
+            isApplicationInactive: applicationState == .inactive
+        )
+    }
+    #endif
 }
 
 enum StudyNotificationPayload {
@@ -338,6 +357,8 @@ final class NotificationService: NotificationServicing {
             #if os(macOS)
             NSSound.beep()
             #elseif os(iOS)
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+            try? AVAudioSession.sharedInstance().setActive(true)
             AudioServicesPlaySystemSound(1007)
             #endif
         case .none:
@@ -366,15 +387,23 @@ final class NotificationService: NotificationServicing {
             sound.play()
             #elseif os(iOS)
             guard let url = Bundle.main.url(forResource: resourceName, withExtension: fileExtension) else {
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+                try? AVAudioSession.sharedInstance().setActive(true)
                 AudioServicesPlaySystemSound(1007)
                 return
             }
 
             do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
                 let player = try AVAudioPlayer(contentsOf: url)
+                player.volume = 1
+                player.prepareToPlay()
                 previewPlayer = player
                 player.play()
             } catch {
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+                try? AVAudioSession.sharedInstance().setActive(true)
                 AudioServicesPlaySystemSound(1007)
             }
             #endif
@@ -656,10 +685,11 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             return
         }
 
-        let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-            actionIdentifier: actionIdentifier
-        )
         Task { @MainActor in
+            let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: actionIdentifier,
+                applicationState: UIApplication.shared.applicationState
+            )
             StudyNotificationDelegate.shared.enqueueLocalResponse(
                 actionIdentifier: actionIdentifier,
                 recordID: recordID,
@@ -809,7 +839,8 @@ final class StudyRemoteNotificationBridge {
 
         let applicationState = UIApplication.shared.applicationState
         let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-            actionIdentifier: actionIdentifier
+            actionIdentifier: actionIdentifier,
+            applicationState: applicationState
         )
 
         pendingNotifications.append(
@@ -906,7 +937,8 @@ final class StudyRemoteNotificationBridge {
         }
 
         let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-            actionIdentifier: actionIdentifier
+            actionIdentifier: actionIdentifier,
+            applicationState: UIApplication.shared.applicationState
         )
 
         return await handleNotificationResponse(

@@ -46,6 +46,16 @@ class QuestionScheduler:
             await self._task
 
     async def run_once(self) -> int:
+        if not self.database.is_postgres:
+            return await self._run_once_with_lock()
+
+        with self.database.scheduler_lock() as leader:
+            if not leader:
+                logger.debug("scheduler is not leader; skipping this cycle")
+                return 0
+            return await self._run_once_with_lock()
+
+    async def _run_once_with_lock(self) -> int:
         sent_count = 0
         for row in self.database.due_schedules():
             device_id = row["device_id"]

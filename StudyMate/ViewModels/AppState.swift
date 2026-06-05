@@ -1,8 +1,10 @@
 import Foundation
+import Combine
 #if os(macOS)
 import AppKit
 #elseif os(iOS)
 import UIKit
+import UniformTypeIdentifiers
 #endif
 
 private enum QuestionGenerationSkip: Error {
@@ -36,6 +38,15 @@ private final class BackgroundTaskExpiration: @unchecked Sendable {
 final class AppState: ObservableObject {
     static let developerLogPageSize = 50
     static let maxPendingQuestionCount = 3
+    static let communityQuestionPageSize = 20
+    static let maxAPITrafficLogs = 120
+    private static let clipboardQuickReadAttempts = 10
+    private static let clipboardFallbackAttempts = 70
+    private static let clipboardQuickReadIntervalMilliseconds: UInt64 = 8
+    private static let clipboardSettingsReadAttempts = 120
+    private static let clipboardSettingsReadIntervalMilliseconds: UInt64 = 16
+    private static let clipboardStickyReadIntervalMilliseconds: UInt64 = 6
+    private static let recentLocalSettingsMutationWindow: TimeInterval = 300
 
     @Published var settings: StudySettings
     @Published var draftSettings: StudySettings
@@ -49,25 +60,50 @@ final class AppState: ObservableObject {
     @Published var isRunning: Bool
     @Published var studyRecords: [StudyRecord]
     @Published var backendStats: BackendStats?
+    @Published var isBackendStatsLoading = false
+    @Published var backendStatsErrorMessage: String?
     @Published var hasAPIKeyError = false
     @Published var isValidatingAPIKey = false
     @Published var appLogs: [AppLogEntry]
     @Published var appLogTotalCount: Int
     @Published var appLogPage: Int
+    @Published var apiTrafficLogs: [APITrafficLogEntry] = []
+    @Published var isAPIDebugPanelPresented = false
     @Published var isDebuggingEnabled: Bool
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var notificationLandingMessage: String?
     @Published var selectedTab: AppTab = .study
+    @Published var homeStudyRoute: HomeStudyRoute?
     @Published var focusedRecordRequest: FocusedRecordRequest?
+    @Published var openAIModelOptions: [OpenAIModelOption] = OpenAIModelOption.all
     @Published var hasCompletedOnboarding: Bool
     @Published var isRefreshingVisibleData = false
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
+    @Published var isCommunitySignedIn: Bool
+
+    var studyCategoriesForDisplay: [StudyCategory] {
+        let synchronized = synchronizedTopicCategories(for: settings)
+        return synchronized.studyCategories
+    }
+
+    var selectedStudyCategoryIDForDisplay: String? {
+        let synchronized = synchronizedTopicCategories(for: settings)
+        return synchronized.selectedStudyCategoryID
+    }
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
     @Published var isBackendOpenAIKeyConfigured = false
+    @Published var communityQuestions: [CommunityQuestion] = []
+    @Published var communitySearchText = ""
+    @Published var communityTotalCount = 0
+    @Published var communityOffset = 0
+    @Published var isLoadingCommunityQuestions = false
+    @Published var communityErrorMessage: String?
+    @Published var communityProfile: CommunityUserProfile?
+    @Published var isUpdatingCommunityProfile = false
 
     private let settingsStore: SettingsStore
     private let remotePushBackendClient: RemotePushBackendClientProtocol
@@ -79,7 +115,16 @@ final class AppState: ObservableObject {
     private var didStart = false
     private var savedSettings: StudySettings
     private var savedAPIKey: String
+    private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
+    private var didReceiveCloudSnapshotWhileEditing = false
+    private var didReceiveBackendSnapshotWhileEditing = false
+    private var pendingBackendSnapshotWhileEditing: BackendSnapshot?
+    private var backendStatsRequestID = UUID()
+    private var communityQuestionLoadRequestID = UUID()
+    private var apiTrafficLogCancellable: AnyCancellable?
+    private var lastAPIKeyUpdatedAt: Date?
+    private var lastLocalSettingsMutationAt: Date?
 
     var strings: AppStrings {
         AppStrings(language: settings.appLanguage)
@@ -96,6 +141,33 @@ final class AppState: ObservableObject {
     var hasUnsavedSettingsChanges: Bool {
         normalizedSettings(activeSettingsForEditing) != savedSettings ||
             activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey
+    }
+
+    var mobileVisibleTab: AppTab {
+        switch selectedTab {
+        case .home, .records, .statistics, .settings:
+            return selectedTab
+        case .study:
+            return .home
+        }
+    }
+
+    func normalizeSelectedTabForMobile() {
+        if selectedTab == .study {
+            selectedTab = .home
+        }
+        homeStudyRoute = nil
+    }
+
+    func setSelectedTab(_ nextTab: AppTab) {
+        if isEditingSettings && selectedTab == .settings && nextTab != .settings {
+            cancelSettingsEditing()
+        }
+
+        selectedTab = nextTab
+        if nextTab == .home {
+            homeStudyRoute = nil
+        }
     }
 
     var apiKeyValidationMessage: String? {
@@ -116,7 +188,7 @@ final class AppState: ObservableObject {
     }
 
     private var activeAPIKeyForEditing: String {
-        isEditingSettings ? draftAPIKey : apiKey
+        (isEditingSettings ? draftAPIKey : apiKey).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var pendingQuestionCount: Int {
@@ -186,14 +258,28 @@ final class AppState: ObservableObject {
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let loadedSettings = settingsStore.loadSettings()
-        let loadedAPIKey = settingsStore.loadAPIKey()
+        let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
+            for: loadedSettings,
+            fallbackTopicResolver: Self.defaultFallbackTopic
+        )
+        let loadedIsCommunitySignedIn = settingsStore.loadIsCommunitySignedIn()
+        let effectiveLoadedSettings = loadedIsCommunitySignedIn
+            ? synchronizedLoadedSettings
+            : synchronizedLoadedSettings.withQuestionPrivacy(false)
+        if effectiveLoadedSettings != loadedSettings {
+            settingsStore.saveSettings(effectiveLoadedSettings)
+        }
+        let loadedAPIKey = settingsStore.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        let loadedAPIKeyUpdatedAt = settingsStore.loadOpenAIAPIKeyUpdatedAt()
+        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
         let loadedLogPage = settingsStore.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedHasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
         let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
+        let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
 
         self.settingsStore = settingsStore
-        self.settings = loadedSettings
-        self.draftSettings = loadedSettings
+        self.settings = effectiveLoadedSettings
+        self.draftSettings = effectiveLoadedSettings
         self.currentQuestion = settingsStore.loadQuestion()
         self.lastAnswer = settingsStore.loadLastAnswer()
         self.gradingResult = settingsStore.loadGradingResult()
@@ -201,7 +287,7 @@ final class AppState: ObservableObject {
         let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
             && !loadedIsRunning
             && !settingsStore.hasExplicitRunningPreference()
-            && !loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !loadedAPIKey.isEmpty
         self.isRunning = shouldRecoverLegacyRunningState ? true : loadedIsRunning
         if shouldRecoverLegacyRunningState {
             settingsStore.saveIsRunning(true)
@@ -210,22 +296,42 @@ final class AppState: ObservableObject {
         self.backendStats = nil
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
-        self.savedSettings = loadedSettings
+        self.lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
+        self.savedSettings = effectiveLoadedSettings
         self.savedAPIKey = loadedAPIKey
         self.appLogs = loadedLogPage.entries
         self.appLogTotalCount = loadedLogPage.totalCount
         self.appLogPage = loadedLogPage.page
         self.isDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
-        self.isCloudSyncEnabled = settingsStore.loadIsCloudSyncEnabled()
+        self.isCloudSyncEnabled = cloudSyncService == nil ? false : settingsStore.loadIsCloudSyncEnabled()
+        if cloudSyncService == nil {
+            settingsStore.saveIsCloudSyncEnabled(false)
+        }
+        self.isCommunitySignedIn = loadedIsCommunitySignedIn
         self.cloudLastSyncedAt = loadedCloudLastSyncedAt
+        self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
         self.remotePushBackendClient = remotePushBackendClient
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
+            for: APITrafficNotification.didReceiveLog,
+            object: nil
+        )
+        .compactMap { notification -> APITrafficLogEntry? in
+            (notification.userInfo?[APITrafficNotification.userInfoKey] as? APITrafficLogEntry)
+        }
+        .sink { [weak self] entry in
+            self?.appendAPITrafficLog(entry)
+        }
 
         if shouldRecoverLegacyRunningState {
             log(.info, "백엔드 schedule 상태로 인해 저장된 이전 일시정지 값을 실행 상태로 복구했습니다.")
+        }
+
+        if loadedAPIKeyUpdatedAt == nil, !loadedAPIKey.isEmpty {
+            settingsStore.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
         }
 
         if !hasCompletedOnboarding {
@@ -240,8 +346,15 @@ final class AppState: ObservableObject {
     }
 
     deinit {
-        timerTask?.cancel()
-        cloudSyncTask?.cancel()
+        MainActor.assumeIsolated {
+            let timerTask = timerTask
+            let cloudSyncTask = cloudSyncTask
+            let apiTrafficLogCancellable = apiTrafficLogCancellable
+
+            timerTask?.cancel()
+            cloudSyncTask?.cancel()
+            apiTrafficLogCancellable?.cancel()
+        }
     }
 
     func start() async {
@@ -260,6 +373,7 @@ final class AppState: ObservableObject {
             await ensureCloudQuestionPushSubscription()
         }
 
+        await loadOpenAIModelOptions()
         await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
@@ -275,6 +389,7 @@ final class AppState: ObservableObject {
         }
 
         reloadPersistedState()
+        await loadOpenAIModelOptions()
         await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -345,6 +460,65 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func loadOpenAIModelOptions() async {
+        do {
+            let fetchedOptions = try await remotePushBackendClient.fetchOpenAIModelOptions()
+            let normalized: [OpenAIModelOption] = fetchedOptions.compactMap { option -> OpenAIModelOption? in
+                let id = option.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                let displayName = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty && !displayName.isEmpty else {
+                    return nil
+                }
+                return OpenAIModelOption(
+                    id: id,
+                    displayName: displayName,
+                    supportsTextVerbosity: option.supportsTextVerbosity
+                )
+            }
+
+            let uniqueOptions = normalized.enumerated().reduce(into: [OpenAIModelOption]()) { result, current in
+                if !result.contains(where: { $0.id == current.element.id }) {
+                    result.append(current.element)
+                }
+            }
+
+            if !uniqueOptions.isEmpty {
+                openAIModelOptions = uniqueOptions
+                let currentModel = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !currentModel.isEmpty && !openAIModelOptions.contains(where: { $0.id == currentModel }) {
+                    openAIModelOptions.append(
+                        OpenAIModelOption(
+                            id: currentModel,
+                            displayName: currentModel,
+                            supportsTextVerbosity: false
+                        )
+                    )
+                } else if !openAIModelOptions.contains(where: { $0.id == currentModel }) {
+                    settings = synchronizedTopicCategories(
+                        for: StudySettings(
+                            topic: settings.topic,
+                            difficulty: settings.difficulty,
+                            appLanguage: settings.appLanguage,
+                            language: settings.appLanguage.studyLanguage,
+                            openAIModel: uniqueOptions.first?.id ?? StudySettings.defaultOpenAIModel,
+                            notificationSound: settings.notificationSound,
+                            customPrompt: settings.customPrompt,
+                            intervalMinutes: settings.sanitizedIntervalMinutes,
+                            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+                            isQuestionPublic: settings.isQuestionPublic,
+                            studyCategories: settings.studyCategories,
+                            selectedStudyCategoryID: settings.selectedStudyCategoryID
+                        )
+                    )
+                }
+            }
+            log(.info, "OpenAI 모델 목록을 업데이트했습니다. count=\(openAIModelOptions.count)")
+        } catch {
+            openAIModelOptions = OpenAIModelOption.all
+            log(.warning, "OpenAI 모델 목록 갱신 실패: \(error.localizedDescription)")
+        }
+    }
+
     @discardableResult
     private func refreshBackendSnapshotIfPossible(updateVisibleQuestion: Bool = true) async -> Bool {
         guard let registration = settingsStore.loadRemotePushRegistration() else {
@@ -367,11 +541,214 @@ final class AppState: ObservableObject {
         }
     }
 
+    func fetchBackendStats(
+        period: BackendStatsPeriod = .all,
+        search: String = "",
+        sort: BackendStatsSort = .level,
+        startAt: Date? = nil,
+        endAt: Date? = nil,
+        limit: Int = 8,
+        offset: Int = 0
+    ) async {
+        let requestID = UUID()
+        backendStatsRequestID = requestID
+
+        backendStatsErrorMessage = nil
+        isBackendStatsLoading = true
+        defer {
+            if backendStatsRequestID == requestID {
+                isBackendStatsLoading = false
+            }
+        }
+
+        let trimmedSearch = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLimit = max(1, min(limit, 100))
+        let normalizedOffset = max(0, offset)
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats") else {
+            backendStatsErrorMessage = "백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요."
+            log(.warning, "통계 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
+            if backendStatsRequestID == requestID {
+                isBackendStatsLoading = false
+            }
+            return
+        }
+
+        do {
+            let stats = try await remotePushBackendClient.fetchStats(
+                registration: registration,
+                period: period,
+                startAt: startAt,
+                endAt: endAt,
+                search: trimmedSearch,
+                sort: sort,
+                limit: normalizedLimit,
+                offset: normalizedOffset
+            )
+
+            guard requestID == backendStatsRequestID else {
+                return
+            }
+
+            backendStats = stats
+            log(.info, "통계 조회 완료. topics=\(stats.topics.count), totalTopics=\(stats.totalTopics), totalResponses=\(stats.totalResponses), offset=\(stats.offset)")
+        } catch {
+            guard requestID == backendStatsRequestID else {
+                return
+            }
+
+            backendStatsErrorMessage = "통계 조회 실패: \(error.localizedDescription)"
+            log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
+        guard isCommunitySignedIn else {
+            if reset {
+                communityQuestions = []
+                communityOffset = 0
+                communityTotalCount = 0
+            }
+            communityErrorMessage = nil
+            isLoadingCommunityQuestions = false
+            return
+        }
+
+        let requestID = UUID()
+        let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedOffset = reset ? 0 : communityOffset
+        let limit = Self.communityQuestionPageSize
+
+        if normalizedOffset > 0 && !canLoadMoreCommunityQuestions(currentCount: normalizedOffset) {
+            return
+        }
+
+        communityQuestionLoadRequestID = requestID
+        isLoadingCommunityQuestions = true
+        communityErrorMessage = nil
+        defer {
+            if communityQuestionLoadRequestID == requestID {
+                isLoadingCommunityQuestions = false
+            }
+        }
+
+        do {
+            guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
+                if userInitiated {
+                    communityErrorMessage = strings.communityRequestFailed
+                }
+                return
+            }
+
+            let response = try await remotePushBackendClient.fetchPublicQuestions(
+                registration: registration,
+                topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
+                limit: limit,
+                offset: normalizedOffset,
+                excludeDeviceID: registration.deviceID
+            )
+
+            guard communityQuestionLoadRequestID == requestID else {
+                return
+            }
+
+            if reset {
+                communityQuestions = response.questions
+            } else {
+                let existing = Set(communityQuestions.map(\.id))
+                communityQuestions.append(contentsOf: response.questions.filter { !existing.contains($0.id) })
+            }
+            communityTotalCount = response.totalCount
+            communityOffset = normalizedOffset + response.questions.count
+            log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
+        } catch {
+            guard communityQuestionLoadRequestID == requestID else {
+                return
+            }
+            if reset {
+                communityQuestions = []
+                communityOffset = 0
+                communityTotalCount = 0
+            }
+            if userInitiated {
+                communityErrorMessage = communityErrorMessage(for: error)
+            } else {
+                communityErrorMessage = nil
+            }
+            log(.warning, "공개 질문 로드 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func loadNextCommunityPage() async {
+        guard canLoadMoreCommunityQuestions(currentCount: communityOffset) else {
+            return
+        }
+
+        await loadCommunityQuestions(reset: false, userInitiated: true)
+    }
+
+    func refreshCommunityQuestions(userInitiated: Bool = true) {
+        Task {
+            await loadCommunityQuestions(reset: true, userInitiated: userInitiated)
+        }
+    }
+
+    func shouldLoadNextCommunityQuestion(after recordID: String) {
+        guard let last = communityQuestions.last,
+              last.id == recordID else {
+            return
+        }
+        Task {
+            await loadNextCommunityPage()
+        }
+    }
+
+    var canLoadCommunityQuestions: Bool {
+        communityOffset < communityTotalCount
+    }
+
+    private func canLoadMoreCommunityQuestions(currentCount: Int) -> Bool {
+        if currentCount <= 0 {
+            return communityTotalCount == 0 ? !communityQuestions.isEmpty : true
+        }
+
+        return currentCount < communityTotalCount
+    }
+
     private func applyBackendSnapshot(_ snapshot: BackendSnapshot, updateVisibleQuestion: Bool) {
-        let sanitizedSettings = normalizedSettings(snapshot.settings.studySettings(fallback: settings))
+        guard !isEditingSettings else {
+            didReceiveBackendSnapshotWhileEditing = true
+            if let currentPending = pendingBackendSnapshotWhileEditing,
+               currentPending.serverTime >= snapshot.serverTime {
+                return
+            }
+
+            pendingBackendSnapshotWhileEditing = snapshot
+            log(.info, "설정 편집 중이어서 백엔드 스냅샷 적용을 미뤘습니다.")
+            return
+        }
+
+        let localSettings = synchronizedTopicCategories(for: settings)
+        let remoteSanitizedSettings = synchronizedTopicCategories(
+            for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
+            includeResolvedTopicCategory: true
+        )
+        let shouldPreserveLocal = shouldPreserveLocalSettings(
+            local: localSettings,
+            remote: remoteSanitizedSettings,
+            remoteUpdatedAt: snapshot.serverTime
+        )
+        var sanitizedSettings = shouldPreserveLocal ? localSettings : remoteSanitizedSettings
+        if !isCommunitySignedIn {
+            sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
+        }
         let localCurrentQuestion = currentQuestion
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
+
+        if shouldPreserveLocal {
+            log(.info, "백엔드 설정보다 로컬 저장 설정을 우선 적용했습니다.")
+        }
 
         settings = sanitizedSettings
         if !isEditingSettings {
@@ -430,30 +807,38 @@ final class AppState: ObservableObject {
 
     private func reloadPersistedState(restartTimerAfterReload: Bool = true) {
         let loadedSettings = settingsStore.loadSettings()
-        let loadedAPIKey = settingsStore.loadAPIKey()
+        let synchronizedLoadedSettings = synchronizedTopicCategories(for: loadedSettings)
+        let loadedAPIKey = settingsStore.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        let loadedAPIKeyUpdatedAt = settingsStore.loadOpenAIAPIKeyUpdatedAt()
+        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
 
-        settings = loadedSettings
+        settings = synchronizedLoadedSettings
         currentQuestion = settingsStore.loadQuestion()
         lastAnswer = settingsStore.loadLastAnswer()
         gradingResult = settingsStore.loadGradingResult()
         isRunning = settingsStore.loadIsRunning()
         studyRecords = settingsStore.loadStudyRecords()
         apiKey = loadedAPIKey
-        savedSettings = loadedSettings
+        savedSettings = synchronizedLoadedSettings
         savedAPIKey = loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
         hasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
         isCloudSyncEnabled = settingsStore.loadIsCloudSyncEnabled()
         cloudLastSyncedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
         loadAppLogPage(appLogPage)
 
         if !isEditingSettings {
-            draftSettings = loadedSettings
+            draftSettings = synchronizedLoadedSettings
             draftAPIKey = loadedAPIKey
         }
 
-        hasAPIKeyError = loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        hasAPIKeyError = loadedAPIKey.isEmpty
         if restartTimerAfterReload {
             restartTimer()
+        }
+
+        if loadedAPIKeyUpdatedAt == nil, !loadedAPIKey.isEmpty {
+            settingsStore.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
         }
     }
 
@@ -512,8 +897,17 @@ final class AppState: ObservableObject {
     }
 
     func beginSettingsEditing() {
-        draftSettings = settings
+        guard !isEditingSettings else {
+            return
+        }
+
+        let syncedSettings = synchronizedTopicCategories(for: settings)
+        settings = syncedSettings
+        draftSettings = syncedSettings
         draftAPIKey = apiKey
+        didReceiveCloudSnapshotWhileEditing = false
+        didReceiveBackendSnapshotWhileEditing = false
+        pendingBackendSnapshotWhileEditing = nil
         isEditingSettings = true
     }
 
@@ -522,14 +916,159 @@ final class AppState: ObservableObject {
             return
         }
 
-        draftSettings = settings
-        draftAPIKey = apiKey
+        let shouldSyncAfterCancel = didReceiveCloudSnapshotWhileEditing && hasUnsavedSettingsChanges
+        let shouldApplyBackendSnapshotAfterCancel = {
+            guard !hasUnsavedSettingsChanges,
+                  let snapshot = pendingBackendSnapshotWhileEditing else {
+                return false
+            }
+
+            return shouldApplyPendingBackendSnapshot(snapshot)
+        }()
+        let pendingBackendSnapshot = pendingBackendSnapshotWhileEditing
+        settings = savedSettings
+        apiKey = savedAPIKey
+        draftSettings = savedSettings
+        draftAPIKey = savedAPIKey
         isEditingSettings = false
+        didReceiveCloudSnapshotWhileEditing = false
+        didReceiveBackendSnapshotWhileEditing = false
+        pendingBackendSnapshotWhileEditing = nil
+
+        if shouldSyncAfterCancel {
+            Task {
+                await syncCloudNow(updateVisibleQuestion: false)
+            }
+        }
+
+        if shouldApplyBackendSnapshotAfterCancel, let snapshot = pendingBackendSnapshot {
+            applyBackendSnapshot(snapshot, updateVisibleQuestion: false)
+        }
     }
 
     func updateDraftAppLanguage(_ language: AppLanguage) {
         draftSettings.appLanguage = language
         draftSettings.language = language.studyLanguage
+    }
+
+    func setDraftQuestionPublicity(_ isQuestionPublic: Bool) {
+        draftSettings.isQuestionPublic = isCommunitySignedIn && isQuestionPublic
+    }
+
+    func signInToCommunity() {
+        Task {
+            #if os(iOS)
+            do {
+                let idToken = try await GoogleOAuthService().signIn()
+                await signInToCommunity(idToken: idToken)
+            } catch GoogleOAuthError.notConfigured {
+                statusMessage = strings.googleLoginSetupRequired
+                log(.warning, "Google Login 설정이 없습니다.")
+            } catch {
+                communityErrorMessage = communityErrorMessage(for: error)
+                log(.warning, "Google Login 실패: \(error.localizedDescription)")
+            }
+            #else
+            statusMessage = strings.googleLoginSetupRequired
+            #endif
+        }
+    }
+
+    func signInToCommunity(idToken: String) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "google-login") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        do {
+            communityProfile = try await remotePushBackendClient.loginWithGoogle(
+                registration: registration,
+                idToken: idToken
+            )
+            isCommunitySignedIn = true
+            settingsStore.saveIsCommunitySignedIn(true)
+            statusMessage = strings.communitySignedIn
+            await syncRemotePushScheduleIfPossible(reason: "google-login")
+            await loadCommunityQuestions(reset: true, userInitiated: true)
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func signOutFromCommunity() {
+        isCommunitySignedIn = false
+        communityProfile = nil
+        settingsStore.saveIsCommunitySignedIn(false)
+        communityQuestions = []
+        communityOffset = 0
+        communityTotalCount = 0
+        communityErrorMessage = nil
+        if settings.isQuestionPublic || draftSettings.isQuestionPublic {
+            settings = settings.withQuestionPrivacy(false)
+            draftSettings = draftSettings.withQuestionPrivacy(false)
+            settingsStore.saveSettings(settings)
+            savedSettings = normalizedSettings(settings)
+            Task {
+                await syncRemotePushScheduleIfPossible(reason: "community-logout")
+            }
+        }
+        statusMessage = strings.communitySignedOut
+    }
+
+    func loadCommunityProfile() async {
+        guard isCommunitySignedIn,
+              let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
+            return
+        }
+
+        do {
+            communityProfile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+        } catch {
+            log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func updateCommunityProfile(displayName: String, bio: String) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
+            return
+        }
+        isUpdatingCommunityProfile = true
+        defer {
+            isUpdatingCommunityProfile = false
+        }
+
+        do {
+            communityProfile = try await remotePushBackendClient.updateMyProfile(
+                registration: registration,
+                displayName: displayName,
+                bio: bio
+            )
+            statusMessage = strings.profileSaved
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func reportCommunityQuestion(_ question: CommunityQuestion, reason: String, message: String = "") async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-report") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        do {
+            try await remotePushBackendClient.reportCommunityQuestion(
+                registration: registration,
+                questionID: question.id,
+                reason: reason,
+                message: message
+            )
+            statusMessage = strings.reportSubmitted
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
+        }
     }
 
     func setDraftNotificationSound(_ sound: NotificationSoundOption, preview: Bool = true) {
@@ -545,11 +1084,709 @@ final class AppState: ObservableObject {
             : "\(sound.displayName(language: draftSettings.appLanguage)) 알림음을 재생했습니다."
     }
 
+    func applyClipboardOpenAIAPIKey() {
+        clipboardPasteRequestID += 1
+        let requestID = clipboardPasteRequestID
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            let key = await readClipboardOpenAIAPIKeyForSettingsPaste()
+            await MainActor.run {
+                guard requestID == self.clipboardPasteRequestID else {
+                    return
+                }
+
+                if let key {
+                    self.setDraftAPIKey(key)
+                } else {
+                    self.statusMessage = strings.openAIAPIKeyMissing
+                    self.errorMessage = strings.openAIAPIKeyMissing
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func applyPastedOpenAIAPIKeyCandidates(_ values: [String]) -> Bool {
+        for value in values {
+            if let key = Self.extractOpenAIAPIKey(from: value) {
+                setDraftAPIKey(key)
+                return true
+            }
+        }
+
+        statusMessage = strings.openAIAPIKeyMissing
+        errorMessage = strings.openAIAPIKeyMissing
+        return false
+    }
+
+    func readClipboardOpenAIAPIKeyForSettingsPaste() async -> String? {
+        statusMessage = strings.pasteboardChecking
+        errorMessage = nil
+        let preChangeCount = currentClipboardChangeCount()
+
+        if let key = await fetchClipboardOpenAIAPIKeyWithRetry(
+            maxAttempts: Self.clipboardQuickReadAttempts,
+            intervalMilliseconds: Self.clipboardQuickReadIntervalMilliseconds,
+            requiredChangeCount: preChangeCount
+        ) {
+            statusMessage = nil
+            errorMessage = nil
+            return key
+        }
+
+        if let key = readClipboardOpenAIAPIKeyImmediate() {
+            statusMessage = nil
+            errorMessage = nil
+            return key
+        }
+
+        if let key = await readClipboardOpenAIAPIKeyForExternalPaste(
+            maxAttempts: Self.clipboardFallbackAttempts,
+            intervalMilliseconds: Self.clipboardSettingsReadIntervalMilliseconds,
+            requiredChangeCount: preChangeCount
+        ) {
+            statusMessage = nil
+            errorMessage = nil
+            return key
+        }
+
+        statusMessage = strings.openAIAPIKeyMissing
+        errorMessage = strings.openAIAPIKeyMissing
+        return nil
+    }
+
+    func readClipboardOpenAIAPIKeyForExternalPaste(
+        maxAttempts: Int = 80,
+        intervalMilliseconds: UInt64 = 24,
+        requiredChangeCount: Int? = nil
+    ) async -> String? {
+        statusMessage = strings.pasteboardChecking
+
+        if let key = readClipboardOpenAIAPIKeyImmediate() {
+            errorMessage = nil
+            statusMessage = nil
+            return key
+        }
+
+        let preChangeCount = currentClipboardChangeCount()
+        if let key = await fetchClipboardOpenAIAPIKeyWithRetry(
+            maxAttempts: 16,
+            intervalMilliseconds: Self.clipboardStickyReadIntervalMilliseconds,
+            requiredChangeCount: preChangeCount
+        ) {
+            errorMessage = nil
+            statusMessage = nil
+            return key
+        }
+
+        guard let key = await fetchClipboardOpenAIAPIKeyWithRetry(
+            maxAttempts: maxAttempts,
+            intervalMilliseconds: intervalMilliseconds,
+            requiredChangeCount: requiredChangeCount
+        ) else {
+            statusMessage = strings.openAIAPIKeyMissing
+            errorMessage = strings.openAIAPIKeyMissing
+            return nil
+        }
+
+        errorMessage = nil
+        statusMessage = nil
+        return key
+    }
+
+    func readClipboardOpenAIAPIKeyForQuickPaste() async -> String? {
+        return await readClipboardOpenAIAPIKeyForSettingsPaste()
+    }
+
+    func readClipboardOpenAIAPIKeyForLongPaste() async -> String? {
+        statusMessage = strings.pasteboardChecking
+
+        if let key = readClipboardOpenAIAPIKey() {
+            errorMessage = nil
+            statusMessage = nil
+            return key
+        }
+
+        let preChangeCount = currentClipboardChangeCount()
+        if let key = await fetchClipboardOpenAIAPIKeyWithRetry(
+            maxAttempts: 16,
+            intervalMilliseconds: Self.clipboardSettingsReadIntervalMilliseconds,
+            requiredChangeCount: preChangeCount
+        ) {
+            statusMessage = nil
+            errorMessage = nil
+            return key
+        }
+
+        guard let key = await readClipboardOpenAIAPIKeyForExternalPaste() else {
+            statusMessage = strings.openAIAPIKeyMissing
+            errorMessage = strings.openAIAPIKeyMissing
+            return nil
+        }
+
+        return key
+    }
+
+    /// 즉시 붙여넣기 동작에서 사용하는 편의 래퍼입니다.
+    /// 일부 뷰에서 호출명이 누락된 경로를 방지합니다.
+    func readClipboardOpenAIAPIKey() -> String? {
+        readClipboardOpenAIAPIKeyImmediate()
+    }
+
+    private func setDraftAPIKey(_ key: String) {
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else {
+            return
+        }
+
+        draftAPIKey = trimmedKey
+        statusMessage = strings.openAIAPIKeyCopied
+        errorMessage = nil
+    }
+
+    func readClipboardOpenAIAPIKeyImmediate() -> String? {
+        if let key = fetchClipboardOpenAIAPIKey() {
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedKey.isEmpty {
+                return trimmedKey
+            }
+        }
+
+        return nil
+    }
+
+    func fetchClipboardOpenAIAPIKeyWithRetry(
+        maxAttempts: Int = 80,
+        intervalMilliseconds: UInt64 = 16,
+        requiredChangeCount: Int? = nil
+    ) async -> String? {
+        guard maxAttempts > 0 else {
+            return nil
+        }
+
+        for attempt in 0..<maxAttempts {
+            if let key = fetchClipboardOpenAIAPIKey() {
+                return key
+            }
+
+            let isLastAttempt = attempt == maxAttempts - 1
+            guard !isLastAttempt else {
+                return nil
+            }
+
+            if let requiredChangeCount {
+                if currentClipboardChangeCount() == requiredChangeCount {
+                    let baseInterval = max(Self.clipboardStickyReadIntervalMilliseconds, 3)
+                    let shortInterval = min(
+                        baseInterval * UInt64(attempt + 1),
+                        40
+                    )
+                    try? await Task.sleep(nanoseconds: shortInterval * 1_000_000)
+                    continue
+                }
+            }
+
+            let pollingInterval = min(
+                intervalMilliseconds * UInt64(attempt + 1),
+                160
+            )
+            try? await Task.sleep(nanoseconds: max(pollingInterval, 6) * 1_000_000)
+        }
+
+        return nil
+    }
+
+    private func currentClipboardChangeCount() -> Int {
+        #if os(macOS)
+        return Int(NSPasteboard.general.changeCount)
+        #elseif os(iOS)
+        return UIPasteboard.general.changeCount
+        #else
+        return 0
+        #endif
+    }
+
+    func fetchClipboardOpenAIAPIKey() -> String? {
+        #if os(macOS)
+        let candidates: [NSPasteboard.PasteboardType] = [
+            .string,
+            .init("public.utf8-plain-text"),
+            .init("public.text"),
+            .init("public.utf16-plain-text"),
+            .init("public.utf16-external-plain-text"),
+            .init("public.html"),
+            .init("public.rtf")
+        ]
+
+        for type in candidates {
+            if let value = NSPasteboard.general.string(forType: type) {
+                if let extracted = Self.extractOpenAIAPIKey(from: value) {
+                    return extracted
+                }
+            }
+        }
+
+        for item in NSPasteboard.general.pasteboardItems ?? [] {
+            for type in item.types {
+                if let value = Self.extractString(fromPasteboardItem: item, type: type),
+                   let extracted = Self.extractOpenAIAPIKey(from: value) {
+                    return extracted
+                }
+            }
+        }
+
+        let classes: [NSPasteboardReading.Type] = [NSString.self, NSAttributedString.self]
+        if let objects = NSPasteboard.general.readObjects(forClasses: classes, options: nil),
+           let extracted = objects
+                .compactMap({ object -> String? in
+                    if let string = object as? String {
+                        return Self.extractOpenAIAPIKey(from: string)
+                    }
+                    if let attributed = object as? NSAttributedString {
+                        return Self.extractOpenAIAPIKey(from: attributed.string)
+                    }
+                    return nil
+                })
+                .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return extracted
+        }
+
+        return nil
+        #elseif os(iOS)
+        if let directString = UIPasteboard.general.string,
+           let extracted = Self.extractOpenAIAPIKey(from: directString) {
+            return extracted
+        }
+
+        let candidates: [String] = [
+            UTType.text.identifier,
+            UTType.plainText.identifier,
+            UTType.html.identifier,
+            UTType.utf8PlainText.identifier,
+            "public.text",
+            "public.utf16-plain-text",
+            "public.utf16-external-plain-text",
+            UTType.utf16PlainText.identifier,
+            UTType.rtf.identifier,
+            "public.url",
+            "public.url-name"
+        ]
+
+        for item in UIPasteboard.general.items {
+            for value in item.values {
+                if let extracted = Self.extractOpenAIAPIKeyFromNestedClipboardValue(value) {
+                    return extracted
+                }
+            }
+        }
+
+        for type in candidates {
+            if let value = UIPasteboard.general.value(forPasteboardType: type) {
+                if let extracted = Self.extractOpenAIAPIKeyFromNestedClipboardValue(value) {
+                    return extracted
+                }
+            }
+
+            if let data = UIPasteboard.general.data(forPasteboardType: type),
+               let dataText = String(data: data, encoding: .utf8),
+               let extracted = Self.extractOpenAIAPIKey(from: dataText) {
+                return extracted
+            }
+
+            if let data = UIPasteboard.general.data(forPasteboardType: type),
+               let extracted = Self.extractOpenAIAPIKeyFromNestedData(data) {
+                return extracted
+            }
+        }
+
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(iOS)
+    private static func extractOpenAIAPIKey(fromClipboardValue value: Any) -> String? {
+        if let valueString = value as? String,
+           let extracted = extractOpenAIAPIKey(from: valueString) {
+            return extracted
+        }
+
+        if let url = value as? URL,
+           let extracted = extractOpenAIAPIKey(from: url.absoluteString) {
+            return extracted
+        }
+
+        if let data = value as? Data {
+            if let utf8Text = String(data: data, encoding: .utf8),
+               let extracted = extractOpenAIAPIKey(from: utf8Text) {
+                return extracted
+            }
+
+            if let utf16Text = String(data: data, encoding: .utf16LittleEndian),
+               let extracted = extractOpenAIAPIKey(from: utf16Text) {
+                return extracted
+            }
+
+            if let utf16Text = String(data: data, encoding: .utf16BigEndian),
+               let extracted = extractOpenAIAPIKey(from: utf16Text) {
+                return extracted
+            }
+
+            if let asciiText = String(data: data, encoding: .ascii),
+               let extracted = extractOpenAIAPIKey(from: asciiText) {
+                return extracted
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractOpenAIAPIKeyFromNestedClipboardValue(_ value: Any) -> String? {
+        if let found = extractOpenAIAPIKey(fromClipboardValue: value) {
+            return found
+        }
+
+        if let arrayValue = value as? [Any] {
+            for element in arrayValue {
+                if let found = extractOpenAIAPIKeyFromNestedClipboardValue(element) {
+                    return found
+                }
+            }
+        }
+
+        if let dictValue = value as? [String: Any] {
+            for element in dictValue.values {
+                if let found = extractOpenAIAPIKeyFromNestedClipboardValue(element) {
+                    return found
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractOpenAIAPIKeyFromNestedData(_ data: Data) -> String? {
+        let encodings: [String.Encoding] = [.utf8, .utf16LittleEndian, .utf16BigEndian, .ascii]
+
+        for encoding in encodings {
+            if let text = String(data: data, encoding: encoding),
+               let extracted = extractOpenAIAPIKey(from: text) {
+                return extracted
+            }
+        }
+
+        return nil
+    }
+    #endif
+
+    #if os(macOS)
+    private static func extractString(fromPasteboardItem item: NSPasteboardItem, type: NSPasteboard.PasteboardType) -> String? {
+        if let value = item.string(forType: type), !value.isEmpty {
+            return value
+        }
+
+        guard let data = item.data(forType: type) else {
+            return nil
+        }
+
+        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
+            return text
+        }
+
+        if let text = String(data: data, encoding: .utf16LittleEndian), !text.isEmpty {
+            return text
+        }
+
+        if let text = String(data: data, encoding: .utf16BigEndian), !text.isEmpty {
+            return text
+        }
+
+        return nil
+    }
+    #endif
+
+    nonisolated static func extractOpenAIAPIKey(from text: String) -> String? {
+        let normalized = text
+            .replacingOccurrences(of: "`", with: " ")
+            .replacingOccurrences(of: "\"", with: " ")
+            .replacingOccurrences(of: "'", with: " ")
+            .replacingOccurrences(of: "“", with: " ")
+            .replacingOccurrences(of: "”", with: " ")
+            .replacingOccurrences(of: "<", with: " ")
+            .replacingOccurrences(of: ">", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\u{200b}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return nil
+        }
+
+        let candidateSeparators = CharacterSet(charactersIn: " \t\n\r.,:;()[]{}<>/\\\"'`~!@#$%^&*+=|?:;<>[]{}")
+        let tokenCandidates = normalized
+            .components(separatedBy: candidateSeparators)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        for token in tokenCandidates {
+            if (token.hasPrefix("sk-proj-") || token.hasPrefix("sk-")) && token.count >= 20 {
+                return token
+            }
+        }
+
+        let patterns = [
+            "sk-(?:proj-)?[A-Za-z0-9_-]{20,}",
+            "sk-proj-[A-Za-z0-9_-]{20,}",
+            "sk-[A-Za-z0-9_-]{20,}"
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                  let match = regex.firstMatch(
+                      in: normalized,
+                      options: [],
+                      range: NSRange(location: 0, length: normalized.utf16.count)
+                  ) else {
+                continue
+            }
+
+            let start = String.Index(utf16Offset: match.range.location, in: normalized)
+            let end = String.Index(utf16Offset: match.range.location + match.range.length, in: normalized)
+            let extracted = String(normalized[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !extracted.isEmpty {
+                return extracted
+            }
+        }
+
+        if let tokenRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9_-]+", options: []) {
+            let tokenRange = NSRange(location: 0, length: normalized.utf16.count)
+            let tokenMatches = tokenRegex.matches(in: normalized, options: [], range: tokenRange)
+            for token in tokenMatches {
+                let start = String.Index(utf16Offset: token.range.location, in: normalized)
+                let end = String.Index(utf16Offset: token.range.location + token.range.length, in: normalized)
+                let tokenText = String(normalized[start..<end])
+
+                if (tokenText.hasPrefix("sk-proj-") || tokenText.hasPrefix("sk-")) && tokenText.count >= 20 {
+                    return tokenText
+                }
+            }
+        }
+
+        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("sk-") && trimmed.count >= 20 ? trimmed : nil
+    }
+
     func saveSettings() {
         persistSettings(
             activeSettingsForEditing,
             apiKey: activeAPIKeyForEditing
         )
+    }
+
+    func addStudyCategory(
+        _ title: String,
+        difficulty: Difficulty? = nil,
+        customPrompt: String? = nil,
+        openAIModel: String? = nil
+    ) {
+        let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            return
+        }
+
+        let nextCategory = StudyCategory(
+            title: raw,
+            difficulty: difficulty ?? settings.difficulty,
+            customPrompt: customPrompt ?? settings.customPrompt,
+            openAIModel: openAIModel ?? settings.sanitizedOpenAIModel
+        )
+        let nextSettings = StudySettings(
+            topic: settings.topic,
+            difficulty: settings.difficulty,
+            appLanguage: settings.appLanguage,
+            language: settings.appLanguage.studyLanguage,
+            openAIModel: settings.sanitizedOpenAIModel,
+            notificationSound: settings.notificationSound,
+            customPrompt: settings.customPrompt,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: settings.studyCategories + [nextCategory],
+            selectedStudyCategoryID: settings.selectedStudyCategoryID ?? nextCategory.id
+        )
+
+        persistSettings(nextSettings, apiKey: apiKey)
+        if settings.selectedStudyCategoryID == nil {
+            activateStudyContext(forTopic: nextSettings.topic)
+        }
+        statusMessage = nil
+    }
+
+    func updateStudyCategory(
+        id: String,
+        title: String,
+        difficulty: Difficulty,
+        customPrompt: String,
+        openAIModel: String
+    ) {
+        let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            return
+        }
+
+        let categories = settings.studyCategories.map { category in
+            guard category.id == id else {
+                return category
+            }
+
+            return StudyCategory(
+                id: category.id,
+                title: raw,
+                difficulty: difficulty,
+                customPrompt: customPrompt,
+                openAIModel: openAIModel,
+                createdAt: category.createdAt
+            )
+        }
+
+        let editedCategory = categories.first { $0.id == id }
+
+        let nextSettings = StudySettings(
+            topic: settings.selectedStudyCategoryID == id ? raw : settings.topic,
+            difficulty: settings.selectedStudyCategoryID == id ? difficulty : settings.difficulty,
+            appLanguage: settings.appLanguage,
+            language: settings.appLanguage.studyLanguage,
+            openAIModel: settings.selectedStudyCategoryID == id ? (editedCategory?.sanitizedOpenAIModel ?? openAIModel) : settings.sanitizedOpenAIModel,
+            notificationSound: settings.notificationSound,
+            customPrompt: settings.selectedStudyCategoryID == id ? customPrompt : settings.customPrompt,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: categories,
+            selectedStudyCategoryID: settings.selectedStudyCategoryID == id ? id : settings.selectedStudyCategoryID
+        )
+
+        persistSettings(nextSettings, apiKey: apiKey)
+        if nextSettings.selectedStudyCategoryID == id {
+            activateStudyContext(forTopic: nextSettings.topic)
+        }
+        statusMessage = nil
+    }
+
+    func activateStudyCategory(_ categoryID: String) {
+        let categories = synchronizedTopicCategories(for: settings).studyCategories
+        guard let targetCategory = categories.first(where: { $0.id == categoryID }) else {
+            return
+        }
+
+        let nextSettings = settings.withSelectedCategoryID(targetCategory.id)
+        persistSettings(nextSettings, apiKey: apiKey)
+        activateStudyContext(forTopic: nextSettings.topic)
+        statusMessage = nil
+    }
+
+    func deleteStudyCategory(id: String) {
+        guard let index = studyCategoriesForDisplay.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        deleteStudyCategories(at: IndexSet(integer: index))
+    }
+
+    func deleteStudyCategories(at offsets: IndexSet) {
+        let displayCategories = studyCategoriesForDisplay
+        let idsToDelete = Set(offsets.compactMap { index in
+            displayCategories.indices.contains(index) ? displayCategories[index].id : nil
+        })
+        guard !idsToDelete.isEmpty else {
+            return
+        }
+
+        let currentSelectedID = settings.selectedStudyCategoryID
+        let didDeleteActiveCategory = currentSelectedID.map { idsToDelete.contains($0) } ?? false
+        let categories = settings.studyCategories.filter { !idsToDelete.contains($0.id) }
+        let nextSelectedID: String?
+        if didDeleteActiveCategory {
+            nextSelectedID = categories.first?.id
+        } else if let currentSelectedID,
+                  categories.contains(where: { $0.id == currentSelectedID }) {
+            nextSelectedID = currentSelectedID
+        } else {
+            nextSelectedID = categories.first?.id
+        }
+
+        let selectedCategory = nextSelectedID.flatMap { selectedID in
+            categories.first { $0.id == selectedID }
+        }
+
+        let nextSettings = StudySettings(
+            topic: selectedCategory?.normalizedTitle ?? settings.topic,
+            difficulty: selectedCategory?.difficulty ?? settings.difficulty,
+            appLanguage: settings.appLanguage,
+            language: settings.appLanguage.studyLanguage,
+            openAIModel: selectedCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel,
+            notificationSound: settings.notificationSound,
+            customPrompt: selectedCategory?.normalizedCustomPrompt ?? settings.customPrompt,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: categories,
+            selectedStudyCategoryID: nextSelectedID
+        )
+
+        persistSettings(nextSettings, apiKey: apiKey)
+        if didDeleteActiveCategory {
+            if let selectedCategory {
+                activateStudyContext(forTopic: selectedCategory.title)
+            } else {
+                currentQuestion = nil
+                lastAnswer = ""
+                gradingResult = nil
+                settingsStore.saveQuestion(nil)
+                settingsStore.saveLastAnswer("")
+                settingsStore.saveGradingResult(nil)
+            }
+        }
+    }
+
+    func moveStudyCategories(from source: IndexSet, to destination: Int) {
+        var categories = settings.studyCategories
+        categories.move(fromOffsets: source, toOffset: destination)
+
+        let nextSettings = StudySettings(
+            topic: settings.topic,
+            difficulty: settings.difficulty,
+            appLanguage: settings.appLanguage,
+            language: settings.appLanguage.studyLanguage,
+            openAIModel: settings.activeCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel,
+            notificationSound: settings.notificationSound,
+            customPrompt: settings.customPrompt,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: categories,
+            selectedStudyCategoryID: settings.selectedStudyCategoryID
+        )
+
+        persistSettings(nextSettings, apiKey: apiKey)
+    }
+
+    func selectStudyCategory(_ categoryID: String) {
+        let categories = synchronizedTopicCategories(for: settings).studyCategories
+        guard let targetCategoryID = categories.first(where: { $0.id == categoryID })?.id ?? categories.first?.id else {
+            return
+        }
+
+        let nextSettings = settings.withSelectedCategoryID(targetCategoryID)
+        persistSettings(nextSettings, apiKey: apiKey)
+        activateStudyContext(forTopic: nextSettings.topic)
+        showStudyScreen(categoryID: targetCategoryID)
     }
 
     func completeOnboarding(settings pendingSettings: StudySettings, apiKey pendingAPIKey: String) async {
@@ -559,7 +1796,11 @@ final class AppState: ObservableObject {
         )
         settingsStore.saveHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
+        #if os(iOS)
+        selectedTab = .home
+        #else
         selectedTab = .study
+        #endif
         markCloudDataChanged()
 
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -624,26 +1865,49 @@ final class AppState: ObservableObject {
         _ pendingSettings: StudySettings,
         apiKey pendingAPIKey: String
     ) {
-        let sanitizedSettings = normalizedSettings(pendingSettings)
+        let profileSettings = settingsWithResolvedStudyProfile(from: pendingSettings)
+        let synchronizedSettings = synchronizedTopicCategories(
+            for: profileSettings,
+            includeResolvedTopicCategory: false
+        )
+        var sanitizedSettings = normalizedSettings(synchronizedSettings)
+        if !isCommunitySignedIn {
+            sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
+        }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
+        if didAPIKeyChange {
+            lastAPIKeyUpdatedAt = now
+            settingsStore.saveOpenAIAPIKeyUpdatedAt(now)
+        } else if settingsStore.loadOpenAIAPIKeyUpdatedAt() == nil, !trimmedAPIKey.isEmpty {
+            lastAPIKeyUpdatedAt = now
+            settingsStore.saveOpenAIAPIKeyUpdatedAt(now)
+        }
+        lastLocalSettingsMutationAt = now
+        settingsStore.saveLocalSettingsMutationAt(now)
 
         settings = sanitizedSettings
-        apiKey = pendingAPIKey
+        apiKey = trimmedAPIKey
         draftSettings = sanitizedSettings
-        draftAPIKey = pendingAPIKey
+        draftAPIKey = trimmedAPIKey
+        didReceiveCloudSnapshotWhileEditing = false
+        didReceiveBackendSnapshotWhileEditing = false
+        pendingBackendSnapshotWhileEditing = nil
 
         settingsStore.saveSettings(sanitizedSettings)
-        if didAPIKeyChange {
-            settingsStore.saveAPIKey(pendingAPIKey)
-        }
+        settingsStore.saveAPIKey(trimmedAPIKey)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
         studyRecords = settingsStore.loadStudyRecords()
         if trimmedAPIKey.isEmpty {
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
-        } else if didAPIKeyChange || !hasAPIKeyError {
+        } else if didAPIKeyChange {
+            isBackendOpenAIKeyConfigured = false
+            hasAPIKeyError = false
+            errorMessage = nil
+        } else if !hasAPIKeyError {
             isBackendOpenAIKeyConfigured = true
             errorMessage = nil
         }
@@ -658,6 +1922,41 @@ final class AppState: ObservableObject {
             await ensureCloudQuestionPushSubscription()
             await syncRemotePushScheduleIfPossible(reason: "settings")
         }
+    }
+
+    private func settingsWithResolvedStudyProfile(from pendingSettings: StudySettings) -> StudySettings {
+        let fallbackTitle = StudySettings.fallbackTopic(for: pendingSettings.appLanguage)
+        let normalizedTopic = Self.normalizedCategoryLookup(for: pendingSettings.topic)
+        let normalizedFallback = Self.normalizedCategoryLookup(for: fallbackTitle)
+        let hasUserStudy = pendingSettings.studyCategories.contains {
+            Self.normalizedCategoryLookup(for: $0.title) != normalizedFallback
+        }
+
+        guard !hasUserStudy, normalizedTopic != normalizedFallback else {
+            return pendingSettings
+        }
+
+        let profile = StudyCategory(
+            title: pendingSettings.topic,
+            difficulty: pendingSettings.difficulty,
+            customPrompt: pendingSettings.customPrompt,
+            openAIModel: pendingSettings.sanitizedOpenAIModel
+        )
+
+        return StudySettings(
+            topic: pendingSettings.topic,
+            difficulty: pendingSettings.difficulty,
+            appLanguage: pendingSettings.appLanguage,
+            language: pendingSettings.appLanguage.studyLanguage,
+            openAIModel: pendingSettings.sanitizedOpenAIModel,
+            notificationSound: pendingSettings.notificationSound,
+            customPrompt: pendingSettings.customPrompt,
+            intervalMinutes: pendingSettings.sanitizedIntervalMinutes,
+            maxHistoryCount: pendingSettings.sanitizedMaxHistoryCount,
+            isQuestionPublic: pendingSettings.isQuestionPublic,
+            studyCategories: [profile],
+            selectedStudyCategoryID: profile.id
+        )
     }
 
     func saveSettingsAndValidateAPIKey() async {
@@ -817,6 +2116,10 @@ final class AppState: ObservableObject {
         log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
 
         do {
+            try await updateBackendSettings(
+                registration: registration,
+                reason: manual ? "manual-question-before-create" : "scheduled-question-before-create"
+            )
             let record = try await remotePushBackendClient.createQuestion(registration: registration)
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
@@ -1200,22 +2503,6 @@ final class AppState: ObservableObject {
         log(.info, "가장 오래된 미제출 질문을 열었습니다.")
     }
 
-    func copyToClipboard(_ text: String, message: String? = nil) {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else {
-            return
-        }
-
-        #if os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(trimmedText, forType: .string)
-        #elseif os(iOS)
-        UIPasteboard.general.string = trimmedText
-        #endif
-        statusMessage = message ?? strings.copiedToClipboard
-        log(.info, "텍스트를 클립보드에 복사했습니다.")
-    }
-
     func updateAnswer(_ answer: String) {
         lastAnswer = answer
         settingsStore.saveLastAnswer(answer)
@@ -1234,14 +2521,14 @@ final class AppState: ObservableObject {
         settingsStore.saveQuestion(record.question)
         settingsStore.saveLastAnswer(record.answer ?? "")
         settingsStore.saveGradingResult(record.gradingResult)
-        selectedTab = .study
+        showStudyScreen(categoryID: categoryID(forTopic: record.topic))
         focusedRecordRequest = nil
         statusMessage = record.gradingResult == nil ? "미제출 질문을 열었습니다." : "학습 기록을 열었습니다."
         markCloudDataChanged(syncDelaySeconds: 4)
     }
 
     func prepareToOpenQuestionFromNotification() {
-        selectedTab = .study
+        showStudyScreen(categoryID: nil)
         notificationLandingMessage = strings.openingNotificationQuestion
         statusMessage = strings.openingNotificationQuestion
         errorMessage = nil
@@ -1255,7 +2542,7 @@ final class AppState: ObservableObject {
     ) -> Bool {
         if let recordID,
            settingsStore.loadRemotePushRegistration() != nil {
-            selectedTab = .study
+            showStudyScreen(categoryID: nil)
             notificationLandingMessage = strings.openingNotificationQuestion
             statusMessage = strings.openingNotificationQuestion
             Task {
@@ -1289,7 +2576,7 @@ final class AppState: ObservableObject {
                     statusMessage = "알림에서 열린 질문입니다."
                 }
                 notificationLandingMessage = nil
-                selectedTab = .study
+                showStudyScreen(categoryID: nil)
                 return true
             }
 
@@ -1521,7 +2808,7 @@ final class AppState: ObservableObject {
     }
 
     private func showNotificationQuestionUnavailable(preserveCurrentQuestion: Bool) {
-        selectedTab = .study
+        showStudyScreen(categoryID: nil)
         errorMessage = nil
 
         if !preserveCurrentQuestion || currentQuestion == nil {
@@ -1600,6 +2887,26 @@ final class AppState: ObservableObject {
         appLogs = []
         appLogTotalCount = 0
         appLogPage = 0
+    }
+
+    func appendAPITrafficLog(_ entry: APITrafficLogEntry) {
+        apiTrafficLogs.insert(entry, at: 0)
+        if apiTrafficLogs.count > Self.maxAPITrafficLogs {
+            apiTrafficLogs.removeLast(apiTrafficLogs.count - Self.maxAPITrafficLogs)
+        }
+    }
+
+    func clearAPITrafficLogs() {
+        apiTrafficLogs = []
+    }
+
+    func showAPIDebugPanel() {
+        isAPIDebugPanelPresented = true
+    }
+
+    func requestDebugPanelIfEnabledOrEnableOnDemand() {
+        isAPIDebugPanelPresented = true
+        log(.info, "API 디버그 패널을 열었습니다.")
     }
 
     func logRemoteNotificationEvent(_ message: String, isWarning: Bool = false) {
@@ -1962,9 +3269,10 @@ final class AppState: ObservableObject {
         let hasPushToken = !registration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldEnableRemotePush = isRunning && hasPushToken && hasRemoteUsableKey
         let shouldUploadAPIKey = !trimmedAPIKey.isEmpty && (includeAPIKey || !isBackendOpenAIKeyConfigured)
+        let backendSettings = isCommunitySignedIn ? settings : settings.withQuestionPrivacy(false)
         try await remotePushBackendClient.updateSchedule(
             registration: registration,
-            settings: settings,
+            settings: backendSettings,
             apiKey: shouldUploadAPIKey ? trimmedAPIKey : nil,
             enabled: shouldEnableRemotePush
         )
@@ -2130,7 +3438,8 @@ final class AppState: ObservableObject {
             notificationSound: settings.notificationSound,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+                        maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic
         )
 
         settingsStore.appendQuestionToHistory(push.question)
@@ -2184,6 +3493,7 @@ final class AppState: ObservableObject {
         CloudSyncSnapshot(
             updatedAt: updatedAt,
             apiKey: Self.trimmedOptional(apiKey),
+            apiKeyUpdatedAt: lastAPIKeyUpdatedAt,
             settings: normalizedSettings(settings),
             currentQuestion: currentQuestion,
             questionHistory: settingsStore.loadQuestionHistory(),
@@ -2198,19 +3508,47 @@ final class AppState: ObservableObject {
     }
 
     private func remoteSnapshotByFillingMissingAPIKey(_ snapshot: CloudSyncSnapshot) -> (snapshot: CloudSyncSnapshot, shouldPush: Bool) {
-        guard Self.trimmedOptional(snapshot.apiKey ?? "") == nil,
-              let localAPIKey = Self.trimmedOptional(apiKey) else {
+        let resolvedAPIKey = resolvedAPIKeyForCloudSync(
+            localAPIKey: apiKey,
+            localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
+            remoteAPIKey: snapshot.apiKey,
+            remoteAPIKeyUpdatedAt: snapshot.apiKeyUpdatedAt
+        )
+
+        let currentRemoteAPIKey = Self.trimmedOptional(snapshot.apiKey ?? "")
+        guard let selectedKey = resolvedAPIKey.key,
+              selectedKey != currentRemoteAPIKey else {
             return (snapshot, false)
         }
 
         var mergedSnapshot = snapshot
-        mergedSnapshot.apiKey = localAPIKey
+        mergedSnapshot.apiKey = resolvedAPIKey.key
+        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
         mergedSnapshot.updatedAt = max(snapshot.updatedAt, Date())
+
+        if resolvedAPIKey.updatedAt == nil {
+            mergedSnapshot.apiKeyUpdatedAt = lastAPIKeyUpdatedAt
+        }
+
+        if resolvedAPIKey.updatedAt == nil,
+           let localUpdatedAt = lastAPIKeyUpdatedAt {
+            mergedSnapshot.apiKeyUpdatedAt = localUpdatedAt
+        }
+
         return (mergedSnapshot, true)
     }
 
     private func incomingSnapshotMergingLocalData(_ remoteSnapshot: CloudSyncSnapshot) -> CloudSyncSnapshot {
         var mergedSnapshot = remoteSnapshot
+        let resolvedAPIKey = resolvedAPIKeyForCloudSync(
+            localAPIKey: apiKey,
+            localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
+            remoteAPIKey: remoteSnapshot.apiKey,
+            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+        )
+        mergedSnapshot.apiKey = resolvedAPIKey.key
+        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+
         let maxHistoryCount = max(
             remoteSnapshot.settings.sanitizedMaxHistoryCount,
             settings.sanitizedMaxHistoryCount
@@ -2273,23 +3611,50 @@ final class AppState: ObservableObject {
         remoteSnapshot: CloudSyncSnapshot
     ) -> CloudSyncSnapshot {
         var mergedSnapshot = snapshot
+        let resolvedAPIKey = resolvedAPIKeyForCloudSync(
+            localAPIKey: apiKey,
+            localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
+            remoteAPIKey: remoteSnapshot.apiKey,
+            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+        )
+        let previousAPIKey = mergedSnapshot.apiKey
+        mergedSnapshot.apiKey = resolvedAPIKey.key
+        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+
         let maxHistoryCount = max(
             snapshot.settings.sanitizedMaxHistoryCount,
             remoteSnapshot.settings.sanitizedMaxHistoryCount
         )
 
-        if Self.trimmedOptional(snapshot.apiKey ?? "") == nil,
-           let remoteAPIKey = Self.trimmedOptional(remoteSnapshot.apiKey ?? "") {
-            mergedSnapshot.apiKey = remoteAPIKey
-            apiKey = remoteAPIKey
-            draftAPIKey = remoteAPIKey
-            savedAPIKey = remoteAPIKey
-            settingsStore.saveAPIKey(remoteAPIKey)
-            hasAPIKeyError = false
+        if previousAPIKey != resolvedAPIKey.key {
+            let trimmedResolved = resolvedAPIKey.key ?? ""
+            if !isEditingSettings && !trimmedResolved.isEmpty {
+                apiKey = trimmedResolved
+                draftAPIKey = trimmedResolved
+                savedAPIKey = trimmedResolved
+                settingsStore.saveAPIKey(trimmedResolved)
+                lastAPIKeyUpdatedAt = resolvedAPIKey.updatedAt
+                if let updatedAt = resolvedAPIKey.updatedAt {
+                    settingsStore.saveOpenAIAPIKeyUpdatedAt(updatedAt)
+                } else {
+                    settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                }
+            }
+
+            if resolvedAPIKey.key == nil {
+                settingsStore.saveAPIKey("")
+                apiKey = ""
+                draftAPIKey = ""
+                savedAPIKey = ""
+                lastAPIKeyUpdatedAt = nil
+                settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+            }
+
             if errorMessage == strings.apiKeyEmptyDetailed || errorMessage == strings.apiKeyInvalidDetailed {
                 errorMessage = nil
             }
             log(.info, "iCloud 원격 OpenAI API 키를 보존해 로컬 변경사항과 함께 저장합니다.")
+            hasAPIKeyError = resolvedAPIKey.key == nil
         }
 
         mergedSnapshot.hasCompletedOnboarding = snapshot.hasCompletedOnboarding || remoteSnapshot.hasCompletedOnboarding
@@ -2341,6 +3706,100 @@ final class AppState: ObservableObject {
         return mergedSnapshot
     }
 
+    private func shouldPreserveLocalAPIKeyDuringSync(
+        localAPIKey: String?,
+        localAPIKeyUpdatedAt: Date?,
+        remoteAPIKey: String?,
+        remoteAPIKeyUpdatedAt: Date?
+    ) -> Bool {
+        let trimmedLocal = Self.trimmedOptional(localAPIKey ?? "")
+        let trimmedRemote = Self.trimmedOptional(remoteAPIKey ?? "")
+
+        guard let trimmedLocal else {
+            return false
+        }
+
+        guard trimmedRemote != trimmedLocal else {
+            return false
+        }
+
+        guard let localMutationAt = lastLocalSettingsMutationAt else {
+            return false
+        }
+
+        if trimmedRemote == nil {
+            return true
+        }
+
+        if let localUpdatedAt = localAPIKeyUpdatedAt,
+           let remoteUpdatedAt = remoteAPIKeyUpdatedAt,
+           localUpdatedAt >= remoteUpdatedAt {
+            return true
+        }
+
+        guard localAPIKeyUpdatedAt == nil else {
+            return false
+        }
+
+        return Date().timeIntervalSince(localMutationAt) <= Self.recentLocalSettingsMutationWindow
+    }
+
+    private func resolvedAPIKeyForCloudSync(
+        localAPIKey: String?,
+        localAPIKeyUpdatedAt: Date?,
+        remoteAPIKey: String?,
+        remoteAPIKeyUpdatedAt: Date?
+    ) -> (key: String?, updatedAt: Date?) {
+        if shouldPreserveLocalAPIKeyDuringSync(
+            localAPIKey: localAPIKey,
+            localAPIKeyUpdatedAt: localAPIKeyUpdatedAt,
+            remoteAPIKey: remoteAPIKey,
+            remoteAPIKeyUpdatedAt: remoteAPIKeyUpdatedAt
+        ) {
+            return (Self.trimmedOptional(localAPIKey ?? ""), localAPIKeyUpdatedAt)
+        }
+
+        return resolvedAPIKey(
+            localAPIKey: localAPIKey,
+            localAPIKeyUpdatedAt: localAPIKeyUpdatedAt,
+            remoteAPIKey: remoteAPIKey,
+            remoteAPIKeyUpdatedAt: remoteAPIKeyUpdatedAt
+        )
+    }
+
+    private func resolvedAPIKey(
+        localAPIKey: String?,
+        localAPIKeyUpdatedAt: Date?,
+        remoteAPIKey: String?,
+        remoteAPIKeyUpdatedAt: Date?
+    ) -> (key: String?, updatedAt: Date?) {
+        let trimmedLocal = Self.trimmedOptional(localAPIKey ?? "")
+        let trimmedRemote = Self.trimmedOptional(remoteAPIKey ?? "")
+
+        switch (trimmedLocal, trimmedRemote) {
+        case let (local?, remote?):
+            if let localUpdatedAt = localAPIKeyUpdatedAt, let remoteUpdatedAt = remoteAPIKeyUpdatedAt {
+                return localUpdatedAt >= remoteUpdatedAt ? (local, localUpdatedAt) : (remote, remoteUpdatedAt)
+            }
+
+            if let localUpdatedAt = localAPIKeyUpdatedAt, remoteAPIKeyUpdatedAt == nil {
+                return (local, localUpdatedAt)
+            }
+
+            if localAPIKeyUpdatedAt == nil, let remoteUpdatedAt = remoteAPIKeyUpdatedAt {
+                return (remote, remoteUpdatedAt)
+            }
+
+            return (local, localAPIKeyUpdatedAt)
+        case (let local?, nil):
+            return (local, localAPIKeyUpdatedAt)
+        case (nil, let remote?):
+            return (remote, remoteAPIKeyUpdatedAt)
+        case (nil, nil):
+            return (nil, nil)
+        }
+    }
+
     private func preferredCurrentQuestion(
         local: QuestionItem?,
         remote: QuestionItem?,
@@ -2368,8 +3827,30 @@ final class AppState: ObservableObject {
 
         var mergedSnapshot = remoteSnapshot
         mergedSnapshot.updatedAt = Date()
-        if Self.trimmedOptional(mergedSnapshot.apiKey ?? "") == nil {
-            mergedSnapshot.apiKey = Self.trimmedOptional(apiKey)
+        let resolvedAPIKey = resolvedAPIKeyForCloudSync(
+            localAPIKey: apiKey,
+            localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
+            remoteAPIKey: remoteSnapshot.apiKey,
+            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+        )
+
+        if resolvedAPIKey.key != nil {
+            mergedSnapshot.apiKey = resolvedAPIKey.key
+            mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+        }
+
+        if mergedSnapshot.settings.studyCategories.isEmpty {
+            mergedSnapshot.settings = synchronizedTopicCategories(
+                for: mergedSnapshot.settings,
+                includeResolvedTopicCategory: true
+            )
+        }
+
+        if mergedSnapshot.settings.selectedStudyCategoryID == nil {
+            mergedSnapshot.settings = synchronizedTopicCategories(
+                for: mergedSnapshot.settings,
+                includeResolvedTopicCategory: true
+            )
         }
         mergedSnapshot.hasCompletedOnboarding = remoteSnapshot.hasCompletedOnboarding || hasCompletedOnboarding
         mergedSnapshot.deletedStudyRecordMarkers = mergedDeletedStudyRecordMarkers(
@@ -2593,14 +4074,45 @@ final class AppState: ObservableObject {
 
     private func applyCloudSnapshot(_ snapshot: CloudSyncSnapshot, updateVisibleQuestion: Bool = true) {
         let preservedCloudSyncEnabled = isCloudSyncEnabled
-        let sanitizedSettings = normalizedSettings(snapshot.settings)
+
+        if isEditingSettings {
+            didReceiveCloudSnapshotWhileEditing = true
+            settingsStore.saveCloudSyncSnapshotUpdatedAt(snapshot.updatedAt)
+            if cloudLastSyncedAt == nil || snapshot.updatedAt > cloudLastSyncedAt! {
+                cloudLastSyncedAt = snapshot.updatedAt
+            }
+            log(.info, "설정 편집 중이어서 iCloud 스냅샷 적용을 미뤘습니다.")
+            return
+        }
+
+        let localSynchronizedSettings = synchronizedTopicCategories(for: settings)
+        let sanitizedSettings = synchronizedTopicCategories(
+            for: normalizedSettings(snapshot.settings),
+            includeResolvedTopicCategory: true
+        )
+        let effectiveSettings = shouldPreserveLocalSettings(
+            local: localSynchronizedSettings,
+            remote: sanitizedSettings,
+            remoteUpdatedAt: snapshot.updatedAt
+        )
+            ? localSynchronizedSettings
+            : sanitizedSettings
+        let mergedMaxHistoryCount = max(
+            localSynchronizedSettings.sanitizedMaxHistoryCount,
+            sanitizedSettings.sanitizedMaxHistoryCount
+        )
         let mergedHasCompletedOnboarding = hasCompletedOnboarding || snapshot.hasCompletedOnboarding
-        let syncedAPIKey = Self.trimmedOptional(snapshot.apiKey ?? "")
         let localCurrentQuestion = currentQuestion
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
         let localStudyRecords = studyRecords
         let localQuestionHistory = settingsStore.loadQuestionHistory()
+        let resolvedAPIKey = resolvedAPIKeyForCloudSync(
+            localAPIKey: apiKey,
+            localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
+            remoteAPIKey: snapshot.apiKey,
+            remoteAPIKeyUpdatedAt: snapshot.apiKeyUpdatedAt
+        )
         let previousAPIKey = Self.trimmedOptional(apiKey)
         let shouldPreserveActiveQuestion = shouldPreserveActiveQuestion(whenApplying: snapshot)
         let mergedDeletedMarkers = mergedDeletedStudyRecordMarkers(
@@ -2616,10 +4128,7 @@ final class AppState: ObservableObject {
             local: localStudyRecords,
             deletedMarkers: mergedDeletedMarkers,
             recordsClearedAt: mergedRecordsClearedAt,
-            maxCount: max(
-                sanitizedSettings.sanitizedMaxHistoryCount,
-                settings.sanitizedMaxHistoryCount
-            )
+            maxCount: mergedMaxHistoryCount
         )
         let mergedHistory = mergedQuestionHistory(
             remote: snapshot.questionHistory,
@@ -2629,20 +4138,64 @@ final class AppState: ObservableObject {
         let appliedLastAnswer: String
         let appliedGradingResult: GradingResult?
 
-        settings = sanitizedSettings
-        draftSettings = sanitizedSettings
-        if let syncedAPIKey {
-            apiKey = syncedAPIKey
-            draftAPIKey = syncedAPIKey
-            savedAPIKey = syncedAPIKey
-            settingsStore.saveAPIKey(syncedAPIKey)
-            hasAPIKeyError = false
+        settings = effectiveSettings
+        if !isEditingSettings {
+            draftSettings = effectiveSettings
+            savedSettings = effectiveSettings
+            if effectiveSettings != sanitizedSettings {
+                log(.info, "로컬 설정이 원격 설정보다 최신이라 iCloud 스냅샷의 카테고리/주제 반영을 보류했습니다.")
+            }
+        }
+
+        if !isEditingSettings {
+            if let syncedAPIKey = resolvedAPIKey.key {
+                if previousAPIKey != syncedAPIKey {
+                    apiKey = syncedAPIKey
+                    draftAPIKey = syncedAPIKey
+                    savedAPIKey = syncedAPIKey
+                    settingsStore.saveAPIKey(syncedAPIKey)
+                    log(.info, "원격 OpenAI API 키 동기화를 반영해 앱 키를 갱신했습니다.")
+                }
+
+                lastAPIKeyUpdatedAt = resolvedAPIKey.updatedAt
+                if let updatedAt = resolvedAPIKey.updatedAt {
+                    settingsStore.saveOpenAIAPIKeyUpdatedAt(updatedAt)
+                } else {
+                    settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                }
+
+                hasAPIKeyError = false
+            } else if previousAPIKey != nil {
+                apiKey = ""
+                draftAPIKey = ""
+                savedAPIKey = ""
+                lastAPIKeyUpdatedAt = nil
+                settingsStore.saveAPIKey("")
+                settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                hasAPIKeyError = true
+                log(.warning, "원격 OpenAI API 키가 없어 앱 키를 비웠습니다.")
+            }
+
+            if resolvedAPIKey.key == nil {
+                hasAPIKeyError = true
+            }
+
             if errorMessage == strings.apiKeyEmptyDetailed || errorMessage == strings.apiKeyInvalidDetailed {
                 errorMessage = nil
             }
-            if previousAPIKey != syncedAPIKey {
-                log(.info, "iCloud에서 OpenAI API 키를 불러왔습니다.")
+
+            if previousAPIKey != resolvedAPIKey.key {
+                log(.info, resolvedAPIKey.key == nil
+                    ? "iCloud에서 OpenAI API 키가 비어 있어 동기화에서 빈 값으로 반영했습니다."
+                    : "iCloud에서 OpenAI API 키를 불러왔습니다.")
             }
+        }
+
+        if let syncedAPIKey = resolvedAPIKey.key,
+           !isEditingSettings && previousAPIKey == syncedAPIKey,
+           lastAPIKeyUpdatedAt == nil,
+           resolvedAPIKey.updatedAt != nil {
+            lastAPIKeyUpdatedAt = resolvedAPIKey.updatedAt
         }
 
         if !updateVisibleQuestion {
@@ -2679,7 +4232,7 @@ final class AppState: ObservableObject {
         hasCompletedOnboarding = mergedHasCompletedOnboarding
         isCloudSyncEnabled = preservedCloudSyncEnabled
 
-        settingsStore.saveSettings(sanitizedSettings)
+        settingsStore.saveSettings(effectiveSettings)
         settingsStore.saveQuestion(appliedCurrentQuestion)
         settingsStore.saveQuestionHistory(mergedHistory)
         settingsStore.saveLastAnswer(appliedLastAnswer)
@@ -2690,12 +4243,93 @@ final class AppState: ObservableObject {
         settingsStore.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
         settingsStore.saveStudyRecordsClearedAt(mergedRecordsClearedAt)
         settingsStore.replaceStudyRecords(mergedRecords)
-        settingsStore.saveCloudSyncSnapshotUpdatedAt(snapshot.updatedAt)
+        let nextCloudSyncTimestamp = max(
+            snapshot.updatedAt,
+            cloudLastSyncedAt ?? snapshot.updatedAt,
+            lastLocalSettingsMutationAt ?? .distantPast
+        )
+        settingsStore.saveCloudSyncSnapshotUpdatedAt(nextCloudSyncTimestamp)
 
         studyRecords = settingsStore.loadStudyRecords()
-        savedSettings = sanitizedSettings
-        cloudLastSyncedAt = snapshot.updatedAt
+        savedSettings = effectiveSettings
+        cloudLastSyncedAt = nextCloudSyncTimestamp
         restartTimer()
+    }
+
+    private func shouldPreserveLocalSettings(
+        local: StudySettings,
+        remote: StudySettings,
+        remoteUpdatedAt: Date
+    ) -> Bool {
+        guard local != remote else {
+            return false
+        }
+
+        if hasUserDefinedCategory(in: local) && remoteSettingsAreFallbackOnly(remote, matchingLanguageOf: local) {
+            return true
+        }
+
+        guard let lastLocalSettingsMutationAt else {
+            return false
+        }
+
+        let now = Date()
+        if now.timeIntervalSince(lastLocalSettingsMutationAt) <= Self.recentLocalSettingsMutationWindow {
+            return true
+        }
+
+        guard remoteUpdatedAt <= lastLocalSettingsMutationAt else {
+            return false
+        }
+
+        return true
+    }
+
+    private func shouldApplyPendingBackendSnapshot(_ snapshot: BackendSnapshot) -> Bool {
+        let synchronizedLocalSettings = synchronizedTopicCategories(for: settings)
+        let synchronizedRemoteSettings = synchronizedTopicCategories(
+            for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
+            includeResolvedTopicCategory: true
+        )
+
+        if synchronizedLocalSettings == synchronizedRemoteSettings,
+           snapshot.records.count == studyRecords.count {
+            return false
+        }
+
+        if let lastLocalSettingsMutationAt,
+           snapshot.serverTime <= lastLocalSettingsMutationAt {
+            return false
+        }
+
+        return !shouldPreserveLocalSettings(
+            local: synchronizedLocalSettings,
+            remote: synchronizedRemoteSettings,
+            remoteUpdatedAt: snapshot.serverTime
+        )
+    }
+
+    private func hasUserDefinedCategory(in settings: StudySettings) -> Bool {
+        let fallback = Self.normalizedCategoryLookup(for: StudySettings.fallbackTopic(for: settings.appLanguage))
+        return settings.studyCategories.contains { category in
+            Self.normalizedCategoryLookup(for: category.title) != fallback
+        }
+    }
+
+    private func remoteSettingsAreFallbackOnly(_ settings: StudySettings, matchingLanguageOf local: StudySettings) -> Bool {
+        let fallback = Self.normalizedCategoryLookup(for: StudySettings.fallbackTopic(for: local.appLanguage))
+        return settings.studyCategories.allSatisfy { category in
+            Self.normalizedCategoryLookup(for: category.title) == fallback
+        }
+    }
+
+    private static func normalizedCategoryLookup(for title: String) -> String {
+        title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
     }
 
     private func shouldPreserveActiveQuestion(whenApplying snapshot: CloudSyncSnapshot) -> Bool {
@@ -2772,8 +4406,203 @@ final class AppState: ObservableObject {
             notificationSound: settings.notificationSound,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: settings.studyCategories,
+            selectedStudyCategoryID: settings.selectedStudyCategoryID
         )
+    }
+
+    private static func defaultFallbackTopic(for appLanguage: AppLanguage) -> String {
+        StudySettings.fallbackTopic(for: appLanguage)
+    }
+
+    private static func synchronizedTopicCategories(
+        for settings: StudySettings,
+        fallbackTopicResolver: (AppLanguage) -> String,
+        includeResolvedTopicCategory: Bool = false
+    ) -> StudySettings {
+        let fallbackTopic = fallbackTopicResolver(settings.appLanguage)
+        let normalizedTopic = settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedReferenceTopic = normalizedTopic.isEmpty ? fallbackTopic : normalizedTopic
+        var categories = StudySettings.normalizedCategories(
+            categories: settings.studyCategories,
+            fallbackTopic: fallbackTopic,
+            fallbackTitle: fallbackTopic
+        )
+
+        if includeResolvedTopicCategory {
+            categories = ensureCustomTopicCategory(
+                in: categories,
+                fallbackTopic: fallbackTopic,
+                resolvedTopic: resolvedReferenceTopic
+            )
+        }
+
+        if categories.isEmpty {
+            categories = []
+        }
+
+        let matchedBySelection = categories.first {
+            $0.id == settings.selectedStudyCategoryID
+        }
+
+        let matchedByName = categories.first {
+            normalizedCategoryMatch(lhs: $0.title, rhs: resolvedReferenceTopic)
+        }
+
+        let selectedCategoryID: String?
+        if let selected = matchedBySelection {
+            selectedCategoryID = selected.id
+        } else if includeResolvedTopicCategory, let matched = matchedByName {
+            selectedCategoryID = matched.id
+        } else {
+            selectedCategoryID = nil
+        }
+
+        let effectiveTopic: String
+        if let selectedCategoryID,
+           let selectedCategoryTitle = categories.first(where: { $0.id == selectedCategoryID })?.normalizedTitle,
+           !selectedCategoryTitle.isEmpty {
+            effectiveTopic = selectedCategoryTitle
+        } else {
+            effectiveTopic = resolvedReferenceTopic
+        }
+
+        return StudySettings(
+            topic: effectiveTopic,
+            difficulty: settings.difficulty,
+            appLanguage: settings.appLanguage,
+            language: settings.appLanguage.studyLanguage,
+            openAIModel: settings.sanitizedOpenAIModel,
+            notificationSound: settings.notificationSound,
+            customPrompt: settings.customPrompt,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: categories,
+            selectedStudyCategoryID: selectedCategoryID
+        )
+    }
+
+    private func synchronizedTopicCategories(
+        for settings: StudySettings,
+        includeResolvedTopicCategory: Bool = false
+    ) -> StudySettings {
+        Self.synchronizedTopicCategories(
+            for: settings,
+            fallbackTopicResolver: Self.defaultFallbackTopic,
+            includeResolvedTopicCategory: includeResolvedTopicCategory
+        )
+    }
+
+    private static func normalizedTopicKey(
+        for title: String,
+        normalizedAgainst fallback: String
+    ) -> Bool {
+        normalizedCategoryText(for: title) == normalizedCategoryText(for: fallback)
+    }
+
+    private static func normalizedCategoryText(for topic: String) -> String {
+        topic
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
+    }
+
+    private static func normalizedCategoryMatch(lhs: String, rhs: String) -> Bool {
+        normalizedCategoryText(for: lhs) == normalizedCategoryText(for: rhs)
+    }
+
+    private static func ensureCustomTopicCategory(
+        in categories: [StudyCategory],
+        fallbackTopic: String,
+        resolvedTopic: String,
+    ) -> [StudyCategory] {
+        let normalizedResolved = normalizedCategoryText(for: resolvedTopic)
+        let normalizedFallback = normalizedCategoryText(for: fallbackTopic)
+
+        guard !normalizedResolved.isEmpty,
+              normalizedResolved != normalizedFallback else {
+            return categories
+        }
+
+        guard !categories.contains(where: {
+            normalizedCategoryMatch(lhs: $0.title, rhs: resolvedTopic)
+        }) else {
+            return categories
+        }
+
+        var merged = categories
+        if let fallbackIndex = merged.firstIndex(where: { normalizedCategoryMatch(lhs: $0.title, rhs: fallbackTopic) }) {
+            merged.insert(StudyCategory(title: resolvedTopic), at: min(fallbackIndex + 1, merged.count))
+        } else {
+            merged.append(StudyCategory(title: resolvedTopic))
+        }
+
+        return merged
+    }
+
+    private func normalizedTopicKey(for topic: String) -> String {
+        topic
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined()
+    }
+
+    private func categoryID(forTopic topic: String) -> String? {
+        settings.studyCategories.first {
+            normalizedTopicKey(for: $0.title) == normalizedTopicKey(for: topic)
+        }?.id
+    }
+
+    private func activateStudyContext(forTopic topic: String) {
+        let matchingRecords = studyRecords
+            .filter { normalizedTopicKey(for: $0.topic) == normalizedTopicKey(for: topic) }
+            .sorted { lhs, rhs in
+                let lhsDate = lhs.answeredAt ?? lhs.question.createdAt
+                let rhsDate = rhs.answeredAt ?? rhs.question.createdAt
+                return lhsDate > rhsDate
+            }
+
+        if let preferredRecord = matchingRecords.first(where: { $0.gradingResult == nil }) ?? matchingRecords.first {
+            currentQuestion = preferredRecord.question
+            lastAnswer = preferredRecord.answer ?? ""
+            gradingResult = preferredRecord.gradingResult
+            settingsStore.saveQuestion(preferredRecord.question)
+            settingsStore.saveLastAnswer(preferredRecord.answer ?? "")
+            settingsStore.saveGradingResult(preferredRecord.gradingResult)
+        } else {
+            currentQuestion = nil
+            lastAnswer = ""
+            gradingResult = nil
+            settingsStore.saveQuestion(nil)
+            settingsStore.saveLastAnswer("")
+            settingsStore.saveGradingResult(nil)
+        }
+    }
+
+    private func showStudyScreen(categoryID: String?) {
+        #if os(iOS)
+        selectedTab = .home
+        homeStudyRoute = HomeStudyRoute(categoryID: categoryID)
+        #else
+        selectedTab = .study
+        #endif
+    }
+
+    private func communityErrorMessage(for error: Error) -> String {
+        if let backendError = error as? RemotePushBackendError,
+           case let .httpStatus(statusCode, _) = backendError,
+           statusCode == 404 {
+            return strings.communityUnavailable
+        }
+
+        return strings.communityRequestFailed
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

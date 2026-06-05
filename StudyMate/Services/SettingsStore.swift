@@ -1,5 +1,4 @@
 import Foundation
-import SQLite3
 
 final class SettingsStore {
     static let maxLogCount = 1000
@@ -15,11 +14,14 @@ final class SettingsStore {
         static let isRunning = "isRunning"
         static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
         static let apiKey = "openAIAPIKey"
+        static let apiKeyUpdatedAt = "openAIAPIKeyUpdatedAt"
+        static let localSettingsMutationAt = "localSettingsMutationAt"
         static let questionResponseID = "questionResponseID"
         static let appLogs = "appLogs"
         static let isDebuggingEnabled = "isDebuggingEnabled"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
+        static let isCommunitySignedIn = "isCommunitySignedIn"
         static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
@@ -33,6 +35,7 @@ final class SettingsStore {
 
     init(defaults: UserDefaults = .standard, recordDatabaseURL: URL? = nil) {
         self.defaults = defaults
+        Self.removeLegacyRecordDatabaseIfNeeded(defaults: defaults, databaseURL: recordDatabaseURL)
         self.recordStore = Self.makeRecordStore(defaults: defaults, databaseURL: recordDatabaseURL)
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
@@ -54,7 +57,10 @@ final class SettingsStore {
             notificationSound: settings.notificationSound,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: settings.studyCategories,
+            selectedStudyCategoryID: settings.selectedStudyCategoryID
         )
     }
 
@@ -68,7 +74,10 @@ final class SettingsStore {
             notificationSound: settings.notificationSound,
             customPrompt: settings.customPrompt,
             intervalMinutes: settings.sanitizedIntervalMinutes,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            studyCategories: settings.studyCategories,
+            selectedStudyCategoryID: settings.selectedStudyCategoryID
         )
 
         if let data = try? encoder.encode(sanitizedSettings) {
@@ -344,6 +353,40 @@ final class SettingsStore {
         }
     }
 
+    func loadOpenAIAPIKeyUpdatedAt() -> Date? {
+        guard let value = defaults.object(forKey: Keys.apiKeyUpdatedAt) as? TimeInterval else {
+            return nil
+        }
+
+        return Date(timeIntervalSince1970: value)
+    }
+
+    func saveOpenAIAPIKeyUpdatedAt(_ date: Date?) {
+        guard let date else {
+            defaults.removeObject(forKey: Keys.apiKeyUpdatedAt)
+            return
+        }
+
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.apiKeyUpdatedAt)
+    }
+
+    func loadLocalSettingsMutationAt() -> Date? {
+        guard let value = defaults.object(forKey: Keys.localSettingsMutationAt) as? TimeInterval else {
+            return nil
+        }
+
+        return Date(timeIntervalSince1970: value)
+    }
+
+    func saveLocalSettingsMutationAt(_ date: Date?) {
+        guard let date else {
+            defaults.removeObject(forKey: Keys.localSettingsMutationAt)
+            return
+        }
+
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.localSettingsMutationAt)
+    }
+
     func loadRemotePushRegistration() -> RemotePushRegistration? {
         guard let data = defaults.data(forKey: Keys.remotePushRegistration) else {
             return nil
@@ -391,6 +434,14 @@ final class SettingsStore {
 
     func saveIsCloudSyncEnabled(_ isEnabled: Bool) {
         defaults.set(isEnabled, forKey: Keys.isCloudSyncEnabled)
+    }
+
+    func loadIsCommunitySignedIn() -> Bool {
+        defaults.bool(forKey: Keys.isCommunitySignedIn)
+    }
+
+    func saveIsCommunitySignedIn(_ isSignedIn: Bool) {
+        defaults.set(isSignedIn, forKey: Keys.isCommunitySignedIn)
     }
 
     func loadCloudSyncSnapshotUpdatedAt() -> Date? {
@@ -479,31 +530,47 @@ final class SettingsStore {
         defaults.removeObject(forKey: Keys.studyRecords)
     }
 
-    private static func makeRecordStore(defaults: UserDefaults, databaseURL: URL?) -> StudyRecordStorage {
-        let resolvedURL: URL
-        do {
-            resolvedURL = try databaseURL ?? defaultRecordDatabaseURL(defaults: defaults)
-            return try SQLiteStudyRecordStore(databaseURL: resolvedURL)
-        } catch {
-            return InMemoryStudyRecordStore()
+    private static func makeRecordStore(defaults _: UserDefaults, databaseURL _: URL?) -> StudyRecordStorage {
+        InMemoryStudyRecordStore()
+    }
+
+    private static func removeLegacyRecordDatabaseIfNeeded(defaults: UserDefaults, databaseURL: URL?) {
+        let baseURL: URL?
+        if let databaseURL {
+            baseURL = databaseURL
+        } else if defaults === UserDefaults.standard {
+            baseURL = legacyStandardRecordDatabaseURL()
+        } else {
+            baseURL = nil
+        }
+
+        guard let baseURL else {
+            return
+        }
+
+        let urls = [
+            baseURL,
+            URL(fileURLWithPath: baseURL.path + "-wal"),
+            URL(fileURLWithPath: baseURL.path + "-shm")
+        ]
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
-    private static func defaultRecordDatabaseURL(defaults: UserDefaults) throws -> URL {
-        if defaults !== UserDefaults.standard {
-            return FileManager.default.temporaryDirectory
-                .appendingPathComponent("studymate-records-\(UUID().uuidString).sqlite")
-        }
-
-        let supportDirectory = try FileManager.default.url(
+    private static func legacyStandardRecordDatabaseURL() -> URL? {
+        guard let supportDirectory = try? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
-        )
-        let appDirectory = supportDirectory.appendingPathComponent("StudyMate", isDirectory: true)
-        try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
-        return appDirectory.appendingPathComponent("StudyMate.sqlite")
+            create: false
+        ) else {
+            return nil
+        }
+
+        return supportDirectory
+            .appendingPathComponent("StudyMate", isDirectory: true)
+            .appendingPathComponent("StudyMate.sqlite")
     }
 
     private func saveOptional<T: Encodable>(_ value: T?, forKey key: String) {
@@ -574,373 +641,6 @@ private protocol StudyRecordStorage: AnyObject {
     func replaceAll(_ records: [StudyRecord])
 }
 
-private final class SQLiteStudyRecordStore: StudyRecordStorage {
-    private let database: OpaquePointer?
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-
-    private static let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-
-    var count: Int {
-        (try? intValue("SELECT COUNT(*) FROM study_records")) ?? 0
-    }
-
-    init(databaseURL: URL) throws {
-        encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
-
-        var openedDatabase: OpaquePointer?
-        let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(databaseURL.path, &openedDatabase, flags, nil) == SQLITE_OK,
-              let openedDatabase else {
-            throw SQLiteStudyRecordStoreError.openFailed
-        }
-
-        database = openedDatabase
-        try migrateSchema()
-    }
-
-    deinit {
-        sqlite3_close(database)
-    }
-
-    func load(limit: Int) -> [StudyRecord] {
-        let boundedLimit = max(0, limit)
-        guard boundedLimit > 0 else {
-            return []
-        }
-
-        return (try? records(
-            sql: """
-            SELECT record_json
-            FROM (
-              SELECT rowid, record_json
-              FROM study_records
-              ORDER BY rowid DESC
-              LIMIT ?
-            )
-            ORDER BY rowid ASC
-            """,
-            bindings: [.integer(boundedLimit)]
-        )) ?? []
-    }
-
-    func find(question: QuestionItem) -> StudyRecord? {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
-        return try? records(
-            sql: """
-            SELECT record_json
-            FROM study_records
-            WHERE question_created_at = ? OR normalized_question = ?
-            ORDER BY rowid DESC
-            LIMIT 1
-            """,
-            bindings: [
-                .real(question.createdAt.timeIntervalSince1970),
-                .text(normalizedQuestion)
-            ]
-        ).first
-    }
-
-    func append(_ record: StudyRecord) {
-        do {
-            try execute("BEGIN IMMEDIATE")
-            try deleteMatching(normalizedQuestion: SettingsStore.normalizedQuestionText(record.question.question))
-            try insert(record)
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-        }
-    }
-
-    func save(_ record: StudyRecord) {
-        do {
-            try execute("BEGIN IMMEDIATE")
-            if try !update(record) {
-                try deleteMatching(normalizedQuestion: SettingsStore.normalizedQuestionText(record.question.question))
-                try insert(record)
-            }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-        }
-    }
-
-    func delete(_ record: StudyRecord) {
-        do {
-            try deleteMatching(
-                id: record.id,
-                normalizedQuestion: SettingsStore.normalizedQuestionText(record.question.question)
-            )
-        } catch {
-            return
-        }
-    }
-
-    func clear() {
-        try? execute("DELETE FROM study_records")
-    }
-
-    func trim(to limit: Int) {
-        let boundedLimit = max(0, limit)
-        do {
-            if boundedLimit == 0 {
-                try execute("DELETE FROM study_records")
-                return
-            }
-
-            try run(
-                """
-                DELETE FROM study_records
-                WHERE rowid NOT IN (
-                  SELECT rowid
-                  FROM study_records
-                  ORDER BY rowid DESC
-                  LIMIT ?
-                )
-                """,
-                bindings: [.integer(boundedLimit)]
-            )
-        } catch {
-            return
-        }
-    }
-
-    func replaceAll(_ records: [StudyRecord]) {
-        do {
-            try execute("BEGIN IMMEDIATE")
-            try execute("DELETE FROM study_records")
-            for record in records {
-                try insert(record)
-            }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-        }
-    }
-
-    private func migrateSchema() throws {
-        try execute("PRAGMA journal_mode=WAL")
-        try execute("PRAGMA foreign_keys=ON")
-        try execute(
-            """
-            CREATE TABLE IF NOT EXISTS study_records (
-              id TEXT PRIMARY KEY NOT NULL,
-              normalized_question TEXT NOT NULL UNIQUE,
-              question_text TEXT NOT NULL,
-              expected_answer_hint TEXT,
-              question_created_at REAL NOT NULL,
-              answer TEXT,
-              topic TEXT NOT NULL,
-              difficulty INTEGER NOT NULL,
-              grading_score INTEGER,
-              is_correct INTEGER,
-              answered_at REAL,
-              record_json BLOB NOT NULL
-            )
-            """
-        )
-        try execute("CREATE INDEX IF NOT EXISTS idx_study_records_created_at ON study_records(question_created_at)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_study_records_topic ON study_records(topic)")
-        try execute("CREATE INDEX IF NOT EXISTS idx_study_records_answered_at ON study_records(answered_at)")
-    }
-
-    @discardableResult
-    private func update(_ record: StudyRecord) throws -> Bool {
-        try run(
-            """
-            UPDATE study_records
-            SET normalized_question = ?,
-                question_text = ?,
-                expected_answer_hint = ?,
-                question_created_at = ?,
-                answer = ?,
-                topic = ?,
-                difficulty = ?,
-                grading_score = ?,
-                is_correct = ?,
-                answered_at = ?,
-                record_json = ?
-            WHERE id = ?
-            """,
-            bindings: recordBindings(record) + [.text(record.id)]
-        )
-
-        return sqlite3_changes(database) > 0
-    }
-
-    private func insert(_ record: StudyRecord) throws {
-        try run(
-            """
-            INSERT INTO study_records (
-              id,
-              normalized_question,
-              question_text,
-              expected_answer_hint,
-              question_created_at,
-              answer,
-              topic,
-              difficulty,
-              grading_score,
-              is_correct,
-              answered_at,
-              record_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            bindings: [.text(record.id)] + recordBindings(record)
-        )
-    }
-
-    private func deleteMatching(id: String? = nil, normalizedQuestion: String) throws {
-        if let id {
-            try run(
-                "DELETE FROM study_records WHERE id = ? OR normalized_question = ?",
-                bindings: [.text(id), .text(normalizedQuestion)]
-            )
-        } else {
-            try run(
-                "DELETE FROM study_records WHERE normalized_question = ?",
-                bindings: [.text(normalizedQuestion)]
-            )
-        }
-    }
-
-    private func recordBindings(_ record: StudyRecord) throws -> [SQLiteBinding] {
-        let recordData = try encoder.encode(record)
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(record.question.question)
-        let isCorrect = record.gradingResult.map { $0.isCorrect ? 1 : 0 }
-
-        return [
-            .text(normalizedQuestion),
-            .text(record.question.question),
-            .optionalText(record.question.expectedAnswerHint),
-            .real(record.question.createdAt.timeIntervalSince1970),
-            .optionalText(record.answer),
-            .text(record.topic),
-            .integer(record.difficulty.level),
-            .optionalInteger(record.gradingResult?.score),
-            .optionalInteger(isCorrect),
-            .optionalReal(record.answeredAt?.timeIntervalSince1970),
-            .blob(recordData)
-        ]
-    }
-
-    private func records(sql: String, bindings: [SQLiteBinding] = []) throws -> [StudyRecord] {
-        try prepare(sql, bindings: bindings) { statement in
-            var records: [StudyRecord] = []
-            while sqlite3_step(statement) == SQLITE_ROW {
-                guard let record = try decodeRecord(statement: statement, column: 0) else {
-                    continue
-                }
-                records.append(record)
-            }
-            return records
-        }
-    }
-
-    private func decodeRecord(statement: OpaquePointer?, column: Int32) throws -> StudyRecord? {
-        guard let bytes = sqlite3_column_blob(statement, column) else {
-            return nil
-        }
-
-        let count = Int(sqlite3_column_bytes(statement, column))
-        let data = Data(bytes: bytes, count: count)
-        return try decoder.decode(StudyRecord.self, from: data)
-    }
-
-    private func intValue(_ sql: String) throws -> Int {
-        try prepare(sql) { statement in
-            guard sqlite3_step(statement) == SQLITE_ROW else {
-                return 0
-            }
-            return Int(sqlite3_column_int64(statement, 0))
-        }
-    }
-
-    private func execute(_ sql: String) throws {
-        var errorMessage: UnsafeMutablePointer<Int8>?
-        guard sqlite3_exec(database, sql, nil, nil, &errorMessage) == SQLITE_OK else {
-            let message: String
-            if let errorMessage {
-                message = String(cString: errorMessage)
-            } else {
-                message = String(cString: sqlite3_errmsg(database))
-            }
-            defer {
-                sqlite3_free(errorMessage)
-            }
-            throw SQLiteStudyRecordStoreError.executionFailed(message)
-        }
-    }
-
-    private func run(_ sql: String, bindings: [SQLiteBinding] = []) throws {
-        try prepare(sql, bindings: bindings) { statement in
-            guard sqlite3_step(statement) == SQLITE_DONE else {
-                throw SQLiteStudyRecordStoreError.executionFailed(String(cString: sqlite3_errmsg(database)))
-            }
-        }
-    }
-
-    private func prepare<T>(
-        _ sql: String,
-        bindings: [SQLiteBinding] = [],
-        body: (OpaquePointer?) throws -> T
-    ) throws -> T {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw SQLiteStudyRecordStoreError.executionFailed(String(cString: sqlite3_errmsg(database)))
-        }
-        defer {
-            sqlite3_finalize(statement)
-        }
-
-        for (index, binding) in bindings.enumerated() {
-            try bind(binding, to: statement, index: Int32(index + 1))
-        }
-
-        return try body(statement)
-    }
-
-    private func bind(_ binding: SQLiteBinding, to statement: OpaquePointer?, index: Int32) throws {
-        let result: Int32
-        switch binding {
-        case .text(let value):
-            result = sqlite3_bind_text(statement, index, value, -1, Self.transientDestructor)
-        case .optionalText(let value):
-            if let value {
-                result = sqlite3_bind_text(statement, index, value, -1, Self.transientDestructor)
-            } else {
-                result = sqlite3_bind_null(statement, index)
-            }
-        case .integer(let value):
-            result = sqlite3_bind_int64(statement, index, sqlite3_int64(value))
-        case .optionalInteger(let value):
-            if let value {
-                result = sqlite3_bind_int64(statement, index, sqlite3_int64(value))
-            } else {
-                result = sqlite3_bind_null(statement, index)
-            }
-        case .real(let value):
-            result = sqlite3_bind_double(statement, index, value)
-        case .optionalReal(let value):
-            if let value {
-                result = sqlite3_bind_double(statement, index, value)
-            } else {
-                result = sqlite3_bind_null(statement, index)
-            }
-        case .blob(let value):
-            result = value.withUnsafeBytes { buffer in
-                sqlite3_bind_blob(statement, index, buffer.baseAddress, Int32(value.count), Self.transientDestructor)
-            }
-        }
-
-        guard result == SQLITE_OK else {
-            throw SQLiteStudyRecordStoreError.executionFailed(String(cString: sqlite3_errmsg(database)))
-        }
-    }
-}
-
 private final class InMemoryStudyRecordStore: StudyRecordStorage {
     private var records: [StudyRecord] = []
 
@@ -995,19 +695,4 @@ private final class InMemoryStudyRecordStore: StudyRecordStorage {
     func replaceAll(_ records: [StudyRecord]) {
         self.records = records
     }
-}
-
-private enum SQLiteBinding {
-    case text(String)
-    case optionalText(String?)
-    case integer(Int)
-    case optionalInteger(Int?)
-    case real(Double)
-    case optionalReal(Double?)
-    case blob(Data)
-}
-
-private enum SQLiteStudyRecordStoreError: Error {
-    case openFailed
-    case executionFailed(String)
 }

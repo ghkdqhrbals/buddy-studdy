@@ -26,6 +26,32 @@ class DeviceRegisterResponse(CamelModel):
     client_secret: str = Field(alias="clientSecret")
 
 
+class UserProfileResponse(CamelModel):
+    id: int
+    display_name: str = Field(alias="displayName")
+    bio: str = ""
+    avatar_url: str | None = Field(default=None, alias="avatarUrl")
+
+
+class GoogleLoginRequest(CamelModel):
+    id_token: str = Field(alias="idToken", min_length=20, max_length=8192)
+
+
+class ProfileUpdateRequest(CamelModel):
+    display_name: str | None = Field(default=None, alias="displayName", max_length=120)
+    bio: str | None = Field(default=None, max_length=500)
+
+
+class ReportQuestionRequest(CamelModel):
+    reason: str = Field(min_length=1, max_length=120)
+    message: str = Field(default="", max_length=1000)
+
+
+class ReportQuestionResponse(CamelModel):
+    id: int
+    email_sent: bool = Field(alias="emailSent")
+
+
 class ScheduleRequest(CamelModel):
     topic: str = Field(min_length=1, max_length=120)
     difficulty_level: int = Field(alias="difficultyLevel", ge=1, le=10)
@@ -37,7 +63,7 @@ class ScheduleRequest(CamelModel):
     app_language: str = Field(default="ko", alias="appLanguage")
     openai_model: str = Field(default=DEFAULT_OPENAI_MODEL, alias="openaiModel")
     max_history_count: int = Field(default=100, alias="maxHistoryCount", ge=10, le=10_000)
-    is_question_public: bool = Field(default=True, alias="isQuestionPublic")
+    is_question_public: bool = Field(default=False, alias="isQuestionPublic")
 
     @field_validator("openai_model")
     @classmethod
@@ -80,6 +106,7 @@ class CommunityQuestionResponse(CamelModel):
     status: str
     source: str
     created_at: str = Field(alias="createdAt")
+    author: UserProfileResponse | None = None
 
 
 class CommunityQuestionsResponse(CamelModel):
@@ -107,6 +134,8 @@ class OpenAIModelOptionResponse(CamelModel):
     id: str
     display_name: str = Field(alias="displayName")
     supports_text_verbosity: bool = Field(alias="supportsTextVerbosity")
+    supports_reasoning: bool = Field(alias="supportsReasoning")
+    default_reasoning_effort: str | None = Field(alias="defaultReasoningEffort")
 
 
 class QuestionPayload(CamelModel):

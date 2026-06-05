@@ -1,13 +1,13 @@
 name: Deploy GitHub Pages
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - docs/**
-      - .github/workflows/pages.yml
   workflow_dispatch:
+    inputs:
+      publish_public:
+        description: "Publish documentation to public GitHub Pages (set false for private-only docs workflow)."
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event.inputs.publish_public == true }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

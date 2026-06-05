@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Privacy Policy for BuddyStuddy.">
+  <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="../assets/favicon-16.png" sizes="16x16" type="image/png">
   <link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
@@ -143,12 +144,12 @@
         <span>BuddyStuddy</span>
       </div>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: June 1, 2026</p>
+      <p class="updated">Last updated: June 5, 2026</p>
     </header>
 
     <section>
       <h2>Overview</h2>
-      <p>BuddyStuddy is a free study app that uses your own OpenAI API key to generate study questions and grade answers. The app is designed to be local-first for study records and settings. We may run a small backend only for scheduled push notifications, and we do not sell personal data.</p>
+      <p>BuddyStuddy is a free study app that uses your own OpenAI API key to generate study questions and grade answers. The app is designed to keep study records and settings local-first, and uses the backend only where needed for scheduling, synchronization, and push delivery.</p>
     </section>
 
     <section>
@@ -158,14 +159,35 @@
         <li>Study topic, level, prompt, interval, language, notification, and app settings.</li>
         <li>Your OpenAI API key, if you enter one.</li>
         <li>Study questions, answer drafts, graded answers, scores, feedback, explanations, and topic statistics.</li>
+        <li>If you use Google Login for community features: Google account subject, email, display name, avatar URL, and the public bio you enter.</li>
+        <li>If you report a community question: reported question ID, reason, optional message, reporter device ID, and submission time.</li>
         <li>Local diagnostic logs when debugging mode is enabled.</li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Community Profiles And Reports</h2>
+      <p>Community questions are available only after Google Login. Your public profile may show your display name, avatar, and bio to other signed-in users when they view a question you chose to make public. Your email address and Google account identifier are used for account linking and are not shown in public question lists.</p>
+      <p>When you report a community question, BuddyStuddy stores the report and may forward it to the operator email address for moderation. Reports are used only for abuse review and service operation.</p>
     </section>
 
     <section>
       <h2>OpenAI API</h2>
       <p>When you generate a question or grade an answer, BuddyStuddy sends the required study text to OpenAI using the API key you provide. OpenAI processes that information under OpenAI's own terms and privacy practices. Your OpenAI API usage and billing are managed through your own OpenAI account.</p>
       <p>BuddyStuddy does not provide an OpenAI account or API key for normal use.</p>
+    </section>
+
+    <section>
+      <h2>Backend Storage of OpenAI API Key</h2>
+      <p>Your OpenAI API key is a credential, so BuddyStuddy treats it as sensitive. We upload it to the backend only when you enable schedule/push features and allow that sync path in-app.</p>
+      <ul>
+        <li>On the backend, the key is stored as an encrypted value, never as plain text.</li>
+        <li>Encryption uses AES-256-GCM with an internal server master key (BACKEND_MASTER_KEY).</li>
+        <li>Backend sync only happens when the schedule/push path is explicitly enabled, and data is not uploaded while that feature is disabled.</li>
+        <li>BuddyStuddy does not expose the decrypted key in API responses or application logs.</li>
+        <li>When you clear the key in settings or disable scheduling, backend usage stops immediately and no new key sync is made.</li>
+      </ul>
+      <p>If you prefer not to use server-side storage, disable scheduled push/backend sync features and the key is kept local only as needed for app operation.</p>
     </section>
 
     <section>
@@ -182,12 +204,14 @@
 
     <section>
       <h2>Data Sharing</h2>
-      <p>BuddyStuddy does not sell your personal data. The app may send data to OpenAI when you use AI question generation or grading, may store/sync data through Apple's iCloud/CloudKit if you enable iCloud sync, and may use the BuddyStuddy push backend for scheduled notification delivery.</p>
+      <p>BuddyStuddy does not sell your personal data. The app may send data to OpenAI when you use AI question generation or grading, may use Google Login for community identity, may store/sync data through Apple's iCloud/CloudKit if you enable iCloud sync, and may use the BuddyStuddy push backend for scheduled notification delivery, community profiles, public questions, and reports.</p>
     </section>
 
     <section>
       <h2>Data Deletion</h2>
       <p>You can delete study records in the app. You can also disable iCloud sync in the app settings. Deleting the app removes local app data from the device according to iOS behavior. Data synced through iCloud may also be managed through your Apple ID and iCloud settings.</p>
+      <p>When you remove the OpenAI API key from app settings, that key is no longer used by the service and is excluded from scheduled backend delivery.</p>
+      <p>Disabling backend scheduling immediately stops scheduled OpenAI key usage and prevents further uploads.</p>
     </section>
 
     <section>

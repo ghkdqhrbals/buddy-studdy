@@ -1,5 +1,8 @@
 import Foundation
+
+#if canImport(Sparkle)
 @preconcurrency import Sparkle
+#endif
 
 @MainActor
 final class UpdateService: ObservableObject {
@@ -10,13 +13,11 @@ final class UpdateService: ObservableObject {
     @Published private(set) var automaticallyDownloadsUpdates: Bool
     @Published private(set) var canUseUpdates: Bool
 
-    private let updaterController: SPUStandardUpdaterController
-    private var canCheckObservation: NSKeyValueObservation?
-
     private init() {
         let canUseUpdates = Self.canUseUpdatesFromCurrentLocation()
         self.canUseUpdates = canUseUpdates
 
+        #if canImport(Sparkle)
         updaterController = SPUStandardUpdaterController(
             startingUpdater: canUseUpdates,
             updaterDelegate: nil,
@@ -36,22 +37,38 @@ final class UpdateService: ObservableObject {
         } else {
             canCheckForUpdates = false
         }
+        #else
+        canCheckForUpdates = false
+        automaticallyChecksForUpdates = false
+        automaticallyDownloadsUpdates = false
+        #endif
     }
 
+    #if canImport(Sparkle)
+    private let updaterController: SPUStandardUpdaterController
+    private var canCheckObservation: NSKeyValueObservation?
+    #endif
+
     func checkForUpdates() {
+        #if canImport(Sparkle)
         guard canUseUpdates else { return }
         updaterController.checkForUpdates(nil)
+        #endif
     }
 
     func setAutomaticallyChecksForUpdates(_ isEnabled: Bool) {
+        #if canImport(Sparkle)
         guard canUseUpdates else { return }
         updaterController.updater.automaticallyChecksForUpdates = isEnabled
+        #endif
         automaticallyChecksForUpdates = isEnabled
     }
 
     func setAutomaticallyDownloadsUpdates(_ isEnabled: Bool) {
+        #if canImport(Sparkle)
         guard canUseUpdates else { return }
         updaterController.updater.automaticallyDownloadsUpdates = isEnabled
+        #endif
         automaticallyDownloadsUpdates = isEnabled
     }
 
@@ -70,4 +87,5 @@ final class UpdateService: ObservableObject {
         let resourceValues = try? bundleURL.resourceValues(forKeys: [.volumeIsReadOnlyKey])
         return resourceValues?.volumeIsReadOnly != true
     }
+
 }

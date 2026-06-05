@@ -5,7 +5,8 @@ struct HistoryView: View {
     @State private var selectedRecordID: String?
     @State private var openSwipeRecordID: String?
     @State private var searchText = ""
-    @State private var page = 0
+    @State private var visibleCount = 0
+    @State private var showsRecordSettings = false
 
     private let pageSize = 10
 
@@ -36,32 +37,41 @@ struct HistoryView: View {
         }
     }
 
-    private func pageCount(for recordCount: Int) -> Int {
-        max(Int(ceil(Double(recordCount) / Double(pageSize))), 1)
+    private var visibleRecords: [StudyRecord] {
+        let clamped = min(max(visibleCount, 0), filteredRecords.count)
+        return Array(filteredRecords.prefix(clamped))
     }
 
-    private func visibleRecords(from records: [StudyRecord], page: Int, pageCount: Int) -> [StudyRecord] {
-        let clampedPage = min(max(page, 0), pageCount - 1)
-        let start = clampedPage * pageSize
-        let end = min(start + pageSize, records.count)
+    private var hasMoreRecords: Bool {
+        visibleRecords.count < filteredRecords.count
+    }
 
-        guard start < end else {
-            return []
+    private func resetVisibleCount() {
+        visibleCount = min(pageSize, max(filteredRecords.count, 0))
+    }
+
+    private func reconcileVisibleCount() {
+        let total = filteredRecords.count
+        if total == 0 {
+            visibleCount = 0
+            return
         }
 
-        return Array(records[start..<end])
+        let minimumVisible = min(pageSize, total)
+        visibleCount = min(max(visibleCount, minimumVisible), total)
+    }
+
+    private func ensureVisibleCount(atLeast minimum: Int) {
+        let clampedMinimum = min(max(minimum, 1), max(filteredRecords.count, 0))
+        if visibleCount < clampedMinimum {
+            visibleCount = clampedMinimum
+        }
     }
 
     var body: some View {
         let strings = appState.strings
         let displayedRecords = filteredRecords
-        let displayedPageCount = pageCount(for: displayedRecords.count)
-        let displayedPage = min(max(page, 0), displayedPageCount - 1)
-        let displayedVisibleRecords = visibleRecords(
-            from: displayedRecords,
-            page: displayedPage,
-            pageCount: displayedPageCount
-        )
+        let displayedVisibleRecords = visibleRecords
 
         VStack(alignment: .leading, spacing: 12) {
             if appState.studyRecords.isEmpty {
@@ -72,15 +82,11 @@ struct HistoryView: View {
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                HStack(spacing: 8) {
-                    TextField(strings.searchRecords, text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-
-                    Text(strings.filteredRecordCount(displayedRecords.count, total: appState.studyRecords.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if displayedRecords.isEmpty {
                     ContentUnavailableView(
@@ -90,76 +96,24 @@ struct HistoryView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    #if os(iOS)
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            ForEach(displayedVisibleRecords) { record in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    let deleteAction: () -> Void = {
-                                        openSwipeRecordID = nil
-                                        delete(record)
-                                    }
-
-                                    SwipeRevealRow(
-                                        isOpen: Binding(
-                                            get: { openSwipeRecordID == record.id },
-                                            set: { openSwipeRecordID = $0 ? record.id : nil }
-                                        ),
-                                        onTap: {
-                                            if let openSwipeRecordID, openSwipeRecordID != record.id {
-                                                closeOpenSwipe(animated: true)
-                                                return
-                                            }
-
-                                            selectedRecordID = selectedRecordID == record.id ? nil : record.id
-                                        },
-                                        onFullSwipe: deleteAction
-                                    ) {
-                                        HistoryRow(record: record, strings: strings, isSelected: selectedRecordID == record.id)
-                                    } action: {
-                                        SwipeActionButton(title: strings.clear, systemImage: "trash", tint: .red)
-                                    }
-
-                                    if selectedRecordID == record.id {
-                                        InlineStudyRecordDetail(record: record) {
-                                            selectedRecordID = nil
-                                        }
-                                        .transition(.opacity.combined(with: .move(edge: .top)))
-                                    }
-                                }
-                                .transition(
-                                    .asymmetric(
-                                        insertion: .opacity,
-                                        removal: .opacity.combined(with: .move(edge: .leading))
-                                    )
-                                )
-                            }
-                        }
-                        .padding(.trailing, 2)
-                    }
-                    .frame(maxHeight: .infinity)
-                    .refreshable {
-                        await appState.refreshVisibleData()
-                    }
-                    #else
                     List {
                         ForEach(displayedVisibleRecords) { record in
                             VStack(alignment: .leading, spacing: 8) {
-                                Button {
+                                HistoryRow(record: record, strings: strings, isSelected: selectedRecordID == record.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
                                     selectedRecordID = selectedRecordID == record.id ? nil : record.id
-                                } label: {
-                                    HistoryRow(record: record, strings: strings, isSelected: selectedRecordID == record.id)
                                 }
-                                .buttonStyle(.plain)
 
                                 if selectedRecordID == record.id {
-                                    InlineStudyRecordDetail(record: record) {
-                                        selectedRecordID = nil
-                                    }
+                                    InlineStudyRecordDetail(record: record)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             }
-                            .listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 8))
+                            .onAppear {
+                                loadNextPageIfNeeded(for: record)
+                            }
+                            .listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -170,6 +124,21 @@ struct HistoryView: View {
                                 }
                             }
                         }
+
+                        if hasMoreRecords {
+                            HStack {
+                                Spacer()
+
+                                ProgressView()
+                                    .controlSize(.small)
+
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                        }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -177,63 +146,21 @@ struct HistoryView: View {
                     .refreshable {
                         await appState.refreshVisibleData()
                     }
-                    #endif
-
-                    Divider()
-
-                    HStack {
-                        Button {
-                            page = 0
-                        } label: {
-                            Image(systemName: "backward.end.fill")
-                        }
-                        .disabled(displayedPage == 0)
-
-                        Button {
-                            page = max(page - 1, 0)
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-                        .disabled(displayedPage == 0)
-
-                        Spacer()
-
-                        Text("\(displayedPage + 1) / \(displayedPageCount)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        Button {
-                            page = min(page + 1, displayedPageCount - 1)
-                        } label: {
-                            Image(systemName: "chevron.right")
-                        }
-                        .disabled(displayedPage >= displayedPageCount - 1)
-
-                        Button {
-                            page = displayedPageCount - 1
-                        } label: {
-                            Image(systemName: "forward.end.fill")
-                        }
-                        .disabled(displayedPage >= displayedPageCount - 1)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.bottom, 6)
                 }
             }
         }
         .padding(.top, 10)
         .frame(maxHeight: .infinity, alignment: .top)
+        .searchable(text: $searchText, prompt: strings.searchRecords)
         .onChange(of: appState.studyRecords.count) {
-            clampPage()
+            reconcileVisibleCount()
             if let openSwipeRecordID,
                !appState.studyRecords.contains(where: { $0.id == openSwipeRecordID }) {
                 self.openSwipeRecordID = nil
             }
         }
         .onChange(of: searchText) {
-            page = 0
+            resetVisibleCount()
             selectedRecordID = nil
             openSwipeRecordID = nil
         }
@@ -241,12 +168,42 @@ struct HistoryView: View {
             showFocusedRecord()
         }
         .onAppear {
-            showFocusedRecord()
+            resetVisibleCount()
+            if appState.focusedRecordRequest != nil {
+                showFocusedRecord()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        showsRecordSettings = true
+                    } label: {
+                        Label(strings.recordSettings, systemImage: "slider.horizontal.3")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel(strings.recordSettings)
+            }
+        }
+        .sheet(isPresented: $showsRecordSettings) {
+            RecordSettingsSheet()
         }
     }
 
-    private func clampPage() {
-        page = min(max(page, 0), pageCount(for: filteredRecords.count) - 1)
+    private func loadNextPageIfNeeded(for record: StudyRecord) {
+        guard hasMoreRecords else {
+            return
+        }
+        guard let index = filteredRecords.firstIndex(where: { $0.id == record.id }) else {
+            return
+        }
+        if index >= max(visibleRecords.count - 2, 0) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                visibleCount = min(visibleRecords.count + pageSize, filteredRecords.count)
+            }
+        }
     }
 
     private func sortDate(for record: StudyRecord) -> Date {
@@ -260,7 +217,7 @@ struct HistoryView: View {
         }
 
         searchText = ""
-        page = index / pageSize
+        ensureVisibleCount(atLeast: index + 1)
         selectedRecordID = request.recordID
     }
 
@@ -285,10 +242,88 @@ struct HistoryView: View {
     private func delete(_ record: StudyRecord) {
         withAnimation(.easeOut(duration: 0.22)) {
             appState.deleteStudyRecord(record)
-            clampPage()
+            reconcileVisibleCount()
             openSwipeRecordID = nil
             if selectedRecordID == record.id {
                 selectedRecordID = nil
+            }
+        }
+    }
+}
+
+private struct RecordSettingsSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var showsDeleteConfirmation = false
+
+    var body: some View {
+        let strings = appState.settingsEditorStrings
+
+        NavigationStack {
+            Form {
+                Section {
+                    Stepper(
+                        "\(strings.maxRecordCount): \(appState.draftSettings.sanitizedMaxHistoryCount)",
+                        value: $appState.draftSettings.maxHistoryCount,
+                        in: 10...10_000,
+                        step: 100
+                    )
+
+                    TextField(
+                        "100",
+                        value: $appState.draftSettings.maxHistoryCount,
+                        format: .number
+                    )
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                } footer: {
+                    Text(strings.recordLimitHelp(limit: appState.draftSettings.sanitizedMaxHistoryCount, count: appState.studyRecords.count))
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        showsDeleteConfirmation = true
+                    } label: {
+                        Label(strings.deleteRecords, systemImage: "trash")
+                    }
+                    .disabled(appState.studyRecords.isEmpty)
+                } footer: {
+                    Text(strings.deleteRecordsHelp)
+                }
+            }
+            .keyboardDoneToolbar(strings.done)
+            .navigationTitle(strings.recordSettings)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        appState.cancelSettingsEditing()
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.save) {
+                        appState.saveSettings()
+                        dismiss()
+                    }
+                }
+            }
+            .confirmationDialog(strings.deleteRecords, isPresented: $showsDeleteConfirmation) {
+                Button(strings.deleteRecords, role: .destructive) {
+                    appState.clearStudyRecords()
+                }
+            } message: {
+                Text(strings.deleteRecordsHelp)
+            }
+            .onAppear {
+                appState.beginSettingsEditing()
+            }
+            .onDisappear {
+                appState.cancelSettingsEditing()
             }
         }
     }
@@ -368,20 +403,9 @@ private struct HistoryRow: View {
 
 private struct InlineStudyRecordDetail: View {
     var record: StudyRecord
-    var onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Spacer()
-
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-            }
-
             StudyRecordDetailView(record: record)
                 .frame(minHeight: 320)
         }

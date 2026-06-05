@@ -21,17 +21,24 @@ from .models import (
     BackendSettingsResponse,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
+    GoogleLoginRequest,
     HealthResponse,
     PushTokenRequest,
     RecordsPageResponse,
+    ProfileUpdateRequest,
+    ReportQuestionRequest,
+    ReportQuestionResponse,
     ScheduleRequest,
     OpenAIModelOptionResponse,
     ScheduleResponse,
     StatsResponse,
     StudyRecordResponse,
+    UserProfileResponse,
 )
 from .openai_client import OpenAIQuestionClient
 from .openai_models import DEFAULT_OPENAI_MODEL, OPENAI_MODEL_OPTIONS, normalize_openai_model
+from .google_auth import GoogleAuthError, verify_google_id_token
+from .reporting import send_report_email
 from .scheduler import QuestionScheduler
 
 
@@ -123,6 +130,11 @@ def require_matching_device(device_id: str, authenticated_device_id: str) -> Non
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device mismatch.")
 
 
+def require_google_linked_device(device_id: str) -> None:
+    if not database.device_has_user(device_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google Login is required.")
+
+
 def device_api_key(schedule_row) -> str:
     encrypted_key = schedule_row["openai_api_key_cipher"] if schedule_row is not None else None
     if encrypted_key:
@@ -174,6 +186,8 @@ async def list_openai_models() -> list[OpenAIModelOptionResponse]:
             id=option.id,
             displayName=option.display_name,
             supportsTextVerbosity=option.supports_text_verbosity,
+            supportsReasoning=option.supports_reasoning,
+            defaultReasoningEffort=option.default_reasoning_effort,
         )
         for option in OPENAI_MODEL_OPTIONS
     ]
@@ -209,6 +223,65 @@ async def update_push_token(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/api/v1/devices/{device_id}/auth/google", response_model=UserProfileResponse)
+async def google_login(
+    device_id: str,
+    payload: GoogleLoginRequest,
+    authenticated_device_id: str = Depends(verify_device),
+) -> UserProfileResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    if not settings.google_ios_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Login is not configured on this backend.",
+        )
+
+    try:
+        identity = await verify_google_id_token(payload.id_token, settings.google_ios_client_id)
+    except GoogleAuthError as error:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
+
+    profile = database.link_google_user_to_device(
+        device_id=device_id,
+        google_sub=str(identity["sub"] or ""),
+        email=str(identity["email"] or ""),
+        display_name=str(identity["name"] or ""),
+        avatar_url=identity.get("picture"),
+    )
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+    return UserProfileResponse.model_validate(profile)
+
+
+@app.get("/api/v1/devices/{device_id}/profile", response_model=UserProfileResponse)
+async def get_my_profile(
+    device_id: str,
+    authenticated_device_id: str = Depends(verify_device),
+) -> UserProfileResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    profile = database.get_device_profile(device_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return UserProfileResponse.model_validate(profile)
+
+
+@app.patch("/api/v1/devices/{device_id}/profile", response_model=UserProfileResponse)
+async def update_my_profile(
+    device_id: str,
+    payload: ProfileUpdateRequest,
+    authenticated_device_id: str = Depends(verify_device),
+) -> UserProfileResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    profile = database.update_device_profile(
+        device_id=device_id,
+        display_name=payload.display_name,
+        bio=payload.bio,
+    )
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return UserProfileResponse.model_validate(profile)
+
+
 @app.put("/api/v1/devices/{device_id}/schedule", response_model=ScheduleResponse)
 async def upsert_schedule(
     device_id: str,
@@ -221,6 +294,7 @@ async def upsert_schedule(
     if payload.openai_api_key:
         encrypted_key = KeyCipher(settings.backend_master_key).encrypt(payload.openai_api_key)
 
+    is_question_public = bool(payload.is_question_public and database.device_has_user(device_id))
     next_due_at = database.upsert_schedule(
         device_id=device_id,
         topic=payload.topic,
@@ -233,7 +307,7 @@ async def upsert_schedule(
         app_language=payload.app_language,
         openai_model=payload.openai_model,
         max_history_count=payload.max_history_count,
-        is_question_public=payload.is_question_public,
+        is_question_public=is_question_public,
     )
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
@@ -490,14 +564,50 @@ async def list_public_questions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     exclude_device_id: str | None = Query(default=None, alias="excludeDeviceId"),
+    authenticated_device_id: str = Depends(verify_device),
 ) -> CommunityQuestionsResponse:
+    require_google_linked_device(authenticated_device_id)
     questions, total = database.list_public_questions(
-        exclude_device_id=exclude_device_id or "",
+        exclude_device_id=exclude_device_id or authenticated_device_id,
         limit=limit,
         offset=offset,
         topic=topic,
     )
     return CommunityQuestionsResponse(questions=questions, totalCount=total, limit=limit, offset=offset)
+
+
+@app.get("/api/v1/public/users/{user_id}/profile", response_model=UserProfileResponse)
+async def get_public_profile(user_id: int) -> UserProfileResponse:
+    profile = database.get_public_profile(user_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return UserProfileResponse.model_validate(profile)
+
+
+@app.post("/api/v1/devices/{device_id}/public/questions/{question_id}/report", response_model=ReportQuestionResponse)
+async def report_public_question(
+    device_id: str,
+    question_id: str,
+    payload: ReportQuestionRequest,
+    authenticated_device_id: str = Depends(verify_device),
+) -> ReportQuestionResponse:
+    require_matching_device(device_id, authenticated_device_id)
+    require_google_linked_device(device_id)
+    report = database.create_report(
+        reporter_device_id=device_id,
+        question_id=question_id,
+        reason=payload.reason,
+        message=payload.message,
+    )
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+
+    email_sent = False
+    try:
+        email_sent = send_report_email(settings, report)
+    except Exception as error:
+        logger.warning("report email failed report_id=%s error=%s", report.get("id"), error)
+    return ReportQuestionResponse(id=int(report["id"]), emailSent=email_sent)
 
 
 @app.delete("/api/v1/devices/{device_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)

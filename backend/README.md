@@ -9,6 +9,8 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores APNs device tokens.
 - Stores per-device study settings and schedule.
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
+- Stores optional community profiles for Google-signed-in users.
+- Stores community question reports and can forward them by email when SMTP is configured.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
 - Uses SQLAlchemy ORM with repository methods; JPA 감각의 `save`/`insert`/`delete`도 래퍼로 제공됩니다.
 - Generates due questions with OpenAI.
@@ -28,6 +30,11 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
 - `DATABASE_URL`: required PostgreSQL connection string.
 - `ALLOW_SQLITE_FALLBACK`: optional. Set to `true` only for isolated local tests. Production must not use SQLite.
+- `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
+- `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
+- `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
+- `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -95,20 +102,20 @@ you can use `Database.transactional()` as an explicit block.
 See [API.md](API.md) for request/response examples.
 
 - `GET /health`
-- `POST /v1/devices/register`
-- `PUT /v1/devices/{device_id}/push-token`
-- `PUT /v1/devices/{device_id}/schedule`
-- `GET /v1/devices/{device_id}/settings`
-- `PUT /v1/devices/{device_id}/settings`
-- `GET /v1/devices/{device_id}/api`
-- `POST /v1/devices/{device_id}/api/validate`
-- `GET /v1/devices/{device_id}/snapshot`
-- `GET /v1/devices/{device_id}/stats`
-- `POST /v1/devices/{device_id}/questions`
-- `GET /v1/devices/{device_id}/records`
-- `POST /v1/devices/{device_id}/records/{record_id}/answer`
-- `DELETE /v1/devices/{device_id}/records/{record_id}`
-- `POST /v1/admin/scheduler/run-once`
+- `POST /api/v1/devices/register`
+- `PUT /api/v1/devices/{device_id}/push-token`
+- `PUT /api/v1/devices/{device_id}/schedule`
+- `GET /api/v1/devices/{device_id}/settings`
+- `PUT /api/v1/devices/{device_id}/settings`
+- `GET /api/v1/devices/{device_id}/api`
+- `POST /api/v1/devices/{device_id}/api/validate`
+- `GET /api/v1/devices/{device_id}/snapshot`
+- `GET /api/v1/devices/{device_id}/stats`
+- `POST /api/v1/devices/{device_id}/questions`
+- `GET /api/v1/devices/{device_id}/records`
+- `POST /api/v1/devices/{device_id}/records/{record_id}/answer`
+- `DELETE /api/v1/devices/{device_id}/records/{record_id}`
+- `POST /api/v1/admin/scheduler/run-once`
 
 Device schedule updates require:
 
@@ -116,5 +123,31 @@ Device schedule updates require:
 - `X-Client-Secret`
 
 FastAPI also serves generated API docs at `/docs`, `/redoc`, and `/openapi.json`.
+
+### DB Backups
+
+- Data is persisted with Docker volume `buddystuddy-postgres-data`.
+- In deploy workflow, a logical backup is generated on each rollout as:
+  `backups/buddystuddy-YYYYMMDDTHHMMSS.dump`.
+- Locally, `docker compose` also starts a dedicated backup service (`buddystuddy-db-backups`) that writes
+  daily snapshots to that same 14-day retention policy.
+
+Backup artifacts are written to the mounted backup volume:
+
+- `buddystuddy-db-backups` (local compose)
+- `backups/` (deploy host)
+
+Backup files older than 14 days are removed automatically.
+
+Example restore command on the deploy host:
+
+```sh
+docker run --rm \
+  -e PGPASSWORD="<postgres-password>" \
+  --network buddystuddy-net \
+  -v "<absolute-path-to-backups>:/backups:ro" \
+  postgres:16-alpine \
+  pg_restore -h buddystuddy-db -U buddystuddy -d buddystuddy /backups/buddystuddy-20260101T000000.dump
+```
 
 Client apps should not call OpenAI directly. They should register a backend device, upload settings/API key to this service, and use the question/grading endpoints.

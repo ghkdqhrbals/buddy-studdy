@@ -10,6 +10,10 @@ on:
         description: "Image ref to deploy."
         required: true
         type: string
+      coordinator_backend_url:
+        description: "Optional backend URL for coordinator.ghkdqhrbals.org, e.g. http://redis-coordinator:8080."
+        required: false
+        type: string
 
 concurrency:
   group: deploy-backend
@@ -22,6 +26,8 @@ jobs:
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
+      COORDINATOR_DOMAIN: coordinator.ghkdqhrbals.org
+      COORDINATOR_BACKEND_URL: ${{ github.event.client_payload.coordinator_backend_url || inputs.coordinator_backend_url || vars.COORDINATOR_BACKEND_URL }}
 
     steps:
       - name: Validate input
@@ -53,6 +59,8 @@ jobs:
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
           APNS_ENV: ${{ secrets.APNS_ENV }}
+          OPENAPI_ACCESS_TOKEN: ${{ secrets.OPENAPI_ACCESS_TOKEN }}
+          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/buddystuddy-ec2 \
@@ -62,6 +70,8 @@ jobs:
             "IMAGE_REF='${IMAGE_REF}' \
              EC2_HOST='${EC2_HOST}' \
              BACKEND_DOMAIN='${BACKEND_DOMAIN}' \
+             COORDINATOR_DOMAIN='${COORDINATOR_DOMAIN}' \
+             COORDINATOR_BACKEND_URL='${COORDINATOR_BACKEND_URL}' \
              GHCR_USERNAME='${GHCR_USERNAME}' \
              GHCR_TOKEN='${GHCR_TOKEN}' \
              BACKEND_MASTER_KEY='${BACKEND_MASTER_KEY}' \
@@ -71,6 +81,8 @@ jobs:
              APNS_TEAM_ID='${APNS_TEAM_ID}' \
              APNS_BUNDLE_ID='${APNS_BUNDLE_ID}' \
              APNS_ENV='${APNS_ENV}' \
+             OPENAPI_ACCESS_TOKEN='${OPENAPI_ACCESS_TOKEN}' \
+             GOOGLE_IOS_CLIENT_ID='${GOOGLE_IOS_CLIENT_ID}' \
              bash -s" <<'REMOTE'
           set -euo pipefail
 
@@ -80,6 +92,7 @@ jobs:
           cd /opt/buddystuddy-backend
 
           mkdir -p nginx/certs letsencrypt
+          COORDINATOR_BACKEND_URL="${COORDINATOR_BACKEND_URL:-}"
 
           POSTGRES_DB=buddystuddy
           POSTGRES_USER=buddystuddy
@@ -95,6 +108,7 @@ jobs:
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_SECONDS=30
           OPENAI_MODEL=gpt-5.4
+          ENABLE_OPENAPI_DOCS=false
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}
           APNS_AUTH_KEY_BASE64=${APNS_AUTH_KEY_BASE64}
@@ -102,6 +116,8 @@ jobs:
           APNS_TEAM_ID=${APNS_TEAM_ID}
           APNS_BUNDLE_ID=${APNS_BUNDLE_ID}
           APNS_ENV=${APNS_ENV}
+          OPENAPI_ACCESS_TOKEN=${OPENAPI_ACCESS_TOKEN}
+          GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}
           ENV
           chmod 600 .env
 
@@ -117,10 +133,11 @@ jobs:
           sudo docker pull nginx:1.27-alpine
           sudo docker pull postgres:16-alpine
           sudo docker pull certbot/certbot:v2.11.0
+          sudo docker pull curlimages/curl:8.11.0
           sudo docker network create buddystuddy-net >/dev/null 2>&1 || true
           sudo docker volume create buddystuddy-postgres-data >/dev/null
-
-          sudo docker rm -f buddystuddy-nginx buddystuddy-backend buddystuddy-db >/dev/null 2>&1 || true
+          mkdir -p backups
+          sudo docker rm -f buddystuddy-nginx >/dev/null 2>&1 || true
           sudo docker run -d \
             --name buddystuddy-db \
             --network buddystuddy-net \
@@ -145,6 +162,23 @@ jobs:
             sleep 2
           done
 
+          BACKUP_FILE="backups/buddystuddy-$(date -u +%Y%m%dT%H%M%SZ).dump"
+          BACKUP_NAME="$(basename "${BACKUP_FILE}")"
+          sudo docker run --rm \
+            --network buddystuddy-net \
+            -e PGPASSWORD="${POSTGRES_PASSWORD}" \
+            -v "$PWD/backups:/backups" \
+            postgres:16-alpine \
+            sh -c "pg_dump -Fc -h buddystuddy-db -U \"${POSTGRES_USER}\" -d \"${POSTGRES_DB}\" > /backups/${BACKUP_NAME}"
+
+          if [ ! -f "${BACKUP_FILE}" ]; then
+            echo "Backup file was not created." >&2
+            exit 1
+          fi
+
+          # Keep only the last 14 days of backups.
+          find backups -type f -name "buddystuddy-*.dump" -mtime +14 -delete
+
           if sudo docker volume inspect buddystuddy-backend-data >/dev/null 2>&1; then
             sudo docker run --rm \
               --network buddystuddy-net \
@@ -154,29 +188,249 @@ jobs:
               python -m app.migrate_sqlite_to_postgres /legacy/buddystuddy.db
           fi
 
+          SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
+          SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
+
+          BACKEND_SLOT_A_NAME="buddystuddy-backend-a"
+          BACKEND_SLOT_B_NAME="buddystuddy-backend-b"
+          ACTIVE_SLOT_FILE=".active_backend_slot"
+
+          container_running() {
+            local container_name="$1"
+            local state
+            state="$(sudo docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null || true)"
+            [ "${state}" = "true" ]
+          }
+
+          remove_container_if_exists() {
+            local container_name="$1"
+            if sudo docker inspect "$container_name" >/dev/null 2>&1; then
+              sudo docker rm -f "$container_name" >/dev/null 2>&1 || true
+            fi
+          }
+
+          render_nginx_conf() {
+            local upstream_servers="$1"
+            local cert_path="$2"
+            local key_path="$3"
+            local coordinator_server_block=""
+            local coordinator_api_redirect_block=""
+
+            if [ -n "${COORDINATOR_BACKEND_URL}" ]; then
+              coordinator_api_redirect_block="
+              location /coord/ {
+                return 308 https://${COORDINATOR_DOMAIN}\\\$request_uri;
+              }"
+              coordinator_server_block="
+            server {
+              listen 443 ssl http2;
+              server_name ${COORDINATOR_DOMAIN};
+
+              ssl_certificate ${cert_path};
+              ssl_certificate_key ${key_path};
+
+              client_max_body_size 1m;
+
+              location / {
+                proxy_pass ${COORDINATOR_BACKEND_URL};
+                proxy_http_version 1.1;
+                proxy_set_header Host \\\$host;
+                proxy_set_header X-Real-IP \\\$remote_addr;
+                proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+            }"
+            fi
+
+            cat > nginx/nginx.conf <<NGINX
+          events {}
+
+          http {
+            server {
+              listen 443 ssl http2;
+              server_name ${BACKEND_DOMAIN};
+
+              ssl_certificate ${cert_path};
+              ssl_certificate_key ${key_path};
+
+              client_max_body_size 1m;
+
+              upstream buddystuddy_backend {
+          $(for server in ${upstream_servers}; do
+              echo "                server ${server}:8080;"
+            done)
+              }
+
+              location = /health {
+                proxy_pass http://buddystuddy_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+
+              location = /api/v1/health {
+                proxy_pass http://buddystuddy_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+
+              location /api/v1/ {
+                proxy_pass http://buddystuddy_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+              }
+          ${coordinator_api_redirect_block}
+
+              location / {
+                return 404;
+              }
+            }
+          ${coordinator_server_block}
+          }
+          NGINX
+          }
+
+          upsert_nginx() {
+            local upstream_servers="$1"
+            render_nginx_conf "${upstream_servers}" "${SSL_CERTIFICATE}" "${SSL_CERTIFICATE_KEY}"
+
+            if container_running "buddystuddy-nginx"; then
+              if sudo docker exec buddystuddy-nginx nginx -t >/dev/null 2>&1; then
+                sudo docker exec buddystuddy-nginx nginx -s reload
+              else
+                sudo docker rm -f buddystuddy-nginx >/dev/null 2>&1 || true
+              fi
+            fi
+
+            if ! container_running "buddystuddy-nginx"; then
+              sudo docker run -d \
+                --name buddystuddy-nginx \
+                --network buddystuddy-net \
+                --restart unless-stopped \
+                -p 443:443 \
+                -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+                -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+                -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
+                nginx:1.27-alpine
+            fi
+          }
+
+          wait_backend() {
+            local container_name="$1"
+            local attempts="${2:-30}"
+            local attempt
+            for attempt in $(seq 1 "${attempts}"); do
+              if sudo docker run --rm \
+                --network buddystuddy-net \
+                curlimages/curl:8.11.0 \
+                sh -c "curl -fsS http://${container_name}:8080/health"; then
+                return 0
+              fi
+              if [ "${attempt}" -eq "${attempts}" ]; then
+                return 1
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
+          active_slot="a"
+          if [ -f "${ACTIVE_SLOT_FILE}" ]; then
+            active_slot="$(tr -d '\n\r' < "${ACTIVE_SLOT_FILE}")"
+          fi
+
+          if [ "${active_slot}" != "a" ] && [ "${active_slot}" != "b" ]; then
+            active_slot="a"
+          fi
+          if ! container_running "buddystuddy-backend-${active_slot}"; then
+            if [ "${active_slot}" = "a" ] && container_running "${BACKEND_SLOT_B_NAME}"; then
+              active_slot="b"
+            elif [ "${active_slot}" = "b" ] && container_running "${BACKEND_SLOT_A_NAME}"; then
+              active_slot="a"
+            elif container_running "${BACKEND_SLOT_A_NAME}"; then
+              active_slot="a"
+            elif container_running "${BACKEND_SLOT_B_NAME}"; then
+              active_slot="b"
+            fi
+          fi
+
+          if [ "${active_slot}" = "a" ]; then
+            active_container="${BACKEND_SLOT_A_NAME}"
+            next_container="${BACKEND_SLOT_B_NAME}"
+            next_slot="b"
+          else
+            active_container="${BACKEND_SLOT_B_NAME}"
+            next_container="${BACKEND_SLOT_A_NAME}"
+            next_slot="a"
+          fi
+
+          remove_container_if_exists "${next_container}"
+
+          if ! container_running "${active_container}"; then
+            active_container=""
+            active_slot=""
+          fi
+
           sudo docker run -d \
-            --name buddystuddy-backend \
+            --name "${next_container}" \
             --network buddystuddy-net \
             --restart unless-stopped \
             --env-file .env \
             "${IMAGE_REF}"
 
+          if ! wait_backend "${next_container}" 45; then
+            echo "Rolling deploy rollback: standby container failed health check."
+            remove_container_if_exists "${next_container}"
+            if [ -n "${active_container}" ] && container_running "${active_container}"; then
+              upsert_nginx "${active_container}"
+            fi
+            exit 1
+          fi
+
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
           if [ ! -s "letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem" ]; then
+            CERTBOT_DOMAINS=(-d "${BACKEND_DOMAIN}")
+            if [ -n "${COORDINATOR_BACKEND_URL}" ]; then
+              CERTBOT_DOMAINS+=(-d "${COORDINATOR_DOMAIN}")
+            fi
             if ! sudo docker run --rm \
               -p 443:443 \
               -v "$PWD/letsencrypt:/etc/letsencrypt" \
               certbot/certbot:v2.11.0 certonly \
               --standalone \
               --preferred-challenges tls-alpn-01 \
-              -d "${BACKEND_DOMAIN}" \
+              "${CERTBOT_DOMAINS[@]}" \
               --agree-tos \
               --non-interactive \
               --register-unsafely-without-email; then
               echo "Let's Encrypt certificate issuance failed. Falling back to a temporary self-signed certificate." >&2
             fi
           else
+            if [ -n "${COORDINATOR_BACKEND_URL}" ]; then
+              sudo docker run --rm \
+                -p 443:443 \
+                -v "$PWD/letsencrypt:/etc/letsencrypt" \
+                certbot/certbot:v2.11.0 certonly \
+                --standalone \
+                --preferred-challenges tls-alpn-01 \
+                --cert-name "${BACKEND_DOMAIN}" \
+                --expand \
+                -d "${BACKEND_DOMAIN}" \
+                -d "${COORDINATOR_DOMAIN}" \
+                --agree-tos \
+                --non-interactive \
+                --register-unsafely-without-email || true
+            fi
+
             sudo docker run --rm \
               -p 443:443 \
               -v "$PWD/letsencrypt:/etc/letsencrypt" \
@@ -191,58 +445,51 @@ jobs:
               -keyout nginx/certs/server.key \
               -out nginx/certs/server.crt \
               -subj "/CN=${BACKEND_DOMAIN}" \
-              -addext "subjectAltName=DNS:${BACKEND_DOMAIN}"
+              -addext "subjectAltName=DNS:${BACKEND_DOMAIN}$(if [ -n "${COORDINATOR_BACKEND_URL}" ]; then echo ",DNS:${COORDINATOR_DOMAIN}"; fi)"
             chmod 600 nginx/certs/server.key
             SSL_CERTIFICATE="/etc/nginx/certs/server.crt"
             SSL_CERTIFICATE_KEY="/etc/nginx/certs/server.key"
           fi
 
-          cat > nginx/nginx.conf <<NGINX
-          events {}
-
-          http {
-            server {
-              listen 443 ssl http2;
-              server_name ${BACKEND_DOMAIN};
-
-              ssl_certificate ${SSL_CERTIFICATE};
-              ssl_certificate_key ${SSL_CERTIFICATE_KEY};
-
-              client_max_body_size 1m;
-
-              location / {
-                proxy_pass http://buddystuddy-backend:8080;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-            }
-          }
-          NGINX
-
-          sudo docker run -d \
-            --name buddystuddy-nginx \
-            --network buddystuddy-net \
-            --restart unless-stopped \
-            -p 443:443 \
-            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-            -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
-            -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
-            nginx:1.27-alpine
+          has_active_container=0
+          if [ -n "${active_container}" ] && container_running "${active_container}"; then
+            has_active_container=1
+            upsert_nginx "${active_container} ${next_container}"
+            sleep 3
+          else
+            upsert_nginx "${next_container}"
+          fi
 
           for attempt in $(seq 1 30); do
             if curl -kfsS https://127.0.0.1/health; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
-              echo "Backend health check failed after ${attempt} attempts." >&2
-              sudo docker logs buddystuddy-backend || true
-              sudo docker logs buddystuddy-nginx || true
+              echo "Backend health check via HTTPS failed after ${attempt} attempts." >&2
+              if [ "${has_active_container}" = "1" ] && container_running "${active_container}"; then
+                upsert_nginx "${active_container}"
+              fi
               exit 1
             fi
             sleep 2
           done
+
+          if [ "${has_active_container}" = "1" ] && container_running "${active_container}"; then
+            sudo docker stop -t 20 "${active_container}"
+            remove_container_if_exists "${active_container}"
+            upsert_nginx "${next_container}"
+          else
+            upsert_nginx "${next_container}"
+          fi
+
+          printf '%s\n' "${next_slot}" > "${ACTIVE_SLOT_FILE}"
+
+          if ! container_running "${next_container}"; then
+            if [ -n "${next_container}" ]; then
+              sudo docker logs "${next_container}" || true
+            fi
+            sudo docker logs buddystuddy-nginx || true
+            exit 1
+          fi
           sudo docker image prune -f
           REMOTE

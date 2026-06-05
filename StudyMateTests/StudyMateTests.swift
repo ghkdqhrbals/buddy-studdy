@@ -113,6 +113,262 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(store.loadSettings(), settings)
     }
 
+    @MainActor
+    func testSettingsStorePreservesStudyCategories() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let categoryA = StudyCategory(title: "Swift")
+        let categoryB = StudyCategory(title: "iOS")
+        let expectedSelection = categoryB.id
+
+        store.saveSettings(
+            StudySettings(
+                topic: "기초",
+                difficulty: .level5,
+                appLanguage: .korean,
+                language: .korean,
+                openAIModel: StudySettings.defaultOpenAIModel,
+                notificationSound: .defaultSound,
+                customPrompt: "짧게",
+                intervalMinutes: 10,
+                studyCategories: [categoryA, categoryB],
+                selectedStudyCategoryID: expectedSelection
+            )
+        )
+
+        let loaded = store.loadSettings()
+
+        XCTAssertEqual(loaded.studyCategories.map { $0.title }, ["Swift", "iOS"])
+        XCTAssertEqual(loaded.selectedStudyCategoryID, expectedSelection)
+        XCTAssertEqual(loaded.topic, "iOS")
+    }
+
+    func testStudySettingsAllowsEmptyStudyCategories() {
+        let settings = StudySettings(
+            topic: "",
+            difficulty: .beginner,
+            appLanguage: .korean,
+            language: .korean,
+            customPrompt: "짧게",
+            intervalMinutes: 10,
+            studyCategories: []
+        )
+
+        XCTAssertEqual(settings.studyCategories.count, 0)
+        XCTAssertNil(settings.selectedStudyCategoryID)
+    }
+
+    func testNormalizedCategoriesDoesNotInjectDefaultCategoryWhenEmpty() {
+        let normalized = StudySettings.normalizedCategories(
+            categories: [],
+            fallbackTopic: "",
+            fallbackTitle: StudySettings.fallbackTopic(for: .korean)
+        )
+
+        XCTAssertEqual(normalized.count, 0)
+    }
+
+    func testOpenAIKeyExtractionSkipsSurroundingText() {
+        let pasted = "Please use key: sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567 and ignore this."
+        let extracted = AppState.extractOpenAIAPIKey(from: pasted)
+
+        XCTAssertNotNil(extracted)
+        XCTAssertEqual(extracted, "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567")
+    }
+
+    func testOpenAIKeyExtractionParsesFromHTMLAndCodeBlock() {
+        let pasted = """
+            <div>키를 복사했습니다: <code>sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAA</code></div>
+            ```\nsk-proj-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n```
+        """
+
+        XCTAssertEqual(
+            AppState.extractOpenAIAPIKey(from: pasted),
+            "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        )
+    }
+
+    @MainActor
+    func testAppStateAddsDefaultCategoryWhenEmptyOnLoad() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = SettingsStore(defaults: defaults)
+        let initial = StudySettings(
+            topic: "Swift",
+            difficulty: .beginner,
+            customPrompt: "짧게",
+            intervalMinutes: 10,
+            studyCategories: []
+        )
+        store.saveSettings(initial)
+
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertEqual(appState.settings.studyCategories.count, 0)
+        XCTAssertEqual(appState.settings.topic, "Swift")
+    }
+
+    @MainActor
+    func testAppStateStudyCategoryManagement() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveSettings(
+            StudySettings(
+                topic: "Start",
+                difficulty: .beginner,
+                customPrompt: "짧은 문제",
+                intervalMinutes: 15,
+                studyCategories: [
+                    StudyCategory(title: "SwiftUI"),
+                    StudyCategory(title: "CoreData")
+                ]
+            )
+        )
+
+        let appState = AppState(settingsStore: store)
+
+        appState.addStudyCategory("Combine")
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["SwiftUI", "CoreData", "Combine"])
+        XCTAssertEqual(appState.settings.studyCategories.last?.title, "Combine")
+
+        appState.moveStudyCategories(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(appState.settings.studyCategories.first?.title, "Combine")
+        XCTAssertEqual(appState.settings.studyCategories[1].title, "SwiftUI")
+
+        appState.selectStudyCategory(appState.settings.studyCategories[2].id)
+        XCTAssertEqual(appState.selectedTab, .study)
+        XCTAssertEqual(appState.settings.topic, appState.settings.studyCategories[2].title)
+
+        appState.deleteStudyCategories(at: IndexSet(integer: 1))
+        XCTAssertEqual(appState.settings.studyCategories.count, 2)
+    }
+
+    @MainActor
+    func testDeletingActiveStudyCategorySelectsNextAvailableStudy() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let firstCategory = StudyCategory(title: "SwiftUI")
+        let secondCategory = StudyCategory(title: "Algorithms")
+        store.saveSettings(
+            StudySettings(
+                topic: "SwiftUI",
+                difficulty: .beginner,
+                customPrompt: "짧은 문제",
+                intervalMinutes: 15,
+                studyCategories: [firstCategory, secondCategory],
+                selectedStudyCategoryID: firstCategory.id
+            )
+        )
+
+        let appState = AppState(settingsStore: store)
+        appState.deleteStudyCategory(id: firstCategory.id)
+
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Algorithms"])
+        XCTAssertEqual(appState.settings.selectedStudyCategoryID, secondCategory.id)
+        XCTAssertEqual(appState.settings.topic, "Algorithms")
+    }
+
+    @MainActor
+    func testAppStateSavesEditedTopicAsActiveCategory() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveSettings(
+            StudySettings(
+                topic: "Swift",
+                difficulty: .beginner,
+                appLanguage: .korean,
+                language: .korean,
+                customPrompt: "짧게",
+                intervalMinutes: 10,
+                studyCategories: [StudyCategory(title: "내 학습")]
+            )
+        )
+
+        let appState = AppState(settingsStore: store)
+        appState.beginSettingsEditing()
+        appState.draftSettings.topic = "Swift UI"
+
+        appState.saveSettings()
+
+        XCTAssertEqual(appState.settings.topic, "Swift UI")
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Swift UI"])
+        XCTAssertEqual(appState.selectedStudyCategoryIDForDisplay, appState.settings.studyCategories.first?.id)
+    }
+
+    @MainActor
+    func testSettingsEditCancellationWhenLeavingSettingsTab() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveAPIKey("sk-initial")
+        store.saveHasCompletedOnboarding(true)
+        let appState = AppState(settingsStore: store)
+
+        appState.selectedTab = .settings
+        appState.beginSettingsEditing()
+        appState.draftAPIKey = "sk-updated"
+        appState.settings.difficulty = .level6
+
+        XCTAssertTrue(appState.hasUnsavedSettingsChanges)
+
+        appState.setSelectedTab(.home)
+
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+        XCTAssertEqual(appState.draftAPIKey, appState.apiKey)
+    }
+
+    @MainActor
+    func testSettingsSaveThenLeaveSettingsTabDoesNotRestorePreviousValues() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveAPIKey("sk-initial")
+        store.saveHasCompletedOnboarding(true)
+        let appState = AppState(settingsStore: store)
+
+        appState.beginSettingsEditing()
+        appState.draftAPIKey = "sk-updated"
+        appState.draftSettings.intervalMinutes = 30
+        appState.saveSettings()
+
+        appState.setSelectedTab(.home)
+
+        XCTAssertEqual(store.loadAPIKey(), "sk-updated")
+        XCTAssertEqual(appState.apiKey, "sk-updated")
+        XCTAssertEqual(appState.settings.intervalMinutes, 30)
+        XCTAssertEqual(appState.draftSettings.intervalMinutes, 30)
+    }
+
     func testTopicGroupingNormalizesCaseSpacingAndSeparators() {
         let topics = [
             "Spring Boot",
@@ -705,6 +961,61 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testManualQuestionSyncsSavedModelBeforeCreateQuestion() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let initialSettings = StudySettings(
+            topic: "Swift",
+            difficulty: .level5,
+            openAIModel: StudySettings.defaultOpenAIModel,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        store.saveAPIKey("sk-local")
+        store.saveSettings(initialSettings)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "device-test",
+                clientSecret: "secret-test",
+                apnsToken: "token-test"
+            )
+        )
+
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionResult = StudyRecord(
+            id: "model-sync-1",
+            question: QuestionItem(
+                question: "Swift Concurrency에서 actor는 언제 쓰나요?",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 200)
+            ),
+            topic: "Swift",
+            difficulty: .level5
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        appState.beginSettingsEditing()
+        appState.draftSettings.openAIModel = "gpt-4o-mini"
+        await appState.saveSettingsAndValidateAPIKey()
+        await appState.generateQuestion()
+
+        XCTAssertEqual(backend.createQuestionCallCount, 1)
+        XCTAssertEqual(backend.scheduledModels.last, "gpt-4o-mini")
+        guard let createIndex = backend.callEvents.firstIndex(of: "createQuestion") else {
+            XCTFail("createQuestion should be called")
+            return
+        }
+        XCTAssertGreaterThan(createIndex, 0)
+        XCTAssertEqual(backend.callEvents[createIndex - 1], "updateSchedule:gpt-4o-mini")
+        XCTAssertEqual(appState.errorMessage, nil)
+    }
+
+    @MainActor
     func testGeneratedQuestionDoesNotSaveWhenAllAttemptsRepeatExistingQuestion() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1059,9 +1370,28 @@ final class StudyMateTests: XCTestCase {
                 actionIdentifier: UNNotificationDefaultActionIdentifier
             )
         )
+        XCTAssertTrue(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: UNNotificationDefaultActionIdentifier,
+                isApplicationInactive: true
+            )
+        )
         XCTAssertFalse(
             StudyNotificationRouting.shouldOpenStudyImmediately(
-                actionIdentifier: StudyNotificationAction.reply
+                actionIdentifier: UNNotificationDefaultActionIdentifier,
+                isApplicationInactive: false
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: StudyNotificationAction.reply,
+                isApplicationInactive: true
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: StudyNotificationAction.otherAnswer,
+                isApplicationInactive: true
             )
         )
         XCTAssertFalse(
@@ -2778,22 +3108,23 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(records.first?.question.question, "Question B")
     }
 
-    func testStudyRecordsPersistInSQLiteAcrossStoreInstances() {
+    func testStudyRecordsDoNotPersistInLocalDatabaseAcrossStoreInstances() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("StudyMateTests-\(UUID().uuidString).sqlite")
+            .appendingPathComponent("StudyMateTests-\(UUID().uuidString).ignored")
         defer {
             defaults.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: databaseURL)
         }
 
         let settings = StudySettings(
-            topic: "SQLite",
+            topic: "Backend",
             difficulty: .intermediate,
             customPrompt: "짧게",
             intervalMinutes: 15
         )
+        _ = FileManager.default.createFile(atPath: databaseURL.path, contents: Data(), attributes: nil)
         let firstStore = SettingsStore(defaults: defaults, recordDatabaseURL: databaseURL)
         firstStore.appendStudyRecord(
             question: QuestionItem(question: "FTS5는 무엇인가요?", expectedAnswerHint: nil, createdAt: Date()),
@@ -2803,16 +3134,16 @@ final class StudyMateTests: XCTestCase {
         let secondStore = SettingsStore(defaults: defaults, recordDatabaseURL: databaseURL)
         let records = secondStore.loadStudyRecords()
 
-        XCTAssertEqual(records.count, 1)
-        XCTAssertEqual(records.first?.topic, "SQLite")
-        XCTAssertEqual(records.first?.question.question, "FTS5는 무엇인가요?")
+        XCTAssertEqual(firstStore.loadStudyRecords().count, 1)
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
     }
 
-    func testLegacyUserDefaultsStudyRecordsMigrateToSQLite() throws {
+    func testLegacyUserDefaultsStudyRecordsLoadIntoVolatileStoreOnly() throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("StudyMateTests-\(UUID().uuidString).sqlite")
+            .appendingPathComponent("StudyMateTests-\(UUID().uuidString).ignored")
         defer {
             defaults.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: databaseURL)
@@ -2826,6 +3157,7 @@ final class StudyMateTests: XCTestCase {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         defaults.set(try encoder.encode([legacyRecord]), forKey: "studyRecords")
+        _ = FileManager.default.createFile(atPath: databaseURL.path, contents: Data(), attributes: nil)
 
         let store = SettingsStore(defaults: defaults, recordDatabaseURL: databaseURL)
         let migratedRecords = store.loadStudyRecords()
@@ -2834,7 +3166,71 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: "studyRecords"))
         XCTAssertEqual(migratedRecords.count, 1)
         XCTAssertEqual(migratedRecords.first?.question.question, "마이그레이션 질문")
-        XCTAssertEqual(reloadedStore.loadStudyRecords().first?.topic, "Migration")
+        XCTAssertTrue(reloadedStore.loadStudyRecords().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+    }
+
+    func testBackendSnapshotDecoderAcceptsOpenAIModelAndFractionalSecondDates() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "settings": {
+                "topic": "Swift",
+                "difficultyLevel": 2,
+                "intervalMinutes": 1,
+                "enabled": true,
+                "notificationSound": "default",
+                "customPrompt": "짧게",
+                "appLanguage": "ko",
+                "openaiModel": "gpt-5.4",
+                "maxHistoryCount": 100,
+                "openaiKeyConfigured": true,
+                "nextDueAt": "2026-06-01T19:29:23.180849+00:00",
+                "lastError": null
+              },
+              "api": {
+                "openaiKeyConfigured": true,
+                "openaiModel": "gpt-5.4",
+                "usageUrl": "https://platform.openai.com/usage",
+                "billingUrl": "https://platform.openai.com/settings/organization/billing/overview",
+                "creditsUrl": "https://platform.openai.com/settings/organization/billing/credit-grants"
+              },
+              "records": [
+                {
+                  "id": "1",
+                  "question": {
+                    "question": "Swift에서 변수를 선언할 때 사용하는 키워드는 무엇인가요?",
+                    "expectedAnswerHint": "var",
+                    "createdAt": "2026-06-01T19:05:51.531909+00:00"
+                  },
+                  "answer": null,
+                  "gradingResult": null,
+                  "topic": "Swift",
+                  "difficulty": 2,
+                  "answeredAt": null,
+                  "status": "ungraded"
+                }
+              ],
+              "stats": {
+                "totalResponses": 0,
+                "totalTopics": 0,
+                "topics": [],
+                "limit": 8,
+                "offset": 0,
+                "generatedAt": "2026-06-01T19:29:23.180849+00:00"
+              },
+              "totalCount": 1,
+              "serverTime": "2026-06-01T19:29:23.180849+00:00"
+            }
+            """.data(using: .utf8)
+        )
+
+        let snapshot = try RemotePushBackendClient.makeDecoder().decode(BackendSnapshot.self, from: payload)
+
+        XCTAssertEqual(snapshot.settings.openAIModel, "gpt-5.4")
+        XCTAssertEqual(snapshot.records.count, 1)
+        XCTAssertEqual(snapshot.records.first?.id, "1")
+        XCTAssertEqual(snapshot.totalCount, 1)
     }
 
     func testQuestionResponseIDRoundTripUsesUserDefaults() {
@@ -3026,6 +3422,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var updatedAPNSTokens: [String] = []
     var updateScheduleCallCount = 0
     var scheduledAPIKeys: [String?] = []
+    var scheduledModels: [String] = []
+    var callEvents: [String] = []
     var createQuestionCallCount = 0
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
@@ -3067,6 +3465,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     ) async throws {
         updateScheduleCallCount += 1
         scheduledAPIKeys.append(apiKey)
+        scheduledModels.append(settings.sanitizedOpenAIModel)
+        callEvents.append("updateSchedule:\(settings.sanitizedOpenAIModel)")
     }
 
     func fetchSnapshot(
@@ -3100,6 +3500,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func fetchOpenAIModelOptions() async throws -> [OpenAIModelOption] {
+        [
+            OpenAIModelOption(
+                id: StudySettings.defaultOpenAIModel,
+                displayName: StudySettings.defaultOpenAIModel,
+                supportsTextVerbosity: false
+            )
+        ]
+    }
+
     func fetchStats(
         registration: RemotePushRegistration,
         period: BackendStatsPeriod,
@@ -3113,8 +3523,50 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         throw RemotePushBackendError.invalidResponse
     }
 
+    func fetchPublicQuestions(
+        registration: RemotePushRegistration,
+        topic: String?,
+        limit: Int,
+        offset: Int,
+        excludeDeviceID: String?
+    ) async throws -> CommunityQuestionsResponse {
+        CommunityQuestionsResponse(
+            questions: [],
+            totalCount: 0,
+            limit: limit,
+            offset: offset
+        )
+    }
+
+    func loginWithGoogle(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityUserProfile {
+        CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
+    }
+
+    func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
+        CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
+    }
+
+    func updateMyProfile(
+        registration: RemotePushRegistration,
+        displayName: String?,
+        bio: String?
+    ) async throws -> CommunityUserProfile {
+        CommunityUserProfile(id: 1, displayName: displayName ?? "Tester", bio: bio ?? "", avatarURL: nil)
+    }
+
+    func reportCommunityQuestion(
+        registration: RemotePushRegistration,
+        questionID: String,
+        reason: String,
+        message: String
+    ) async throws {}
+
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
         createQuestionCallCount += 1
+        callEvents.append("createQuestion")
         if !createQuestionResults.isEmpty {
             return createQuestionResults.removeFirst()
         }

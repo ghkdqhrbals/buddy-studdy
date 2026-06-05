@@ -26,7 +26,35 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://buddystuddy:local-password@db:5432/buddystuddy
+      ENABLE_OPENAPI_DOCS: "true"
+      OPENAPI_ACCESS_TOKEN: "local-openapi"
+      GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
     restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: buddystuddy
+      PGDATABASE: buddystuddy
+      PGPASSWORD: local-password
+      BACKUP_RETENTION_DAYS: 14
+    volumes:
+      - buddystuddy-db-backups:/backups
+    restart: unless-stopped
+    command: >
+      sh -c '
+      mkdir -p /backups &&
+      while true; do
+        ts=$$(date -u +%Y%m%dT%H%M%SZ);
+        pg_dump -Fc -h "$${PGHOST}" -U "$${PGUSER}" -d "$${PGDATABASE}" > /backups/buddystuddy-$${ts}.dump;
+        find /backups -type f -name "buddystuddy-*.dump" -mtime +$${BACKUP_RETENTION_DAYS} -delete;
+        sleep 86400;
+      done'
 
 volumes:
   buddystuddy-postgres-data:
+  buddystuddy-db-backups:

@@ -1,11 +1,15 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selection: SettingsCategory = .study
+    @State private var debugPanelOffset: CGSize = .zero
 
     private var visibleCategories: [SettingsCategory] {
-        SettingsCategory.visible(isDebuggingEnabled: appState.isDebuggingEnabled)
+        SettingsCategory.visible
     }
 
     var body: some View {
@@ -54,26 +58,18 @@ struct SettingsView: View {
 
                         case .study:
                             StudySettingsSection()
-
-                        case .records:
-                            RecordsSettingsSection()
-
-                        case .developer:
-                            DeveloperSettingsSection()
                         }
                     }
                     .padding(.leading, 20)
                     .padding(.trailing, 28)
                     .padding(.top, 20)
                     .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
 
                 Divider()
 
                 HStack(spacing: 12) {
-                    CompactCloudSyncFooter()
-
                     Spacer()
 
                     Button {
@@ -103,11 +99,23 @@ struct SettingsView: View {
                 .padding(.bottom, 20)
             }
         }
-        .onChange(of: appState.isDebuggingEnabled) {
-            if !appState.isDebuggingEnabled && selection == .developer {
-                selection = .study
+        .overlay(alignment: .center) {
+            if appState.isAPIDebugPanelPresented {
+                APIDebugPanel(
+                    logs: appState.apiTrafficLogs,
+                    isPresented: $appState.isAPIDebugPanelPresented
+                )
+                .offset(debugPanelOffset)
             }
         }
+        .contentShape(Rectangle())
+        .zIndex(1000)
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.75)
+                .onEnded { _ in
+                    appState.requestDebugPanelIfEnabledOrEnableOnDemand()
+                }
+        )
         .onAppear {
             appState.beginSettingsEditing()
         }
@@ -117,19 +125,141 @@ struct SettingsView: View {
     }
 }
 
+private struct APIDebugPanel: View {
+    let logs: [APITrafficLogEntry]
+    @Binding var isPresented: Bool
+    @EnvironmentObject private var appState: AppState
+
+    @State private var dragOffset: CGSize = .zero
+    @State private var accumulatedOffset: CGSize = .zero
+
+    var body: some View {
+        let strings = appState.settingsEditorStrings
+        VStack(spacing: 10) {
+            HStack {
+                Text(strings.apiDebugWindowTitle)
+                    .font(.headline)
+                Spacer()
+                Button(role: .cancel) {
+                    isPresented = false
+                } label: {
+                    Text("✕")
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+            }
+            Divider()
+
+            if logs.isEmpty {
+                ContentUnavailableView(strings.noLogs, systemImage: "wifi.slash", description: Text(strings.noLogsDescription))
+                    .frame(height: 120)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(logs) { log in
+                            APITrafficRow(entry: log)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 620, maxHeight: 420)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(radius: 12)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.2))
+        )
+        .padding()
+        .offset(x: dragOffset.width + accumulatedOffset.width, y: dragOffset.height + accumulatedOffset.height)
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    dragOffset = value.translation
+                }
+                .onEnded { value in
+                    accumulatedOffset.width += value.translation.width
+                    accumulatedOffset.height += value.translation.height
+                    dragOffset = .zero
+                }
+        )
+        .onTapGesture {}
+    }
+
+    private struct APITrafficRow: View {
+        let entry: APITrafficLogEntry
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(timeText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(entry.compactSummary)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(entry.isError ? .red : .secondary)
+                        .lineLimit(1)
+                }
+
+                if !entry.requestHeaders.isEmpty {
+                    Text("Headers: \(entry.requestHeaders)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+
+                if !entry.requestBody.isEmpty {
+                    Text("Request: \(entry.requestBody)")
+                        .font(.caption2)
+                        .foregroundStyle(.primary)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                }
+
+                if !entry.responseBody.isEmpty {
+                    Text("Response: \(entry.responseBody)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                }
+
+                if let error = entry.error {
+                    Text("Error: \(error)")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(entry.isError ? Color.red.opacity(0.08) : Color.secondary.opacity(0.06))
+            )
+        }
+
+        private var timeText: String {
+            entry.createdAt.formatted(date: .omitted, time: .standard)
+        }
+    }
+}
+
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case general
     case secrets
     case study
-    case records
-    case developer
 
     var id: String { rawValue }
 
-    static func visible(isDebuggingEnabled: Bool) -> [SettingsCategory] {
-        [.study, .general, .secrets, .records, .developer].filter { category in
-            category != .developer || isDebuggingEnabled
-        }
+    static var visible: [SettingsCategory] {
+        [.study, .general, .secrets]
     }
 
     func title(strings: AppStrings) -> String {
@@ -140,10 +270,6 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
             strings.secrets
         case .study:
             strings.study
-        case .records:
-            strings.records
-        case .developer:
-            strings.developer
         }
     }
 }
@@ -160,62 +286,6 @@ private struct SettingsPanel<Content: View>: View {
             content
         }
         .frame(maxWidth: 440, alignment: .leading)
-    }
-}
-
-private struct CompactCloudSyncFooter: View {
-    @EnvironmentObject private var appState: AppState
-
-    var body: some View {
-        let strings = appState.settingsEditorStrings
-
-        HStack(spacing: 8) {
-            Toggle(
-                strings.iCloudSync,
-                isOn: Binding(
-                    get: { appState.isCloudSyncEnabled },
-                    set: { appState.setCloudSyncEnabled($0) }
-                )
-            )
-            .toggleStyle(.switch)
-            .fixedSize()
-
-            Text(statusText(strings: strings))
-                .font(.caption)
-                .foregroundStyle(appState.hasCloudSyncError ? .orange : .secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Button {
-                Task {
-                    await appState.syncCloudNow()
-                }
-            } label: {
-                if appState.isCloudSyncing {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                }
-            }
-            .buttonStyle(.borderless)
-            .disabled(!appState.isCloudSyncEnabled || appState.isCloudSyncing)
-            .help(strings.syncNow)
-        }
-        .frame(minWidth: 260, maxWidth: 430, alignment: .leading)
-    }
-
-    private func statusText(strings: AppStrings) -> String {
-        if let message = appState.cloudSyncMessage,
-           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return message
-        }
-
-        if let cloudLastSyncedAt = appState.cloudLastSyncedAt {
-            return strings.lastSyncedAt(cloudLastSyncedAt)
-        }
-
-        return appState.isCloudSyncEnabled ? strings.iCloudSyncOn : strings.iCloudSyncOff
     }
 }
 
@@ -321,20 +391,6 @@ private struct GeneralSettingsSection: View {
 
             Divider()
 
-            Toggle(
-                strings.debuggingMode,
-                isOn: Binding(
-                    get: { appState.isDebuggingEnabled },
-                    set: { appState.setDebuggingEnabled($0) }
-                )
-            )
-
-            Text(strings.debuggingHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
             Button(role: .destructive) {
                 showsUninstallConfirmation = true
             } label: {
@@ -366,8 +422,8 @@ private struct SecretsSettingsSection: View {
     var body: some View {
         let strings = appState.settingsEditorStrings
 
-        SettingsPanel(title: "OpenAI") {
-            VStack(alignment: .leading, spacing: 8) {
+            SettingsPanel(title: "OpenAI") {
+                VStack(alignment: .leading, spacing: 8) {
                 Text(strings.openAIAPIKey)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -387,6 +443,17 @@ private struct SecretsSettingsSection: View {
                     } label: {
                         Label(showsAPIKey ? strings.hide : strings.show, systemImage: showsAPIKey ? "eye.slash" : "eye")
                     }
+
+                    Button(strings.paste) {
+                        appState.applyClipboardOpenAIAPIKey()
+                    }
+                }
+
+                if let statusMessage = appState.statusMessage {
+                    Text(statusMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let validationMessage = appState.apiKeyValidationMessage {
@@ -413,7 +480,7 @@ private struct SecretsSettingsSection: View {
                     .foregroundStyle(.secondary)
 
                 Picker(strings.openAIModel, selection: $appState.draftSettings.openAIModel) {
-                    ForEach(OpenAIModelOption.all) { option in
+                    ForEach(appState.openAIModelOptions.isEmpty ? OpenAIModelOption.all : appState.openAIModelOptions) { option in
                         Text(option.displayName).tag(option.id)
                     }
                 }
@@ -468,8 +535,26 @@ private struct StudySettingsSection: View {
         let strings = appState.settingsEditorStrings
 
         SettingsPanel(title: strings.studySettings) {
-            TextField(strings.studyTopic, text: $appState.draftSettings.topic)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(strings.currentStudyCategory)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(appState.draftSettings.topic.isEmpty ? strings.studyFallback : appState.draftSettings.topic)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Button {
+                    appState.selectedTab = .home
+                } label: {
+                    Label(strings.editInHome, systemImage: "list.bullet.rectangle")
+                }
+                .buttonStyle(.borderless)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -516,6 +601,20 @@ private struct StudySettingsSection: View {
                 step: 1
             ) {
                 Text(strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes))
+            }
+
+            if appState.isCommunitySignedIn {
+                Toggle(
+                    strings.questionVisibility,
+                    isOn: Binding(
+                        get: { appState.draftSettings.isQuestionPublic },
+                        set: { appState.setDraftQuestionPublicity($0) }
+                    )
+                )
+
+                Text(strings.questionVisibilityHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Menu {
@@ -598,114 +697,6 @@ private struct RecordsSettingsSection: View {
                 appState.clearStudyRecords()
             }
         }
-    }
-}
-
-private struct DeveloperSettingsSection: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var didLoadInitialLogPage = false
-
-    var body: some View {
-        let strings = appState.settingsEditorStrings
-        let visibleLogs = appState.appLogs
-
-        SettingsPanel(title: strings.developerOptions) {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(strings.apiStatus, systemImage: appState.hasAPIKeyError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(appState.hasAPIKeyError ? .orange : .green)
-
-                Text(appState.hasAPIKeyError ? strings.apiKeyErrorDetected : strings.apiKeyNoError)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            HStack {
-                Text("\(strings.logs) · \(pageStatus(strings: strings))")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Spacer()
-
-                if appState.appLogPageCount > 1 {
-                    HStack(spacing: 6) {
-                        Button(action: appState.loadPreviousAppLogPage) {
-                            Image(systemName: "chevron.left")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(appState.appLogPage == 0)
-                        .help(strings.previousPage)
-
-                        Text("\(appState.appLogPage + 1)/\(appState.appLogPageCount)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-
-                        Button(action: appState.loadNextAppLogPage) {
-                            Image(systemName: "chevron.right")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(appState.appLogPage >= appState.appLogPageCount - 1)
-                        .help(strings.nextPage)
-                    }
-                }
-
-                Button(role: .destructive) {
-                    appState.clearAppLogs()
-                } label: {
-                    Label(strings.deleteLogs, systemImage: "trash")
-                }
-                .disabled(appState.appLogTotalCount == 0)
-            }
-
-            Text(strings.logLimitHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if visibleLogs.isEmpty {
-                ContentUnavailableView(
-                    strings.noLogs,
-                    systemImage: "doc.text.magnifyingglass",
-                    description: Text(strings.noLogsDescription)
-                )
-                .frame(height: 180)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(visibleLogs) { entry in
-                            LogRow(entry: entry)
-                        }
-                    }
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 7)
-                }
-                .background(Color.secondary.opacity(0.045))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .frame(height: 320)
-            }
-        }
-        .onAppear {
-            guard !didLoadInitialLogPage else {
-                return
-            }
-
-            didLoadInitialLogPage = true
-            appState.loadAppLogPage(appState.appLogPage)
-        }
-    }
-
-    private func pageStatus(strings: AppStrings) -> String {
-        guard appState.appLogTotalCount > 0 else {
-            return strings.itemCount(0)
-        }
-
-        return strings.topicPageStatus(
-            start: appState.appLogPageStart,
-            end: appState.appLogPageEnd,
-            total: appState.appLogTotalCount
-        )
     }
 }
 

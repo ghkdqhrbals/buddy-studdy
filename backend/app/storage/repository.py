@@ -15,7 +15,7 @@ from sqlalchemy import Index, asc, create_engine, func, text
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base, Device, Question, Schedule, as_utc_datetime, to_iso
+from .models import Base, Device, Question, Report, Schedule, User, as_utc_datetime, to_iso
 from ..openai_models import DEFAULT_OPENAI_MODEL
 from ..services.stats_service import TopicStatisticsService
 
@@ -127,6 +127,34 @@ class Database:
                 session.close()
 
     @contextmanager
+    def scheduler_lock(self) -> Iterator[bool]:
+        if not self.is_postgres:
+            yield True
+            return
+
+        lock_id = abs(hash("buddystuddy:scheduler")) % (2**31 - 1)
+        with self.engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                acquired = (
+                    connection.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": lock_id})
+                    .scalar()
+                )
+                if not acquired:
+                    transaction.commit()
+                    yield False
+                    return
+
+                try:
+                    yield True
+                finally:
+                    connection.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
+                transaction.commit()
+            except Exception:
+                transaction.rollback()
+                raise
+
+    @contextmanager
     def transactional(self) -> Iterator[Session]:
         """JPA-style explicit transaction scope.
 
@@ -181,9 +209,26 @@ class Database:
                     session.execute(
                         text(
                             "ALTER TABLE schedules ADD COLUMN is_question_public "
-                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
+                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(False)}"
                         )
                     )
+            if "devices" in table_names:
+                device_columns = {column["name"] for column in inspector.get_columns("devices")}
+                if "user_id" not in device_columns:
+                    session.execute(text("ALTER TABLE devices ADD COLUMN user_id INTEGER"))
+                    device_columns.add("user_id")
+                if "google_session_expires_at" not in device_columns:
+                    session.execute(text("ALTER TABLE devices ADD COLUMN google_session_expires_at TIMESTAMP"))
+                    session.execute(
+                        text(
+                            "UPDATE devices "
+                            "SET google_session_expires_at = :expires_at "
+                            "WHERE user_id IS NOT NULL AND google_session_expires_at IS NULL"
+                        ),
+                        {"expires_at": self._utc_now() + timedelta(days=90)},
+                    )
+                if "idx_devices_user_id" not in {idx["name"] for idx in inspector.get_indexes("devices")}:
+                    session.execute(text("CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices (user_id)"))
 
             if "questions" in table_names:
                 question_columns = {column["name"] for column in inspector.get_columns("questions")}
@@ -191,7 +236,7 @@ class Database:
                     session.execute(
                         text(
                             "ALTER TABLE questions ADD COLUMN is_public "
-                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
+                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(False)}"
                         )
                     )
 
@@ -250,6 +295,20 @@ class Database:
             row.last_seen_at = now
             return True
 
+    def device_has_user(self, device_id: str) -> bool:
+        return self.device_has_active_google_session(device_id)
+
+    def device_has_active_google_session(self, device_id: str) -> bool:
+        now = self._utc_now()
+        with self.connect() as session:
+            row = self._get_device(session, device_id)
+            return bool(
+                row is not None
+                and row.user_id is not None
+                and row.google_session_expires_at is not None
+                and as_utc_datetime(row.google_session_expires_at) > now
+            )
+
     def update_device_push_token(self, device_id: str, apns_token: str, apns_environment: str) -> None:
         now = self._utc_now()
         with self.connect() as session:
@@ -274,7 +333,7 @@ class Database:
         app_language: str,
         openai_model: str,
         max_history_count: int,
-        is_question_public: bool = True,
+        is_question_public: bool = False,
     ) -> str | None:
         now = self._utc_now()
         with self.connect() as session:
@@ -351,6 +410,132 @@ class Database:
             if row is not None:
                 session.delete(row)
 
+    def link_google_user_to_device(
+        self,
+        device_id: str,
+        google_sub: str,
+        email: str,
+        display_name: str,
+        avatar_url: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = self._utc_now()
+        normalized_name = display_name.strip() or email.split("@")[0] or "BuddyStuddy user"
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if device is None:
+                return None
+
+            user = session.query(User).filter(User.google_sub == google_sub).first()
+            if user is None:
+                user = User(
+                    google_sub=google_sub,
+                    email=email,
+                    display_name=normalized_name,
+                    avatar_url=avatar_url,
+                    bio="",
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(user)
+                session.flush()
+            else:
+                user.email = email
+                user.display_name = user.display_name or normalized_name
+                user.avatar_url = avatar_url or user.avatar_url
+                user.updated_at = now
+
+            device.user_id = user.id
+            device.google_session_expires_at = now + timedelta(days=90)
+            device.updated_at = now
+            device.last_seen_at = now
+            session.flush()
+            return self.user_profile_response(user)
+
+    def get_device_profile(self, device_id: str) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if (
+                device is None
+                or device.user is None
+                or device.google_session_expires_at is None
+                or as_utc_datetime(device.google_session_expires_at) <= now
+            ):
+                return None
+            return self.user_profile_response(device.user)
+
+    def get_public_profile(self, user_id: int) -> dict[str, Any] | None:
+        with self.connect() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user is None:
+                return None
+            return self.user_profile_response(user)
+
+    def update_device_profile(
+        self,
+        device_id: str,
+        display_name: str | None = None,
+        bio: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if (
+                device is None
+                or device.user is None
+                or device.google_session_expires_at is None
+                or as_utc_datetime(device.google_session_expires_at) <= now
+            ):
+                return None
+
+            if display_name is not None:
+                next_name = display_name.strip()
+                if next_name:
+                    device.user.display_name = next_name[:120]
+            if bio is not None:
+                device.user.bio = bio.strip()[:500]
+            device.user.updated_at = now
+            device.updated_at = now
+            session.flush()
+            return self.user_profile_response(device.user)
+
+    def create_report(
+        self,
+        reporter_device_id: str,
+        question_id: str,
+        reason: str,
+        message: str,
+    ) -> dict[str, Any] | None:
+        row_id = self._record_id_value(question_id)
+        if row_id is None:
+            return None
+        now = self._utc_now()
+        with self.connect() as session:
+            question = session.query(Question).filter(Question.id == row_id, Question.deleted_at.is_(None)).first()
+            if question is None:
+                return None
+            device = self._get_device(session, reporter_device_id)
+            report = Report(
+                question_id=question.id,
+                reporter_device_id=reporter_device_id,
+                reporter_user_id=device.user_id if device is not None else None,
+                reason=reason.strip()[:120],
+                message=message.strip()[:1000],
+                created_at=now,
+            )
+            session.add(report)
+            session.flush()
+            return {
+                "id": report.id,
+                "question": question.question,
+                "topic": question.topic,
+                "authorDeviceId": question.device_id,
+                "reporterDeviceId": reporter_device_id,
+                "reason": report.reason,
+                "message": report.message,
+                "createdAt": self._response_timestamp(report.created_at),
+            }
+
     def get_schedule(self, device_id: str) -> dict[str, Any] | None:
         with self.connect() as session:
             schedule = self._get_schedule(session, device_id)
@@ -374,6 +559,7 @@ class Database:
                 "appLanguage": "ko",
                 "openaiModel": DEFAULT_OPENAI_MODEL,
                 "maxHistoryCount": 100,
+                "isQuestionPublic": False,
                 "openaiKeyConfigured": False,
                 "nextDueAt": None,
                 "lastError": None,
@@ -389,7 +575,7 @@ class Database:
             "appLanguage": row["app_language"] or row["device_language"] or "ko",
             "openaiModel": row["openai_model"] or DEFAULT_OPENAI_MODEL,
             "maxHistoryCount": row["max_history_count"] or 100,
-            "isQuestionPublic": bool(row["is_question_public"] if "is_question_public" in row else True),
+            "isQuestionPublic": bool(row["is_question_public"] if "is_question_public" in row else False),
             "openaiKeyConfigured": bool(row["openai_api_key_cipher"]),
             "nextDueAt": self._response_timestamp(row["next_due_at"]),
             "lastError": row["last_error"],
@@ -462,9 +648,10 @@ class Database:
         topic: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         with self.connect() as session:
-            query = session.query(Question).filter(
+            query = session.query(Question).join(Device, Question.device_id == Device.device_id).filter(
                 Question.deleted_at.is_(None),
                 Question.is_public.is_(True),
+                Device.user_id.isnot(None),
             )
             if exclude_device_id:
                 query = query.filter(Question.device_id != exclude_device_id)
@@ -560,8 +747,8 @@ class Database:
         topic: str,
         difficulty_level: int,
         question: str,
-        expected_answer_hint: str | None,
-        is_public: bool = True,
+        expected_answer_hint: str | None = None,
+        is_public: bool = False,
         scheduled_for: datetime | str | None = None,
         sent_at: datetime | str | None = None,
         source: str = "manual",
@@ -771,6 +958,7 @@ class Database:
                     "max_history_count": row.max_history_count,
                     "is_question_public": bool(row.is_question_public),
                     "openai_api_key_cipher": row.openai_api_key_cipher,
+                    "next_due_at": as_utc_datetime(row.next_due_at) if row.next_due_at is not None else None,
                 }
             )
 
@@ -900,6 +1088,7 @@ class Database:
         }
 
     def community_question_response(self, row: Question) -> dict[str, Any]:
+        author = row.device.user if row.device is not None else None
         return {
             "id": str(row.id),
             "question": row.question,
@@ -908,6 +1097,15 @@ class Database:
             "status": row.status,
             "source": row.source,
             "createdAt": self._response_timestamp(row.created_at),
+            "author": self.user_profile_response(author) if author is not None else None,
+        }
+
+    def user_profile_response(self, row: User) -> dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "displayName": row.display_name,
+            "bio": row.bio or "",
+            "avatarUrl": row.avatar_url,
         }
 
 def hash_secret(value: str) -> str:

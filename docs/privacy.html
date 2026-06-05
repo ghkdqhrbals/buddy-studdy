@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="BuddyStuddy 개인정보 처리방침">
+  <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="assets/favicon-16.png" sizes="16x16" type="image/png">
   <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
@@ -178,17 +179,24 @@
         <span>BuddyStuddy</span>
       </div>
       <h1>개인정보 처리방침</h1>
-      <p class="updated">시행일: 2026년 6월 1일</p>
+      <p class="updated">시행일: 2026년 6월 5일</p>
     </header>
 
     <div class="toc" aria-label="목차">
       <a href="#purpose">1. 개인정보의 처리 목적</a>
       <a href="#items">2. 처리하는 개인정보 항목</a>
-      <a href="#retention">3. 개인정보의 처리 및 보유 기간</a>
-      <a href="#third-party">4. 제3자 제공, 위탁 및 국외 이전</a>
-      <a href="#rights">5. 이용자의 권리와 행사 방법</a>
-      <a href="#security">6. 안전성 확보조치</a>
-      <a href="#contact">7. 문의 및 권익침해 구제</a>
+      <a href="#backend-key">3. 백엔드에서의 OpenAI 키 저장</a>
+      <a href="#retention">4. 개인정보의 처리 및 보유 기간</a>
+      <a href="#destruction">5. 개인정보의 파기 절차 및 방법</a>
+      <a href="#third-party">6. 제3자 제공, 처리위탁 및 국외 이전</a>
+      <a href="#cookies">7. 개인정보 자동 수집 장치</a>
+      <a href="#rights">8. 이용자의 권리와 행사 방법</a>
+      <a href="#security">9. 개인정보의 안전성 확보조치</a>
+      <a href="#children">10. 14세 미만 아동의 개인정보 처리</a>
+      <a href="#automated">11. 자동화된 결정</a>
+      <a href="#contact">12. 개인정보 보호 관련 문의</a>
+      <a href="#remedy">13. 권익침해 구제방법</a>
+      <a href="#changes">14. 개인정보 처리방침의 변경</a>
     </div>
 
     <section id="intro">
@@ -212,7 +220,7 @@
 
     <section id="items">
       <h2>2. 처리하는 개인정보 항목</h2>
-      <p>BuddyStuddy는 계정 가입을 요구하지 않습니다. 앱 사용 과정에서 다음 정보가 사용자의 기기 또는 사용자가 선택한 외부 서비스에 저장될 수 있습니다.</p>
+      <p>BuddyStuddy는 기본 학습 기능에 계정 가입을 요구하지 않습니다. 다만 다른 사용자 질문 등 커뮤니티 기능을 사용하는 경우 Google Login이 필요할 수 있습니다. 앱 사용 과정에서 다음 정보가 사용자의 기기 또는 사용자가 선택한 외부 서비스에 저장될 수 있습니다.</p>
       <table>
         <thead>
           <tr>
@@ -230,12 +238,22 @@
           <tr>
             <td>OpenAI 설정</td>
             <td>사용자가 입력한 일반 OpenAI API 키, 모델 설정</td>
-            <td>기기 내 저장, iCloud 동기화 사용 시 CloudKit, 서버 예약 push 사용 시 암호화되어 BuddyStuddy 백엔드</td>
+            <td>기기 내 저장, iCloud 동기화 사용 시 CloudKit, 백엔드 예약 기능 사용 시 AES-256-GCM으로 암호화되어 BuddyStuddy 백엔드</td>
           </tr>
           <tr>
             <td>학습 데이터</td>
             <td>질문, 힌트, 답변 초안, 제출 답변, 점수, 피드백, 해설, 학습 기록, 주제별 통계</td>
             <td>기기 내 저장, iCloud 동기화 사용 시 CloudKit, AI 기능 사용 시 OpenAI API</td>
+          </tr>
+          <tr>
+            <td>커뮤니티 프로필</td>
+            <td>Google 계정 식별자, 이메일, 표시 이름, 프로필 이미지 URL, 사용자가 입력한 소개말</td>
+            <td>Google Login 사용 시 BuddyStuddy 백엔드. 공개 질문 작성자 표시에는 표시 이름, 이미지, 소개말만 사용</td>
+          </tr>
+          <tr>
+            <td>신고 정보</td>
+            <td>신고 대상 질문 ID, 신고 사유, 선택 입력 메시지, 신고자 기기 ID, 신고 시각</td>
+            <td>BuddyStuddy 백엔드. 운영자 확인을 위해 이메일로 전달될 수 있음</td>
           </tr>
           <tr>
             <td>진단 정보</td>
@@ -245,17 +263,40 @@
         </tbody>
       </table>
       <p>BuddyStuddy는 일반 OpenAI API 키만 입력받으며, 해당 키는 질문 생성과 답변 채점에 사용됩니다.</p>
+      <p>백엔드 기반 동기화/예약 푸시를 사용하는 경우에만 서버로 전송되며, 사용자 동의와 앱 설정 기준으로만 처리됩니다.</p>
+    </section>
+
+    <section id="backend-key">
+      <h2>3. 백엔드에서의 OpenAI 키 저장 및 보관</h2>
+      <p>OpenAI API 키는 API 호출 시 필요한 자격 증명으로, 백엔드 저장은 선택 기능(예약 학습/푸시) 사용 동의가 있을 때만 진행됩니다.</p>
+      <ul>
+        <li>키는 평문으로 보관하지 않고 <strong>암호화된 문자열</strong>(openai_api_key_cipher) 형태로 저장합니다.</li>
+        <li>백엔드의 실제 저장 키는 운영 환경 변수 <strong>BACKEND_MASTER_KEY</strong>로 복호화됩니다.</li>
+        <li>동의 기반 전송만 허용되며, 백엔드 동기화 토글이 꺼져있으면 새 키를 저장하지 않습니다.</li>
+        <li>백엔드는 키 원문을 응답으로 반환하지 않으며, OpenAI 요청 로그에 키를 기록하지 않습니다.</li>
+        <li>사용자가 설정에서 API 키 삭제 또는 예약 스케줄 비활성화 시, 해당 키는 즉시 더 이상 사용되지 않고 신규 동기화도 중단됩니다.</li>
+      </ul>
+      <p>키는 인증 목적의 중요정보로 보기 때문에, <strong>최소 보존</strong> 원칙과 <strong>즉시 중단</strong> 동작을 적용해 저장·이용 범위를 제한합니다.</p>
+    </section>
+
+    <section id="community">
+      <h2>커뮤니티 프로필 및 신고 처리</h2>
+      <p>다른 사용자 질문 기능은 Google Login 이후 사용할 수 있습니다. 사용자가 질문 공개를 켜고 질문을 생성한 경우, 로그인한 다른 사용자에게 질문과 함께 공개 프로필(표시 이름, 프로필 이미지, 소개말)이 표시될 수 있습니다.</p>
+      <p>이메일 주소와 Google 계정 식별자는 계정 연결과 보안 확인에 사용되며 공개 질문 목록에는 표시하지 않습니다. 질문 신고 시 신고 내용은 백엔드에 저장되고, 운영자 확인을 위해 지정된 Gmail 주소로 전달될 수 있습니다.</p>
     </section>
 
     <section id="retention">
       <h2>3. 개인정보의 처리 및 보유 기간</h2>
       <p>앱 설정, API 키, 학습 기록 및 통계는 사용자가 앱을 사용하는 동안 기기 내에 보관됩니다. 학습 기록은 앱 설정의 최대 기록 개수에 따라 보관되며, 사용자는 앱 안에서 개별 기록 또는 전체 기록을 삭제할 수 있습니다.</p>
+      <p>백엔드에는 사용자 동작 시점 기준으로만 키가 저장되며, 스케줄/푸시 기능이 비활성 상태이면 키는 사용되지 않습니다.</p>
       <p>앱을 삭제하면 iOS 동작에 따라 기기 내 로컬 데이터가 삭제됩니다. iCloud 동기화를 사용한 경우 iCloud에 동기화된 데이터는 Apple ID 및 iCloud 설정의 영향을 받을 수 있습니다.</p>
     </section>
 
     <section id="destruction">
       <h2>4. 개인정보의 파기 절차 및 방법</h2>
       <p>사용자가 앱에서 기록을 삭제하면 해당 기록은 앱의 로컬 저장소에서 삭제됩니다. 앱 삭제 시 로컬 앱 데이터는 iOS의 앱 데이터 삭제 방식에 따라 제거됩니다. iCloud 동기화 데이터는 Apple이 제공하는 iCloud 관리 기능을 통해 관리될 수 있습니다.</p>
+      <p>사용자가 OpenAI API 키 입력을 지우거나 백엔드 스케줄을 비활성화하면 키는 즉시 미사용 처리되고, 신규 동기화 대상에서 제외됩니다.</p>
+      <p>백엔드 운영 환경에서는 키 삭제 요청과 함께 보존 대상 제외 처리 후 필요한 범위 내에서 곧바로 폐기됩니다.</p>
     </section>
 
     <section id="third-party">
@@ -287,8 +328,13 @@
           </tr>
           <tr>
             <td>BuddyStuddy push backend</td>
-            <td>서버 예약 push 알림 생성 및 전달</td>
-            <td>APNs 기기 토큰, 학습 주제, 난이도, 질문 간격, 알림음, 암호화된 OpenAI API 키</td>
+            <td>서버 예약 push 알림 생성 및 전달, 커뮤니티 프로필, 공개 질문, 신고 처리</td>
+            <td>APNs 기기 토큰, 학습 주제, 난이도, 질문 간격, 알림음, 암호화된 OpenAI API 키, Google Login 프로필 정보, 신고 정보</td>
+          </tr>
+          <tr>
+            <td>Google Login</td>
+            <td>커뮤니티 기능 로그인 및 사용자 식별</td>
+            <td>Google ID 토큰 검증 결과, 이메일, 표시 이름, 프로필 이미지 URL</td>
           </tr>
         </tbody>
       </table>
@@ -312,7 +358,7 @@
       <ul>
         <li>학습 기록과 설정은 기기 중심으로 저장하고, 서버 예약 push에 필요한 최소 정보만 백엔드에서 처리</li>
         <li>OpenAI API 키는 사용자가 iCloud 동기화를 켠 경우에만 CloudKit으로 동기화</li>
-        <li>서버 예약 push에 필요한 OpenAI API 키는 백엔드에서 암호화하여 저장</li>
+        <li>서버 예약 push에 필요한 OpenAI API 키는 백엔드에서 AES-256-GCM으로 암호화하여 저장</li>
         <li>iCloud 동기화는 사용자가 켠 경우에만 사용</li>
         <li>디버깅 로그는 앱 내부에서만 확인 가능하며 최대 1,000개로 제한</li>
         <li>앱과 외부 서비스 간 통신은 운영체제의 표준 보안 통신을 사용</li>

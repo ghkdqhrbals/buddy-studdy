@@ -17,9 +17,13 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
     @State private var suppressTapAfterDrag = false
     @State private var isCommittingFullSwipe = false
     @State private var didTriggerCommitFeedback = false
+    @State private var isDismissingCommittedAction = false
+    @State private var commitSequence = 0
     @State private var rowWidth: CGFloat = 0
 
-    private let commitAnimationDuration: TimeInterval = 0.30
+    private let commitAnimationDuration: TimeInterval = 0.24
+    private let committedActionDismissalDuration: TimeInterval = 0.12
+    private let postCommitRemovalSettleDuration: TimeInterval = 0.28
     private let horizontalDragActivationDistance: CGFloat = 14
 
     private var baseOffset: CGFloat {
@@ -43,7 +47,7 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
             return committedSwipeDistance
         }
 
-        return max(actionWidth, -currentOffset)
+        return min(actionWidth, max(0, -currentOffset))
     }
 
     private var actionOffset: CGFloat {
@@ -51,7 +55,7 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
             return 0
         }
 
-        return min(actionWidth, max(0, actionWidth + currentOffset))
+        return actionWidth - actionVisibleWidth
     }
 
     private var fullSwipeCommitOffset: CGFloat {
@@ -83,7 +87,15 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
     }
 
     private var contentOpacity: CGFloat {
-        isCommittingFullSwipe ? 0.18 : 1 - fullSwipePreviewProgress * 0.08 - fullSwipeCommitProgress * 0.12
+        if isCommittingFullSwipe {
+            return isDismissingCommittedAction ? 0 : 0.18
+        }
+
+        return 1 - fullSwipePreviewProgress * 0.08 - fullSwipeCommitProgress * 0.12
+    }
+
+    private var actionOpacity: CGFloat {
+        isDismissingCommittedAction ? 0 : 1
     }
 
     private var shouldAllowActionTap: Bool {
@@ -115,6 +127,7 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
                 .frame(width: actionVisibleWidth)
                 .frame(maxHeight: .infinity)
                 .offset(x: actionOffset)
+                .opacity(actionOpacity)
                 .brightness(commitIndicatorProgress * 0.05)
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -142,6 +155,7 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .animation(.easeOut(duration: commitAnimationDuration), value: isCommittingFullSwipe)
+        .animation(.easeOut(duration: committedActionDismissalDuration), value: isDismissingCommittedAction)
         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.9), value: isOpen)
     }
 
@@ -218,6 +232,9 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
             return
         }
 
+        commitSequence += 1
+        let currentCommitSequence = commitSequence
+        isDismissingCommittedAction = false
         withAnimation(.easeOut(duration: commitAnimationDuration)) {
             isOpen = true
             dragOffset = 0
@@ -227,11 +244,37 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
         playCommitFeedbackIfNeeded()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + commitAnimationDuration) {
-            onFullSwipe?()
-            isOpen = false
-            isCommittingFullSwipe = false
-            dragOffset = 0
-            didTriggerCommitFeedback = false
+            guard commitSequence == currentCommitSequence else {
+                return
+            }
+
+            withAnimation(.easeOut(duration: committedActionDismissalDuration)) {
+                isDismissingCommittedAction = true
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + committedActionDismissalDuration) {
+                guard commitSequence == currentCommitSequence else {
+                    return
+                }
+
+                onFullSwipe?()
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + postCommitRemovalSettleDuration) {
+                    guard commitSequence == currentCommitSequence else {
+                        return
+                    }
+
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        isOpen = false
+                        isCommittingFullSwipe = false
+                        isDismissingCommittedAction = false
+                        dragOffset = 0
+                        isTrackingHorizontalDrag = false
+                    }
+                    didTriggerCommitFeedback = false
+                    suppressTapAfterDrag = false
+                }
+            }
         }
     }
 
@@ -428,11 +471,12 @@ struct SwipeActionButton: View {
     var title: String
     var systemImage: String
     var tint: Color
-    var width: CGFloat = 68
+    var width: CGFloat = 88
     var iconSize: CGFloat = 14
+    var contentHorizontalPadding: CGFloat = 12
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        ZStack {
             tint
 
             VStack(spacing: 3) {
@@ -445,10 +489,12 @@ struct SwipeActionButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            .frame(width: width)
+            .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity)
             .foregroundStyle(.white)
+            .padding(.horizontal, contentHorizontalPadding)
         }
+        .frame(width: width)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -31,6 +31,8 @@ X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
 
+Community profile and community question endpoints require device credentials. Google Login links a Google account to that device identity.
+
 ## Endpoints
 
 ### Health
@@ -50,7 +52,7 @@ Response:
 ### Register Device
 
 ```http
-POST /v1/devices/register
+POST /api/v1/devices/register
 Content-Type: application/json
 ```
 
@@ -88,7 +90,7 @@ The app must store both values locally. The backend does not return the client s
 ### Update Push Token
 
 ```http
-PUT /v1/devices/{deviceId}/push-token
+PUT /api/v1/devices/{deviceId}/push-token
 Content-Type: application/json
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
@@ -105,11 +107,78 @@ Request:
 
 Use this after iOS returns an APNs token for an already registered backend device. This preserves the same backend identity instead of creating a second device.
 
+### Google Login And Profile
+
+```http
+POST /api/v1/devices/{deviceId}/auth/google
+Content-Type: application/json
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Request:
+
+```json
+{
+  "idToken": "google-id-token"
+}
+```
+
+The backend verifies the ID token against `GOOGLE_IOS_CLIENT_ID`, then links the Google identity to the device.
+
+Response:
+
+```json
+{
+  "id": 1,
+  "displayName": "Buddy",
+  "bio": "",
+  "avatarUrl": "https://..."
+}
+```
+
+Profile endpoints:
+
+```http
+GET /api/v1/devices/{deviceId}/profile
+PATCH /api/v1/devices/{deviceId}/profile
+GET /api/v1/public/users/{userId}/profile
+```
+
+Patch request:
+
+```json
+{
+  "displayName": "Buddy",
+  "bio": "Short public intro"
+}
+```
+
+### Report Public Question
+
+```http
+POST /api/v1/devices/{deviceId}/public/questions/{questionId}/report
+Content-Type: application/json
+X-Device-Id: <deviceId>
+X-Client-Secret: <clientSecret>
+```
+
+Request:
+
+```json
+{
+  "reason": "Inappropriate question",
+  "message": "Optional details"
+}
+```
+
+Reports are always stored in PostgreSQL. If `REPORT_EMAIL_TO` and SMTP settings are configured, the backend also forwards the report by email.
+
 ### Upsert Study Settings And Schedule
 
 ```http
-PUT /v1/devices/{deviceId}/schedule
-PUT /v1/devices/{deviceId}/settings
+PUT /api/v1/devices/{deviceId}/schedule
+PUT /api/v1/devices/{deviceId}/settings
 Content-Type: application/json
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
@@ -146,10 +215,10 @@ Fields:
 - `appLanguage`: `ko` or `en`. This also controls question/feedback language.
 - `openaiModel`: selected model. Defaults to `gpt-5.4`.
 
-The `/v1/openai/models` endpoint returns all supported model IDs and metadata:
+The `/api/v1/openai/models` endpoint returns all supported model IDs and metadata:
 
 ```http
-GET /v1/openai/models
+GET /api/v1/openai/models
 ```
 
 Response:
@@ -157,64 +226,25 @@ Response:
 ```json
 [
   {
-    "id": "gpt-5.5",
-    "displayName": "GPT-5.5",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-5.4",
-    "displayName": "GPT-5.4",
-    "supportsTextVerbosity": true
-  },
-  {
     "id": "gpt-5.2",
     "displayName": "GPT-5.2",
-    "supportsTextVerbosity": true
+    "supportsTextVerbosity": true,
+    "supportsReasoning": true,
+    "defaultReasoningEffort": "none"
   },
   {
-    "id": "gpt-5.1",
-    "displayName": "GPT-5.1",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-5",
-    "displayName": "GPT-5",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-5-mini",
-    "displayName": "GPT-5 mini",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-5-nano",
-    "displayName": "GPT-5 nano",
-    "supportsTextVerbosity": true
+    "id": "gpt-5.2-pro",
+    "displayName": "GPT-5.2 pro",
+    "supportsTextVerbosity": true,
+    "supportsReasoning": true,
+    "defaultReasoningEffort": "high"
   },
   {
     "id": "gpt-4.1",
     "displayName": "GPT-4.1",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-4.1-mini",
-    "displayName": "GPT-4.1 mini",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-4.1-nano",
-    "displayName": "GPT-4.1 nano",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-4o",
-    "displayName": "GPT-4o",
-    "supportsTextVerbosity": true
-  },
-  {
-    "id": "gpt-4o-mini",
-    "displayName": "GPT-4o mini",
-    "supportsTextVerbosity": true
+    "supportsTextVerbosity": false,
+    "supportsReasoning": false,
+    "defaultReasoningEffort": null
   }
 ]
 ```
@@ -222,6 +252,10 @@ Response:
 The catalog is maintained from the OpenAI documentation and intentionally includes
 non-exhaustive, commonly usable Responses API models. If your key has access to
 additional model IDs, the API will still accept them and route them through directly.
+GPT-5 family models receive Responses API `reasoning.effort` and `text.verbosity`
+when supported. Non-reasoning models use a minimal Responses payload with
+structured JSON output only.
+
 - `maxHistoryCount`: record retention preference from 10 to 10,000.
 
 Response:
@@ -237,7 +271,7 @@ Response:
 ### Settings
 
 ```http
-GET /v1/devices/{deviceId}/settings
+GET /api/v1/devices/{deviceId}/settings
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -247,7 +281,7 @@ Returns the same backend settings object used in the startup snapshot.
 ### API Status
 
 ```http
-GET /v1/devices/{deviceId}/api
+GET /api/v1/devices/{deviceId}/api
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -257,7 +291,7 @@ Returns whether the device has an encrypted OpenAI API key configured, the selec
 ### Validate API Key
 
 ```http
-POST /v1/devices/{deviceId}/api/validate
+POST /api/v1/devices/{deviceId}/api/validate
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -277,7 +311,7 @@ The iOS/macOS apps must not validate keys by calling OpenAI directly.
 ### Snapshot
 
 ```http
-GET /v1/devices/{deviceId}/snapshot?limit=500&offset=0
+GET /api/v1/devices/{deviceId}/snapshot?limit=500&offset=0
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -288,13 +322,13 @@ The snapshot also includes `api` and `stats` objects so clients can render API s
 ### Records
 
 ```http
-GET /v1/devices/{deviceId}/records?limit=100&offset=0
-GET /v1/devices/{deviceId}/records/{recordId}
-PATCH /v1/devices/{deviceId}/records/{recordId}/answer
-POST /v1/devices/{deviceId}/records/{recordId}/answer
-POST /v1/devices/{deviceId}/records/{recordId}/skip
-DELETE /v1/devices/{deviceId}/records/{recordId}
-DELETE /v1/devices/{deviceId}/records
+GET /api/v1/devices/{deviceId}/records?limit=100&offset=0
+GET /api/v1/devices/{deviceId}/records/{recordId}
+PATCH /api/v1/devices/{deviceId}/records/{recordId}/answer
+POST /api/v1/devices/{deviceId}/records/{recordId}/answer
+POST /api/v1/devices/{deviceId}/records/{recordId}/skip
+DELETE /api/v1/devices/{deviceId}/records/{recordId}
+DELETE /api/v1/devices/{deviceId}/records
 ```
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
@@ -303,8 +337,8 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 ### Statistics
 
 ```http
-GET /v1/devices/{deviceId}/stats?period=all&sort=level&limit=8&offset=0
-GET /v1/devices/{deviceId}/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
+GET /api/v1/devices/{deviceId}/stats?period=all&sort=level&limit=8&offset=0
+GET /api/v1/devices/{deviceId}/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -322,7 +356,7 @@ The response is topic-first and includes total response/topic counts, topic alia
 ### Manual Question
 
 ```http
-POST /v1/devices/{deviceId}/questions
+POST /api/v1/devices/{deviceId}/questions
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -332,7 +366,7 @@ Generates one question using the device settings and stored OpenAI API key, stor
 ### Delete Device
 
 ```http
-DELETE /v1/devices/{deviceId}
+DELETE /api/v1/devices/{deviceId}
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
@@ -348,7 +382,7 @@ This removes the device, APNs token, schedule, stored encrypted OpenAI key, and 
 ### Run Scheduler Once
 
 ```http
-POST /v1/admin/scheduler/run-once
+POST /api/v1/admin/scheduler/run-once
 Authorization: Bearer <BACKEND_API_TOKEN>
 ```
 

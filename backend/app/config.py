@@ -34,6 +34,13 @@ class Settings:
     apns_env: str
     enable_openapi_docs: bool
     openapi_access_token: str | None
+    google_ios_client_id: str | None
+    report_email_to: str | None
+    smtp_host: str | None
+    smtp_port: int
+    smtp_username: str | None
+    smtp_password: str | None
+    smtp_from: str | None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -69,6 +76,13 @@ class Settings:
             apns_env=os.getenv("APNS_ENV", "production").strip().lower(),
             enable_openapi_docs=_bool_env("ENABLE_OPENAPI_DOCS", False),
             openapi_access_token=os.getenv("OPENAPI_ACCESS_TOKEN"),
+            google_ios_client_id=os.getenv("GOOGLE_IOS_CLIENT_ID"),
+            report_email_to=os.getenv("REPORT_EMAIL_TO"),
+            smtp_host=os.getenv("SMTP_HOST"),
+            smtp_port=int(os.getenv("SMTP_PORT", "587")),
+            smtp_username=os.getenv("SMTP_USERNAME"),
+            smtp_password=os.getenv("SMTP_PASSWORD"),
+            smtp_from=os.getenv("SMTP_FROM"),
         )
 
     @property

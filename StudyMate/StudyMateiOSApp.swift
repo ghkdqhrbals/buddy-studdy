@@ -7,27 +7,17 @@ import BackgroundTasks
 struct StudyMateiOSApp: App {
     @UIApplicationDelegateAdaptor(StudyMateiOSAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var appState: AppState
-
-    init() {
-        let appState = AppState()
-        _appState = StateObject(wrappedValue: appState)
-        StudyNotificationDelegate.shared.configure(appState: appState)
-        StudyRemoteNotificationBridge.shared.configure(appState: appState)
-        StudyMateBackgroundRefreshBridge.shared.configure(appState: appState)
-        StudyMateBackgroundRefreshBridge.shared.register()
-
-        Task { @MainActor in
-            await appState.start()
-        }
-    }
+    @State private var appState: AppState?
 
     var body: some Scene {
         WindowGroup {
-            MobileRootView()
-                .environmentObject(appState)
+            StudyMateiOSBootstrapView(appState: $appState)
         }
         .onChange(of: scenePhase) { _, phase in
+            guard let appState else {
+                return
+            }
+
             switch phase {
             case .active:
                 Task {
@@ -51,12 +41,59 @@ struct StudyMateiOSApp: App {
     }
 }
 
+private struct StudyMateiOSBootstrapView: View {
+    @Binding var appState: AppState?
+    @State private var didBootstrap = false
+    @State private var bootstrapError: String?
+
+    var body: some View {
+        Group {
+            if let appState {
+                MobileRootView()
+                    .environmentObject(appState)
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("BuddyStuddy")
+                        .font(.headline)
+                    if let bootstrapError {
+                        Text(bootstrapError)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+            }
+        }
+        .task {
+            guard !didBootstrap else {
+                return
+            }
+
+            didBootstrap = true
+            bootstrapError = "Preparing BuddyStuddy..."
+            bootstrapError = "Loading settings..."
+            let state = AppState()
+            bootstrapError = "Preparing notifications..."
+            StudyNotificationDelegate.shared.configure(appState: state)
+            StudyRemoteNotificationBridge.shared.configure(appState: state)
+            StudyMateBackgroundRefreshBridge.shared.configure(appState: state)
+            appState = state
+            bootstrapError = nil
+            await state.start()
+        }
+    }
+}
+
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        StudyNotificationDelegate.shared.register()
+        StudyMateBackgroundRefreshBridge.shared.register()
         return true
     }
 
@@ -93,46 +130,59 @@ final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        StudyMateBackgroundRefreshBridge.shared.schedule()
+        Task { @MainActor in
+            StudyMateBackgroundRefreshBridge.shared.schedule()
+        }
     }
 }
 
-@MainActor
-final class StudyMateBackgroundRefreshBridge {
+final class StudyMateBackgroundRefreshBridge: @unchecked Sendable {
     static let shared = StudyMateBackgroundRefreshBridge()
     static let identifier = "io.github.ghkdqhrbals.StudyMate.refresh"
 
+    private struct RefreshTaskBox: @unchecked Sendable {
+        let task: BGAppRefreshTask
+    }
+
+    @MainActor
     private weak var appState: AppState?
+    private let lock = NSLock()
     private var didRegister = false
 
     private init() {}
 
+    @MainActor
     func configure(appState: AppState) {
         self.appState = appState
     }
 
     func register() {
-        guard !didRegister else {
+        lock.lock()
+        if didRegister {
+            lock.unlock()
             return
         }
-
         didRegister = true
+        lock.unlock()
+
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.identifier,
             using: nil
         ) { task in
-            guard let refreshTask = task as? BGAppRefreshTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-
-            Task { @MainActor in
-                await self.handle(task: refreshTask)
-            }
+            Self.handleRegisteredTask(task)
         }
     }
 
+    @MainActor
     func schedule() {
+        guard isRegistered else {
+            appState?.logRemoteNotificationEvent(
+                "iPhone background refresh 등록 전이라 예약을 건너뛰었습니다.",
+                isWarning: true
+            )
+            return
+        }
+
         let request = BGAppRefreshTaskRequest(identifier: Self.identifier)
         let minimumWakeUpDate = Date(timeIntervalSinceNow: 60)
         let requestedWakeUpDate = appState?.backgroundRefreshEarliestBeginDate() ?? Date(timeIntervalSinceNow: 15 * 60)
@@ -149,7 +199,29 @@ final class StudyMateBackgroundRefreshBridge {
         }
     }
 
-    private func handle(task: BGAppRefreshTask) async {
+    private var isRegistered: Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return didRegister
+    }
+
+    private static func handleRegisteredTask(_ task: BGTask) {
+        guard let refreshTask = task as? BGAppRefreshTask else {
+            task.setTaskCompleted(success: false)
+            return
+        }
+
+        let taskBox = RefreshTaskBox(task: refreshTask)
+        Task { @MainActor in
+            await shared.handle(taskBox: taskBox)
+        }
+    }
+
+    @MainActor
+    private func handle(taskBox: RefreshTaskBox) async {
+        let task = taskBox.task
         schedule()
 
         let worker = Task { @MainActor in

@@ -10,49 +10,21 @@ struct StatisticsView: View {
     @State private var selectedTopicID: String?
     @State private var topicSort: TopicSort = .level
     @State private var topicPage = 0
+    @State private var statsSearchDebounceTask: Task<Void, Never>?
 
     private static let topicPageSize = 8
 
-    private var allGradedRecords: [StudyRecord] {
-        appState.studyRecords
-            .filter { $0.gradingResult != nil }
-            .sorted { statsDate(for: $0) < statsDate(for: $1) }
+    private var totalTopicCount: Int {
+        appState.backendStats?.totalTopics ?? topicStats.count
     }
 
-    private var gradedRecords: [StudyRecord] {
-        allGradedRecords.filter {
-            selectedPeriod.contains(
-                statsDate(for: $0),
-                customStartDate: customStartDate,
-                customEndDate: customEndDate
-            )
-        }
-    }
-
-    private var allScores: [Int] {
-        allGradedRecords.compactMap { $0.gradingResult?.score }
-    }
-
-    private var scores: [Int] {
-        gradedRecords.compactMap { $0.gradingResult?.score }
+    private var responseCount: Int {
+        appState.backendStats?.totalResponses ?? 0
     }
 
     private var topicStats: [TopicStat] {
-        Dictionary(grouping: gradedRecords, by: topicGroupKey)
-            .compactMap(makeTopicStat(topicKey:records:))
-            .sorted(by: defaultTopicSort)
-    }
-
-    private var filteredTopicStats: [TopicStat] {
-        let query = topicSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        let queryText = query.lowercased()
-        let queryKey = TopicGrouping.normalizedKey(for: query, fallback: "")
-        let filtered = query.isEmpty ? topicStats : topicStats.filter { stat in
-            stat.topic.lowercased().contains(queryText) ||
-                stat.topicAliases.contains { $0.lowercased().contains(queryText) } ||
-                stat.topicKey.contains(queryKey)
-        }
-        return filtered.sorted { topicSort.areInIncreasingOrder($0, $1) }
+        (appState.backendStats?.topics ?? [])
+            .compactMap(TopicStat.init(backend:))
     }
 
     private var selectedTopicStat: TopicStat? {
@@ -65,7 +37,7 @@ struct StatisticsView: View {
     }
 
     private var topicPageCount: Int {
-        max(1, (filteredTopicStats.count + Self.topicPageSize - 1) / Self.topicPageSize)
+        max(1, (max(totalTopicCount, topicStats.count) + Self.topicPageSize - 1) / Self.topicPageSize)
     }
 
     private var boundedTopicPage: Int {
@@ -77,7 +49,7 @@ struct StatisticsView: View {
     }
 
     private var pagedTopicStats: [TopicStat] {
-        Array(filteredTopicStats.dropFirst(topicPageStartIndex).prefix(Self.topicPageSize))
+        Array(topicStats.dropFirst(topicPageStartIndex).prefix(Self.topicPageSize))
     }
 
     private var selectedTopicRecords: [StudyRecord] {
@@ -90,47 +62,84 @@ struct StatisticsView: View {
 
     var body: some View {
         let strings = appState.strings
+        let count = responseCount
+        let pageCount = topicPageCount
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                if !scores.isEmpty {
-                    Text(strings.itemCount(scores.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                if count > 0 {
+                    HStack {
+                        Text(strings.itemCount(count))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if appState.isBackendStatsLoading {
+                            Spacer()
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
 
                 StatisticsPeriodControls(
                     selectedPeriod: $selectedPeriod,
                     customStartDate: $customStartDate,
                     customEndDate: $customEndDate,
-                    filteredRecords: gradedRecords,
                     strings: strings
                 )
 
-                if allScores.isEmpty {
-                    ContentUnavailableView(
-                        strings.noScores,
-                        systemImage: "chart.xyaxis.line",
-                        description: Text(strings.noScoresDescription)
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 280)
-                } else if scores.isEmpty {
-                    ContentUnavailableView(
-                        strings.noScoresInPeriod,
-                        systemImage: "calendar.badge.exclamationmark",
-                        description: Text(strings.noScoresInPeriodDescription)
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 280)
+                if let statsErrorMessage = appState.backendStatsErrorMessage {
+                    Text(statsErrorMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                if appState.isBackendStatsLoading && appState.backendStats == nil {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else if count == 0 {
+                    if appState.backendStatsErrorMessage != nil {
+                        ContentUnavailableView(
+                            strings.syncUnavailable,
+                            systemImage: "wifi.exclamationmark",
+                            description: Text(appState.backendStatsErrorMessage ?? strings.syncFailed(strings.syncUnavailable))
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                    } else if selectedPeriod == .all && topicSearch.isEmpty {
+                        ContentUnavailableView(
+                            strings.noScores,
+                            systemImage: "chart.xyaxis.line",
+                            description: Text(strings.noScoresDescription)
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                    } else {
+                        ContentUnavailableView(
+                            strings.noScoresInPeriod,
+                            systemImage: "calendar.badge.exclamationmark",
+                            description: Text(strings.noScoresInPeriodDescription)
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                    }
                 } else {
-                    TopicPortfolioSummary(stats: topicStats, responseCount: scores.count, strings: strings)
+                    TopicPortfolioSummary(
+                        stats: topicStats,
+                        totalTopicCount: max(totalTopicCount, 0),
+                        responseCount: count,
+                        strings: strings
+                    )
 
                     TopicBrowserSection(
                         stats: pagedTopicStats,
-                        totalCount: filteredTopicStats.count,
+                        totalCount: max(totalTopicCount, 0),
                         pageStartIndex: topicPageStartIndex,
                         currentPage: boundedTopicPage,
-                        pageCount: topicPageCount,
+                        pageCount: pageCount,
                         selectedTopicID: selectedTopicStat?.id,
                         topicSearch: $topicSearch,
                         topicSort: $topicSort,
@@ -138,10 +147,12 @@ struct StatisticsView: View {
                         onPreviousPage: {
                             topicPage = max(boundedTopicPage - 1, 0)
                             selectedTopicID = nil
+                            loadStats()
                         },
                         onNextPage: {
                             topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
                             selectedTopicID = nil
+                            loadStats()
                         },
                         onSelect: { stat in
                             selectedTopicID = stat.id
@@ -182,62 +193,129 @@ struct StatisticsView: View {
         .padding(.top, 10)
         .frame(maxHeight: .infinity, alignment: .top)
         .refreshable {
-            await appState.refreshVisibleData()
+            await appState.fetchBackendStats(
+                period: selectedPeriod.backendPeriod,
+                search: topicSearch,
+                sort: topicSort.backendSort,
+                startAt: selectedPeriodStartAt,
+                endAt: selectedPeriodEndAt,
+                limit: Self.topicPageSize,
+                offset: max(topicPage * Self.topicPageSize, 0)
+            )
         }
         .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
         .onChange(of: topicSearch) {
             resetTopicPaging()
+            scheduleDebouncedStatsReload()
         }
         .onChange(of: topicSort) {
             resetTopicPaging()
+            loadStats()
         }
         .onChange(of: selectedPeriod) {
             resetTopicPaging()
+            loadStats()
         }
         .onChange(of: customStartDate) {
             resetTopicPaging()
+            if selectedPeriod == .custom {
+                loadStats()
+            }
         }
         .onChange(of: customEndDate) {
             resetTopicPaging()
+            if selectedPeriod == .custom {
+                loadStats()
+            }
+        }
+        .onAppear {
+            loadStats()
+        }
+        .onDisappear {
+            statsSearchDebounceTask?.cancel()
+            statsSearchDebounceTask = nil
         }
     }
 
-    private func statsDate(for record: StudyRecord) -> Date {
-        record.answeredAt ?? record.question.createdAt
+    private var selectedPeriodStartAt: Date? {
+        periodBounds(for: selectedPeriod).startAt
     }
 
-    private func topicGroupKey(for record: StudyRecord) -> String {
-        TopicGrouping.normalizedKey(for: record, fallback: appState.strings.studyFallback)
+    private var selectedPeriodEndAt: Date? {
+        periodBounds(for: selectedPeriod).endAt
     }
 
-    private func makeTopicStat(topicKey: String, records: [StudyRecord]) -> TopicStat? {
-        let sortedRecords = records.sorted { statsDate(for: $0) < statsDate(for: $1) }
-        let recordScores = sortedRecords.compactMap { $0.gradingResult?.score }
-        guard !recordScores.isEmpty,
-              let levelRange = TopicLevelRange.calculate(records: sortedRecords) else {
-            return nil
+    private func periodBounds(for period: StatisticsPeriod) -> (startAt: Date?, endAt: Date?) {
+        guard period == .custom else {
+            return (nil, nil)
         }
 
-        let correctCount = sortedRecords.filter { $0.gradingResult?.isCorrect == true }.count
-        let averageScore = Int((Double(recordScores.reduce(0, +)) / Double(recordScores.count)).rounded())
-        let correctRate = Int((Double(correctCount) / Double(sortedRecords.count) * 100).rounded())
+        let start = min(customStartDate, customEndDate)
+        let startAt = Calendar.current.startOfDay(for: start)
+        let end = max(customStartDate, customEndDate)
+        let dayStart = Calendar.current.startOfDay(for: end)
+        let endAt = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
+        return (startAt, endAt)
+    }
 
-        return TopicStat(
-            topicKey: topicKey,
-            topic: TopicGrouping.preferredDisplayTopic(for: sortedRecords, fallback: appState.strings.studyFallback),
-            topicAliases: TopicGrouping.displayAliases(for: sortedRecords, fallback: appState.strings.studyFallback),
-            count: recordScores.count,
-            average: averageScore,
-            best: recordScores.max() ?? 0,
-            correctRate: correctRate,
-            levelRange: levelRange,
-            records: sortedRecords,
-            latestDate: sortedRecords.last.map(statsDate(for:)) ?? .distantPast
+    private func loadStats() {
+        loadStats(
+            period: selectedPeriod,
+            search: topicSearch,
+            sort: topicSort,
+            startAt: selectedPeriodStartAt,
+            endAt: selectedPeriodEndAt,
+            limit: Self.topicPageSize,
+            offset: max(topicPage * Self.topicPageSize, 0)
         )
     }
 
-    private func defaultTopicSort(_ lhs: TopicStat, _ rhs: TopicStat) -> Bool {
-        TopicSort.level.areInIncreasingOrder(lhs, rhs)
+    private func loadStats(
+        period: StatisticsPeriod = .all,
+        search: String = "",
+        sort: TopicSort = .level,
+        startAt: Date? = nil,
+        endAt: Date? = nil,
+        limit: Int = Self.topicPageSize,
+        offset: Int = 0
+    ) {
+        let requestOffset = max(offset, 0)
+        Task {
+            await appState.fetchBackendStats(
+                period: period.backendPeriod,
+                search: search,
+                sort: sort.backendSort,
+                startAt: startAt,
+                endAt: endAt,
+                limit: limit,
+                offset: requestOffset
+            )
+        }
+    }
+
+    private func scheduleDebouncedStatsReload() {
+        statsSearchDebounceTask?.cancel()
+        let period = selectedPeriod
+        let search = topicSearch
+        let sort = topicSort
+        statsSearchDebounceTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 220_000_000)
+                await MainActor.run {
+                    loadStats(
+                        period: period,
+                        search: search,
+                        sort: sort,
+                        startAt: periodBounds(for: period).startAt,
+                        endAt: periodBounds(for: period).endAt,
+                        limit: Self.topicPageSize,
+                        offset: max(topicPage * Self.topicPageSize, 0)
+                    )
+                }
+            } catch {
+                return
+            }
+        }
     }
 
     private func resetTopicPaging() {
@@ -360,14 +438,6 @@ struct StudyRecordDetailView: View {
                                 }
                                 #if os(iOS)
                                 .focused($isAnswerEditorFocused)
-                                .toolbar {
-                                    ToolbarItemGroup(placement: .keyboard) {
-                                        Spacer()
-                                        Button(appState.strings.done) {
-                                            isAnswerEditorFocused = false
-                                        }
-                                    }
-                                }
                                 #endif
 
                             Button {
@@ -392,6 +462,7 @@ struct StudyRecordDetailView: View {
             }
             #if os(iOS)
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDoneToolbar(appState.strings.done)
             #endif
         }
     }
@@ -503,34 +574,23 @@ private enum StatisticsPeriod: String, CaseIterable, Identifiable {
             return strings.language == .korean ? "직접" : "Custom"
         }
     }
+}
 
-    func contains(
-        _ date: Date,
-        customStartDate: Date,
-        customEndDate: Date,
-        now: Date = Date(),
-        calendar: Calendar = .current
-    ) -> Bool {
+private extension StatisticsPeriod {
+    var backendPeriod: BackendStatsPeriod {
         switch self {
         case .all:
-            return true
+            return .all
         case .today:
-            let start = calendar.startOfDay(for: now)
-            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? now
-            return date >= start && date < end
+            return .today
         case .last7Days:
-            return date >= (calendar.date(byAdding: .day, value: -7, to: now) ?? now)
+            return .last7
         case .last30Days:
-            return date >= (calendar.date(byAdding: .day, value: -30, to: now) ?? now)
+            return .last30
         case .last90Days:
-            return date >= (calendar.date(byAdding: .day, value: -90, to: now) ?? now)
+            return .last90
         case .custom:
-            let lowerDate = min(customStartDate, customEndDate)
-            let upperDate = max(customStartDate, customEndDate)
-            let start = calendar.startOfDay(for: lowerDate)
-            let upperStart = calendar.startOfDay(for: upperDate)
-            let end = calendar.date(byAdding: .day, value: 1, to: upperStart) ?? upperDate
-            return date >= start && date < end
+            return .all
         }
     }
 }
@@ -539,7 +599,6 @@ private struct StatisticsPeriodControls: View {
     @Binding var selectedPeriod: StatisticsPeriod
     @Binding var customStartDate: Date
     @Binding var customEndDate: Date
-    var filteredRecords: [StudyRecord]
     var strings: AppStrings
 
     var body: some View {
@@ -597,14 +656,7 @@ private struct StatisticsPeriodControls: View {
             return "\(Self.dateFormatter.string(from: customStartDate)) - \(Self.dateFormatter.string(from: customEndDate))"
         }
 
-        guard let firstRecord = filteredRecords.first,
-              let latestRecord = filteredRecords.last else {
-            return selectedPeriod.title(strings: strings)
-        }
-
-        let first = Self.statsDate(for: firstRecord)
-        let latest = Self.statsDate(for: latestRecord)
-        return "\(selectedPeriod.title(strings: strings)) · \(Self.dateTimeFormatter.string(from: first)) - \(Self.dateTimeFormatter.string(from: latest))"
+        return selectedPeriod.title(strings: strings)
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -613,15 +665,6 @@ private struct StatisticsPeriodControls: View {
         return formatter
     }()
 
-    private static let dateTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d HH:mm"
-        return formatter
-    }()
-
-    private static func statsDate(for record: StudyRecord) -> Date {
-        record.answeredAt ?? record.question.createdAt
-    }
 }
 
 private struct TopicStat: Identifiable {
@@ -637,6 +680,40 @@ private struct TopicStat: Identifiable {
     var latestDate: Date
 
     var id: String { topicKey }
+}
+
+private extension TopicStat {
+    init?(backend: BackendTopicStats) {
+        let levelRange = TopicLevelRange.from(backend.levelRange)
+
+        self.init(
+            topicKey: backend.topicKey,
+            topic: backend.topic,
+            topicAliases: backend.topicAliases,
+            count: backend.count,
+            average: backend.average,
+            best: backend.best,
+            correctRate: backend.correctRate,
+            levelRange: levelRange,
+            records: backend.records,
+            latestDate: backend.latestAt
+        )
+    }
+}
+
+private extension TopicSort {
+    var backendSort: BackendStatsSort {
+        switch self {
+        case .level:
+            .level
+        case .recent:
+            .recent
+        case .name:
+            .name
+        case .count:
+            .count
+        }
+    }
 }
 
 private enum TopicSort: String, CaseIterable, Identifiable {
@@ -660,30 +737,6 @@ private enum TopicSort: String, CaseIterable, Identifiable {
         }
     }
 
-    func areInIncreasingOrder(_ lhs: TopicStat, _ rhs: TopicStat) -> Bool {
-        switch self {
-        case .level:
-            if lhs.levelRange.centerLevel != rhs.levelRange.centerLevel {
-                return lhs.levelRange.centerLevel > rhs.levelRange.centerLevel
-            }
-            if lhs.count != rhs.count {
-                return lhs.count > rhs.count
-            }
-            return lhs.topic.localizedCaseInsensitiveCompare(rhs.topic) == .orderedAscending
-        case .recent:
-            if lhs.latestDate != rhs.latestDate {
-                return lhs.latestDate > rhs.latestDate
-            }
-            return lhs.topic.localizedCaseInsensitiveCompare(rhs.topic) == .orderedAscending
-        case .name:
-            return lhs.topic.localizedCaseInsensitiveCompare(rhs.topic) == .orderedAscending
-        case .count:
-            if lhs.count != rhs.count {
-                return lhs.count > rhs.count
-            }
-            return lhs.topic.localizedCaseInsensitiveCompare(rhs.topic) == .orderedAscending
-        }
-    }
 }
 
 struct TopicLevelRange: Equatable {
@@ -812,8 +865,37 @@ struct TopicLevelRange: Equatable {
     }
 }
 
+private extension TopicLevelRange {
+    static func from(_ backendRange: BackendTopicLevelRange) -> TopicLevelRange {
+        let average = min(max(backendRange.average, 0), 100)
+        let centerDifficulty = Difficulty(level: backendRange.level)
+        let centerLevel = estimatedLevel(difficulty: centerDifficulty, score: average)
+        let lowerBound = normalizeProgress(backendRange.lowerBound)
+        let upperBound = normalizeProgress(backendRange.upperBound)
+
+        return TopicLevelRange(
+            level: Difficulty(level: Int(centerLevel.rounded())),
+            average: average,
+            sampleCount: max(backendRange.sampleCount, 1),
+            centerLevel: centerLevel,
+            lowerBound: lowerBound,
+            upperBound: max(lowerBound + 0.025, upperBound)
+        )
+    }
+
+    private static func normalizeProgress(_ value: Double) -> Double {
+        if value >= 0 && value <= 1 {
+            return value
+        }
+
+        let progress = (value - 0.5) / Double(Difficulty.allCases.count)
+        return min(max(progress, 0), 1)
+    }
+}
+
 private struct TopicPortfolioSummary: View {
     var stats: [TopicStat]
+    var totalTopicCount: Int
     var responseCount: Int
     var strings: AppStrings
 
@@ -825,7 +907,7 @@ private struct TopicPortfolioSummary: View {
                 .lineLimit(1)
 
             KeyMetricsStrip(metrics: [
-                MetricItem(title: strings.topicCount, value: "\(stats.count)"),
+                MetricItem(title: strings.topicCount, value: "\(totalTopicCount)"),
                 MetricItem(title: strings.responses, value: "\(responseCount)")
             ])
         }
@@ -924,6 +1006,7 @@ private struct TopicBrowserSection: View {
                 .labelsHidden()
                 .frame(width: 112)
             }
+            .keyboardDoneToolbar(strings.done)
 
             HStack(spacing: 8) {
                 Text(strings.statsByTopic)

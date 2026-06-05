@@ -4,7 +4,8 @@ from app.services.stats_service import TopicStatisticsService
 def test_topic_key_normalizes_case_spacing_and_numbers():
     assert TopicStatisticsService.to_topic_key("SwiftUI", "Study") == "swiftui"
     assert TopicStatisticsService.to_topic_key("swift_ui", "Study") == "swiftui"
-    assert TopicStatisticsService.to_topic_key("Kotlin 101", "Study") == "kotlin101"
+    assert TopicStatisticsService.to_topic_key("Kotlin 101", "Study") == "kotlin"
+    assert TopicStatisticsService.to_topic_key("GPT-4", "Study") == "gpt4"
 
 
 def test_topic_statistics_aggregates_records():

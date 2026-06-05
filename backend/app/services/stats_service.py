@@ -15,6 +15,8 @@ class TopicStatisticsService:
         expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", display)
         expanded = re.sub(r"([A-Za-z])([0-9])", r"\1 \2", expanded)
         expanded = re.sub(r"([0-9])([A-Za-z])", r"\1 \2", expanded)
+        if re.search(r"[\s_-][0-9]{2,}\s*$", display) or re.search(r"[A-Za-z][0-9]{3,}\s*$", display):
+            expanded = re.sub(r"\s+[0-9]+\s*$", "", expanded).strip()
         folded = unicodedata.normalize("NFKD", expanded).casefold()
         return "".join(
             character
