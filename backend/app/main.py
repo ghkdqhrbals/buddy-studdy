@@ -50,6 +50,7 @@ settings = Settings.load()
 database = Database(path=settings.database_path, url=settings.database_url)
 scheduler: QuestionScheduler | None = None
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def _docs_urls() -> tuple[str | None, str | None, str | None]:
