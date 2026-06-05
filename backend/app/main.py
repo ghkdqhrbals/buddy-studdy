@@ -51,6 +51,11 @@ database = Database(path=settings.database_path, url=settings.database_url)
 scheduler: QuestionScheduler | None = None
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    logger.addHandler(handler)
+logger.propagate = False
 
 
 def _docs_urls() -> tuple[str | None, str | None, str | None]:
