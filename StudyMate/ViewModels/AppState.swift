@@ -2901,12 +2901,11 @@ final class AppState: ObservableObject {
     }
 
     func showAPIDebugPanel() {
-        isAPIDebugPanelPresented = true
+        isAPIDebugPanelPresented = false
     }
 
     func requestDebugPanelIfEnabledOrEnableOnDemand() {
-        isAPIDebugPanelPresented = true
-        log(.info, "API 디버그 패널을 열었습니다.")
+        isAPIDebugPanelPresented = false
     }
 
     func logRemoteNotificationEvent(_ message: String, isWarning: Bool = false) {
@@ -2929,131 +2928,24 @@ final class AppState: ObservableObject {
     }
 
     func setDebuggingEnabled(_ isEnabled: Bool) {
-        isDebuggingEnabled = isEnabled
-        settingsStore.saveIsDebuggingEnabled(isEnabled)
-        log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
+        isDebuggingEnabled = false
+        settingsStore.saveIsDebuggingEnabled(false)
     }
 
     func setCloudSyncEnabled(_ isEnabled: Bool) {
-        isCloudSyncEnabled = isEnabled
-        settingsStore.saveIsCloudSyncEnabled(isEnabled)
-        cloudSyncMessage = isEnabled ? strings.iCloudSyncOn : strings.iCloudSyncOff
+        isCloudSyncEnabled = false
+        settingsStore.saveIsCloudSyncEnabled(false)
+        cloudSyncMessage = nil
         hasCloudSyncError = false
-
-        guard isEnabled else {
-            cloudSyncTask?.cancel()
-            return
-        }
-
-        Task {
-            await syncCloudNow()
-            await ensureCloudQuestionPushSubscription()
-        }
+        cloudSyncTask?.cancel()
     }
 
     func syncCloudNow(updateVisibleQuestion: Bool = true) async {
-        guard isCloudSyncEnabled else {
-            return
-        }
-
-        guard !isCloudSyncing else {
-            cloudSyncMessage = strings.syncAlreadyInProgress
-            return
-        }
-
-        guard cloudSyncService != nil || CloudSyncService.canUseCloudKitContainer() else {
-            cloudSyncMessage = strings.syncEntitlementMissing
-            hasCloudSyncError = true
-            log(.error, "이 앱 빌드에 iCloud CloudKit entitlement가 없어 동기화할 수 없습니다.")
-            return
-        }
-
-        let cloudSyncService = resolvedCloudSyncService()
-        guard let cloudSyncService else {
-            cloudSyncMessage = strings.syncUnavailable
-            hasCloudSyncError = true
-            log(.warning, cloudSyncMessage ?? "iCloud 동기화를 사용할 수 없습니다.")
-            return
-        }
-
-        isCloudSyncing = true
-        defer {
-            isCloudSyncing = false
-        }
-
-        do {
-            let storedLocalUpdatedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
-            let localUpdatedAt = storedLocalUpdatedAt ?? .distantPast
-            let fetchedRemoteSnapshot = try await cloudSyncService.fetchSnapshot()
-
-            if let fetchedRemoteSnapshot {
-                let apiKeyMerge = remoteSnapshotByFillingMissingAPIKey(fetchedRemoteSnapshot)
-                let remoteSnapshot = apiKeyMerge.snapshot
-                if storedLocalUpdatedAt == nil {
-                    let firstSync = firstSyncSnapshot(from: remoteSnapshot)
-                    applyCloudSnapshot(firstSync.snapshot, updateVisibleQuestion: updateVisibleQuestion)
-
-                    if firstSync.shouldPushMergedSnapshot {
-                        try await cloudSyncService.saveSnapshot(firstSync.snapshot)
-                        settingsStore.saveCloudSyncSnapshotUpdatedAt(firstSync.snapshot.updatedAt)
-                        cloudLastSyncedAt = firstSync.snapshot.updatedAt
-                        cloudSyncMessage = strings.syncMergedRemote
-                        log(.info, "iCloud 데이터를 불러오고 이 기기의 기록을 병합했습니다.")
-                    } else {
-                        cloudSyncMessage = strings.syncPulledRemote
-                        log(.info, "첫 iCloud 동기화에서 원격 학습 데이터를 불러왔습니다.")
-                    }
-                } else if remoteSnapshot.updatedAt > localUpdatedAt {
-                    var mergedRemoteSnapshot = incomingSnapshotMergingLocalData(remoteSnapshot)
-                    let shouldPushMergedRemote = apiKeyMerge.shouldPush ||
-                        cloudSnapshotContentDiffers(mergedRemoteSnapshot, remoteSnapshot)
-
-                    if shouldPushMergedRemote {
-                        mergedRemoteSnapshot.updatedAt = max(Date(), remoteSnapshot.updatedAt, localUpdatedAt)
-                        try await cloudSyncService.saveSnapshot(mergedRemoteSnapshot)
-                        applyCloudSnapshot(mergedRemoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
-                        settingsStore.saveCloudSyncSnapshotUpdatedAt(mergedRemoteSnapshot.updatedAt)
-                        cloudLastSyncedAt = mergedRemoteSnapshot.updatedAt
-                        cloudSyncMessage = strings.syncMergedRemote
-                        log(.info, "iCloud 최신 데이터에 이 기기의 로컬 변경사항을 병합했습니다.")
-                    } else {
-                        applyCloudSnapshot(remoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
-                        cloudSyncMessage = strings.syncPulledRemote
-                        log(.info, "iCloud에서 최신 학습 데이터를 불러왔습니다.")
-                    }
-                } else {
-                    let mergedSnapshot = outgoingSnapshotMergingRemoteData(
-                        makeCloudSnapshot(updatedAt: localUpdatedAt),
-                        remoteSnapshot: remoteSnapshot
-                    )
-                    if cloudSnapshotContentDiffers(mergedSnapshot, remoteSnapshot) {
-                        var snapshot = mergedSnapshot
-                        snapshot.updatedAt = max(localUpdatedAt, remoteSnapshot.updatedAt, Date())
-                        try await cloudSyncService.saveSnapshot(snapshot)
-                        applyCloudSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
-                        cloudSyncMessage = strings.syncPushedLocal
-                        log(.info, "학습 데이터를 iCloud에 저장했습니다.")
-                    } else {
-                        applyCloudSnapshot(remoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
-                        cloudSyncMessage = strings.syncAlreadyCurrent
-                    }
-                }
-            } else {
-                let updatedAt = max(localUpdatedAt, Date())
-                let snapshot = makeCloudSnapshot(updatedAt: updatedAt)
-                try await cloudSyncService.saveSnapshot(snapshot)
-                applyCloudSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
-                cloudSyncMessage = strings.syncPushedLocal
-                log(.info, "학습 데이터를 iCloud에 저장했습니다.")
-            }
-
-            hasCloudSyncError = false
-        } catch {
-            cloudSyncMessage = cloudSyncFailureMessage(for: error)
-            hasCloudSyncError = true
-            settingsStore.saveIsCloudSyncEnabled(isCloudSyncEnabled)
-            log(.warning, cloudSyncMessage ?? "iCloud 동기화에 실패했습니다.")
-        }
+        isCloudSyncEnabled = false
+        settingsStore.saveIsCloudSyncEnabled(false)
+        cloudSyncMessage = nil
+        hasCloudSyncError = false
+        cloudSyncTask?.cancel()
     }
 
     func openOpenAIBillingPage() {

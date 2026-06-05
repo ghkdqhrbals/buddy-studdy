@@ -973,6 +973,7 @@ class Database:
         scheduled_for: datetime | str,
         question: str,
         expected_answer_hint: str | None,
+        is_public: bool = False,
         created_at: datetime | str | None = None,
     ) -> dict[str, Any]:
         now = self._utc_now()
@@ -986,6 +987,7 @@ class Database:
                 difficulty_level=difficulty_level,
                 scheduled_for=scheduled_for,
                 sent_at=now,
+                is_public=is_public,
                 status="ungraded",
                 source="scheduled",
                 created_at=created_dt,

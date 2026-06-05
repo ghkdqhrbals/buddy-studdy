@@ -407,11 +407,11 @@ final class SettingsStore {
     }
 
     func loadIsDebuggingEnabled() -> Bool {
-        defaults.bool(forKey: Keys.isDebuggingEnabled)
+        false
     }
 
     func saveIsDebuggingEnabled(_ isEnabled: Bool) {
-        defaults.set(isEnabled, forKey: Keys.isDebuggingEnabled)
+        defaults.removeObject(forKey: Keys.isDebuggingEnabled)
     }
 
     func loadHasCompletedOnboarding() -> Bool {
@@ -429,11 +429,11 @@ final class SettingsStore {
     }
 
     func loadIsCloudSyncEnabled() -> Bool {
-        defaults.bool(forKey: Keys.isCloudSyncEnabled)
+        false
     }
 
     func saveIsCloudSyncEnabled(_ isEnabled: Bool) {
-        defaults.set(isEnabled, forKey: Keys.isCloudSyncEnabled)
+        defaults.removeObject(forKey: Keys.isCloudSyncEnabled)
     }
 
     func loadIsCommunitySignedIn() -> Bool {
@@ -445,20 +445,11 @@ final class SettingsStore {
     }
 
     func loadCloudSyncSnapshotUpdatedAt() -> Date? {
-        guard let value = defaults.object(forKey: Keys.cloudSyncSnapshotUpdatedAt) as? TimeInterval else {
-            return nil
-        }
-
-        return Date(timeIntervalSince1970: value)
+        nil
     }
 
     func saveCloudSyncSnapshotUpdatedAt(_ date: Date?) {
-        guard let date else {
-            defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
-            return
-        }
-
-        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncSnapshotUpdatedAt)
+        defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
     }
 
     func loadAppLogs() -> [AppLogEntry] {
