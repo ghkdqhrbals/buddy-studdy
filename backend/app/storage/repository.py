@@ -738,6 +738,7 @@ class Database:
             query = session.query(Question).join(Device, Question.device_id == Device.device_id).filter(
                 Question.deleted_at.is_(None),
                 Question.is_public.is_(True),
+                Question.status == "graded",
                 Device.user_id.isnot(None),
             )
             query = query.join(User, Device.user_id == User.id).filter(User.allow_public_questions.is_(True))

@@ -231,6 +231,7 @@ struct HistoryView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
+            collapsedWidth: 100,
             onClose: {
                 closeRecordSearch(clearText: true)
             }

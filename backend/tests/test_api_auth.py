@@ -208,6 +208,22 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
 
     public_response = client.get("/api/v1/public/questions", headers=headers)
     assert public_response.status_code == 200
+    assert public_response.json()["questions"] == []
+
+    graded = main.database.grade_record(
+        device_id=registered["deviceId"],
+        record_id=record["id"],
+        answer="Use it for owned observable state.",
+        score=90,
+        is_correct=True,
+        feedback="Good",
+        explanation="StateObject owns the lifecycle.",
+        user_id=profile["id"],
+    )
+    assert graded is not None
+
+    public_response = client.get("/api/v1/public/questions", headers=headers)
+    assert public_response.status_code == 200
     assert [item["id"] for item in public_response.json()["questions"]] == [record["id"]]
 
     privacy_response = client.patch(
@@ -254,6 +270,17 @@ def test_profile_page_access_can_hide_public_questions_and_reports_private_page_
         question="What is view identity?",
         is_public=True,
     )
+    graded = main.database.grade_record(
+        device_id=registered["deviceId"],
+        record_id=record["id"],
+        answer="It determines whether SwiftUI preserves state.",
+        score=88,
+        is_correct=True,
+        feedback="Good",
+        explanation="Identity controls view/state reuse.",
+        user_id=profile["id"],
+    )
+    assert graded is not None
 
     public_response = client.get("/api/v1/public/questions", headers=headers)
     assert public_response.status_code == 200

@@ -167,6 +167,21 @@ def test_google_profile_is_attached_to_public_questions(db: Database):
         is_public=True,
     )
     questions, total = db.list_public_questions(exclude_device_id="", limit=10, offset=0)
+    assert total == 0
+    assert questions == []
+
+    graded = db.grade_record(
+        device_id=device_id,
+        record_id=created["id"],
+        answer="조건부 View 구성을 선언적으로 만들 때 씁니다.",
+        score=90,
+        is_correct=True,
+        feedback="Good",
+        explanation="ViewBuilder는 여러 View 표현식을 하나의 View로 구성합니다.",
+    )
+    assert graded is not None
+
+    questions, total = db.list_public_questions(exclude_device_id="", limit=10, offset=0)
     assert total == 1
     assert questions[0]["id"] == created["id"]
     assert questions[0]["author"]["displayName"] == "테스터"
@@ -698,11 +713,37 @@ def test_public_questions_filters_and_paginates(db: Database):
         expected_answer_hint="swift",
         is_public=True,
     )
+    db.grade_record(
+        device_id=device_a,
+        record_id=public_one["id"],
+        answer="answer",
+        score=92,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+    )
     public_two = db.create_question(
         device_id=device_b,
         topic="Python",
         difficulty_level=6,
         question="Public Python question",
+        expected_answer_hint="python",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_b,
+        record_id=public_two["id"],
+        answer="answer",
+        score=91,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+    )
+    ungraded_public = db.create_question(
+        device_id=device_b,
+        topic="Python",
+        difficulty_level=6,
+        question="Ungraded public question",
         expected_answer_hint="python",
         is_public=True,
     )
@@ -745,3 +786,4 @@ def test_public_questions_filters_and_paginates(db: Database):
     assert len(page_two) == 1
     assert page_one[0]["id"] != page_two[0]["id"]
     assert unlinked_public["id"] not in {page_one[0]["id"], page_two[0]["id"]}
+    assert ungraded_public["id"] not in {page_one[0]["id"], page_two[0]["id"]}

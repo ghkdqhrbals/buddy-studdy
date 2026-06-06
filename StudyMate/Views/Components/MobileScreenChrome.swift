@@ -138,7 +138,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     var focus: FocusState<Bool>.Binding
     var closeAccessibilityLabel: String
     var width: CGFloat = 430
-    var collapsedWidth: CGFloat = 84
+    var collapsedWidth: CGFloat = 50
     var height: CGFloat = 50
     var onSubmit: () -> Void = {}
     var onClose: () -> Void

@@ -448,6 +448,7 @@ private struct MobileHomeView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
+            collapsedWidth: selectedHomeScope == .my && appState.isCommunitySignedIn ? 100 : 50,
             onSubmit: {
                 guard selectedHomeScope == .all else {
                     return
