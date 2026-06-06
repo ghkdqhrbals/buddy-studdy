@@ -1655,6 +1655,20 @@ struct AppStrings {
     var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }
     var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
+    var deleteAccount: String { text("앱 탈퇴", "Delete Account") }
+    var deleteAccountNotice: String {
+        text(
+            "탈퇴하면 프로필과 로그인 정보는 즉시 비식별 처리됩니다. 법적 의무와 분쟁 대응에 필요한 최소 기록은 최대 30일 보관 후 삭제하거나 익명화할 수 있습니다.",
+            "Deleting your account immediately de-identifies your profile and sign-in data. Minimal records needed for legal obligations or dispute handling may be retained for up to 30 days, then deleted or anonymized."
+        )
+    }
+    var deleteAccountConfirmMessage: String {
+        text(
+            "탈퇴 후에는 공개 프로필과 로그인 세션이 제거됩니다.",
+            "After deletion, your public profile and sign-in session will be removed."
+        )
+    }
+    var accountDeleted: String { text("탈퇴 처리되었습니다.", "Account deleted.") }
     var pageAccess: String { text("페이지 접근 허용", "Page Access") }
     var publicQuestionsPage: String { text("공개 질문", "Public Questions") }
     var statisticsPage: String { text("통계", "Statistics") }

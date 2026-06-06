@@ -107,6 +107,9 @@ See [API.md](API.md) for request/response examples.
 - `PUT /api/v1/me/schedule`
 - `GET /api/v1/me/settings`
 - `PUT /api/v1/me/settings`
+- `GET /api/v1/me/profile`
+- `PATCH /api/v1/me/profile`
+- `DELETE /api/v1/me/profile`
 - `GET /api/v1/me/api`
 - `POST /api/v1/me/api/validate`
 - `GET /api/v1/me/snapshot`

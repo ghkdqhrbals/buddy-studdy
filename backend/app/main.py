@@ -469,7 +469,7 @@ async def google_login(
         provider_id=str(identity["sub"] or ""),
         email=str(identity["email"] or ""),
         display_name=str(identity["name"] or ""),
-        avatar_url=identity.get("picture"),
+        avatar_url=None,
     )
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
@@ -513,6 +513,18 @@ async def update_my_profile(
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
     return UserProfileResponse.model_validate(profile)
+
+
+@app.delete("/api/v1/me/profile", response_model=AccessTokenResponse)
+async def withdraw_my_profile(
+    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+) -> AccessTokenResponse:
+    device_id = principal.device_id
+    require_google_principal(principal)
+    profile = database.withdraw_device_user(device_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    return issue_access_token_for_device(device_id)
 
 
 @app.put("/api/v1/me/schedule", response_model=ScheduleResponse)

@@ -24,6 +24,7 @@ PROVIDER_ANONYMOUS = "ANONYMOUS"
 PROVIDER_GOOGLE = "GOOGLE"
 USER_STATUS_ANONYMOUS = "ANONYMOUS"
 USER_STATUS_ACTIVE = "ACTIVE"
+USER_STATUS_WITHDRAWN = "WITHDRAWN"
 
 
 _EntityT = TypeVar("_EntityT", bound=Base)
@@ -492,6 +493,7 @@ class Database:
             session.query(User, UserDevice)
             .join(UserDevice, UserDevice.user_id == User.id)
             .filter(UserDevice.device_id == device_id)
+            .filter(User.status != USER_STATUS_WITHDRAWN)
             .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
             .order_by(UserDevice.last_seen_at.desc(), UserDevice.id.desc())
             .first()
@@ -503,6 +505,7 @@ class Database:
             session.query(User, UserDevice)
             .join(UserDevice, UserDevice.user_id == User.id)
             .filter(User.id == user_id)
+            .filter(User.status != USER_STATUS_WITHDRAWN)
             .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
             .order_by(UserDevice.last_seen_at.desc(), UserDevice.id.desc())
             .first()
@@ -516,6 +519,8 @@ class Database:
             if row is None:
                 return None
             user, mapping = row
+            if user.status == USER_STATUS_WITHDRAWN:
+                return None
             is_anonymous = user.status == USER_STATUS_ANONYMOUS
             has_active_session = (
                 not is_anonymous
@@ -537,6 +542,8 @@ class Database:
             if row is None:
                 return None
             user, mapping = row
+            if user.status == USER_STATUS_WITHDRAWN:
+                return None
             is_anonymous = user.status == USER_STATUS_ANONYMOUS
             return {
                 "device_id": mapping.device_id,
@@ -556,12 +563,15 @@ class Database:
                     session.query(User, UserDevice)
                     .join(UserDevice, UserDevice.user_id == User.id)
                     .filter(User.id == user_id, UserDevice.id == user_device_id)
+                    .filter(User.status != USER_STATUS_WITHDRAWN)
                     .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
                     .first()
                 )
             if row is None:
                 return None
             user, mapping = row
+            if user.status == USER_STATUS_WITHDRAWN:
+                return None
             is_anonymous = user.status == USER_STATUS_ANONYMOUS
             return {
                 "device_id": mapping.device_id,
@@ -792,7 +802,7 @@ class Database:
     def get_public_profile(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as session:
             user = session.query(User).filter(User.id == user_id).first()
-            if user is None:
+            if user is None or user.status != USER_STATUS_ACTIVE:
                 return None
             return self.user_profile_response(user)
 
@@ -829,6 +839,75 @@ class Database:
             mapping.last_seen_at = now
             session.flush()
             return self.user_profile_response(user)
+
+    def withdraw_device_user(self, device_id: str) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if device is None:
+                return None
+
+            principal = self._device_principal_row(session, device_id, now)
+            if principal is None:
+                return None
+            user, mapping = principal
+            if user.status != USER_STATUS_ACTIVE:
+                return None
+
+            withdrawn_user_id = int(user.id)
+            user.status = USER_STATUS_WITHDRAWN
+            user.provider_id = f"withdrawn:{withdrawn_user_id}:{int(now.timestamp())}"
+            user.email = f"withdrawn-{withdrawn_user_id}@withdrawn.buddystuddy.local"
+            user.display_name = "Withdrawn user"
+            user.avatar_url = None
+            user.bio = ""
+            user.allow_public_questions = False
+            user.updated_at = now
+            mapping.session_expires_at = now
+            mapping.updated_at = now
+            mapping.last_seen_at = now
+
+            (
+                session.query(Question)
+                .filter(Question.user_id == withdrawn_user_id)
+                .update({"is_public": False, "updated_at": now}, synchronize_session=False)
+            )
+
+            provider_id = f"anonymous:{device_id}"
+            anonymous_user = (
+                session.query(User)
+                .filter(User.provider == PROVIDER_ANONYMOUS, User.provider_id == provider_id)
+                .first()
+            )
+            if anonymous_user is None:
+                anonymous_user = User(
+                    provider=PROVIDER_ANONYMOUS,
+                    provider_id=provider_id,
+                    status=USER_STATUS_ANONYMOUS,
+                    email=f"{device_id}@anonymous.buddystuddy.local",
+                    display_name="BuddyStuddy user",
+                    avatar_url=None,
+                    bio="",
+                    allow_public_questions=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(anonymous_user)
+                session.flush()
+            else:
+                anonymous_user.status = USER_STATUS_ANONYMOUS
+                anonymous_user.allow_public_questions = False
+                anonymous_user.updated_at = now
+
+            self._attach_device_to_user(
+                session,
+                device=device,
+                user=anonymous_user,
+                session_expires_at=now + timedelta(days=90),
+                now=now,
+            )
+            session.flush()
+            return self.user_profile_response(anonymous_user)
 
     def create_report(
         self,
@@ -987,7 +1066,10 @@ class Database:
                 Question.status == "graded",
                 Device.user_id.isnot(None),
             )
-            query = query.join(User, Device.user_id == User.id).filter(User.allow_public_questions.is_(True))
+            query = query.join(User, Device.user_id == User.id).filter(
+                User.status == USER_STATUS_ACTIVE,
+                User.allow_public_questions.is_(True),
+            )
             if exclude_device_id:
                 query = query.filter(Question.device_id != exclude_device_id)
 
@@ -1491,6 +1573,8 @@ class Database:
 
     def community_question_response(self, row: Question) -> dict[str, Any]:
         author = row.device.user if row.device is not None else None
+        if author is not None and author.status != USER_STATUS_ACTIVE:
+            author = None
         return {
             "id": str(row.id),
             "question": row.question,
@@ -1507,7 +1591,7 @@ class Database:
             "id": int(row.id),
             "displayName": row.display_name,
             "bio": row.bio or "",
-            "avatarUrl": row.avatar_url,
+            "avatarUrl": None,
             "pageAccess": {
                 "publicQuestions": bool(row.allow_public_questions),
                 "statistics": True,

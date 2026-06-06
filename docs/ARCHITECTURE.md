@@ -103,7 +103,8 @@ User answer
 - Device credentials are used to register a backend device and bootstrap or refresh an access token.
 - Access tokens carry both `user_id` and `device_id`; protected API calls resolve the current principal from those claims and the stored user-device mapping.
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
-- Public question rows can expose only the author's public profile fields: display name, bio, and avatar URL.
+- User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Withdrawal de-identifies direct profile fields, disables public question exposure, expires the active login mapping, and reconnects the device to an anonymous user.
+- Public question rows can expose only the author's public profile fields: display name and bio. Profile photo changes are not exposed in the current iOS app.
 - Question publicity defaults to private unless the signed-in user enables public sharing.
 - Reports are stored in PostgreSQL and can optionally be emailed to the operator Gmail through SMTP settings.
 

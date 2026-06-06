@@ -127,6 +127,7 @@ final class AppState: ObservableObject {
     @Published var communityErrorMessage: String?
     @Published var communityProfile: CommunityUserProfile?
     @Published var isUpdatingCommunityProfile = false
+    @Published var isWithdrawingCommunityAccount = false
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published var profileAvatarSymbolName: String
     @Published var profileAvatarImageData: Data?
@@ -1189,6 +1190,28 @@ final class AppState: ObservableObject {
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func withdrawCommunityAccount() async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-withdraw") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        isWithdrawingCommunityAccount = true
+        defer {
+            isWithdrawingCommunityAccount = false
+        }
+
+        do {
+            let updatedRegistration = try await remotePushBackendClient.withdrawMyProfile(registration: registration)
+            settingsStore.saveRemotePushRegistration(updatedRegistration)
+            signOutFromCommunity()
+            statusMessage = strings.accountDeleted
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
         }
     }
 

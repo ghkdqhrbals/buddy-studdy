@@ -265,6 +265,62 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert public_response.json()["questions"] == []
 
 
+def test_profile_withdrawal_deidentifies_user_and_returns_anonymous_token(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    registered = _register(client, "apns-token-withdraw-" + "w" * 32)
+    profile = main.database.link_google_user_to_device(
+        device_id=registered["deviceId"],
+        google_sub="google-withdraw-owner",
+        email="owner@example.com",
+        display_name="Owner",
+    )
+    assert profile is not None
+
+    token_response = client.post(
+        "/api/v1/auth/token",
+        headers={
+            "X-Device-Id": registered["deviceId"],
+            "X-Client-Secret": registered["clientSecret"],
+        },
+    )
+    assert token_response.status_code == 200
+    headers = {"Authorization": f"Bearer {token_response.json()['accessToken']}"}
+
+    record = main.database.create_question(
+        device_id=registered["deviceId"],
+        user_id=profile["id"],
+        topic="SwiftUI",
+        difficulty_level=5,
+        question="What is view identity?",
+        is_public=True,
+    )
+    graded = main.database.grade_record(
+        device_id=registered["deviceId"],
+        record_id=record["id"],
+        answer="It determines state reuse.",
+        score=88,
+        is_correct=True,
+        feedback="Good",
+        explanation="Identity controls view/state reuse.",
+        user_id=profile["id"],
+    )
+    assert graded is not None
+    assert client.get("/api/v1/public/questions").json()["totalCount"] == 1
+
+    withdrawal = client.delete("/api/v1/me/profile", headers=headers)
+    assert withdrawal.status_code == 200
+    anonymous_token = withdrawal.json()["accessToken"]
+    token_payload = jwt.decode(anonymous_token, "test-jwt-secret", algorithms=["HS256"], issuer="buddystuddy")
+    assert token_payload["device_id"] == registered["deviceId"]
+    assert token_payload["is_anonymous"] is True
+
+    assert client.get("/api/v1/public/questions").json()["questions"] == []
+    assert client.get("/api/v1/me/profile", headers={"Authorization": f"Bearer {anonymous_token}"}).status_code == 401
+    assert main.database.get_public_profile(profile["id"]) is None
+
+
 def test_profile_page_access_can_hide_public_questions_and_reports_private_page_access(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)

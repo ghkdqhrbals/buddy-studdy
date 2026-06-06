@@ -149,6 +149,7 @@ Profile endpoints:
 ```http
 GET /api/v1/me/profile
 PATCH /api/v1/me/profile
+DELETE /api/v1/me/profile
 GET /api/v1/public/users/{userId}/profile
 ```
 
@@ -166,9 +167,13 @@ Patch request:
 ```json
 {
   "displayName": "Buddy",
-  "bio": "Short public intro"
+  "pageAccess": {
+    "publicQuestions": true
+  }
 }
 ```
+
+`DELETE /api/v1/me/profile` withdraws the active Google-linked account for the current device. The backend immediately de-identifies direct profile fields, disables public question exposure, expires that login mapping, reconnects the device to an anonymous user, and returns a fresh anonymous `accessToken`. Minimal operational records required for legal obligations or dispute handling may be retained for up to 30 days, then deleted or anonymized.
 
 ### Report Public Question
 

@@ -3587,6 +3587,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: "anonymous-access-token",
+            accessTokenExpiresAt: Date().addingTimeInterval(3600)
+        )
+    }
+
     func reportCommunityQuestion(
         registration: RemotePushRegistration,
         questionID: String,

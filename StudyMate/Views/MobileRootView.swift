@@ -1,6 +1,5 @@
 import SwiftUI
 #if os(iOS)
-import PhotosUI
 import UIKit
 #endif
 
@@ -427,7 +426,7 @@ private struct MobileHomeView: View {
         return HomeProfileAvatar(
             symbolName: appState.profileAvatarSymbolName,
             displayName: appState.communityProfile?.displayName,
-            imageData: appState.profileAvatarImageData,
+            imageData: nil,
             colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
             usesNeutralColor: !appState.isCommunitySignedIn,
             size: 34
@@ -450,7 +449,7 @@ private struct MobileHomeView: View {
             HomeProfileAvatar(
                 symbolName: appState.profileAvatarSymbolName,
                 displayName: appState.communityProfile?.displayName,
-                imageData: appState.profileAvatarImageData,
+                imageData: nil,
                 colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
                 usesNeutralColor: !appState.isCommunitySignedIn,
                 size: 34
@@ -719,11 +718,7 @@ private struct MobileProfileSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
     @State private var allowPublicQuestionsAccess = true
-    #if os(iOS)
-    @State private var selectedProfilePhotoItem: PhotosPickerItem?
-    @State private var pendingProfilePhotoData: Data?
-    @State private var isShowingProfilePhotoCropper = false
-    #endif
+    @State private var isConfirmingWithdrawal = false
 
     private var strings: AppStrings {
         appState.strings
@@ -731,8 +726,6 @@ private struct MobileProfileSettingsSheet: View {
 
     var body: some View {
         let strings = appState.strings
-        let chooseProfilePhotoTitle = strings.chooseProfilePhoto
-        let removeProfilePhotoTitle = strings.removeProfilePhoto
 
         NavigationStack {
             Form {
@@ -742,47 +735,21 @@ private struct MobileProfileSettingsSheet: View {
                             HomeProfileAvatar(
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
                                 displayName: profileDisplayName,
-                                imageData: appState.profileAvatarImageData,
+                                imageData: nil,
                                 colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
                                 size: 54
                             )
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(appState.communityProfile?.displayName ?? strings.profile)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                            }
+                            TextField(strings.profileDisplayName, text: $profileDisplayName)
+                                .font(.headline)
+                                .textInputAutocapitalization(.words)
+                                .submitLabel(.done)
                         }
                         .padding(.vertical, 4)
                     }
 
-                    Section(strings.profile) {
-                        TextField(strings.profileDisplayName, text: $profileDisplayName)
-                            .textInputAutocapitalization(.words)
-                    }
-
-                    #if os(iOS)
-                    Section(strings.profileAvatar) {
-                        PhotosPicker(selection: $selectedProfilePhotoItem, matching: .images) {
-                            Label(chooseProfilePhotoTitle, systemImage: "photo")
-                        }
-
-                        if appState.profileAvatarImageData != nil {
-                            Button(role: .destructive) {
-                                appState.updateProfileAvatarImageData(nil)
-                            } label: {
-                                Label(removeProfilePhotoTitle, systemImage: "trash")
-                            }
-                        }
-                    }
-                    #endif
-
-                    Section(strings.pageAccess) {
+                    Section {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
-
-                        lockedPageAccessRow(title: strings.statisticsPage, strings: strings)
-                        lockedPageAccessRow(title: strings.studyDetailPage, strings: strings)
-                        lockedPageAccessRow(title: strings.recordsPage, strings: strings)
                     }
 
                     Section {
@@ -793,13 +760,23 @@ private struct MobileProfileSettingsSheet: View {
                             Text(strings.communityLogout)
                         }
                     }
+
+                    Section {
+                        Button(role: .destructive) {
+                            isConfirmingWithdrawal = true
+                        } label: {
+                            Text(strings.deleteAccount)
+                        }
+                    } footer: {
+                        Text(strings.deleteAccountNotice)
+                    }
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
                             HomeProfileAvatar(
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
                                 displayName: nil,
-                                imageData: appState.profileAvatarImageData,
+                                imageData: nil,
                                 colorSeed: appState.profileAvatarColorSeed,
                                 usesNeutralColor: true,
                                 size: 58
@@ -836,9 +813,9 @@ private struct MobileProfileSettingsSheet: View {
                                 displayName: profileDisplayName,
                                 pageAccess: CommunityPageAccess(
                                     publicQuestions: allowPublicQuestionsAccess,
-                                    statistics: false,
-                                    studyDetail: false,
-                                    records: false
+                                    statistics: true,
+                                    studyDetail: true,
+                                    records: true
                                 )
                             )
                             dismiss()
@@ -863,28 +840,27 @@ private struct MobileProfileSettingsSheet: View {
                     allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? allowPublicQuestionsAccess
                 }
             }
-            #if os(iOS)
-            .onChange(of: selectedProfilePhotoItem) { _, item in
-                guard let item else {
-                    return
-                }
-
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        pendingProfilePhotoData = data
-                        isShowingProfilePhotoCropper = true
-                    }
-                    selectedProfilePhotoItem = nil
-                }
-            }
-            .sheet(isPresented: $isShowingProfilePhotoCropper) {
-                if let pendingProfilePhotoData {
-                    ProfilePhotoCropSheet(imageData: pendingProfilePhotoData) { croppedData in
-                        appState.updateProfileAvatarImageData(croppedData)
+            .confirmationDialog(
+                strings.deleteAccount,
+                isPresented: $isConfirmingWithdrawal,
+                titleVisibility: .visible
+            ) {
+                Button(strings.deleteAccount, role: .destructive) {
+                    Task {
+                        await appState.withdrawCommunityAccount()
+                        dismiss()
                     }
                 }
+                Button(strings.cancel, role: .cancel) {}
+            } message: {
+                Text(strings.deleteAccountConfirmMessage)
             }
-            #endif
+            .disabled(appState.isWithdrawingCommunityAccount)
+            .overlay {
+                if appState.isWithdrawingCommunityAccount {
+                    ProgressView()
+                }
+            }
         }
     }
 
@@ -896,14 +872,6 @@ private struct MobileProfileSettingsSheet: View {
         return strings.save
     }
 
-    private func lockedPageAccessRow(title: String, strings: AppStrings) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text(strings.accessAllowed)
-                .foregroundStyle(.secondary)
-        }
-    }
 }
 
 private enum ProfileAvatarOption {
@@ -943,128 +911,6 @@ private enum ProfileAvatarOption {
         }
     }
 }
-
-#if os(iOS)
-private struct ProfilePhotoCropSheet: View {
-    @EnvironmentObject private var appState: AppState
-    @Environment(\.dismiss) private var dismiss
-    var imageData: Data
-    var onUse: (Data) -> Void
-    @State private var scale: Double = 1.0
-
-    private var uiImage: UIImage? {
-        UIImage(data: imageData)
-    }
-
-    var body: some View {
-        let strings = appState.strings
-
-        NavigationStack {
-            VStack(spacing: 22) {
-                Spacer(minLength: 8)
-
-                ZStack {
-                    Circle()
-                        .fill(Color.secondary.opacity(0.08))
-
-                    if let uiImage {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                            .scaleEffect(scale)
-                    }
-                }
-                .frame(width: 220, height: 220)
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
-                .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text(strings.profilePhotoScale)
-                        Spacer()
-                        Text(String(format: "%.1fx", scale))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    .font(.caption)
-
-                    Slider(value: $scale, in: 1...3, step: 0.05)
-                }
-                .padding(.horizontal, 24)
-
-                Spacer()
-            }
-            .navigationTitle(strings.profileAvatar)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.cancel) {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(strings.useProfilePhoto) {
-                        if let croppedData = croppedImageData() {
-                            onUse(croppedData)
-                        }
-                        dismiss()
-                    }
-                    .disabled(uiImage == nil)
-                }
-            }
-        }
-    }
-
-    private func croppedImageData() -> Data? {
-        guard let sourceImage = uiImage,
-              let cgImage = sourceImage.normalizedForCropping().cgImage else {
-            return nil
-        }
-
-        let width = CGFloat(cgImage.width)
-        let height = CGFloat(cgImage.height)
-        let baseSquareSize = min(width, height)
-        let cropSize = max(1, baseSquareSize / CGFloat(scale))
-        let cropRect = CGRect(
-            x: max(0, (width - cropSize) / 2),
-            y: max(0, (height - cropSize) / 2),
-            width: min(cropSize, width),
-            height: min(cropSize, height)
-        ).integral
-
-        guard let cropped = cgImage.cropping(to: cropRect) else {
-            return nil
-        }
-
-        let outputSize = CGSize(width: 512, height: 512)
-        let renderer = UIGraphicsImageRenderer(size: outputSize)
-        let image = renderer.image { _ in
-            UIImage(cgImage: cropped).draw(in: CGRect(origin: .zero, size: outputSize))
-        }
-
-        return image.jpegData(compressionQuality: 0.88)
-    }
-}
-
-private extension UIImage {
-    func normalizedForCropping() -> UIImage {
-        guard imageOrientation != .up else {
-            return self
-        }
-
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
-        }
-    }
-}
-#endif
 
 private struct GoogleSignInButtonLabel: View {
     var title: String

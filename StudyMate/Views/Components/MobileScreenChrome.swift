@@ -125,7 +125,7 @@ struct MobileToolbarSearchField: View {
     }
 
     private var searchBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
+        colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color(uiColor: .secondarySystemFill)
     }
 }
 
@@ -204,7 +204,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     }
 
     private var searchBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
+        colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color(uiColor: .secondarySystemFill)
     }
 
     private func updateSearchFieldMountState(isExpanded expanded: Bool) {

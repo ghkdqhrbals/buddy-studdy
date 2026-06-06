@@ -137,6 +137,8 @@ protocol RemotePushBackendClientProtocol {
         pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile
 
+    func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
+
     func reportCommunityQuestion(
         registration: RemotePushRegistration,
         questionID: String,
@@ -496,6 +498,23 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpBody = try encoder.encode(ProfileUpdateRequest(displayName: displayName, bio: bio, pageAccess: pageAccess))
         let data = try await perform(request)
         return try decoder.decode(CommunityUserProfile.self, from: data)
+    }
+
+    func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "profile")
+        )
+        request.httpMethod = "DELETE"
+        let data = try await perform(request)
+        let response = try decoder.decode(AccessTokenResponse.self, from: data)
+        return RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
     }
 
     func reportCommunityQuestion(
