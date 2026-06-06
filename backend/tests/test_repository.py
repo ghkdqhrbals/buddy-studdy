@@ -39,9 +39,11 @@ def test_upsert_and_get_schedule(db: Database):
         timezone="America/New_York",
     )
     assert db.authenticate_device(device_id, client_secret)
+    user_id = db.get_device_principal(device_id)["user_id"]
 
     first_due = db.upsert_schedule(
         device_id=device_id,
+        user_id=user_id,
         topic="Swift Advanced",
         difficulty_level=4,
         interval_minutes=15,
@@ -63,6 +65,7 @@ def test_upsert_and_get_schedule(db: Database):
     # Same schedule should preserve existing due time.
     unchanged_due = db.upsert_schedule(
         device_id=device_id,
+        user_id=user_id,
         topic="Swift Advanced",
         difficulty_level=4,
         interval_minutes=15,
@@ -79,6 +82,7 @@ def test_upsert_and_get_schedule(db: Database):
     # Changing settings should reset due time.
     changed_due = db.upsert_schedule(
         device_id=device_id,
+        user_id=user_id,
         topic="Swift Architectures",
         difficulty_level=5,
         interval_minutes=20,
@@ -91,6 +95,80 @@ def test_upsert_and_get_schedule(db: Database):
         max_history_count=120,
     )
     assert changed_due != first_due
+
+
+def test_active_user_switch_does_not_reassign_schedule_or_records(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-user-switch",
+        platform="ios",
+        apns_environment="production",
+        language="ko",
+        timezone="Asia/Seoul",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+
+    profile_a, mismatch_a = db.link_email_user_to_device(
+        device_id=device_id,
+        email="first@example.com",
+        password="secret123",
+    )
+    assert not mismatch_a
+    assert profile_a is not None
+    user_a = int(profile_a["id"])
+
+    db.upsert_schedule(
+        device_id=device_id,
+        user_id=user_a,
+        topic="First Account Topic",
+        difficulty_level=4,
+        interval_minutes=15,
+        enabled=True,
+        openai_api_key_cipher=None,
+        notification_sound="default",
+        custom_prompt="",
+        app_language="ko",
+        openai_model="gpt-5.4",
+        max_history_count=100,
+    )
+    db.create_question(
+        device_id=device_id,
+        user_id=user_a,
+        topic="First Account Topic",
+        difficulty_level=4,
+        question="A 계정 질문",
+        expected_answer_hint=None,
+        source="manual",
+    )
+
+    profile_b, mismatch_b = db.link_email_user_to_device(
+        device_id=device_id,
+        email="second@example.com",
+        password="secret123",
+    )
+    assert not mismatch_b
+    assert profile_b is not None
+    user_b = int(profile_b["id"])
+
+    assert db.get_schedule(device_id, user_id=user_b) is None
+    records_b, total_b = db.list_records(device_id, user_id=user_b, limit=20, offset=0)
+    assert records_b == []
+    assert total_b == 0
+
+    profile_a_again, mismatch_a_again = db.link_email_user_to_device(
+        device_id=device_id,
+        email="first@example.com",
+        password="secret123",
+    )
+    assert not mismatch_a_again
+    assert profile_a_again is not None
+    assert int(profile_a_again["id"]) == user_a
+
+    schedule_a = db.get_schedule(device_id, user_id=user_a)
+    assert schedule_a is not None
+    assert schedule_a["topic"] == "First Account Topic"
+    records_a, total_a = db.list_records(device_id, user_id=user_a, limit=20, offset=0)
+    assert total_a == 1
+    assert records_a[0]["question"]["question"] == "A 계정 질문"
 
 
 def test_questions_and_grading_flow(db: Database):
@@ -336,9 +414,11 @@ def test_due_schedules(db: Database):
         timezone="UTC",
     )
     assert db.authenticate_device(device_id, client_secret)
+    user_id = db.get_device_principal(device_id)["user_id"]
 
     db.upsert_schedule(
         device_id=device_id,
+        user_id=user_id,
         topic="Distributed systems",
         difficulty_level=7,
         interval_minutes=60,

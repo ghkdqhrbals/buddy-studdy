@@ -30,10 +30,9 @@ class Device(Base):
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(nullable=False)
 
-    schedule: Mapped["Schedule"] = relationship(
+    schedules: Mapped[list["Schedule"]] = relationship(
         "Schedule",
         back_populates="device",
-        uselist=False,
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
@@ -126,9 +125,10 @@ class Schedule(Base):
     device_id: Mapped[str] = mapped_column(
         String(191),
         ForeignKey("devices.device_id", ondelete="CASCADE"),
-        unique=True,
         nullable=False,
+        index=True,
     )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     topic: Mapped[str] = mapped_column(String(255), nullable=False)
     difficulty_level: Mapped[int] = mapped_column(nullable=False)
     interval_minutes: Mapped[int] = mapped_column(nullable=False)
@@ -146,7 +146,7 @@ class Schedule(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
-    device: Mapped[Device] = relationship("Device", back_populates="schedule")
+    device: Mapped[Device] = relationship("Device", back_populates="schedules")
 
 
 class Question(Base):
@@ -186,6 +186,7 @@ class Question(Base):
 
 
 Index("idx_schedules_due", Schedule.enabled, Schedule.next_due_at)
+Index("idx_schedules_device_user", Schedule.device_id, Schedule.user_id, unique=True)
 Index("idx_questions_device_created", Question.device_id, Question.created_at)
 Index("idx_questions_user_created", Question.user_id, Question.created_at)
 Index("idx_questions_device_status", Question.device_id, Question.status, Question.deleted_at)

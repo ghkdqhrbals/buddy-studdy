@@ -612,6 +612,7 @@ async def upsert_schedule(
     is_question_public = bool(payload.is_question_public and principal.has_google_login)
     next_due_at = database.upsert_schedule(
         device_id=device_id,
+        user_id=principal.user_id,
         topic=payload.topic,
         difficulty_level=payload.difficulty_level,
         interval_minutes=payload.interval_minutes,
@@ -632,7 +633,9 @@ async def get_settings(
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> BackendSettingsResponse:
     device_id = principal.device_id
-    return BackendSettingsResponse.model_validate(database.schedule_settings_response(database.get_schedule(device_id)))
+    return BackendSettingsResponse.model_validate(
+        database.schedule_settings_response(database.get_schedule(device_id, user_id=principal.user_id))
+    )
 
 
 @app.put("/api/v1/me/settings", response_model=ScheduleResponse)
@@ -648,7 +651,9 @@ async def get_api_status(
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> APIStatusResponse:
     device_id = principal.device_id
-    return APIStatusResponse.model_validate(database.api_status_response(database.get_schedule(device_id)))
+    return APIStatusResponse.model_validate(
+        database.api_status_response(database.get_schedule(device_id, user_id=principal.user_id))
+    )
 
 
 @app.post("/api/v1/me/api/validate", response_model=APIValidationResponse)
@@ -656,7 +661,7 @@ async def validate_api_key(
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> APIValidationResponse:
     device_id = principal.device_id
-    schedule = database.get_schedule(device_id)
+    schedule = database.get_schedule(device_id, user_id=principal.user_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
 
@@ -687,7 +692,7 @@ async def get_snapshot(
     offset: int = Query(default=0, ge=0),
 ) -> BackendSnapshotResponse:
     device_id = principal.device_id
-    schedule = database.get_schedule(device_id)
+    schedule = database.get_schedule(device_id, user_id=principal.user_id)
     if principal_can_access_page(principal, ProtectedPage.RECORDS):
         records, total_count = database.list_records(device_id, limit=limit, offset=offset, user_id=principal.user_id)
     else:
@@ -769,7 +774,7 @@ async def create_question(
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     device_id = principal.device_id
-    schedule = database.get_schedule(device_id)
+    schedule = database.get_schedule(device_id, user_id=principal.user_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
 
@@ -799,7 +804,7 @@ async def create_question(
         user_id=principal.user_id,
         source="manual",
     )
-    database.defer_schedule(device_id, minutes=schedule["interval_minutes"])
+    database.defer_schedule(device_id, minutes=schedule["interval_minutes"], user_id=principal.user_id)
     return StudyRecordResponse.model_validate(record)
 
 
@@ -810,7 +815,7 @@ async def answer_record(
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     device_id = principal.device_id
-    schedule = database.get_schedule(device_id)
+    schedule = database.get_schedule(device_id, user_id=principal.user_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
 

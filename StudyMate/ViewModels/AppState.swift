@@ -651,7 +651,10 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func refreshBackendSnapshotIfPossible(updateVisibleQuestion: Bool = true) async -> Bool {
+    private func refreshBackendSnapshotIfPossible(
+        updateVisibleQuestion: Bool = true,
+        preserveLocalSettings: Bool = true
+    ) async -> Bool {
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "snapshot") else {
             return false
@@ -663,7 +666,11 @@ final class AppState: ObservableObject {
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
             )
-            applyBackendSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
+            applyBackendSnapshot(
+                snapshot,
+                updateVisibleQuestion: updateVisibleQuestion,
+                preserveLocalSettings: preserveLocalSettings
+            )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
             log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(snapshot.records.count)")
             return true
@@ -841,7 +848,11 @@ final class AppState: ObservableObject {
         return currentCount < communityTotalCount
     }
 
-    private func applyBackendSnapshot(_ snapshot: BackendSnapshot, updateVisibleQuestion: Bool) {
+    private func applyBackendSnapshot(
+        _ snapshot: BackendSnapshot,
+        updateVisibleQuestion: Bool,
+        preserveLocalSettings: Bool = true
+    ) {
         guard !isEditingSettings else {
             didReceiveBackendSnapshotWhileEditing = true
             if let currentPending = pendingBackendSnapshotWhileEditing,
@@ -859,7 +870,7 @@ final class AppState: ObservableObject {
             for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
             includeResolvedTopicCategory: true
         )
-        let shouldPreserveLocal = shouldPreserveLocalSettings(
+        let shouldPreserveLocal = preserveLocalSettings && shouldPreserveLocalSettings(
             local: localSettings,
             remote: remoteSanitizedSettings,
             remoteUpdatedAt: snapshot.serverTime
@@ -1119,7 +1130,10 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            await syncRemotePushScheduleIfPossible(reason: "google-login")
+            await refreshBackendSnapshotIfPossible(
+                updateVisibleQuestion: true,
+                preserveLocalSettings: false
+            )
             await loadCommunityQuestions(reset: true, userInitiated: true)
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
@@ -1167,7 +1181,10 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            await syncRemotePushScheduleIfPossible(reason: "email-login")
+            await refreshBackendSnapshotIfPossible(
+                updateVisibleQuestion: true,
+                preserveLocalSettings: false
+            )
             await loadCommunityQuestions(reset: true, userInitiated: true)
             return true
         } catch {

@@ -213,11 +213,40 @@ class Database:
 
             if "schedules" in table_names:
                 schedule_columns = {column["name"] for column in inspector.get_columns("schedules")}
+                if "user_id" not in schedule_columns:
+                    session.execute(text("ALTER TABLE schedules ADD COLUMN user_id INTEGER"))
+                    session.execute(
+                        text(
+                            "UPDATE schedules "
+                            "SET user_id = (SELECT devices.user_id FROM devices WHERE devices.device_id = schedules.device_id) "
+                            "WHERE user_id IS NULL"
+                        )
+                    )
+                    schedule_columns.add("user_id")
                 if "is_question_public" not in schedule_columns:
                     session.execute(
                         text(
                             "ALTER TABLE schedules ADD COLUMN is_question_public "
                             f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(False)}"
+                        )
+                    )
+                schedule_indexes = {idx["name"] for idx in inspector.get_indexes("schedules")}
+                if self.engine.dialect.name == "postgresql":
+                    unique_constraints = inspector.get_unique_constraints("schedules")
+                    for constraint in unique_constraints:
+                        if constraint.get("column_names") == ["device_id"] and constraint.get("name"):
+                            session.execute(
+                                text(
+                                    f'ALTER TABLE schedules DROP CONSTRAINT IF EXISTS "{constraint["name"]}"'
+                                )
+                            )
+                if "idx_schedules_user_id" not in schedule_indexes:
+                    session.execute(text("CREATE INDEX IF NOT EXISTS idx_schedules_user_id ON schedules (user_id)"))
+                if "idx_schedules_device_user" not in schedule_indexes:
+                    session.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_schedules_device_user "
+                            "ON schedules (device_id, user_id)"
                         )
                     )
             if "devices" in table_names:
@@ -369,8 +398,49 @@ class Database:
     def _get_device(self, session: Session, device_id: str) -> Device | None:
         return session.query(Device).filter(Device.device_id == device_id).first()
 
-    def _get_schedule(self, session: Session, device_id: str) -> Schedule | None:
-        return session.query(Schedule).filter(Schedule.device_id == device_id).first()
+    def _get_schedule(self, session: Session, device_id: str, user_id: int | None = None) -> Schedule | None:
+        query = session.query(Schedule).filter(Schedule.device_id == device_id)
+        if user_id is not None:
+            schedule = query.filter(Schedule.user_id == user_id).first()
+            if schedule is not None:
+                return schedule
+            return query.filter(Schedule.user_id.is_(None)).first()
+        return query.order_by(Schedule.updated_at.desc(), Schedule.id.desc()).first()
+
+    def _previous_user_was_anonymous(
+        self,
+        session: Session,
+        previous_user_id: int | None,
+        next_user_id: int,
+    ) -> bool:
+        if previous_user_id is None or int(previous_user_id) == int(next_user_id):
+            return False
+        previous_user = session.query(User).filter(User.id == int(previous_user_id)).first()
+        return bool(previous_user is not None and previous_user.status == USER_STATUS_ANONYMOUS)
+
+    def _migrate_anonymous_device_data_to_user(
+        self,
+        session: Session,
+        *,
+        device_id: str,
+        previous_user_id: int | None,
+        user: User,
+        now: datetime,
+    ) -> None:
+        if not self._previous_user_was_anonymous(session, previous_user_id, int(user.id)):
+            return
+
+        (
+            session.query(Question)
+            .filter(Question.device_id == device_id, Question.user_id == previous_user_id)
+            .update({"user_id": int(user.id), "updated_at": now}, synchronize_session=False)
+        )
+
+        previous_schedule = self._get_schedule(session, device_id, int(previous_user_id)) if previous_user_id else None
+        existing_schedule = self._get_schedule(session, device_id, int(user.id))
+        if previous_schedule is not None and existing_schedule is None:
+            previous_schedule.user_id = int(user.id)
+            previous_schedule.updated_at = now
 
     def _get_user_device(self, session: Session, user_id: int, device_id: str) -> UserDevice | None:
         return (
@@ -652,6 +722,7 @@ class Database:
     def upsert_schedule(
         self,
         device_id: str,
+        user_id: int | None,
         topic: str,
         difficulty_level: int,
         interval_minutes: int,
@@ -666,7 +737,7 @@ class Database:
     ) -> str | None:
         now = self._utc_now()
         with self.connect() as session:
-            existing = self._get_schedule(session, device_id)
+            existing = self._get_schedule(session, device_id, user_id)
 
             if existing is not None and openai_api_key_cipher is None:
                 cipher = existing.openai_api_key_cipher
@@ -678,6 +749,7 @@ class Database:
                 session.add(
                     Schedule(
                         device_id=device_id,
+                        user_id=user_id,
                         topic=topic,
                         difficulty_level=difficulty_level,
                         interval_minutes=interval_minutes,
@@ -718,6 +790,7 @@ class Database:
                 next_due_at = now + timedelta(minutes=interval_minutes)
 
             existing.topic = topic
+            existing.user_id = user_id
             existing.difficulty_level = difficulty_level
             existing.interval_minutes = interval_minutes
             existing.enabled = enabled
@@ -797,12 +870,13 @@ class Database:
                 session_expires_at=now + timedelta(days=90),
                 now=now,
             )
-            if previous_user_id is not None and int(previous_user_id) != int(user.id):
-                (
-                    session.query(Question)
-                    .filter(Question.device_id == device_id, Question.user_id == previous_user_id)
-                    .update({"user_id": int(user.id), "updated_at": now}, synchronize_session=False)
-                )
+            self._migrate_anonymous_device_data_to_user(
+                session,
+                device_id=device_id,
+                previous_user_id=previous_user_id,
+                user=user,
+                now=now,
+            )
             session.flush()
             return self.user_profile_response(user)
 
@@ -861,12 +935,13 @@ class Database:
                 session_expires_at=now + timedelta(days=90),
                 now=now,
             )
-            if previous_user_id is not None and int(previous_user_id) != int(user.id):
-                (
-                    session.query(Question)
-                    .filter(Question.device_id == device_id, Question.user_id == previous_user_id)
-                    .update({"user_id": int(user.id), "updated_at": now}, synchronize_session=False)
-                )
+            self._migrate_anonymous_device_data_to_user(
+                session,
+                device_id=device_id,
+                previous_user_id=previous_user_id,
+                user=user,
+                now=now,
+            )
             session.flush()
             return self.user_profile_response(user), False
 
@@ -1071,9 +1146,9 @@ class Database:
                 "createdAt": self._response_timestamp(report.created_at),
             }
 
-    def get_schedule(self, device_id: str) -> dict[str, Any] | None:
+    def get_schedule(self, device_id: str, user_id: int | None = None) -> dict[str, Any] | None:
         with self.connect() as session:
-            schedule = self._get_schedule(session, device_id)
+            schedule = self._get_schedule(session, device_id, user_id)
             if schedule is None:
                 return None
             device = self._get_device(session, device_id)
@@ -1486,11 +1561,11 @@ class Database:
             for row in rows:
                 session.delete(row)
 
-    def defer_schedule(self, device_id: str, minutes: int, error: str | None = None) -> None:
+    def defer_schedule(self, device_id: str, minutes: int, error: str | None = None, user_id: int | None = None) -> None:
         now = self._utc_now()
         next_due_at = now + timedelta(minutes=max(1, minutes))
         with self.connect() as session:
-            row = self._get_schedule(session, device_id)
+            row = self._get_schedule(session, device_id, user_id)
             if row is None:
                 return
             row.next_due_at = next_due_at
@@ -1558,7 +1633,7 @@ class Database:
                     "is_question_public": bool(row.is_question_public),
                     "openai_api_key_cipher": row.openai_api_key_cipher,
                     "next_due_at": as_utc_datetime(row.next_due_at) if row.next_due_at is not None else None,
-                    "user_id": device.user_id,
+                    "user_id": row.user_id if row.user_id is not None else device.user_id,
                 }
             )
 
@@ -1602,7 +1677,7 @@ class Database:
             session.flush()
             record_id = record.id
 
-            schedule = self._get_schedule(session, device_id)
+            schedule = self._get_schedule(session, device_id, user_id)
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_sent_at = now
@@ -1614,7 +1689,13 @@ class Database:
             raise RuntimeError("Inserted scheduled question could not be loaded.")
         return created
 
-    def mark_scheduled_delivery(self, device_id: str, record_id: str, interval_minutes: int) -> None:
+    def mark_scheduled_delivery(
+        self,
+        device_id: str,
+        record_id: str,
+        interval_minutes: int,
+        user_id: int | None = None,
+    ) -> None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
             return
@@ -1629,7 +1710,7 @@ class Database:
                 record.sent_at = now
                 record.updated_at = now
 
-            schedule = self._get_schedule(session, device_id)
+            schedule = self._get_schedule(session, device_id, user_id)
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_sent_at = now
@@ -1642,6 +1723,7 @@ class Database:
         record_id: str,
         interval_minutes: int,
         error: str,
+        user_id: int | None = None,
     ) -> None:
         row_id = self._record_id_value(record_id)
         now = self._utc_now()
@@ -1655,17 +1737,17 @@ class Database:
                 if record is not None:
                     record.updated_at = now
 
-            schedule = self._get_schedule(session, device_id)
+            schedule = self._get_schedule(session, device_id, user_id)
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_error = error[:500]
                 schedule.updated_at = now
 
-    def mark_error(self, device_id: str, error: str, retry_minutes: int = 5) -> None:
+    def mark_error(self, device_id: str, error: str, retry_minutes: int = 5, user_id: int | None = None) -> None:
         now = self._utc_now()
         retry_at = now + timedelta(minutes=retry_minutes)
         with self.connect() as session:
-            schedule = self._get_schedule(session, device_id)
+            schedule = self._get_schedule(session, device_id, user_id)
             if schedule is None:
                 return
             schedule.next_due_at = retry_at
@@ -1690,6 +1772,7 @@ class Database:
             "updated_at": schedule.updated_at,
             "last_error": schedule.last_error,
             "is_question_public": schedule.is_question_public,
+            "user_id": schedule.user_id,
             "device_language": device.language,
             "timezone": device.timezone,
         }
