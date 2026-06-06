@@ -536,6 +536,12 @@ private struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     HStack(spacing: 6) {
+                        if !record.isPublic {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2.weight(.semibold))
+                                .accessibilityLabel(strings.makeQuestionPrivate)
+                        }
+
                         Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
                             .lineLimit(1)
 
