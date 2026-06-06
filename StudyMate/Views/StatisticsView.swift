@@ -10,8 +10,6 @@ struct StatisticsView: View {
     @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
     @State private var customEndDate = Date()
     @State private var topicSearch = ""
-    @State private var selectedTopicID: String?
-    @State private var topicSort: TopicSort = .level
     @State private var topicPage = 0
     @State private var statsSearchDebounceTask: Task<Void, Never>?
     @State private var isPullRefreshing = false
@@ -34,15 +32,6 @@ struct StatisticsView: View {
             .compactMap(TopicStat.init(backend:))
     }
 
-    private var selectedTopicStat: TopicStat? {
-        if let selectedTopicID,
-           let selected = pagedTopicStats.first(where: { $0.id == selectedTopicID }) {
-            return selected
-        }
-
-        return pagedTopicStats.first
-    }
-
     private var topicPageCount: Int {
         max(1, (max(totalTopicCount, topicStats.count) + Self.topicPageSize - 1) / Self.topicPageSize)
     }
@@ -59,14 +48,6 @@ struct StatisticsView: View {
         Array(topicStats.dropFirst(topicPageStartIndex).prefix(Self.topicPageSize))
     }
 
-    private var selectedTopicRecords: [StudyRecord] {
-        selectedTopicStat?.records ?? []
-    }
-
-    private var listedSelectedTopicRecords: [StudyRecord] {
-        Array(selectedTopicRecords.reversed())
-    }
-
     var body: some View {
         let strings = appState.strings
         let count = responseCount
@@ -78,20 +59,6 @@ struct StatisticsView: View {
                     MobileRootLargeTitle(strings.tabStatistics)
                         .padding(.top, 6)
                         .padding(.bottom, 8)
-
-                    if count > 0 {
-                        HStack {
-                            Text(strings.itemCount(count))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if appState.isBackendStatsLoading {
-                                Spacer()
-                                ProgressView()
-                                    .controlSize(.mini)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
 
                     StatisticsPeriodControls(
                         selectedPeriod: $selectedPeriod,
@@ -140,9 +107,9 @@ struct StatisticsView: View {
                         }
                     } else {
                         TopicPortfolioSummary(
-                            stats: topicStats,
                             totalTopicCount: max(totalTopicCount, 0),
                             responseCount: count,
+                            isLoading: appState.isBackendStatsLoading,
                             strings: strings
                         )
 
@@ -152,51 +119,16 @@ struct StatisticsView: View {
                             pageStartIndex: topicPageStartIndex,
                             currentPage: boundedTopicPage,
                             pageCount: pageCount,
-                            selectedTopicID: selectedTopicStat?.id,
-                            topicSearch: $topicSearch,
-                            topicSort: $topicSort,
                             strings: strings,
                             onPreviousPage: {
                                 topicPage = max(boundedTopicPage - 1, 0)
-                                selectedTopicID = nil
                                 loadStats()
                             },
                             onNextPage: {
                                 topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
-                                selectedTopicID = nil
                                 loadStats()
-                            },
-                            onSelect: { stat in
-                                selectedTopicID = stat.id
                             }
                         )
-
-                        if let selectedTopicStat {
-                            SelectedTopicSection(stat: selectedTopicStat, records: selectedTopicRecords, strings: strings)
-                                .padding(.top, 4)
-
-                            Text(strings.scoreByQuestion)
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .lineLimit(1)
-                                .padding(.top, 4)
-
-                            ForEach(Array(listedSelectedTopicRecords.enumerated()), id: \.element.id) { index, record in
-                                Button {
-                                    selectedRecord = record
-                                } label: {
-                                    ScoreRecordRow(index: listedSelectedTopicRecords.count - index, record: record, strings: strings)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        } else {
-                            ContentUnavailableView(
-                                strings.noMatchingTopics,
-                                systemImage: "line.3.horizontal.decrease.circle",
-                                description: Text(strings.noMatchingTopicsDescription)
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                        }
                     }
                 }
                 .padding(.trailing, 8)
@@ -241,10 +173,6 @@ struct StatisticsView: View {
         .onChange(of: topicSearch) {
             resetTopicPaging()
             scheduleDebouncedStatsReload()
-        }
-        .onChange(of: topicSort) {
-            resetTopicPaging()
-            loadStats()
         }
         .onChange(of: selectedPeriod) {
             resetTopicPaging()
@@ -383,7 +311,6 @@ struct StatisticsView: View {
         loadStats(
             period: selectedPeriod,
             search: topicSearch,
-            sort: topicSort,
             startAt: selectedPeriodStartAt,
             endAt: selectedPeriodEndAt,
             limit: Self.topicPageSize,
@@ -394,7 +321,6 @@ struct StatisticsView: View {
     private func loadStats(
         period: StatisticsPeriod = .all,
         search: String = "",
-        sort: TopicSort = .level,
         startAt: Date? = nil,
         endAt: Date? = nil,
         limit: Int = Self.topicPageSize,
@@ -405,7 +331,7 @@ struct StatisticsView: View {
             await appState.fetchBackendStats(
                 period: period.backendPeriod,
                 search: search,
-                sort: sort.backendSort,
+                sort: .count,
                 startAt: startAt,
                 endAt: endAt,
                 limit: limit,
@@ -424,7 +350,7 @@ struct StatisticsView: View {
         await appState.fetchBackendStats(
             period: selectedPeriod.backendPeriod,
             search: topicSearch,
-            sort: topicSort.backendSort,
+            sort: .count,
             startAt: selectedPeriodStartAt,
             endAt: selectedPeriodEndAt,
             limit: Self.topicPageSize,
@@ -436,7 +362,6 @@ struct StatisticsView: View {
         statsSearchDebounceTask?.cancel()
         let period = selectedPeriod
         let search = topicSearch
-        let sort = topicSort
         statsSearchDebounceTask = Task {
             do {
                 try await Task.sleep(nanoseconds: 220_000_000)
@@ -444,7 +369,6 @@ struct StatisticsView: View {
                     loadStats(
                         period: period,
                         search: search,
-                        sort: sort,
                         startAt: periodBounds(for: period).startAt,
                         endAt: periodBounds(for: period).endAt,
                         limit: Self.topicPageSize,
@@ -459,7 +383,6 @@ struct StatisticsView: View {
 
     private func resetTopicPaging() {
         topicPage = 0
-        selectedTopicID = nil
     }
 }
 
@@ -1056,44 +979,6 @@ private extension TopicStat {
     }
 }
 
-private extension TopicSort {
-    var backendSort: BackendStatsSort {
-        switch self {
-        case .level:
-            .level
-        case .recent:
-            .recent
-        case .name:
-            .name
-        case .count:
-            .count
-        }
-    }
-}
-
-private enum TopicSort: String, CaseIterable, Identifiable {
-    case level
-    case recent
-    case name
-    case count
-
-    var id: String { rawValue }
-
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .level:
-            return strings.sortByLevel
-        case .recent:
-            return strings.sortByRecent
-        case .name:
-            return strings.sortByName
-        case .count:
-            return strings.sortByCount
-        }
-    }
-
-}
-
 struct TopicLevelRange: Equatable {
     var level: Difficulty
     var average: Int
@@ -1249,22 +1134,22 @@ private extension TopicLevelRange {
 }
 
 private struct TopicPortfolioSummary: View {
-    var stats: [TopicStat]
     var totalTopicCount: Int
     var responseCount: Int
+    var isLoading: Bool
     var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(strings.topicSummary)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-
+        HStack(alignment: .center, spacing: 10) {
             KeyMetricsStrip(metrics: [
-                MetricItem(title: strings.topicCount, value: "\(totalTopicCount)"),
-                MetricItem(title: strings.responses, value: "\(responseCount)")
+                MetricItem(title: strings.responses, value: "\(responseCount)"),
+                MetricItem(title: strings.topicCount, value: "\(totalTopicCount)")
             ])
+
+            if isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+            }
         }
     }
 }
@@ -1277,19 +1162,15 @@ private struct TopicBrowserSection: View {
     var pageStartIndex: Int
     var currentPage: Int
     var pageCount: Int
-    var selectedTopicID: String?
-    @Binding var topicSearch: String
-    @Binding var topicSort: TopicSort
     var strings: AppStrings
     var onPreviousPage: () -> Void
     var onNextPage: () -> Void
-    var onSelect: (TopicStat) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(strings.topicBrowser)
-                    .font(.subheadline)
+                Text(strings.topicCount)
+                    .font(.title3)
                     .fontWeight(.semibold)
                     .lineLimit(1)
 
@@ -1350,44 +1231,29 @@ private struct TopicBrowserSection: View {
             }
 
             HStack(spacing: 8) {
-                Text(strings.sortTopics)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Picker(strings.sortTopics, selection: $topicSort) {
-                    ForEach(TopicSort.allCases) { sort in
-                        Text(sort.title(strings: strings)).tag(sort)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 160)
-
-                Spacer(minLength: 8)
-            }
-
-            HStack(spacing: 8) {
-                Text(strings.statsByTopic)
+                Text(strings.topicCount)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(strings.level)
-                    .frame(width: 58, alignment: .leading)
-                Text(strings.range)
-                    .frame(width: 50, alignment: .trailing)
                 Text(strings.responsesShort)
-                    .frame(width: 44, alignment: .trailing)
+                    .frame(width: 58, alignment: .trailing)
+                Text(strings.range)
+                    .frame(width: 64, alignment: .trailing)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
 
-            VStack(spacing: 6) {
-                ForEach(stats) { stat in
-                    Button {
-                        onSelect(stat)
-                    } label: {
-                        TopicStatRow(stat: stat, strings: strings, isSelected: stat.id == selectedTopicID)
+            if stats.isEmpty {
+                ContentUnavailableView(
+                    strings.noMatchingTopics,
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    description: Text(strings.noMatchingTopicsDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(stats) { stat in
+                        TopicStatRow(stat: stat, strings: strings)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1409,48 +1275,62 @@ private struct TopicBrowserSection: View {
 private struct TopicStatRow: View {
     var stat: TopicStat
     var strings: AppStrings
-    var isSelected: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Text(stat.topic)
-                    .font(.callout)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(stat.topic)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Text("\(stat.levelRange.level.level)/10")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(width: 58, alignment: .leading)
+                    if stat.topicAliases.count > 1 {
+                        Text(strings.groupedTopics(stat.topicAliases.joined(separator: " · ")))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(stat.levelRange.compactRangeText)
-                    .font(.callout)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .frame(width: 50, alignment: .trailing)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(stat.count)")
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    Text(strings.responsesShort)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(width: 58, alignment: .trailing)
 
-                Text("\(stat.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 44, alignment: .trailing)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(stat.levelRange.compactRangeText)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    Text(strings.range)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(width: 64, alignment: .trailing)
             }
 
             CompactLevelRangeBar(range: stat.levelRange)
         }
-        .padding(10)
-        .background(isSelected ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.045))
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .background(Color.secondary.opacity(0.045))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.1), lineWidth: 1)
+                .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .contentShape(Rectangle())
     }
 }
 
@@ -1847,7 +1727,7 @@ private struct MiniMetric: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Text(value)
-                .font(.callout)
+                .font(.title3)
                 .fontWeight(.semibold)
                 .lineLimit(1)
                 .truncationMode(.tail)
