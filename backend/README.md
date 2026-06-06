@@ -103,24 +103,25 @@ See [API.md](API.md) for request/response examples.
 
 - `GET /health`
 - `POST /api/v1/devices/register`
-- `PUT /api/v1/devices/{device_id}/push-token`
-- `PUT /api/v1/devices/{device_id}/schedule`
-- `GET /api/v1/devices/{device_id}/settings`
-- `PUT /api/v1/devices/{device_id}/settings`
-- `GET /api/v1/devices/{device_id}/api`
-- `POST /api/v1/devices/{device_id}/api/validate`
-- `GET /api/v1/devices/{device_id}/snapshot`
-- `GET /api/v1/devices/{device_id}/stats`
-- `POST /api/v1/devices/{device_id}/questions`
-- `GET /api/v1/devices/{device_id}/records`
-- `POST /api/v1/devices/{device_id}/records/{record_id}/answer`
-- `DELETE /api/v1/devices/{device_id}/records/{record_id}`
+- `PUT /api/v1/me/push-token`
+- `PUT /api/v1/me/schedule`
+- `GET /api/v1/me/settings`
+- `PUT /api/v1/me/settings`
+- `GET /api/v1/me/api`
+- `POST /api/v1/me/api/validate`
+- `GET /api/v1/me/snapshot`
+- `GET /api/v1/me/stats`
+- `POST /api/v1/me/questions`
+- `GET /api/v1/me/records`
+- `POST /api/v1/me/records/{record_id}/answer`
+- `DELETE /api/v1/me/records/{record_id}`
 - `POST /api/v1/admin/scheduler/run-once`
 
-Device schedule updates require:
+Protected endpoints require:
 
-- `X-Device-Id`
-- `X-Client-Secret`
+- `Authorization: Bearer <accessToken>`
+
+Device credentials are used only to register a device and bootstrap or refresh `/api/v1/auth/token`.
 
 FastAPI also serves generated API docs at `/docs`, `/redoc`, and `/openapi.json`.
 

@@ -24,14 +24,21 @@ The admin endpoint uses the backend token when `BACKEND_API_TOKEN` is configured
 Authorization: Bearer <BACKEND_API_TOKEN>
 ```
 
-Device endpoints use the credentials returned during registration. This is the login-free identity model:
+Access tokens include both `user_id` and `device_id`. Protected endpoints use the token principal instead of a `device_id` path parameter:
 
 ```http
+Authorization: Bearer <accessToken>
+```
+
+Bootstrap or refresh an access token with the credentials returned during registration:
+
+```http
+POST /api/v1/auth/token
 X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
 
-Public question listing is readable without login. Profile editing, reports, records, statistics, study details, and private device data require an access token. Google Login links a Google account to that device identity.
+Public question listing is readable without login. Profile editing, reports, records, statistics, study details, and private device data require `Authorization: Bearer <accessToken>`. Google Login links a Google account to that device identity.
 
 ## Endpoints
 
@@ -81,19 +88,20 @@ Response:
 ```json
 {
   "deviceId": "generated-device-id",
-  "clientSecret": "generated-client-secret"
+  "clientSecret": "generated-client-secret",
+  "accessToken": "jwt-access-token",
+  "accessTokenExpiresAt": "2026-06-01T12:00:00+00:00"
 }
 ```
 
-The app must store both values locally. The backend does not return the client secret again.
+The app must store the device credentials locally because the backend does not return the client secret again. The app should use `accessToken` for protected API calls and refresh it through `/api/v1/auth/token` when it expires.
 
 ### Update Push Token
 
 ```http
-PUT /api/v1/devices/{deviceId}/push-token
+PUT /api/v1/me/push-token
 Content-Type: application/json
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+Authorization: Bearer <accessToken>
 ```
 
 Request:
@@ -110,10 +118,9 @@ Use this after iOS returns an APNs token for an already registered backend devic
 ### Google Login And Profile
 
 ```http
-POST /api/v1/devices/{deviceId}/auth/google
+POST /api/v1/auth/google
 Content-Type: application/json
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+Authorization: Bearer <accessToken>
 ```
 
 Request:
@@ -140,8 +147,8 @@ Response:
 Profile endpoints:
 
 ```http
-GET /api/v1/devices/{deviceId}/profile
-PATCH /api/v1/devices/{deviceId}/profile
+GET /api/v1/me/profile
+PATCH /api/v1/me/profile
 GET /api/v1/public/users/{userId}/profile
 ```
 
@@ -166,10 +173,9 @@ Patch request:
 ### Report Public Question
 
 ```http
-POST /api/v1/devices/{deviceId}/public/questions/{questionId}/report
+POST /api/v1/public/questions/{questionId}/report
 Content-Type: application/json
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+Authorization: Bearer <accessToken>
 ```
 
 Request:
@@ -186,11 +192,10 @@ Reports are always stored in PostgreSQL. If `REPORT_EMAIL_TO` and SMTP settings 
 ### Upsert Study Settings And Schedule
 
 ```http
-PUT /api/v1/devices/{deviceId}/schedule
-PUT /api/v1/devices/{deviceId}/settings
+PUT /api/v1/me/schedule
+PUT /api/v1/me/settings
 Content-Type: application/json
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+Authorization: Bearer <accessToken>
 ```
 
 Request:
@@ -280,9 +285,8 @@ Response:
 ### Settings
 
 ```http
-GET /api/v1/devices/{deviceId}/settings
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+GET /api/v1/me/settings
+Authorization: Bearer <accessToken>
 ```
 
 Returns the same backend settings object used in the startup snapshot.
@@ -290,9 +294,8 @@ Returns the same backend settings object used in the startup snapshot.
 ### API Status
 
 ```http
-GET /api/v1/devices/{deviceId}/api
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+GET /api/v1/me/api
+Authorization: Bearer <accessToken>
 ```
 
 Returns whether the device has an encrypted OpenAI API key configured, the selected model, and OpenAI usage/billing links.
@@ -300,9 +303,8 @@ Returns whether the device has an encrypted OpenAI API key configured, the selec
 ### Validate API Key
 
 ```http
-POST /api/v1/devices/{deviceId}/api/validate
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+POST /api/v1/me/api/validate
+Authorization: Bearer <accessToken>
 ```
 
 Validates the device's stored regular OpenAI API key through the backend and returns:
@@ -320,9 +322,8 @@ The iOS/macOS apps must not validate keys by calling OpenAI directly.
 ### Snapshot
 
 ```http
-GET /api/v1/devices/{deviceId}/snapshot?limit=500&offset=0
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+GET /api/v1/me/snapshot?limit=500&offset=0
+Authorization: Bearer <accessToken>
 ```
 
 Returns backend settings plus a paged record cache for app startup and pull-to-refresh.
@@ -331,13 +332,13 @@ The snapshot also includes `api` and `stats` objects so clients can render API s
 ### Records
 
 ```http
-GET /api/v1/devices/{deviceId}/records?limit=100&offset=0
-GET /api/v1/devices/{deviceId}/records/{recordId}
-PATCH /api/v1/devices/{deviceId}/records/{recordId}/answer
-POST /api/v1/devices/{deviceId}/records/{recordId}/answer
-POST /api/v1/devices/{deviceId}/records/{recordId}/skip
-DELETE /api/v1/devices/{deviceId}/records/{recordId}
-DELETE /api/v1/devices/{deviceId}/records
+GET /api/v1/me/records?limit=100&offset=0
+GET /api/v1/me/records/{recordId}
+PATCH /api/v1/me/records/{recordId}/answer
+POST /api/v1/me/records/{recordId}/answer
+POST /api/v1/me/records/{recordId}/skip
+DELETE /api/v1/me/records/{recordId}
+DELETE /api/v1/me/records
 ```
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
@@ -346,10 +347,9 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 ### Statistics
 
 ```http
-GET /api/v1/devices/{deviceId}/stats?period=all&sort=level&limit=8&offset=0
-GET /api/v1/devices/{deviceId}/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+GET /api/v1/me/stats?period=all&sort=level&limit=8&offset=0
+GET /api/v1/me/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
+Authorization: Bearer <accessToken>
 ```
 
 Query fields:
@@ -365,9 +365,8 @@ The response is topic-first and includes total response/topic counts, topic alia
 ### Manual Question
 
 ```http
-POST /api/v1/devices/{deviceId}/questions
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+POST /api/v1/me/questions
+Authorization: Bearer <accessToken>
 ```
 
 Generates one question using the device settings and stored OpenAI API key, stores it as an ungraded record, and returns that record. The backend enforces a maximum of three ungraded records before creating more.
@@ -375,9 +374,8 @@ Generates one question using the device settings and stored OpenAI API key, stor
 ### Delete Device
 
 ```http
-DELETE /api/v1/devices/{deviceId}
-X-Device-Id: <deviceId>
-X-Client-Secret: <clientSecret>
+DELETE /api/v1/me/device
+Authorization: Bearer <accessToken>
 ```
 
 Response:
@@ -423,8 +421,8 @@ Validation, auth, and server failures return one unified JSON shape:
 
 Common statuses:
 
-- `401`: missing or invalid backend/device credentials.
-- `403`: authenticated device does not match the path `deviceId`.
+- `401`: missing or invalid backend/device credentials, or an access token whose `device_id` no longer matches the stored user-device mapping.
+- `403`: authenticated principal does not have permission for the requested page or resource.
 - `422`: request body failed validation.
 
 Common error codes:

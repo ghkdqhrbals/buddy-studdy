@@ -64,7 +64,7 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
 Manual action / pull-to-refresh / backend scheduled interval
 -> AppState.generateQuestion
 -> RemotePushBackendClient.createQuestion
--> backend POST /api/v1/devices/{deviceId}/questions
+-> backend POST /api/v1/me/questions
 -> backend calls OpenAI and stores an ungraded StudyRecord in PostgreSQL
 -> SettingsStore caches the returned StudyRecord
 -> current question updates only when it is safe to activate
@@ -100,7 +100,8 @@ User answer
 
 ## Community Identity
 
-- Device credentials remain the base authentication mechanism for app/backend API calls.
+- Device credentials are used to register a backend device and bootstrap or refresh an access token.
+- Access tokens carry both `user_id` and `device_id`; protected API calls resolve the current principal from those claims and the stored user-device mapping.
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
 - Public question rows can expose only the author's public profile fields: display name, bio, and avatar URL.
 - Question publicity defaults to private unless the signed-in user enables public sharing.

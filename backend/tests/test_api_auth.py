@@ -71,13 +71,13 @@ def test_access_token_is_the_request_principal(monkeypatch, tmp_path):
     headers = {"Authorization": f"Bearer {first['accessToken']}"}
 
     response = client.put(
-        f"/api/v1/devices/{first['deviceId']}/settings",
+        "/api/v1/me/settings",
         headers=headers,
         json=_schedule_payload(),
     )
     assert response.status_code == 200
 
-    settings_response = client.get(f"/api/v1/devices/{first['deviceId']}/settings", headers=headers)
+    settings_response = client.get("/api/v1/me/settings", headers=headers)
     assert settings_response.status_code == 200
     assert settings_response.json()["topic"] == "SwiftUI"
     assert settings_response.json()["isQuestionPublic"] is False
@@ -85,11 +85,18 @@ def test_access_token_is_the_request_principal(monkeypatch, tmp_path):
     token_payload = jwt.decode(first["accessToken"], "test-jwt-secret", algorithms=["HS256"], issuer="buddystuddy")
     assert token_payload["user_id"]
     assert token_payload["session_id"]
-    assert "device_id" not in token_payload
+    assert token_payload["device_id"] == first["deviceId"]
 
-    mismatch = client.get(f"/api/v1/devices/{second['deviceId']}/settings", headers=headers)
-    assert mismatch.status_code == 200
-    assert mismatch.json()["topic"] == "SwiftUI"
+    tampered_token = jwt.encode(
+        {
+            **token_payload,
+            "device_id": second["deviceId"],
+        },
+        "test-jwt-secret",
+        algorithm="HS256",
+    )
+    mismatch = client.get("/api/v1/me/settings", headers={"Authorization": f"Bearer {tampered_token}"})
+    assert mismatch.status_code == 401
 
     me_settings = client.get("/api/v1/me/settings", headers=headers)
     assert me_settings.status_code == 200
@@ -118,7 +125,7 @@ def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_p
     registered = _register(client, "apns-token-legacy-" + "c" * 32)
 
     response = client.post(
-        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        "/api/v1/auth/token",
         headers={
             "X-Device-Id": registered["deviceId"],
             "X-Client-Secret": registered["clientSecret"],
@@ -128,6 +135,8 @@ def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_p
     assert response.status_code == 200
     token = response.json()["accessToken"]
     assert token
+    token_payload = jwt.decode(token, "test-jwt-secret", algorithms=["HS256"], issuer="buddystuddy")
+    assert token_payload["device_id"] == registered["deviceId"]
 
     pathless_response = client.post(
         "/api/v1/auth/token",
@@ -140,7 +149,7 @@ def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_p
     assert pathless_response.json()["accessToken"]
 
     settings_response = client.get(
-        f"/api/v1/devices/{registered['deviceId']}/settings",
+        "/api/v1/me/settings",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert settings_response.status_code == 200
@@ -164,12 +173,12 @@ def test_google_login_accepts_access_token_or_legacy_device_credentials(monkeypa
     registered = _register(client, "apns-token-google-login-" + "g" * 32)
     body = {"idToken": "google-id-token-for-tests"}
 
-    missing_auth_response = client.post(f"/api/v1/devices/{registered['deviceId']}/auth/google", json=body)
+    missing_auth_response = client.post("/api/v1/auth/google", json=body)
     assert missing_auth_response.status_code == 401
     assert missing_auth_response.json()["error"]["code"] == "AUTH_ACCESS_TOKEN_REQUIRED"
 
     legacy_response = client.post(
-        f"/api/v1/devices/{registered['deviceId']}/auth/google",
+        "/api/v1/auth/google",
         headers={
             "X-Device-Id": registered["deviceId"],
             "X-Client-Secret": registered["clientSecret"],
@@ -182,7 +191,7 @@ def test_google_login_accepts_access_token_or_legacy_device_credentials(monkeypa
 
     second = _register(client, "apns-token-google-login-" + "h" * 32)
     access_token_response = client.post(
-        f"/api/v1/devices/{second['deviceId']}/auth/google",
+        "/api/v1/auth/google",
         headers={"Authorization": f"Bearer {second['accessToken']}"},
         json=body,
     )
@@ -205,7 +214,7 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert profile is not None
 
     token_response = client.post(
-        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        "/api/v1/auth/token",
         headers={
             "X-Device-Id": registered["deviceId"],
             "X-Client-Secret": registered["clientSecret"],
@@ -244,7 +253,7 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert [item["id"] for item in public_response.json()["questions"]] == [record["id"]]
 
     privacy_response = client.patch(
-        f"/api/v1/devices/{registered['deviceId']}/records/{record['id']}/publicity",
+        f"/api/v1/me/records/{record['id']}/publicity",
         headers=headers,
         json={"isPublic": False},
     )
@@ -270,7 +279,7 @@ def test_profile_page_access_can_hide_public_questions_and_reports_private_page_
     assert profile is not None
 
     token_response = client.post(
-        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        "/api/v1/auth/token",
         headers={
             "X-Device-Id": registered["deviceId"],
             "X-Client-Secret": registered["clientSecret"],
@@ -304,7 +313,7 @@ def test_profile_page_access_can_hide_public_questions_and_reports_private_page_
     assert [item["id"] for item in public_response.json()["questions"]] == [record["id"]]
 
     profile_response = client.patch(
-        f"/api/v1/devices/{registered['deviceId']}/profile",
+        "/api/v1/me/profile",
         headers=headers,
         json={"pageAccess": {"publicQuestions": False, "statistics": True, "studyDetail": True, "records": True}},
     )
@@ -330,28 +339,28 @@ def test_records_stats_and_study_detail_require_page_access(monkeypatch, tmp_pat
     guest_headers = {"Authorization": f"Bearer {registered['accessToken']}"}
 
     settings_response = client.put(
-        f"/api/v1/devices/{registered['deviceId']}/settings",
+        "/api/v1/me/settings",
         headers=guest_headers,
         json=_schedule_payload(),
     )
     assert settings_response.status_code == 200
 
-    records_response = client.get(f"/api/v1/devices/{registered['deviceId']}/records", headers=guest_headers)
+    records_response = client.get("/api/v1/me/records", headers=guest_headers)
     assert records_response.status_code == 403
     assert records_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
     assert records_response.json()["error"]["message"] == "Page access denied: records."
 
-    stats_response = client.get(f"/api/v1/devices/{registered['deviceId']}/stats", headers=guest_headers)
+    stats_response = client.get("/api/v1/me/stats", headers=guest_headers)
     assert stats_response.status_code == 403
     assert stats_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
     assert stats_response.json()["error"]["message"] == "Page access denied: statistics."
 
-    create_response = client.post(f"/api/v1/devices/{registered['deviceId']}/questions", headers=guest_headers)
+    create_response = client.post("/api/v1/me/questions", headers=guest_headers)
     assert create_response.status_code == 403
     assert create_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
     assert create_response.json()["error"]["message"] == "Page access denied: studyDetail."
 
-    snapshot_response = client.get(f"/api/v1/devices/{registered['deviceId']}/snapshot", headers=guest_headers)
+    snapshot_response = client.get("/api/v1/me/snapshot", headers=guest_headers)
     assert snapshot_response.status_code == 200
     snapshot = snapshot_response.json()
     assert snapshot["records"] == []
@@ -366,7 +375,7 @@ def test_records_stats_and_study_detail_require_page_access(monkeypatch, tmp_pat
     )
     assert profile is not None
     token_response = client.post(
-        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        "/api/v1/auth/token",
         headers={
             "X-Device-Id": registered["deviceId"],
             "X-Client-Secret": registered["clientSecret"],
@@ -375,8 +384,8 @@ def test_records_stats_and_study_detail_require_page_access(monkeypatch, tmp_pat
     assert token_response.status_code == 200
     user_headers = {"Authorization": f"Bearer {token_response.json()['accessToken']}"}
 
-    records_response = client.get(f"/api/v1/devices/{registered['deviceId']}/records", headers=user_headers)
+    records_response = client.get("/api/v1/me/records", headers=user_headers)
     assert records_response.status_code == 200
 
-    stats_response = client.get(f"/api/v1/devices/{registered['deviceId']}/stats", headers=user_headers)
+    stats_response = client.get("/api/v1/me/stats", headers=user_headers)
     assert stats_response.status_code == 200
