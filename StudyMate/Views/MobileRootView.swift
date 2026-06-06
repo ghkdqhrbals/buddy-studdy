@@ -1,5 +1,6 @@
 import SwiftUI
-#if canImport(UIKit)
+#if os(iOS)
+import PhotosUI
 import UIKit
 #endif
 
@@ -16,7 +17,6 @@ struct MobileRootView: View {
                 NavigationStack {
                     MobileHomeView()
                         .padding(.horizontal, 16)
-                        .mobileTabTitle(strings.tabHome)
                         .navigationDestination(item: $appState.homeStudyRoute) { route in
                             StudyView(preferredCategoryID: route.categoryID)
                                 .padding(.horizontal, 16)
@@ -31,7 +31,6 @@ struct MobileRootView: View {
                 NavigationStack {
                     HistoryView()
                         .padding(.horizontal, 16)
-                        .mobileTabTitle(strings.tabRecords)
                 }
                 .tabItem {
                     Label(strings.tabRecords, systemImage: "clock.arrow.circlepath")
@@ -41,7 +40,6 @@ struct MobileRootView: View {
                 NavigationStack {
                     StatisticsView()
                         .padding(.horizontal, 16)
-                        .mobileTabTitle(strings.tabStatistics)
                 }
                 .tabItem {
                     Label(strings.tabStatistics, systemImage: "chart.xyaxis.line")
@@ -50,7 +48,6 @@ struct MobileRootView: View {
 
                 NavigationStack {
                     MobileSettingsView()
-                        .mobileTabTitle(strings.tabSettings)
                 }
                 .tabItem {
                     Label(strings.tabSettings, systemImage: "gearshape.fill")
@@ -85,208 +82,300 @@ struct MobileRootView: View {
 
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var selectedHomeScope: HomeFeedScope = .my
     @State private var editMode: EditMode = .inactive
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestion: CommunityQuestion?
     @State private var isShowingProfileSettings = false
+    @State private var isPullRefreshing = false
+    @State private var isSearchVisible = false
+    @State private var homeStudySearchText = ""
+    @State private var communitySearchDebounceTask: Task<Void, Never>?
+    @FocusState private var isSearchFocused: Bool
 
     private var strings: AppStrings {
         appState.strings
     }
 
+    private var trimmedHomeStudySearchText: String {
+        homeStudySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var activeSearchText: Binding<String> {
+        Binding(
+            get: {
+                selectedHomeScope == .my ? homeStudySearchText : appState.communitySearchText
+            },
+            set: { newValue in
+                if selectedHomeScope == .my {
+                    homeStudySearchText = newValue
+                } else {
+                    appState.communitySearchText = newValue
+                }
+            }
+        )
+    }
+
+    private var activeTrimmedSearchText: String {
+        activeSearchText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredStudyCategories: [StudyCategory] {
+        let categories = appState.studyCategoriesForDisplay
+        let query = trimmedHomeStudySearchText
+        guard !query.isEmpty else {
+            return categories
+        }
+
+        return categories.filter { category in
+            category.matchesHomeSearch(query, appLanguage: strings.language)
+        }
+    }
+
     var body: some View {
-        List {
-            Section(strings.studyCategories) {
-                ForEach(appState.studyCategoriesForDisplay) { category in
-                    if editMode.isEditing {
-                        MobileHomeCategoryRow(
-                            category: category,
-                            isActive: appState.settings.selectedStudyCategoryID == category.id,
-                            strings: strings
-                        )
-                    } else {
-                        Button {
-                            appState.homeStudyRoute = HomeStudyRoute(categoryID: category.id)
-                        } label: {
-                            MobileHomeCategoryRow(
-                                category: category,
-                                isActive: appState.settings.selectedStudyCategoryID == category.id,
-                                strings: strings
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                editingStudyCategory = category
-                            } label: {
-                                Label(strings.edit, systemImage: "pencil")
-                            }
-                            .tint(.blue)
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            if appState.settings.selectedStudyCategoryID != category.id {
-                                Button {
-                                    appState.activateStudyCategory(category.id)
-                                } label: {
-                                    Label(strings.activateStudy, systemImage: "checkmark.circle")
-                                }
-                                .tint(.green)
-                            }
-                        }
+        VStack(spacing: 0) {
+            List {
+                Picker("", selection: $selectedHomeScope) {
+                    ForEach(HomeFeedScope.allCases) { scope in
+                        Text(scope.title(strings: strings))
+                            .tag(scope)
                     }
                 }
-                .onMove(perform: appState.moveStudyCategories)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
 
-                Text(strings.studyProfileHelp)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if appState.isCommunitySignedIn {
-                Section {
-                    if let message = appState.communityErrorMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
+                if isPullRefreshing {
+                    HStack {
+                        Spacer()
                         ProgressView()
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 8)
+                            .controlSize(.small)
+                        Spacer()
                     }
+                    .padding(.vertical, 10)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .accessibilityLabel(strings.refresh)
+                }
 
-                    if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
-                        Text(strings.noCommunityQuestions)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
-                    } else {
-                        ForEach(appState.communityQuestions) { question in
-                            Button {
-                                selectedCommunityQuestion = question
-                            } label: {
-                                MobileCommunityQuestionRow(question: question)
+                if selectedHomeScope == .my {
+                    Section {
+                        if filteredStudyCategories.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(strings.noMatchingTopics)
+                                    .font(.subheadline.weight(.semibold))
+
+                                Text(strings.noMatchingTopicsDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await appState.reportCommunityQuestion(
-                                            question,
-                                            reason: strings.reportReasonInappropriate
+                            .padding(.vertical, 8)
+                        } else {
+                            ForEach(filteredStudyCategories) { category in
+                                if editMode.isEditing {
+                                    MobileHomeCategoryRow(
+                                        category: category,
+                                        isActive: appState.settings.selectedStudyCategoryID == category.id,
+                                        strings: strings
+                                    )
+                                } else {
+                                    Button {
+                                        appState.homeStudyRoute = HomeStudyRoute(categoryID: category.id)
+                                    } label: {
+                                        MobileHomeCategoryRow(
+                                            category: category,
+                                            isActive: appState.settings.selectedStudyCategoryID == category.id,
+                                            strings: strings
                                         )
                                     }
-                                } label: {
-                                    Label(strings.report, systemImage: "exclamationmark.bubble")
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button {
+                                            editingStudyCategory = category
+                                        } label: {
+                                            Label(strings.edit, systemImage: "pencil")
+                                        }
+
+                                        if appState.settings.selectedStudyCategoryID != category.id {
+                                            Button {
+                                                appState.activateStudyCategory(category.id)
+                                            } label: {
+                                                Label(strings.activateStudy, systemImage: "checkmark.circle")
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            .onAppear {
-                                appState.shouldLoadNextCommunityQuestion(after: question.id)
+                            .onMove { offsets, destination in
+                                guard trimmedHomeStudySearchText.isEmpty else {
+                                    return
+                                }
+
+                                appState.moveStudyCategories(from: offsets, to: destination)
+                            }
+                        }
+                    }
+                } else if appState.isCommunitySignedIn {
+                    Section {
+                        if let message = appState.communityErrorMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+
+                        if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
+                            ProgressView()
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.vertical, 8)
+                        }
+
+                        if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
+                            Text(strings.noCommunityQuestions)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        } else {
+                            ForEach(appState.communityQuestions) { question in
+                                Button {
+                                    selectedCommunityQuestion = question
+                                } label: {
+                                    MobileCommunityQuestionRow(question: question)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await appState.reportCommunityQuestion(
+                                                question,
+                                                reason: strings.reportReasonInappropriate
+                                            )
+                                        }
+                                    } label: {
+                                        Label(strings.report, systemImage: "exclamationmark.bubble")
+                                    }
+                                }
+                                .onAppear {
+                                    appState.shouldLoadNextCommunityQuestion(after: question.id)
+                                }
+                            }
+
+                            if appState.isLoadingCommunityQuestions && appState.canLoadCommunityQuestions {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 6)
                             }
                         }
 
-                        if appState.isLoadingCommunityQuestions && appState.canLoadCommunityQuestions {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                    .controlSize(.small)
-                                Spacer()
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-
-                    Button(role: .destructive) {
-                        appState.signOutFromCommunity()
-                    } label: {
-                        Text(strings.communityLogout)
-                    }
-                } header: {
-                    Text(strings.communityFeed)
-                } footer: {
-                    Text(appState.communityQuestions.isEmpty ? strings.communitySearchHelp : strings.communityQuestionLimit)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(strings.communityLoginHelp)
-                            .font(.caption)
+                    } header: {
+                        Text(strings.communityFeed)
+                    } footer: {
+                        Text(appState.communityQuestions.isEmpty ? strings.communitySearchHelp : strings.communityQuestionLimit)
                             .foregroundStyle(.secondary)
-
-                        Button {
-                            appState.signInToCommunity()
-                        } label: {
-                            Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
-                        }
                     }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text(strings.communityFeed)
+                } else {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(strings.communityLoginHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Button {
+                                appState.signInToCommunity()
+                            } label: {
+                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 4)
+                    } header: {
+                        Text(strings.communityFeed)
+                    }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await refreshHomeData()
+            }
+            .searchSafeRefreshControlOffset(offset: 36, isRefreshing: isPullRefreshing, hidesSystemIndicator: true)
         }
         .background(Color(.systemBackground))
-        .searchable(
-            text: $appState.communitySearchText,
-            placement: .navigationBarDrawer(displayMode: .automatic),
-            prompt: strings.topicSearch
-        )
         .environment(\.editMode, $editMode)
+        .navigationTitle(strings.tabHome)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+        .mobileToolbarSearchable(
+            isPresented: isSearchVisible || !activeTrimmedSearchText.isEmpty,
+            text: activeSearchText,
+            prompt: strings.topicSearch,
+            focus: $isSearchFocused
+        )
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .topBarLeading) {
+                profileToolbarButton
+            }
+
+            ToolbarItem(placement: .principal) {
+                homeToolbarSearchField(strings: strings)
+            }
+
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                homeToolbarItems(strings: strings)
+            }
+            #else
+            ToolbarItemGroup(placement: .primaryAction) {
+                profileToolbarButton
+                homeToolbarItems(strings: strings)
+            }
+            #endif
+        }
         .task {
-            guard appState.isCommunitySignedIn, !hasLoadedCommunityQuestions else {
+            await loadCommunityQuestionsIfNeeded(userInitiated: false)
+        }
+        .onChange(of: isSearchFocused) { _, isFocused in
+            guard !isFocused,
+                  activeTrimmedSearchText.isEmpty else {
                 return
             }
 
-            hasLoadedCommunityQuestions = true
-            await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+            closeHomeSearch(clearText: false)
         }
-        .refreshable {
-            await appState.refreshVisibleData()
-            if appState.isCommunitySignedIn {
-                await appState.loadCommunityQuestions(reset: true, userInitiated: false)
-            }
-        }
-        .onSubmit(of: .search) {
-            if appState.isCommunitySignedIn {
-                appState.refreshCommunityQuestions(userInitiated: true)
-            }
-        }
-        .onChange(of: appState.communitySearchText) { _, newValue in
-            if appState.isCommunitySignedIn,
-               newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                appState.refreshCommunityQuestions(userInitiated: false)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    isShowingProfileSettings = true
-                } label: {
-                    HomeProfileAvatar(profile: appState.communityProfile)
+        .onChange(of: selectedHomeScope) { _, newScope in
+            if newScope == .all {
+                editMode = .inactive
+                Task {
+                    await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 }
-                .accessibilityLabel(strings.profile)
+            }
+        }
+        .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+            hasLoadedCommunityQuestions = false
+            guard isSignedIn, selectedHomeScope == .all else {
+                return
             }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    Button {
-                        withAnimation {
-                            editMode = editMode.isEditing ? .inactive : .active
-                        }
-                    } label: {
-                        Text(editMode.isEditing ? strings.done : strings.edit)
-                    }
-
-                    Button {
-                        isAddingStudyCategory = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
+            Task {
+                await loadCommunityQuestionsIfNeeded(userInitiated: false)
+            }
+        }
+        .onChange(of: appState.communitySearchText) {
+            scheduleCommunitySearchReload()
+        }
+        .onDisappear {
+            communitySearchDebounceTask?.cancel()
+            if activeTrimmedSearchText.isEmpty {
+                closeHomeSearch(clearText: false)
             }
         }
         .sheet(isPresented: $isShowingProfileSettings) {
@@ -314,44 +403,258 @@ private struct MobileHomeView: View {
             CommunityQuestionDetailSheet(question: question)
         }
     }
+
+    private var profileToolbarButton: some View {
+        let strings = appState.strings
+
+        return Button {
+            isShowingProfileSettings = true
+        } label: {
+            HomeProfileAvatar(
+                symbolName: appState.profileAvatarSymbolName,
+                displayName: appState.communityProfile?.displayName,
+                imageData: appState.profileAvatarImageData,
+                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+                size: 34
+            )
+            .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.profile)
+    }
+
+    @ViewBuilder
+    private func homeToolbarSearchField(strings: AppStrings) -> some View {
+        if isSearchVisible || !activeTrimmedSearchText.isEmpty {
+            MobileToolbarSearchField(
+                text: activeSearchText,
+                prompt: strings.topicSearch,
+                focus: $isSearchFocused,
+                closeAccessibilityLabel: strings.clearSearch,
+                onSubmit: {
+                    guard selectedHomeScope == .all else {
+                        return
+                    }
+
+                    Task {
+                        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+                    }
+                },
+                onClose: {
+                    closeHomeSearch(clearText: true)
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func homeToolbarItems(strings: AppStrings) -> some View {
+        Button {
+            showHomeSearch()
+        } label: {
+            Image(systemName: "magnifyingglass")
+        }
+        .accessibilityLabel(strings.search)
+
+        if selectedHomeScope == .my {
+            Button {
+                isAddingStudyCategory = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel(strings.newStudyCategory)
+        }
+    }
+
+    @MainActor
+    private func showHomeSearch() {
+        if isSearchVisible || !activeTrimmedSearchText.isEmpty {
+            isSearchFocused = false
+            closeHomeSearch(clearText: true)
+            return
+        }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            isSearchVisible = true
+        }
+        Task { @MainActor in
+            await Task.yield()
+            isSearchFocused = true
+        }
+    }
+
+    @MainActor
+    private func closeHomeSearch(clearText: Bool) {
+        if clearText {
+            setActiveSearchText("")
+        }
+
+        withAnimation(.snappy(duration: 0.18)) {
+            isSearchVisible = false
+        }
+    }
+
+    @MainActor
+    private func setActiveSearchText(_ value: String) {
+        if selectedHomeScope == .my {
+            homeStudySearchText = value
+        } else {
+            appState.communitySearchText = value
+        }
+    }
+
+    @MainActor
+    private func refreshHomeData() async {
+        isPullRefreshing = true
+        defer {
+            isPullRefreshing = false
+        }
+
+        switch selectedHomeScope {
+        case .my:
+            await appState.refreshVisibleData()
+        case .all:
+            hasLoadedCommunityQuestions = true
+            await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+        }
+    }
+
+    @MainActor
+    private func loadCommunityQuestionsIfNeeded(userInitiated: Bool) async {
+        guard selectedHomeScope == .all,
+              appState.isCommunitySignedIn else {
+            return
+        }
+
+        guard userInitiated || !hasLoadedCommunityQuestions else {
+            return
+        }
+
+        hasLoadedCommunityQuestions = true
+        await appState.loadCommunityQuestions(reset: true, userInitiated: userInitiated)
+    }
+
+    @MainActor
+    private func scheduleCommunitySearchReload() {
+        communitySearchDebounceTask?.cancel()
+        guard selectedHomeScope == .all,
+              appState.isCommunitySignedIn else {
+            return
+        }
+
+        communitySearchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            hasLoadedCommunityQuestions = true
+            await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+        }
+    }
 }
 
+private enum HomeFeedScope: String, CaseIterable, Identifiable {
+    case my
+    case all
+
+    var id: String {
+        rawValue
+    }
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .my:
+            strings.homeScopeMy
+        case .all:
+            strings.homeScopeAll
+        }
+    }
+}
 private struct HomeProfileAvatar: View {
-    var profile: CommunityUserProfile?
+    var symbolName: String
+    var displayName: String?
+    var imageData: Data? = nil
+    var colorSeed: String = "profile"
     var size: CGFloat = 34
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color(.secondarySystemBackground))
-
-            if let avatarURL = profile?.avatarURL {
-                AsyncImage(url: avatarURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            } else if let initial = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines).first {
-                Text(String(initial).uppercased())
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
+        Group {
+            #if os(iOS)
+            if let imageData,
+               let uiImage = UIImage(data: imageData) {
+                avatarPhoto(uiImage)
             } else {
-                Image(systemName: "person.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                defaultGlyph
             }
+            #else
+            defaultGlyph
+            #endif
         }
         .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay {
-            Circle()
-                .strokeBorder(Color(.separator).opacity(0.5), lineWidth: 0.6)
-        }
         .contentShape(Circle())
+    }
+
+    private var defaultGlyph: some View {
+        PersonAvatarGlyph(colorSeed: defaultColorSeed)
+            .frame(width: size, height: size)
+    }
+
+    private var defaultColorSeed: String {
+        let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedColorSeed = colorSeed.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedColorSeed.isEmpty {
+            return trimmedColorSeed
+        }
+
+        if !trimmedDisplayName.isEmpty {
+            return trimmedDisplayName
+        }
+
+        return symbolName
+    }
+
+    #if os(iOS)
+    private func avatarPhoto(_ uiImage: UIImage) -> some View {
+        Image(uiImage: uiImage)
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+    }
+    #endif
+}
+
+private struct PersonAvatarGlyph: View {
+    var colorSeed: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            let iconSize = min(proxy.size.width, proxy.size.height) * 0.48
+
+            ZStack {
+                Circle()
+                    .fill(stableAvatarColor(seed: colorSeed))
+
+                Image(systemName: "person.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+
+    private func stableAvatarColor(seed: String) -> Color {
+        let normalizedSeed = seed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = normalizedSeed.isEmpty ? "buddy-studdy-default-profile" : normalizedSeed
+        let hash = source.unicodeScalars.reduce(UInt32(2_166_136_261)) { value, scalar in
+            (value ^ UInt32(scalar.value)) &* 16_777_619
+        }
+
+        let hue = Double(hash % 360) / 360.0
+        return Color(hue: hue, saturation: 0.48, brightness: 0.74)
     }
 }
 
@@ -359,32 +662,38 @@ private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
-    @State private var profileBio = ""
+    #if os(iOS)
+    @State private var selectedProfilePhotoItem: PhotosPickerItem?
+    @State private var pendingProfilePhotoData: Data?
+    @State private var isShowingProfilePhotoCropper = false
+    #endif
 
     private var strings: AppStrings {
         appState.strings
     }
 
     var body: some View {
+        let strings = appState.strings
+        let chooseProfilePhotoTitle = strings.chooseProfilePhoto
+        let removeProfilePhotoTitle = strings.removeProfilePhoto
+
         NavigationStack {
             Form {
                 if appState.isCommunitySignedIn {
                     Section {
                         HStack(spacing: 14) {
-                            HomeProfileAvatar(profile: appState.communityProfile, size: 54)
+                            HomeProfileAvatar(
+                                symbolName: ProfileAvatarOption.defaultSymbolName,
+                                displayName: profileDisplayName,
+                                imageData: appState.profileAvatarImageData,
+                                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+                                size: 54
+                            )
 
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(appState.communityProfile?.displayName ?? strings.profile)
                                     .font(.headline)
                                     .lineLimit(1)
-
-                                if let bio = appState.communityProfile?.bio,
-                                   !bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text(bio)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -393,26 +702,23 @@ private struct MobileProfileSettingsSheet: View {
                     Section(strings.profile) {
                         TextField(strings.profileDisplayName, text: $profileDisplayName)
                             .textInputAutocapitalization(.words)
+                    }
 
-                        TextField(strings.profileBio, text: $profileBio, axis: .vertical)
-                            .lineLimit(3...5)
+                    #if os(iOS)
+                    Section(strings.profileAvatar) {
+                        PhotosPicker(selection: $selectedProfilePhotoItem, matching: .images) {
+                            Label(chooseProfilePhotoTitle, systemImage: "photo")
+                        }
 
-                        Button {
-                            Task {
-                                await appState.updateCommunityProfile(
-                                    displayName: profileDisplayName,
-                                    bio: profileBio
-                                )
-                            }
-                        } label: {
-                            if appState.isUpdatingCommunityProfile {
-                                ProgressView()
-                            } else {
-                                Text(strings.save)
+                        if appState.profileAvatarImageData != nil {
+                            Button(role: .destructive) {
+                                appState.updateProfileAvatarImageData(nil)
+                            } label: {
+                                Label(removeProfilePhotoTitle, systemImage: "trash")
                             }
                         }
-                        .disabled(appState.isUpdatingCommunityProfile)
                     }
+                    #endif
 
                     Section {
                         Button(role: .destructive) {
@@ -425,7 +731,13 @@ private struct MobileProfileSettingsSheet: View {
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
-                            HomeProfileAvatar(profile: nil, size: 58)
+                            HomeProfileAvatar(
+                                symbolName: ProfileAvatarOption.defaultSymbolName,
+                                displayName: nil,
+                                imageData: appState.profileAvatarImageData,
+                                colorSeed: appState.profileAvatarColorSeed,
+                                size: 58
+                            )
 
                             Text(strings.communityLoginHelp)
                                 .font(.caption)
@@ -434,8 +746,9 @@ private struct MobileProfileSettingsSheet: View {
                             Button {
                                 appState.signInToCommunity()
                             } label: {
-                                Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
+                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
                             }
+                            .buttonStyle(.plain)
                         }
                         .padding(.vertical, 6)
                     }
@@ -446,20 +759,308 @@ private struct MobileProfileSettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(strings.done) {
-                        dismiss()
+                    Button {
+                        guard appState.isCommunitySignedIn else {
+                            dismiss()
+                            return
+                        }
+
+                        Task {
+                            await appState.updateCommunityProfile(displayName: profileDisplayName)
+                            dismiss()
+                        }
+                    } label: {
+                        if appState.isUpdatingCommunityProfile {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(profileConfirmationTitle(strings: strings))
+                        }
                     }
+                    .disabled(appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
                 profileDisplayName = appState.communityProfile?.displayName ?? ""
-                profileBio = appState.communityProfile?.bio ?? ""
                 Task {
                     await appState.loadCommunityProfile()
                     profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
-                    profileBio = appState.communityProfile?.bio ?? profileBio
                 }
             }
+            #if os(iOS)
+            .onChange(of: selectedProfilePhotoItem) { _, item in
+                guard let item else {
+                    return
+                }
+
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        pendingProfilePhotoData = data
+                        isShowingProfilePhotoCropper = true
+                    }
+                    selectedProfilePhotoItem = nil
+                }
+            }
+            .sheet(isPresented: $isShowingProfilePhotoCropper) {
+                if let pendingProfilePhotoData {
+                    ProfilePhotoCropSheet(imageData: pendingProfilePhotoData) { croppedData in
+                        appState.updateProfileAvatarImageData(croppedData)
+                    }
+                }
+            }
+            #endif
+        }
+    }
+
+    private func profileConfirmationTitle(strings: AppStrings) -> String {
+        guard appState.isCommunitySignedIn else {
+            return strings.done
+        }
+
+        return strings.save
+    }
+}
+
+private enum ProfileAvatarOption {
+    static let defaultSymbolName = "person.fill"
+
+    static let all = [
+        defaultSymbolName,
+        "graduationcap.fill",
+        "book.fill",
+        "brain.head.profile",
+        "sparkles",
+        "star.fill",
+        "bolt.fill",
+        "leaf.fill"
+    ]
+
+    static func glyphName(for symbolName: String) -> String {
+        canonicalName(for: symbolName)
+    }
+
+    static func canonicalName(for symbolName: String) -> String {
+        switch symbolName {
+        case "person.crop.circle.fill", "pencil.tip":
+            return defaultSymbolName
+        case "graduationcap.circle.fill":
+            return "graduationcap.fill"
+        case "book.circle.fill":
+            return "book.fill"
+        case "star.circle.fill":
+            return "star.fill"
+        case "bolt.circle.fill":
+            return "bolt.fill"
+        case "leaf.circle.fill":
+            return "leaf.fill"
+        default:
+            return symbolName
+        }
+    }
+}
+
+#if os(iOS)
+private struct ProfilePhotoCropSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    var imageData: Data
+    var onUse: (Data) -> Void
+    @State private var scale: Double = 1.0
+
+    private var uiImage: UIImage? {
+        UIImage(data: imageData)
+    }
+
+    var body: some View {
+        let strings = appState.strings
+
+        NavigationStack {
+            VStack(spacing: 22) {
+                Spacer(minLength: 8)
+
+                ZStack {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.08))
+
+                    if let uiImage {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .scaleEffect(scale)
+                    }
+                }
+                .frame(width: 220, height: 220)
+                .clipShape(Circle())
+                .overlay {
+                    Circle()
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text(strings.profilePhotoScale)
+                        Spacer()
+                        Text(String(format: "%.1fx", scale))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .font(.caption)
+
+                    Slider(value: $scale, in: 1...3, step: 0.05)
+                }
+                .padding(.horizontal, 24)
+
+                Spacer()
+            }
+            .navigationTitle(strings.profileAvatar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.useProfilePhoto) {
+                        if let croppedData = croppedImageData() {
+                            onUse(croppedData)
+                        }
+                        dismiss()
+                    }
+                    .disabled(uiImage == nil)
+                }
+            }
+        }
+    }
+
+    private func croppedImageData() -> Data? {
+        guard let sourceImage = uiImage,
+              let cgImage = sourceImage.normalizedForCropping().cgImage else {
+            return nil
+        }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let baseSquareSize = min(width, height)
+        let cropSize = max(1, baseSquareSize / CGFloat(scale))
+        let cropRect = CGRect(
+            x: max(0, (width - cropSize) / 2),
+            y: max(0, (height - cropSize) / 2),
+            width: min(cropSize, width),
+            height: min(cropSize, height)
+        ).integral
+
+        guard let cropped = cgImage.cropping(to: cropRect) else {
+            return nil
+        }
+
+        let outputSize = CGSize(width: 512, height: 512)
+        let renderer = UIGraphicsImageRenderer(size: outputSize)
+        let image = renderer.image { _ in
+            UIImage(cgImage: cropped).draw(in: CGRect(origin: .zero, size: outputSize))
+        }
+
+        return image.jpegData(compressionQuality: 0.88)
+    }
+}
+
+private extension UIImage {
+    func normalizedForCropping() -> UIImage {
+        guard imageOrientation != .up else {
+            return self
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+#endif
+
+private struct GoogleSignInButtonLabel: View {
+    var title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            GoogleMark()
+                .frame(width: 18, height: 18)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(Color.secondary.opacity(0.06))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .foregroundStyle(.primary)
+    }
+}
+
+private struct GoogleMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let lineWidth = max(2.4, size.width * 0.16)
+            let radius = min(size.width, size.height) / 2 - lineWidth / 2
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+
+            func arc(_ start: Double, _ end: Double, _ color: Color) {
+                var path = Path()
+                path.addArc(
+                    center: center,
+                    radius: radius,
+                    startAngle: .degrees(start),
+                    endAngle: .degrees(end),
+                    clockwise: false
+                )
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            }
+
+            arc(-35, 42, Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
+            arc(42, 150, Color(red: 234 / 255, green: 67 / 255, blue: 53 / 255))
+            arc(150, 218, Color(red: 251 / 255, green: 188 / 255, blue: 5 / 255))
+            arc(218, 322, Color(red: 52 / 255, green: 168 / 255, blue: 83 / 255))
+
+            var crossbar = Path()
+            crossbar.move(to: CGPoint(x: center.x, y: center.y))
+            crossbar.addLine(to: CGPoint(x: size.width - lineWidth * 0.4, y: center.y))
+            context.stroke(
+                crossbar,
+                with: .color(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)),
+                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+            )
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private extension StudyCategory {
+    func matchesHomeSearch(_ rawQuery: String, appLanguage: AppLanguage) -> Bool {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return true
+        }
+
+        let searchableFields = [
+            normalizedTitle,
+            normalizedCustomPrompt,
+            sanitizedOpenAIModel,
+            difficulty.displayName(language: appLanguage),
+            "level \(difficulty.level)",
+            "레벨 \(difficulty.level)"
+        ]
+
+        return searchableFields.contains { field in
+            field.localizedCaseInsensitiveContains(query)
         }
     }
 }
@@ -476,16 +1077,9 @@ private struct MobileHomeCategoryRow: View {
                 .frame(width: 4, height: 34)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(category.title)
-                        .lineLimit(1)
-
-                    if isActive {
-                        Text(strings.activeStudy)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(category.title)
+                    .lineLimit(1)
+                    .fontWeight(isActive ? .semibold : .regular)
 
                 Text("\(category.difficulty.displayName(language: strings.language)) · \(category.sanitizedOpenAIModel)")
                     .font(.caption2)
@@ -493,8 +1087,12 @@ private struct MobileHomeCategoryRow: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .frame(minHeight: 46)
         .contentShape(Rectangle())
     }
@@ -703,24 +1301,15 @@ private struct CommunityQuestionDetailSheet: View {
                 if let author = question.author {
                     Section(strings.profile) {
                         HStack(spacing: 12) {
-                            AsyncImage(url: author.avatarURL) { image in
-                                image.resizable().scaledToFill()
-                            } placeholder: {
-                                Image(systemName: "person.crop.circle.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(width: 42, height: 42)
-                            .clipShape(Circle())
+                            HomeProfileAvatar(
+                                symbolName: ProfileAvatarOption.defaultSymbolName,
+                                displayName: author.displayName,
+                                size: 42
+                            )
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(author.displayName)
                                     .font(.headline)
-                                if !author.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text(author.bio)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
                             }
                         }
                     }
@@ -924,138 +1513,126 @@ private struct MobileOnboardingView: View {
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsAPIKey = false
-    @State private var profileDisplayName = ""
-    @State private var profileBio = ""
 
     var body: some View {
         let strings = appState.settingsEditorStrings
 
-        Form {
-            Section(strings.studySettings) {
-                Stepper(
-                    strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes),
-                    value: $appState.draftSettings.intervalMinutes,
-                    in: 1...240
-                )
-
-                if appState.isCommunitySignedIn {
-                    Toggle(
-                        strings.questionVisibility,
-                        isOn: Binding(
-                            get: { appState.draftSettings.isQuestionPublic },
-                            set: { appState.setDraftQuestionPublicity($0) }
-                        )
+        VStack(spacing: 0) {
+            Form {
+                Section(strings.studySettings) {
+                    Stepper(
+                        strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes),
+                        value: $appState.draftSettings.intervalMinutes,
+                        in: 1...240
                     )
 
-                    Text(strings.questionVisibilityHelp)
+                    if appState.isCommunitySignedIn {
+                        Toggle(
+                            strings.questionVisibility,
+                            isOn: Binding(
+                                get: { appState.draftSettings.isQuestionPublic },
+                                set: { appState.setDraftQuestionPublicity($0) }
+                            )
+                        )
+
+                        Text(strings.questionVisibilityHelp)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(strings.studyProfileHelp)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
-                Text(strings.studyProfileHelp)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                Section("OpenAI") {
+                    HStack {
+                        Group {
+                            if showsAPIKey {
+                                TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
+                            } else {
+                                SecureField(strings.openAIAPIKey, text: $appState.draftAPIKey)
+                            }
+                        }
+                        .textContentType(.password)
 
-            if appState.isCommunitySignedIn {
-                Section(strings.profile) {
-                    TextField(strings.profileDisplayName, text: $profileDisplayName)
-                        .textInputAutocapitalization(.words)
+                        Button(showsAPIKey ? strings.hide : strings.show) {
+                            showsAPIKey.toggle()
+                        }
+                    }
 
-                    TextField(strings.profileBio, text: $profileBio, axis: .vertical)
-                        .lineLimit(2...4)
+                    if let statusMessage = appState.statusMessage {
+                        Text(statusMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let validationMessage = appState.apiKeyValidationMessage {
+                        Text(validationMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(strings.openAIBillingHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Link(strings.openAIUsageAndCostsPage, destination: URL(string: "https://platform.openai.com/usage")!)
+                        Link(strings.openAIBillingPage, destination: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!)
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                Section(strings.generalSettings) {
+                    Picker(
+                        strings.appLanguage,
+                        selection: Binding(
+                            get: { appState.draftSettings.appLanguage },
+                            set: { appState.updateDraftAppLanguage($0) }
+                        )
+                    ) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text(language.displayName).tag(language)
+                        }
+                    }
 
                     Button {
-                        Task {
-                            await appState.updateCommunityProfile(
-                                displayName: profileDisplayName,
-                                bio: profileBio
-                            )
-                        }
+                        appState.openSystemNotificationSettings()
                     } label: {
-                        if appState.isUpdatingCommunityProfile {
-                            ProgressView()
-                        } else {
-                            Text(strings.save)
+                        Label(strings.openNotificationSettings, systemImage: "bell.badge")
+                    }
+
+                    Picker(
+                        strings.notificationSound,
+                        selection: Binding(
+                            get: { appState.draftSettings.notificationSound },
+                            set: { appState.setDraftNotificationSound($0) }
+                        )
+                    ) {
+                        ForEach(NotificationSoundOption.allCases) { sound in
+                            Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
                         }
                     }
-                    .disabled(appState.isUpdatingCommunityProfile)
                 }
             }
-
-            Section("OpenAI") {
-                HStack {
-                    Group {
-                        if showsAPIKey {
-                            TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
-                        } else {
-                            SecureField(strings.openAIAPIKey, text: $appState.draftAPIKey)
-                        }
-                    }
-                    .textContentType(.password)
-
-                    Button(showsAPIKey ? strings.hide : strings.show) {
-                        showsAPIKey.toggle()
-                    }
-                }
-
-                if let statusMessage = appState.statusMessage {
-                    Text(statusMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let validationMessage = appState.apiKeyValidationMessage {
-                    Text(validationMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(strings.openAIBillingHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Link(strings.openAIUsageAndCostsPage, destination: URL(string: "https://platform.openai.com/usage")!)
-                    Link(strings.openAIBillingPage, destination: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!)
-                }
-                .padding(.vertical, 2)
-            }
-
-            Section(strings.generalSettings) {
-                Picker(
-                    strings.appLanguage,
-                    selection: Binding(
-                        get: { appState.draftSettings.appLanguage },
-                        set: { appState.updateDraftAppLanguage($0) }
-                    )
-                ) {
-                    ForEach(AppLanguage.allCases) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-
-                Button {
-                    appState.openSystemNotificationSettings()
-                } label: {
-                    Label(strings.openNotificationSettings, systemImage: "bell.badge")
-                }
-
-                Picker(
-                    strings.notificationSound,
-                    selection: Binding(
-                        get: { appState.draftSettings.notificationSound },
-                        set: { appState.setDraftNotificationSound($0) }
-                    )
-                ) {
-                    ForEach(NotificationSoundOption.allCases) { sound in
-                        Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
-                    }
-                }
-            }
-        
         }
         .keyboardDoneToolbar(strings.done)
+        .navigationTitle(strings.tabSettings)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .topBarTrailing) {
+                settingsSaveToolbarButton(strings: strings)
+            }
+            #else
+            ToolbarItem(placement: .confirmationAction) {
+                settingsSaveToolbarButton(strings: strings)
+            }
+            #endif
+        }
         .contentShape(Rectangle())
         .background {
             SettingsDebugLongPressInstaller {
@@ -1080,43 +1657,88 @@ private struct MobileSettingsView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: appState.isAPIDebugPanelPresented)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(strings.tabSettings)
-                    .font(.headline)
-                    .onLongPressGesture(minimumDuration: 0.75) {
-                        appState.requestDebugPanelIfEnabledOrEnableOnDemand()
-                    }
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task {
-                        await appState.saveSettingsAndValidateAPIKey()
-                    }
-                } label: {
-                    if appState.isValidatingAPIKey {
-                        ProgressView()
-                    } else {
-                        Text(appState.hasUnsavedSettingsChanges ? strings.save : strings.saved)
-                    }
-                }
-                .disabled(appState.isValidatingAPIKey)
-            }
-        }
         .onAppear {
             appState.beginSettingsEditing()
-            profileDisplayName = appState.communityProfile?.displayName ?? ""
-            profileBio = appState.communityProfile?.bio ?? ""
-            Task {
-                await appState.loadCommunityProfile()
-                profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
-                profileBio = appState.communityProfile?.bio ?? profileBio
-            }
         }
         .onDisappear {
             appState.cancelSettingsEditing()
         }
+    }
+
+    private func settingsSaveToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            Task {
+                await appState.saveSettingsAndValidateAPIKey()
+            }
+        } label: {
+            MobileSettingsSaveButtonLabel(
+                title: appState.isValidatingAPIKey
+                    ? strings.checking
+                    : (appState.hasUnsavedSettingsChanges ? strings.save : strings.saved),
+                isDirty: appState.hasUnsavedSettingsChanges,
+                isLoading: appState.isValidatingAPIKey
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(appState.isValidatingAPIKey)
+    }
+}
+
+private struct MobileSettingsSaveButtonLabel: View {
+    var title: String
+    var isDirty: Bool
+    var isLoading: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(foregroundColor)
+            }
+
+            Text(title)
+                .font(.subheadline.weight(isDirty ? .semibold : .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(foregroundColor)
+        .padding(.horizontal, 13)
+        .frame(minWidth: 74, minHeight: 34)
+        .background(backgroundColor, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(borderColor, lineWidth: 0.6)
+        }
+        .contentShape(Capsule())
+    }
+
+    private var foregroundColor: Color {
+        isDirty ? .white : .secondary
+    }
+
+    private var backgroundColor: Color {
+        if isDirty {
+            return Color.accentColor
+        }
+
+        #if os(iOS)
+        return Color(.secondarySystemBackground)
+        #else
+        return Color.secondary.opacity(0.12)
+        #endif
+    }
+
+    private var borderColor: Color {
+        if isDirty {
+            return Color.accentColor.opacity(0.28)
+        }
+
+        #if os(iOS)
+        return Color(.separator).opacity(0.35)
+        #else
+        return Color.secondary.opacity(0.18)
+        #endif
     }
 }
 

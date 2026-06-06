@@ -130,13 +130,6 @@ struct SwipeRevealRow<Content: View, Action: View>: View {
                 .opacity(actionOpacity)
                 .brightness(commitIndicatorProgress * 0.05)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    guard shouldAllowActionTap else {
-                        return
-                    }
-
-                    commitFullSwipe()
-                }
                 .allowsHitTesting(shouldAllowActionTap)
                 .accessibilityHidden(!shouldAllowActionTap)
                 .zIndex(1)

@@ -11,6 +11,9 @@ struct StatisticsView: View {
     @State private var topicSort: TopicSort = .level
     @State private var topicPage = 0
     @State private var statsSearchDebounceTask: Task<Void, Never>?
+    @State private var isPullRefreshing = false
+    @State private var isSearchVisible = false
+    @FocusState private var isSearchFocused: Bool
 
     private static let topicPageSize = 8
 
@@ -65,143 +68,163 @@ struct StatisticsView: View {
         let count = responseCount
         let pageCount = topicPageCount
 
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                if count > 0 {
-                    HStack {
-                        Text(strings.itemCount(count))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if appState.isBackendStatsLoading {
-                            Spacer()
-                            ProgressView()
-                                .controlSize(.mini)
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if count > 0 {
+                        HStack {
+                            Text(strings.itemCount(count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if appState.isBackendStatsLoading {
+                                Spacer()
+                                ProgressView()
+                                    .controlSize(.mini)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                }
 
-                StatisticsPeriodControls(
-                    selectedPeriod: $selectedPeriod,
-                    customStartDate: $customStartDate,
-                    customEndDate: $customEndDate,
-                    strings: strings
-                )
-
-                if let statsErrorMessage = appState.backendStatsErrorMessage {
-                    Text(statsErrorMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .lineLimit(2)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                if appState.isBackendStatsLoading && appState.backendStats == nil {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                } else if count == 0 {
-                    if appState.backendStatsErrorMessage != nil {
-                        ContentUnavailableView(
-                            strings.syncUnavailable,
-                            systemImage: "wifi.exclamationmark",
-                            description: Text(appState.backendStatsErrorMessage ?? strings.syncFailed(strings.syncUnavailable))
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 280)
-                    } else if selectedPeriod == .all && topicSearch.isEmpty {
-                        ContentUnavailableView(
-                            strings.noScores,
-                            systemImage: "chart.xyaxis.line",
-                            description: Text(strings.noScoresDescription)
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 280)
-                    } else {
-                        ContentUnavailableView(
-                            strings.noScoresInPeriod,
-                            systemImage: "calendar.badge.exclamationmark",
-                            description: Text(strings.noScoresInPeriodDescription)
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 280)
-                    }
-                } else {
-                    TopicPortfolioSummary(
-                        stats: topicStats,
-                        totalTopicCount: max(totalTopicCount, 0),
-                        responseCount: count,
+                    StatisticsPeriodControls(
+                        selectedPeriod: $selectedPeriod,
+                        customStartDate: $customStartDate,
+                        customEndDate: $customEndDate,
                         strings: strings
                     )
 
-                    TopicBrowserSection(
-                        stats: pagedTopicStats,
-                        totalCount: max(totalTopicCount, 0),
-                        pageStartIndex: topicPageStartIndex,
-                        currentPage: boundedTopicPage,
-                        pageCount: pageCount,
-                        selectedTopicID: selectedTopicStat?.id,
-                        topicSearch: $topicSearch,
-                        topicSort: $topicSort,
-                        strings: strings,
-                        onPreviousPage: {
-                            topicPage = max(boundedTopicPage - 1, 0)
-                            selectedTopicID = nil
-                            loadStats()
-                        },
-                        onNextPage: {
-                            topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
-                            selectedTopicID = nil
-                            loadStats()
-                        },
-                        onSelect: { stat in
-                            selectedTopicID = stat.id
-                        }
-                    )
+                    if let statsErrorMessage = appState.backendStatsErrorMessage {
+                        Text(statsErrorMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
 
-                    if let selectedTopicStat {
-                        SelectedTopicSection(stat: selectedTopicStat, records: selectedTopicRecords, strings: strings)
-                            .padding(.top, 4)
-
-                        Text(strings.scoreByQuestion)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
-                            .padding(.top, 4)
-
-                        ForEach(Array(listedSelectedTopicRecords.enumerated()), id: \.element.id) { index, record in
-                            Button {
-                                selectedRecord = record
-                            } label: {
-                                ScoreRecordRow(index: listedSelectedTopicRecords.count - index, record: record, strings: strings)
-                            }
-                            .buttonStyle(.plain)
+                    if appState.isBackendStatsLoading && appState.backendStats == nil {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                    } else if count == 0 {
+                        if appState.backendStatsErrorMessage != nil {
+                            ContentUnavailableView(
+                                strings.syncUnavailable,
+                                systemImage: "wifi.exclamationmark",
+                                description: Text(appState.backendStatsErrorMessage ?? strings.syncFailed(strings.syncUnavailable))
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 280)
+                        } else if selectedPeriod == .all && topicSearch.isEmpty {
+                            ContentUnavailableView(
+                                strings.noScores,
+                                systemImage: "chart.xyaxis.line",
+                                description: Text(strings.noScoresDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 280)
+                        } else {
+                            ContentUnavailableView(
+                                strings.noScoresInPeriod,
+                                systemImage: "calendar.badge.exclamationmark",
+                                description: Text(strings.noScoresInPeriodDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 280)
                         }
                     } else {
-                        ContentUnavailableView(
-                            strings.noMatchingTopics,
-                            systemImage: "line.3.horizontal.decrease.circle",
-                            description: Text(strings.noMatchingTopicsDescription)
+                        TopicPortfolioSummary(
+                            stats: topicStats,
+                            totalTopicCount: max(totalTopicCount, 0),
+                            responseCount: count,
+                            strings: strings
                         )
-                        .frame(maxWidth: .infinity, minHeight: 220)
+
+                        TopicBrowserSection(
+                            stats: pagedTopicStats,
+                            totalCount: max(totalTopicCount, 0),
+                            pageStartIndex: topicPageStartIndex,
+                            currentPage: boundedTopicPage,
+                            pageCount: pageCount,
+                            selectedTopicID: selectedTopicStat?.id,
+                            topicSearch: $topicSearch,
+                            topicSort: $topicSort,
+                            strings: strings,
+                            onPreviousPage: {
+                                topicPage = max(boundedTopicPage - 1, 0)
+                                selectedTopicID = nil
+                                loadStats()
+                            },
+                            onNextPage: {
+                                topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
+                                selectedTopicID = nil
+                                loadStats()
+                            },
+                            onSelect: { stat in
+                                selectedTopicID = stat.id
+                            }
+                        )
+
+                        if let selectedTopicStat {
+                            SelectedTopicSection(stat: selectedTopicStat, records: selectedTopicRecords, strings: strings)
+                                .padding(.top, 4)
+
+                            Text(strings.scoreByQuestion)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                                .padding(.top, 4)
+
+                            ForEach(Array(listedSelectedTopicRecords.enumerated()), id: \.element.id) { index, record in
+                                Button {
+                                    selectedRecord = record
+                                } label: {
+                                    ScoreRecordRow(index: listedSelectedTopicRecords.count - index, record: record, strings: strings)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        } else {
+                            ContentUnavailableView(
+                                strings.noMatchingTopics,
+                                systemImage: "line.3.horizontal.decrease.circle",
+                                description: Text(strings.noMatchingTopicsDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                        }
                     }
                 }
+                .padding(.trailing, 8)
+                .padding(.bottom, 24)
             }
-            .padding(.trailing, 8)
-            .padding(.bottom, 24)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .refreshable {
+                await refreshStats()
+            }
+            .searchSafeRefreshControlOffset(isRefreshing: isPullRefreshing)
         }
-        .padding(.top, 10)
         .frame(maxHeight: .infinity, alignment: .top)
-        .refreshable {
-            await appState.fetchBackendStats(
-                period: selectedPeriod.backendPeriod,
-                search: topicSearch,
-                sort: topicSort.backendSort,
-                startAt: selectedPeriodStartAt,
-                endAt: selectedPeriodEndAt,
-                limit: Self.topicPageSize,
-                offset: max(topicPage * Self.topicPageSize, 0)
-            )
+        .navigationTitle(strings.tabStatistics)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+        .mobileToolbarSearchable(
+            isPresented: isSearchVisible || !topicSearch.isEmpty,
+            text: $topicSearch,
+            prompt: strings.topicSearch,
+            focus: $isSearchFocused
+        )
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .principal) {
+                statsToolbarSearchField(strings: strings)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                statsSearchToolbarButton(strings: strings)
+            }
+            #else
+            ToolbarItem(placement: .primaryAction) {
+                statsSearchToolbarButton(strings: strings)
+            }
+            #endif
         }
         .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
         .onChange(of: topicSearch) {
@@ -234,6 +257,66 @@ struct StatisticsView: View {
         .onDisappear {
             statsSearchDebounceTask?.cancel()
             statsSearchDebounceTask = nil
+        }
+        .onChange(of: isSearchFocused) { _, isFocused in
+            guard !isFocused,
+                  topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+
+            closeStatsSearch(clearText: false)
+        }
+    }
+
+    @ViewBuilder
+    private func statsToolbarSearchField(strings: AppStrings) -> some View {
+        if isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            MobileToolbarSearchField(
+                text: $topicSearch,
+                prompt: strings.topicSearch,
+                focus: $isSearchFocused,
+                closeAccessibilityLabel: strings.clearSearch,
+                onClose: {
+                    closeStatsSearch(clearText: true)
+                }
+            )
+        }
+    }
+
+    private func statsSearchToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            showStatsSearch()
+        } label: {
+            Image(systemName: "magnifyingglass")
+        }
+        .accessibilityLabel(strings.search)
+    }
+
+    @MainActor
+    private func showStatsSearch() {
+        if isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isSearchFocused = false
+            closeStatsSearch(clearText: true)
+            return
+        }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            isSearchVisible = true
+        }
+        Task { @MainActor in
+            await Task.yield()
+            isSearchFocused = true
+        }
+    }
+
+    @MainActor
+    private func closeStatsSearch(clearText: Bool) {
+        if clearText {
+            topicSearch = ""
+        }
+
+        withAnimation(.snappy(duration: 0.18)) {
+            isSearchVisible = false
         }
     }
 
@@ -291,6 +374,24 @@ struct StatisticsView: View {
                 offset: requestOffset
             )
         }
+    }
+
+    @MainActor
+    private func refreshStats() async {
+        isPullRefreshing = true
+        defer {
+            isPullRefreshing = false
+        }
+
+        await appState.fetchBackendStats(
+            period: selectedPeriod.backendPeriod,
+            search: topicSearch,
+            sort: topicSort.backendSort,
+            startAt: selectedPeriodStartAt,
+            endAt: selectedPeriodEndAt,
+            limit: Self.topicPageSize,
+            offset: max(topicPage * Self.topicPageSize, 0)
+        )
     }
 
     private func scheduleDebouncedStatsReload() {
@@ -371,100 +472,80 @@ struct StudyRecordDetailView: View {
     var body: some View {
         let displayedRecord = latestRecord
 
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(displayedRecord.topic.isEmpty ? appState.strings.problem : displayedRecord.topic)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Text(displayedRecord.difficulty.displayName(language: appState.settings.appLanguage))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                RecordDetailHeader(record: displayedRecord, strings: appState.strings, language: appState.settings.appLanguage)
 
-                if let score = displayedRecord.gradingResult?.score {
-                    Text("\(score)/100")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                }
-            }
-
-            Divider()
-
-            ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    DetailSection(title: appState.strings.question, text: displayedRecord.question.question)
+                    RecordChatBubble(role: .question) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(displayedRecord.question.question.breakingLongTokens())
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .textSelection(.enabled)
 
-                    if let hint = displayedRecord.question.expectedAnswerHint,
-                       !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Button {
-                                showsHint.toggle()
-                            } label: {
-                                Label(showsHint ? appState.strings.hideHint : appState.strings.showHint, systemImage: "lightbulb")
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-
-                            if showsHint {
-                                DetailSection(title: appState.strings.hint, text: hint)
-                            }
+                            hintView(for: displayedRecord)
                         }
                     }
 
-                    if let answer = displayedRecord.answer, !answer.isEmpty {
-                        DetailSection(title: appState.strings.answer, text: answer)
+                    if let answer = displayedRecord.answer,
+                       !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       displayedRecord.gradingResult != nil {
+                        RecordChatBubble(role: .answer) {
+                            Text(answer.breakingLongTokens())
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .textSelection(.enabled)
+                        }
+                    } else if displayedRecord.gradingResult == nil {
+                        RecordChatBubble(role: .input) {
+                            RecordAnswerInput(
+                                strings: appState.strings,
+                                draftAnswer: $draftAnswer,
+                                isGradingAnswer: appState.isGradingAnswer,
+                                canSubmitAnswer: canSubmitAnswer,
+                                onSubmit: {
+                                    submitAnswer(for: displayedRecord)
+                                }
+                            )
+                            #if os(iOS)
+                            .focused($isAnswerEditorFocused)
+                            #endif
+                        }
                     }
 
                     if let result = displayedRecord.gradingResult {
-                        DetailSection(title: appState.strings.feedback, text: result.feedback)
-                        DetailSection(title: appState.strings.explanation, text: result.explanation)
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(appState.strings.answer)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        RecordChatBubble(role: .feedback) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Label(result.gradeTitle(strings: appState.strings), systemImage: result.gradeIconName)
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer(minLength: 12)
+                                    Text("\(result.score)/100")
+                                        .font(.headline)
+                                        .foregroundStyle(scoreColor(result.score))
+                                        .lineLimit(1)
+                                }
 
-                            TextEditor(text: $draftAnswer)
-                                .frame(minHeight: 110)
-                                .padding(6)
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.secondary.opacity(0.24))
-                                }
-                                #if os(iOS)
-                                .focused($isAnswerEditorFocused)
-                                #endif
-
-                            Button {
-                                #if os(iOS)
-                                isAnswerEditorFocused = false
-                                #endif
-                                Task {
-                                    await appState.gradeRecord(displayedRecord, answer: draftAnswer)
-                                }
-                            } label: {
-                                if appState.isGradingAnswer {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Label(appState.strings.gradeAnswer, systemImage: "checkmark.seal")
-                                }
+                                Text(result.feedback.breakingLongTokens())
+                                    .font(.body)
+                                    .textSelection(.enabled)
+                                Text(result.explanation.breakingLongTokens())
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
                             }
-                            .disabled(appState.isGradingAnswer || draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                 }
             }
-            #if os(iOS)
-            .scrollDismissesKeyboard(.interactively)
-            .keyboardDoneToolbar(appState.strings.done)
-            #endif
+            .padding(.top, 10)
+            .padding(.bottom, 22)
         }
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        .keyboardDoneToolbar(appState.strings.done)
+        #endif
     }
 
     private var latestRecord: StudyRecord {
@@ -472,6 +553,235 @@ struct StudyRecordDetailView: View {
             $0.id == record.id ||
                 SettingsStore.normalizedQuestionText($0.question.question) == SettingsStore.normalizedQuestionText(record.question.question)
         } ?? record
+    }
+
+    private var canSubmitAnswer: Bool {
+        !appState.isGradingAnswer &&
+            !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func hintView(for record: StudyRecord) -> some View {
+        if let hint = record.question.expectedAnswerHint,
+           !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    showsHint.toggle()
+                } label: {
+                    Label(showsHint ? appState.strings.hideHint : appState.strings.showHint, systemImage: "lightbulb")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.white)
+                .tint(.white)
+
+                if showsHint {
+                    Text(hint.breakingLongTokens())
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func submitAnswer(for record: StudyRecord) {
+        guard canSubmitAnswer else {
+            return
+        }
+
+        #if os(iOS)
+        isAnswerEditorFocused = false
+        #endif
+
+        Task {
+            await appState.gradeRecord(record, answer: draftAnswer)
+        }
+    }
+
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 70...100:
+            .green
+        case 40..<70:
+            .orange
+        default:
+            .red
+        }
+    }
+}
+
+private struct RecordDetailHeader: View {
+    var record: StudyRecord
+    var strings: AppStrings
+    var language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                Spacer(minLength: 8)
+
+                if let score = record.gradingResult?.score {
+                    Text("\(score)/100")
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                } else {
+                    Text(strings.ungraded)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text(record.difficulty.displayName(language: language))
+                Text("·")
+                Text((record.answeredAt ?? record.question.createdAt).formatted(date: .abbreviated, time: .shortened))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private enum RecordChatBubbleRole {
+    case question
+    case answer
+    case feedback
+    case input
+
+    var alignment: Alignment {
+        switch self {
+        case .answer, .input:
+            .trailing
+        case .question, .feedback:
+            .leading
+        }
+    }
+
+    var fill: Color {
+        switch self {
+        case .question:
+            Color.green.opacity(0.92)
+        case .answer:
+            Color.accentColor.opacity(0.92)
+        case .feedback:
+            Color.secondary.opacity(0.06)
+        case .input:
+            Color.clear
+        }
+    }
+
+    var border: Color {
+        switch self {
+        case .feedback:
+            Color.secondary.opacity(0.12)
+        default:
+            Color.clear
+        }
+    }
+}
+
+private struct RecordChatBubble<Content: View>: View {
+    var role: RecordChatBubbleRole
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if role == .answer || role == .input {
+                Spacer(minLength: 34)
+            }
+
+            if role == .input {
+                content()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                content()
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(role.fill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(role.border, lineWidth: 1)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            if role == .question || role == .feedback {
+                Spacer(minLength: 34)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: role.alignment)
+    }
+}
+
+private struct RecordAnswerInput: View {
+    var strings: AppStrings
+    @Binding var draftAnswer: String
+    var isGradingAnswer: Bool
+    var canSubmitAnswer: Bool
+    var onSubmit: () -> Void
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(strings.answerPlaceholder, text: $draftAnswer, axis: .vertical)
+                .font(.body)
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .frame(minHeight: 32)
+
+            Button {
+                onSubmit()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(canSubmitAnswer ? Color.accentColor : Color.secondary.opacity(0.18))
+
+                    if isGradingAnswer {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(canSubmitAnswer ? .white : .secondary)
+                    }
+                }
+                .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmitAnswer)
+            .accessibilityLabel(strings.gradeAnswer)
+        }
+        .padding(.vertical, 6)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .background(inputBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var inputBackground: Color {
+        #if os(iOS)
+        Color(.secondarySystemBackground)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color.secondary.opacity(0.08)
+        #endif
     }
 }
 
@@ -995,8 +1305,10 @@ private struct TopicBrowserSection: View {
             }
 
             HStack(spacing: 8) {
-                TextField(strings.topicSearch, text: $topicSearch)
-                    .textFieldStyle(.roundedBorder)
+                Text(strings.sortTopics)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
                 Picker(strings.sortTopics, selection: $topicSort) {
                     ForEach(TopicSort.allCases) { sort in
@@ -1004,9 +1316,10 @@ private struct TopicBrowserSection: View {
                     }
                 }
                 .labelsHidden()
-                .frame(width: 112)
+                .frame(maxWidth: 160)
+
+                Spacer(minLength: 8)
             }
-            .keyboardDoneToolbar(strings.done)
 
             HStack(spacing: 8) {
                 Text(strings.statsByTopic)

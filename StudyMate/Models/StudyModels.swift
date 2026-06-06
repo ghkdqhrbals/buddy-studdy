@@ -1258,6 +1258,7 @@ struct AppStrings {
 
     var checking: String { text("확인 중", "Checking") }
     var save: String { text("저장", "Save") }
+    var saving: String { text("저장 중", "Saving") }
     var cancel: String { text("취소", "Cancel") }
     var pasteboardChecking: String { text("클립보드에서 키를 확인 중입니다.", "Checking clipboard for API key.") }
     var saved: String { text("저장됨", "Saved") }
@@ -1299,17 +1300,90 @@ struct AppStrings {
             "Check usage, costs, and billing directly in OpenAI Platform."
         )
     }
-    var syncUnavailable: String { text("동기화는 현재 제공되지 않습니다.", "Sync is currently unavailable.") }
-    var syncQuotaExceeded: String { syncUnavailable }
-    var syncNotAuthenticated: String { syncUnavailable }
-    var syncPermissionDenied: String { syncUnavailable }
-    var syncNetworkUnavailable: String { syncUnavailable }
-    var syncServiceUnavailable: String { syncUnavailable }
-    var syncRateLimited: String { syncUnavailable }
-    var syncLimitExceeded: String { syncUnavailable }
-    var syncConflictRetry: String { syncUnavailable }
+    var iCloudSync: String { text("iCloud 동기화", "iCloud Sync") }
+    var iCloudSyncHelp: String {
+        text(
+            "학습 설정, 현재 질문, 답변 초안, 기록, OpenAI API 키를 iPhone과 Mac 사이에 동기화합니다.",
+            "Syncs study settings, the current question, answer drafts, records, and the OpenAI API key between iPhone and Mac."
+        )
+    }
+    var iCloudSyncOn: String { text("동기화 켜짐", "Sync On") }
+    var iCloudSyncOff: String { text("동기화 꺼짐", "Sync Off") }
+    var syncNow: String { text("지금 동기화", "Sync Now") }
+    var syncing: String { text("동기화 중", "Syncing") }
+    var syncAlreadyInProgress: String { text("이미 동기화 중입니다.", "Sync is already in progress.") }
+    var syncUpdated: String { text("iCloud 동기화가 완료됐습니다.", "iCloud sync complete.") }
+    var syncAlreadyCurrent: String { text("iCloud 데이터가 최신입니다.", "iCloud data is up to date.") }
+    var syncPulledRemote: String { text("iCloud의 최신 데이터를 불러왔습니다.", "Loaded the latest iCloud data.") }
+    var syncMergedRemote: String {
+        text(
+            "iCloud 데이터를 불러오고 이 기기의 기록을 함께 병합했습니다.",
+            "Loaded iCloud data and merged this device's records."
+        )
+    }
+    var syncPushedLocal: String { text("이 기기의 데이터를 iCloud에 저장했습니다.", "Saved this device's data to iCloud.") }
+    var syncUnavailable: String {
+        text(
+            "iCloud 계정 또는 CloudKit 권한을 확인하세요.",
+            "Check the iCloud account or CloudKit permission."
+        )
+    }
+    var syncEntitlementMissing: String {
+        text(
+            "이 앱 빌드에 iCloud 권한이 없습니다. 최신 릴리즈를 다시 설치하세요.",
+            "This app build does not include iCloud entitlement. Reinstall the latest release."
+        )
+    }
+    var syncQuotaExceeded: String {
+        text(
+            "iCloud 저장 공간이 부족해 동기화하지 못했습니다. iCloud 공간을 확보한 뒤 다시 시도하세요.",
+            "iCloud storage is full, so sync could not finish. Free up iCloud storage and try again."
+        )
+    }
+    var syncNotAuthenticated: String {
+        text(
+            "iCloud 로그인이 필요합니다. 시스템 설정에서 iCloud 계정을 확인하세요.",
+            "iCloud sign-in is required. Check your iCloud account in System Settings."
+        )
+    }
+    var syncPermissionDenied: String {
+        text(
+            "iCloud 권한 또는 앱의 CloudKit 설정을 확인하세요.",
+            "Check iCloud permission or the app's CloudKit setup."
+        )
+    }
+    var syncNetworkUnavailable: String {
+        text(
+            "네트워크 연결 문제로 iCloud 동기화가 실패했습니다. 연결 후 다시 시도하세요.",
+            "iCloud sync failed because the network is unavailable. Reconnect and try again."
+        )
+    }
+    var syncServiceUnavailable: String {
+        text(
+            "iCloud 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요.",
+            "iCloud is temporarily unavailable. Try again later."
+        )
+    }
+    var syncRateLimited: String {
+        text(
+            "iCloud 요청이 너무 많아 잠시 대기 중입니다. 조금 뒤 다시 시도하세요.",
+            "iCloud is rate limiting requests. Try again shortly."
+        )
+    }
+    var syncLimitExceeded: String {
+        text(
+            "동기화 데이터가 iCloud 제한을 초과했습니다. 오래된 기록을 줄인 뒤 다시 시도하세요.",
+            "Sync data exceeded an iCloud limit. Reduce older records and try again."
+        )
+    }
+    var syncConflictRetry: String {
+        text(
+            "다른 기기와 동시에 변경되어 동기화가 실패했습니다. 다시 동기화하세요.",
+            "Sync conflicted with another device change. Sync again."
+        )
+    }
     func syncFailed(_ reason: String) -> String {
-        text("동기화는 현재 제공되지 않습니다.", "Sync is currently unavailable.")
+        text("iCloud 동기화 실패: \(reason)", "iCloud sync failed: \(reason)")
     }
     func lastSyncedAt(_ date: Date) -> String {
         text(
@@ -1349,6 +1423,7 @@ struct AppStrings {
     var automaticallyCheckForUpdates: String { text("자동으로 업데이트 확인", "Automatically check for updates") }
     var automaticallyDownloadUpdates: String { text("가능하면 자동으로 다운로드", "Automatically download updates when available") }
     var checkForUpdates: String { text("업데이트 확인...", "Check for Updates...") }
+    var search: String { text("검색", "Search") }
     var edit: String { text("편집", "Edit") }
     var updateHelp: String {
         text("GitHub Releases에 새 DMG가 올라오면 BuddyStuddy가 업데이트를 안내합니다.", "BuddyStuddy checks GitHub Releases and offers updates when a new DMG is available.")
@@ -1372,6 +1447,8 @@ struct AppStrings {
     }
     var studySettings: String { text("학습 설정", "Study Settings") }
     var studyCategories: String { text("내 학습", "My Studies") }
+    var homeScopeMy: String { text("내 학습", "My Studies") }
+    var homeScopeAll: String { text("모든 학습들", "All Studies") }
     var editCategories: String { text("학습 편집", "Edit Studies") }
     var studyCategory: String { text("학습", "Study") }
     var newStudyCategory: String { text("학습 추가", "Add Study") }
@@ -1408,7 +1485,10 @@ struct AppStrings {
     var deleteRecords: String { text("기록 전체삭제", "Delete All Records") }
     var deleteRecordsHelp: String { text("저장된 질문, 답변, 채점 기록을 모두 삭제합니다.", "Delete all saved questions, answers, and grading results.") }
     var recordSettings: String { text("기록 설정", "Record Settings") }
+    var debuggingMode: String { text("디버깅 모드", "Debugging Mode") }
     var paste: String { text("붙여넣기", "Paste") }
+    var debuggingHelp: String { text("켜면 Developer 로그를 확인할 수 있습니다.", "When enabled, Developer logs are available.") }
+    var developerOptions: String { text("개발자 옵션", "Developer Options") }
     var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
     var requestLabel: String { text("요청", "Request") }
     var responseLabel: String { text("응답", "Response") }
@@ -1491,6 +1571,7 @@ struct AppStrings {
     var deleteRecordHelp: String { text("기록 삭제", "Delete Record") }
     var studyFallback: String { text("내 학습", "My Study") }
     var ungraded: String { text("미채점", "Ungraded") }
+    var recordDetail: String { text("상세기록", "Record Detail") }
     func answerPrefix(_ answer: String) -> String { text("답변: \(answer)", "Answer: \(answer)") }
 
     var stats: String { text("통계", "Stats") }
@@ -1509,11 +1590,13 @@ struct AppStrings {
     var trend: String { text("변화", "Trend") }
     var period: String { text("기간", "Period") }
     var topicSearch: String { text("주제 검색", "Search Topics") }
+    var clearSearch: String { text("검색어 지우기", "Clear Search") }
     var topic: String { text("주제", "Topic") }
     var topicBrowser: String { text("주제 탐색", "Topic Browser") }
     var communityFeed: String { text("다른 사용자 질문", "Community Questions") }
     var communityQuestion: String { text("공개 질문", "Community Question") }
     var communityLogin: String { text("로그인", "Sign In") }
+    var signInWithGoogle: String { text("Google로 로그인", "Sign in with Google") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
     var communitySignedOut: String { text("다른 사용자 질문 기능을 껐습니다.", "Community questions are disabled.") }
@@ -1530,6 +1613,11 @@ struct AppStrings {
     var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
     var profile: String { text("프로필", "Profile") }
     var profileDisplayName: String { text("이름", "Name") }
+    var profileAvatar: String { text("프로필 사진", "Profile Picture") }
+    var chooseProfilePhoto: String { text("사진 선택", "Choose Photo") }
+    var removeProfilePhoto: String { text("사진 제거", "Remove Photo") }
+    var profilePhotoScale: String { text("사진 크기", "Photo Size") }
+    var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }
     var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
     var report: String { text("신고", "Report") }

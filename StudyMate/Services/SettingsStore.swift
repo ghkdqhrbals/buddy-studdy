@@ -22,6 +22,9 @@ final class SettingsStore {
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
+        static let profileAvatarSymbolName = "profileAvatarSymbolName"
+        static let profileAvatarImageData = "profileAvatarImageData"
+        static let profileAvatarColorSeed = "profileAvatarColorSeed"
         static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
@@ -407,11 +410,11 @@ final class SettingsStore {
     }
 
     func loadIsDebuggingEnabled() -> Bool {
-        false
+        defaults.bool(forKey: Keys.isDebuggingEnabled)
     }
 
     func saveIsDebuggingEnabled(_ isEnabled: Bool) {
-        defaults.removeObject(forKey: Keys.isDebuggingEnabled)
+        defaults.set(isEnabled, forKey: Keys.isDebuggingEnabled)
     }
 
     func loadHasCompletedOnboarding() -> Bool {
@@ -429,11 +432,11 @@ final class SettingsStore {
     }
 
     func loadIsCloudSyncEnabled() -> Bool {
-        false
+        defaults.bool(forKey: Keys.isCloudSyncEnabled)
     }
 
     func saveIsCloudSyncEnabled(_ isEnabled: Bool) {
-        defaults.removeObject(forKey: Keys.isCloudSyncEnabled)
+        defaults.set(isEnabled, forKey: Keys.isCloudSyncEnabled)
     }
 
     func loadIsCommunitySignedIn() -> Bool {
@@ -444,12 +447,49 @@ final class SettingsStore {
         defaults.set(isSignedIn, forKey: Keys.isCommunitySignedIn)
     }
 
+    func loadProfileAvatarSymbolName() -> String {
+        defaults.string(forKey: Keys.profileAvatarSymbolName) ?? "person.fill"
+    }
+
+    func saveProfileAvatarSymbolName(_ symbolName: String) {
+        defaults.set(symbolName, forKey: Keys.profileAvatarSymbolName)
+    }
+
+    func loadProfileAvatarImageData() -> Data? {
+        defaults.data(forKey: Keys.profileAvatarImageData)
+    }
+
+    func saveProfileAvatarImageData(_ data: Data?) {
+        if let data {
+            defaults.set(data, forKey: Keys.profileAvatarImageData)
+        } else {
+            defaults.removeObject(forKey: Keys.profileAvatarImageData)
+        }
+    }
+
+    func loadProfileAvatarColorSeed() -> String? {
+        defaults.string(forKey: Keys.profileAvatarColorSeed)
+    }
+
+    func saveProfileAvatarColorSeed(_ seed: String) {
+        defaults.set(seed, forKey: Keys.profileAvatarColorSeed)
+    }
+
     func loadCloudSyncSnapshotUpdatedAt() -> Date? {
-        nil
+        guard let value = defaults.object(forKey: Keys.cloudSyncSnapshotUpdatedAt) as? TimeInterval else {
+            return nil
+        }
+
+        return Date(timeIntervalSince1970: value)
     }
 
     func saveCloudSyncSnapshotUpdatedAt(_ date: Date?) {
-        defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
+        guard let date else {
+            defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
+            return
+        }
+
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncSnapshotUpdatedAt)
     }
 
     func loadAppLogs() -> [AppLogEntry] {

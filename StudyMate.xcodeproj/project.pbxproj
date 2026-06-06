@@ -23,6 +23,8 @@
 		11000000000000000000010F /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000F /* StatisticsView.swift */; };
 		110000000000000000000171 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000018 /* SwipeRevealRow.swift */; };
 		110000000000000000000173 /* KeyboardDoneToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001A /* KeyboardDoneToolbar.swift */; };
+		110000000000000000000174 /* SearchSafeRefreshControlOffset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* SearchSafeRefreshControlOffset.swift */; };
+		110000000000000000000175 /* MobileScreenChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001D /* MobileScreenChrome.swift */; };
 		110000000000000000000150 /* study_ping.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000145 /* study_ping.wav */; };
 		110000000000000000000151 /* study_chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000146 /* study_chime.wav */; };
 		110000000000000000000152 /* study_pop.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000147 /* study_pop.wav */; };
@@ -45,6 +47,8 @@
 		120000000000000000000111 /* MobileRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000003 /* MobileRootView.swift */; };
 		120000000000000000000112 /* SwipeRevealRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000018 /* SwipeRevealRow.swift */; };
 		120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001A /* KeyboardDoneToolbar.swift */; };
+		120000000000000000000116 /* SearchSafeRefreshControlOffset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* SearchSafeRefreshControlOffset.swift */; };
+		120000000000000000000117 /* MobileScreenChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001D /* MobileScreenChrome.swift */; };
 		120000000000000000000150 /* study_ping.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000145 /* study_ping.wav */; };
 		120000000000000000000151 /* study_chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000146 /* study_chime.wav */; };
 		120000000000000000000152 /* study_pop.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000147 /* study_pop.wav */; };
@@ -98,6 +102,8 @@
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* GoogleOAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthService.swift; sourceTree = "<group>"; };
+		11000000000000000000001C /* SearchSafeRefreshControlOffset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchSafeRefreshControlOffset.swift; sourceTree = "<group>"; };
+		11000000000000000000001D /* MobileScreenChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileScreenChrome.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -229,8 +235,10 @@
 		11000000000000000000006B /* Components */ = {
 			isa = PBXGroup;
 			children = (
-				110000000000000000000018 /* SwipeRevealRow.swift */,
-				11000000000000000000001A /* KeyboardDoneToolbar.swift */,
+					110000000000000000000018 /* SwipeRevealRow.swift */,
+					11000000000000000000001A /* KeyboardDoneToolbar.swift */,
+					11000000000000000000001C /* SearchSafeRefreshControlOffset.swift */,
+					11000000000000000000001D /* MobileScreenChrome.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -421,9 +429,11 @@
 				110000000000000000000109 /* StudyView.swift in Sources */,
 				11000000000000000000010E /* HistoryView.swift in Sources */,
 				11000000000000000000010F /* StatisticsView.swift in Sources */,
-				110000000000000000000171 /* SwipeRevealRow.swift in Sources */,
-				110000000000000000000173 /* KeyboardDoneToolbar.swift in Sources */,
-				11000000000000000000010A /* SettingsView.swift in Sources */,
+					110000000000000000000171 /* SwipeRevealRow.swift in Sources */,
+					110000000000000000000173 /* KeyboardDoneToolbar.swift in Sources */,
+					110000000000000000000174 /* SearchSafeRefreshControlOffset.swift in Sources */,
+					110000000000000000000175 /* MobileScreenChrome.swift in Sources */,
+					11000000000000000000010A /* SettingsView.swift in Sources */,
 				110000000000000000000170 /* CloudSyncService.swift in Sources */,
 				11000000000000000000010B /* UpdateService.swift in Sources */,
 			);
@@ -454,9 +464,11 @@
 				12000000000000000000010F /* StatisticsView.swift in Sources */,
 				120000000000000000000110 /* CloudSyncService.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
-				120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
-				120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,
-			);
+					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
+					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,
+					120000000000000000000116 /* SearchSafeRefreshControlOffset.swift in Sources */,
+					120000000000000000000117 /* MobileScreenChrome.swift in Sources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */

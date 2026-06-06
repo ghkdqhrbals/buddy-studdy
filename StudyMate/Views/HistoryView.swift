@@ -7,6 +7,9 @@ struct HistoryView: View {
     @State private var searchText = ""
     @State private var visibleCount = 0
     @State private var showsRecordSettings = false
+    @State private var isRefreshing = false
+    @State private var isSearchVisible = false
+    @FocusState private var isSearchFocused: Bool
 
     private let pageSize = 10
 
@@ -73,85 +76,125 @@ struct HistoryView: View {
         let displayedRecords = filteredRecords
         let displayedVisibleRecords = visibleRecords
 
-        VStack(alignment: .leading, spacing: 12) {
-            if appState.studyRecords.isEmpty {
-                ContentUnavailableView(
-                    strings.noRecords,
-                    systemImage: "clock.arrow.circlepath",
-                    description: Text(strings.noRecordsDescription)
-                )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if appState.studyRecords.isEmpty {
+                        ContentUnavailableView(
+                            strings.noRecords,
+                            systemImage: "clock.arrow.circlepath",
+                            description: Text(strings.noRecordsDescription)
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 360)
+                    } else {
+                        Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                if displayedRecords.isEmpty {
-                    ContentUnavailableView(
-                        strings.noSearchResults,
-                        systemImage: "magnifyingglass",
-                        description: Text(strings.noSearchResultsDescription)
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        ForEach(displayedVisibleRecords) { record in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HistoryRow(record: record, strings: strings, isSelected: selectedRecordID == record.id)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                    selectedRecordID = selectedRecordID == record.id ? nil : record.id
+                        if displayedRecords.isEmpty {
+                            ContentUnavailableView(
+                                strings.noSearchResults,
+                                systemImage: "magnifyingglass",
+                                description: Text(strings.noSearchResultsDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 320)
+                        } else {
+                            ForEach(displayedVisibleRecords) { record in
+                                SwipeRevealRow(
+                                    isOpen: swipeBinding(for: record.id),
+                                    actionWidth: 82,
+                                    onTap: {
+                                        if openSwipeRecordID != nil,
+                                           openSwipeRecordID != record.id {
+                                            closeOpenSwipe(animated: true)
+                                            return
+                                        }
+
+                                        selectedRecordID = record.id
+                                    },
+                                    onFullSwipe: {
+                                        delete(record)
+                                    },
+                                    content: {
+                                        HistoryRow(
+                                            record: record,
+                                            strings: strings,
+                                            isSelected: selectedRecordID == record.id
+                                        )
+                                    },
+                                    action: {
+                                        Button(role: .destructive) {
+                                            delete(record)
+                                        } label: {
+                                            SwipeActionButton(
+                                                title: strings.clear,
+                                                systemImage: "trash",
+                                                tint: .red,
+                                                width: 82
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                )
+                                .onAppear {
+                                    loadNextPageIfNeeded(for: record)
                                 }
-
-                                if selectedRecordID == record.id {
-                                    InlineStudyRecordDetail(record: record)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                .onDisappear {
+                                    if openSwipeRecordID == record.id {
+                                        openSwipeRecordID = nil
+                                    }
                                 }
                             }
-                            .onAppear {
-                                loadNextPageIfNeeded(for: record)
-                            }
-                            .listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    delete(record)
-                                } label: {
-                                    Label(strings.clear, systemImage: "trash")
+
+                            if hasMoreRecords {
+                                HStack {
+                                    Spacer()
+
+                                    ProgressView()
+                                        .controlSize(.small)
+
+                                    Spacer()
                                 }
+                                .padding(.vertical, 8)
                             }
                         }
-
-                        if hasMoreRecords {
-                            HStack {
-                                Spacer()
-
-                                ProgressView()
-                                    .controlSize(.small)
-
-                                Spacer()
-                            }
-                            .padding(.vertical, 8)
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .frame(maxHeight: .infinity)
-                    .refreshable {
-                        await appState.refreshVisibleData()
                     }
                 }
             }
+            .frame(maxHeight: .infinity)
+            .refreshable {
+                await refreshRecords()
+            }
+            .searchSafeRefreshControlOffset(isRefreshing: isRefreshing)
         }
-        .padding(.top, 10)
         .frame(maxHeight: .infinity, alignment: .top)
-        .searchable(text: $searchText, prompt: strings.searchRecords)
+        .navigationTitle(strings.tabRecords)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+        .mobileToolbarSearchable(
+            isPresented: isSearchVisible || !searchText.isEmpty,
+            text: $searchText,
+            prompt: strings.searchRecords,
+            focus: $isSearchFocused
+        )
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .principal) {
+                recordToolbarSearchField(strings: strings)
+            }
+
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                recordToolbarItems(strings: strings)
+            }
+            #else
+            ToolbarItemGroup(placement: .primaryAction) {
+                recordToolbarItems(strings: strings)
+            }
+            #endif
+        }
         .onChange(of: appState.studyRecords.count) {
             reconcileVisibleCount()
             if let openSwipeRecordID,
@@ -173,22 +216,93 @@ struct HistoryView: View {
                 showFocusedRecord()
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        showsRecordSettings = true
-                    } label: {
-                        Label(strings.recordSettings, systemImage: "slider.horizontal.3")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel(strings.recordSettings)
+        .onChange(of: isSearchFocused) { _, isFocused in
+            guard !isFocused,
+                  searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
             }
+
+            closeRecordSearch(clearText: false)
         }
         .sheet(isPresented: $showsRecordSettings) {
             RecordSettingsSheet()
+        }
+        #if os(iOS)
+        .navigationDestination(item: $selectedRecordID) { recordID in
+            recordDetailDestination(recordID: recordID, strings: strings)
+        }
+        #else
+        .sheet(isPresented: selectedRecordSheetBinding) {
+            if let recordID = selectedRecordID {
+                recordDetailDestination(recordID: recordID, strings: strings)
+                    .frame(width: 460, height: 620)
+                    .padding()
+            }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private func recordToolbarSearchField(strings: AppStrings) -> some View {
+        if isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            MobileToolbarSearchField(
+                text: $searchText,
+                prompt: strings.searchRecords,
+                focus: $isSearchFocused,
+                closeAccessibilityLabel: strings.clearSearch,
+                onClose: {
+                    closeRecordSearch(clearText: true)
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func recordToolbarItems(strings: AppStrings) -> some View {
+        Button {
+            showRecordSearch()
+        } label: {
+            Image(systemName: "magnifyingglass")
+        }
+        .accessibilityLabel(strings.search)
+
+        Menu {
+            Button {
+                showsRecordSettings = true
+            } label: {
+                Label(strings.recordSettings, systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .accessibilityLabel(strings.recordSettings)
+    }
+
+    @MainActor
+    private func showRecordSearch() {
+        if isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            isSearchFocused = false
+            closeRecordSearch(clearText: true)
+            return
+        }
+
+        withAnimation(.snappy(duration: 0.22)) {
+            isSearchVisible = true
+        }
+        Task { @MainActor in
+            await Task.yield()
+            isSearchFocused = true
+        }
+    }
+
+    @MainActor
+    private func closeRecordSearch(clearText: Bool) {
+        if clearText {
+            searchText = ""
+        }
+
+        withAnimation(.snappy(duration: 0.18)) {
+            isSearchVisible = false
         }
     }
 
@@ -199,10 +313,11 @@ struct HistoryView: View {
         guard let index = filteredRecords.firstIndex(where: { $0.id == record.id }) else {
             return
         }
+        guard !isRefreshing else {
+            return
+        }
         if index >= max(visibleRecords.count - 2, 0) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                visibleCount = min(visibleRecords.count + pageSize, filteredRecords.count)
-            }
+            visibleCount = min(visibleRecords.count + pageSize, filteredRecords.count)
         }
     }
 
@@ -221,6 +336,62 @@ struct HistoryView: View {
         selectedRecordID = request.recordID
     }
 
+    @ViewBuilder
+    private func recordDetailDestination(recordID: String, strings: AppStrings) -> some View {
+        if let record = record(for: recordID) {
+            StudyRecordDetailView(record: record)
+                .padding(.horizontal, 16)
+                .navigationTitle(strings.recordDetail)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+        } else {
+            ContentUnavailableView(
+                strings.notificationQuestionMissingTitle,
+                systemImage: "trash",
+                description: Text(strings.notificationQuestionUnavailableHelp)
+            )
+            .navigationTitle(strings.recordDetail)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+        }
+    }
+
+    private func record(for recordID: String) -> StudyRecord? {
+        appState.studyRecords.first { $0.id == recordID } ??
+            orderedRecords.first { $0.id == recordID }
+    }
+
+    private var selectedRecordSheetBinding: Binding<Bool> {
+        Binding(
+            get: { selectedRecordID != nil },
+            set: { isPresented in
+                if !isPresented {
+                    selectedRecordID = nil
+                }
+            }
+        )
+    }
+
+    private func refreshRecords() async {
+        guard !isRefreshing else {
+            return
+        }
+
+        await MainActor.run {
+            isRefreshing = true
+            closeOpenSwipe(animated: false)
+        }
+
+        await appState.refreshVisibleData()
+
+        await MainActor.run {
+            reconcileVisibleCount()
+            isRefreshing = false
+        }
+    }
+
     private func closeOpenSwipe(animated: Bool) {
         guard openSwipeRecordID != nil else {
             return
@@ -237,6 +408,21 @@ struct HistoryView: View {
                 openSwipeRecordID = nil
             }
         }
+    }
+
+    private func swipeBinding(for recordID: String) -> Binding<Bool> {
+        Binding(
+            get: { openSwipeRecordID == recordID },
+            set: { isOpen in
+                if isOpen {
+                    withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
+                        openSwipeRecordID = recordID
+                    }
+                } else if openSwipeRecordID == recordID {
+                    closeOpenSwipe(animated: true)
+                }
+            }
+        )
     }
 
     private func delete(_ record: StudyRecord) {
@@ -335,51 +521,65 @@ private struct HistoryRow: View {
     var isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 6) {
-                    Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
-                        .lineLimit(1)
+        HStack(alignment: .center, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.75) : Color.clear)
+                .frame(width: 4, height: 42)
 
-                    Text("·")
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    HStack(spacing: 6) {
+                        Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
+                            .lineLimit(1)
 
-                    Text(record.difficulty.displayName(language: strings.language))
-                        .lineLimit(1)
+                        Text("·")
 
-                    Text("·")
+                        Text(record.difficulty.displayName(language: strings.language))
+                            .lineLimit(1)
 
-                    Text(record.question.createdAt, formatter: Self.dateFormatter)
-                        .lineLimit(1)
+                        Text("·")
+
+                        Text(record.question.createdAt, formatter: Self.dateFormatter)
+                            .lineLimit(1)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    if let result = record.gradingResult {
+                        Text("\(result.score)/100")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(scoreColor(result.score))
+                            .lineLimit(1)
+                    } else {
+                        Text(strings.ungraded)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
-                Spacer()
-
-                if let result = record.gradingResult {
-                    Text("\(result.score)/100")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(scoreColor(result.score))
-                } else {
-                    Text(strings.ungraded)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(record.question.question)
+                    .font(.body)
+                    .lineLimit(2)
             }
 
-            Text(record.question.question)
-                .font(.body)
-                .lineLimit(2)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(12)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+        .background(isSelected ? Color.secondary.opacity(0.1) : Color.secondary.opacity(0.055))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+                .stroke(isSelected ? Color.secondary.opacity(0.18) : Color.clear, lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .textSelection(.disabled)
     }
 
     private func scoreColor(_ score: Int) -> Color {
@@ -399,51 +599,4 @@ private struct HistoryRow: View {
         formatter.timeStyle = .short
         return formatter
     }()
-}
-
-private struct InlineStudyRecordDetail: View {
-    var record: StudyRecord
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            StudyRecordDetailView(record: record)
-                .frame(minHeight: 320)
-        }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.platformControlBackground)
-        }
-        .overlay(alignment: .topLeading) {
-            Triangle()
-                .fill(Color.platformControlBackground)
-                .frame(width: 14, height: 8)
-                .offset(x: 22, y: -7)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-        }
-    }
-}
-
-private extension Color {
-    static var platformControlBackground: Color {
-        #if os(macOS)
-        Color(nsColor: .controlBackgroundColor)
-        #else
-        Color(uiColor: .secondarySystemBackground)
-        #endif
-    }
-}
-
-private struct Triangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
 }
