@@ -150,6 +150,16 @@ private struct MobileHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
+                if !isHomeSearchActive {
+                    HStack {
+                        profileToolbarButton
+                        Spacer()
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
                 MobileRootLargeTitle(strings.tabHome)
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                     .listRowSeparator(.hidden)
@@ -334,12 +344,6 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
-            if !isHomeSearchActive {
-                ToolbarItem(placement: .topBarLeading) {
-                    profileToolbarButton
-                }
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 homeToolbarSearchControl(strings: strings)
             }
@@ -448,7 +452,7 @@ private struct MobileHomeView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
-            collapsedWidth: selectedHomeScope == .my && appState.isCommunitySignedIn ? 100 : 50,
+            collapsedWidth: selectedHomeScope == .my && appState.isCommunitySignedIn ? 84 : 34,
             onSubmit: {
                 guard selectedHomeScope == .all else {
                     return
