@@ -242,6 +242,13 @@ class Database:
                             )
                 if "idx_schedules_user_id" not in schedule_indexes:
                     session.execute(text("CREATE INDEX IF NOT EXISTS idx_schedules_user_id ON schedules (user_id)"))
+                if "idx_schedules_due_device_user" not in schedule_indexes:
+                    session.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_schedules_due_device_user "
+                            "ON schedules (enabled, next_due_at, device_id, user_id)"
+                        )
+                    )
                 if "idx_schedules_device_user" not in schedule_indexes:
                     session.execute(
                         text(
