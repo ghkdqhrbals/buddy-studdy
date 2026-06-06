@@ -106,17 +106,8 @@ struct StatisticsView: View {
                             .frame(maxWidth: .infinity, minHeight: 280)
                         }
                     } else {
-                        TopicPortfolioSummary(
-                            totalTopicCount: max(totalTopicCount, 0),
-                            responseCount: count,
-                            isLoading: appState.isBackendStatsLoading,
-                            strings: strings
-                        )
-
                         TopicBrowserSection(
                             stats: pagedTopicStats,
-                            totalCount: max(totalTopicCount, 0),
-                            pageStartIndex: topicPageStartIndex,
                             currentPage: boundedTopicPage,
                             pageCount: pageCount,
                             strings: strings,
@@ -1133,33 +1124,8 @@ private extension TopicLevelRange {
     }
 }
 
-private struct TopicPortfolioSummary: View {
-    var totalTopicCount: Int
-    var responseCount: Int
-    var isLoading: Bool
-    var strings: AppStrings
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            KeyMetricsStrip(metrics: [
-                MetricItem(title: strings.responses, value: "\(responseCount)"),
-                MetricItem(title: strings.topicCount, value: "\(totalTopicCount)")
-            ])
-
-            if isLoading {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-        }
-    }
-}
-
 private struct TopicBrowserSection: View {
-    @State private var showsRangeHelp = false
-
     var stats: [TopicStat]
-    var totalCount: Int
-    var pageStartIndex: Int
     var currentPage: Int
     var pageCount: Int
     var strings: AppStrings
@@ -1168,80 +1134,6 @@ private struct TopicBrowserSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(strings.topicCount)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-
-                Button {
-                    showsRangeHelp.toggle()
-                } label: {
-                    Image(systemName: "questionmark.circle")
-                }
-                .buttonStyle(.borderless)
-                .help(strings.topicRangeHelpTitle)
-                .popover(isPresented: $showsRangeHelp, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label(strings.topicRangeHelpTitle, systemImage: "scope")
-                            .font(.caption.weight(.semibold))
-
-                        Text(strings.topicRangeHelpBody)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(width: 230, alignment: .leading)
-                    .padding(10)
-                    #if os(iOS)
-                    .presentationCompactAdaptation(.popover)
-                    #endif
-                }
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Text(pageStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    if pageCount > 1 {
-                        Button(action: onPreviousPage) {
-                            Image(systemName: "chevron.left")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(currentPage == 0)
-                        .help(strings.previousPage)
-
-                        Text("\(currentPage + 1)/\(pageCount)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-
-                        Button(action: onNextPage) {
-                            Image(systemName: "chevron.right")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(currentPage >= pageCount - 1)
-                        .help(strings.nextPage)
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                Text(strings.topicCount)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(strings.responsesShort)
-                    .frame(width: 58, alignment: .trailing)
-                Text(strings.range)
-                    .frame(width: 64, alignment: .trailing)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-
             if stats.isEmpty {
                 ContentUnavailableView(
                     strings.noMatchingTopics,
@@ -1256,19 +1148,35 @@ private struct TopicBrowserSection: View {
                     }
                 }
             }
-        }
-    }
 
-    private var pageStatus: String {
-        guard totalCount > 0 else {
-            return strings.itemCount(0)
-        }
+            if pageCount > 1 {
+                HStack(spacing: 10) {
+                    Spacer()
 
-        return strings.topicPageStatus(
-            start: pageStartIndex + 1,
-            end: pageStartIndex + stats.count,
-            total: totalCount
-        )
+                    Button(action: onPreviousPage) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(currentPage == 0)
+                    .help(strings.previousPage)
+
+                    Text("\(currentPage + 1)/\(pageCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+
+                    Button(action: onNextPage) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(currentPage >= pageCount - 1)
+                    .help(strings.nextPage)
+                }
+                .padding(.top, 2)
+                .padding(.trailing, 4)
+            }
+        }
     }
 }
 
@@ -1285,14 +1193,6 @@ private struct TopicStatRow: View {
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .truncationMode(.tail)
-
-                    if stat.topicAliases.count > 1 {
-                        Text(strings.groupedTopics(stat.topicAliases.joined(separator: " · ")))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1675,65 +1575,6 @@ private struct ScoreBucket: Identifiable {
     var count: Int
 
     var id: String { title }
-}
-
-private struct MetricItem: Identifiable {
-    var title: String
-    var value: String
-
-    var id: String { title }
-}
-
-private struct KeyMetricsStrip: View {
-    var metrics: [MetricItem]
-
-    private var columns: [GridItem] {
-        let count = max(1, min(metrics.count, 3))
-        return Array(
-            repeating: GridItem(.flexible(), spacing: 10, alignment: .leading),
-            count: count
-        )
-    }
-
-    var body: some View {
-        LazyVGrid(
-            columns: columns,
-            alignment: .leading,
-            spacing: 10
-        ) {
-            ForEach(metrics) { metric in
-                MiniMetric(title: metric.title, value: metric.value)
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.045))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-private struct MiniMetric: View {
-    var title: String
-    var value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Text(value)
-                .font(.title3)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 
 private struct ScoreRecordRow: View {
