@@ -460,8 +460,8 @@ private struct MobileHomeView: View {
             symbolName: appState.profileAvatarSymbolName,
             displayName: appState.communityProfile?.displayName,
             imageData: nil,
-            colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
-            usesNeutralColor: !appState.isCommunitySignedIn,
+            colorSeed: signedInProfileColorSeed,
+            usesNeutralColor: signedInProfileColorSeed == nil,
             size: 34
         )
         .frame(width: 34, height: 34)
@@ -483,8 +483,8 @@ private struct MobileHomeView: View {
                 symbolName: appState.profileAvatarSymbolName,
                 displayName: appState.communityProfile?.displayName,
                 imageData: nil,
-                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
-                usesNeutralColor: !appState.isCommunitySignedIn,
+                colorSeed: signedInProfileColorSeed,
+                usesNeutralColor: signedInProfileColorSeed == nil,
                 size: 34
             )
             .frame(width: 34, height: 34)
@@ -493,6 +493,15 @@ private struct MobileHomeView: View {
         .buttonStyle(.plain)
         .contentShape(Circle())
         .accessibilityLabel(strings.profile)
+    }
+
+    private var signedInProfileColorSeed: String? {
+        guard appState.isCommunitySignedIn,
+              let profileID = appState.communityProfile?.id else {
+            return nil
+        }
+
+        return "user-\(profileID)"
     }
 
     private func homeToolbarSearchControl(strings: AppStrings) -> some View {
@@ -681,7 +690,7 @@ private struct HomeProfileAvatar: View {
     var symbolName: String
     var displayName: String?
     var imageData: Data? = nil
-    var colorSeed: String = "profile"
+    var colorSeed: String? = "profile"
     var usesNeutralColor: Bool = false
     var size: CGFloat = 34
 
@@ -709,7 +718,7 @@ private struct HomeProfileAvatar: View {
 
     private var defaultColorSeed: String {
         let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let trimmedColorSeed = colorSeed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedColorSeed = colorSeed?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         if !trimmedColorSeed.isEmpty {
             return trimmedColorSeed
@@ -789,7 +798,8 @@ private struct MobileProfileSettingsSheet: View {
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
-                                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+                                colorSeed: appState.communityProfile.map { "user-\($0.id)" },
+                                usesNeutralColor: appState.communityProfile == nil,
                                 size: 54
                             )
 
@@ -832,7 +842,7 @@ private struct MobileProfileSettingsSheet: View {
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
                                 displayName: nil,
                                 imageData: nil,
-                                colorSeed: appState.profileAvatarColorSeed,
+                                colorSeed: nil,
                                 usesNeutralColor: true,
                                 size: 58
                             )
@@ -1332,6 +1342,7 @@ private struct CommunityQuestionDetailSheet: View {
                             HomeProfileAvatar(
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
                                 displayName: author.displayName,
+                                colorSeed: "user-\(author.id)",
                                 size: 42
                             )
 
@@ -1629,6 +1640,8 @@ private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsAPIKey = false
 
+    private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStuddy%20Feedback")!
+
     var body: some View {
         let strings = appState.settingsEditorStrings
 
@@ -1730,6 +1743,12 @@ private struct MobileSettingsView: View {
                     }
                 }
             }
+
+            Link(strings.feedbackLink, destination: Self.feedbackURL)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
         }
         .keyboardDoneToolbar(strings.done)
         .navigationTitle(strings.tabSettings)

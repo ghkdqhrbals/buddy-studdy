@@ -1748,6 +1748,7 @@ struct AppStrings {
     var problem: String { text("문제", "Question") }
     var hint: String { text("힌트", "Hint") }
     var feedback: String { text("피드백", "Feedback") }
+    var feedbackLink: String { text("피드백 보내기", "Send feedback") }
     var explanation: String { text("해설", "Explanation") }
     var statsByTopic: String { text("주제별 통계", "Stats by Topic") }
     func currentTopicLevel(_ level: String) -> String {
