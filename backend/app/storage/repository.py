@@ -268,6 +268,8 @@ class Database:
                     )
                     user_columns.add("status")
                 if "google_sub" in user_columns:
+                    if self.engine.dialect.name == "postgresql":
+                        session.execute(text("ALTER TABLE users ALTER COLUMN google_sub DROP NOT NULL"))
                     session.execute(
                         text(
                             "UPDATE users "
