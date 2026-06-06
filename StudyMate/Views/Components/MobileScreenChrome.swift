@@ -68,10 +68,6 @@ private struct MobileSearchCapsuleBackground: View {
     var body: some View {
         Capsule()
             .fill(color)
-            .overlay {
-                Capsule()
-                    .stroke(color, lineWidth: 4)
-            }
     }
 }
 
@@ -136,7 +132,7 @@ struct MobileToolbarSearchField: View {
     }
 
     private var searchBackground: Color {
-        Color(uiColor: .secondarySystemFill)
+        MobileSearchColors.toolbarSearchBackground
     }
 }
 
@@ -213,7 +209,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     }
 
     private var searchBackground: Color {
-        Color(uiColor: .secondarySystemFill)
+        MobileSearchColors.toolbarSearchBackground
     }
 
     private func updateSearchFieldMountState(isExpanded expanded: Bool) {
@@ -232,6 +228,14 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
             }
             keepsSearchFieldMounted = false
         }
+    }
+}
+
+private enum MobileSearchColors {
+    static var toolbarSearchBackground: Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? .systemGray4 : .secondarySystemFill
+        })
     }
 }
 
