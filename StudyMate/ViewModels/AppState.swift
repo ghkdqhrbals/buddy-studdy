@@ -1115,7 +1115,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 idToken: idToken
             )
-            communityProfile = result.profile
+            applyCommunityProfile(result.profile)
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
@@ -1141,7 +1141,7 @@ final class AppState: ObservableObject {
                 email: normalizedEmail,
                 password: password
             )
-            communityProfile = result.profile
+            applyCommunityProfile(result.profile)
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
@@ -1190,6 +1190,30 @@ final class AppState: ObservableObject {
         settingsStore.saveProfileAvatarImageData(data)
     }
 
+    func updateCommunityProfileAvatar(symbolName: String? = nil, colorSeed: String? = nil) {
+        if let symbolName {
+            updateProfileAvatarSymbolName(symbolName)
+        }
+        if let colorSeed {
+            updateProfileAvatarColorSeed(colorSeed)
+        }
+        guard isCommunitySignedIn else {
+            return
+        }
+
+        let nextSymbolName = symbolName ?? profileAvatarSymbolName
+        let nextColorSeed = colorSeed ?? profileAvatarColorSeed
+        Task {
+            await updateCommunityProfile(
+                displayName: communityProfile?.displayName ?? "",
+                bio: communityProfile?.bio ?? "",
+                avatarSymbolName: nextSymbolName,
+                avatarColorSeed: nextColorSeed,
+                pageAccess: communityProfile?.pageAccess
+            )
+        }
+    }
+
     func loadCommunityProfile() async {
         guard isCommunitySignedIn,
               let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
@@ -1197,7 +1221,8 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+            let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+            applyCommunityProfile(profile)
         } catch {
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
         }
@@ -1206,6 +1231,8 @@ final class AppState: ObservableObject {
     func updateCommunityProfile(
         displayName: String,
         bio: String = "",
+        avatarSymbolName: String? = nil,
+        avatarColorSeed: String? = nil,
         pageAccess: CommunityPageAccess? = nil
     ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
@@ -1217,17 +1244,26 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.updateMyProfile(
+            let profile = try await remotePushBackendClient.updateMyProfile(
                 registration: registration,
                 displayName: displayName,
                 bio: bio,
+                avatarSymbolName: avatarSymbolName,
+                avatarColorSeed: avatarColorSeed,
                 pageAccess: pageAccess
             )
+            applyCommunityProfile(profile)
             statusMessage = strings.profileSaved
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
         }
+    }
+
+    private func applyCommunityProfile(_ profile: CommunityUserProfile) {
+        communityProfile = profile
+        updateProfileAvatarSymbolName(profile.avatarSymbolName)
+        updateProfileAvatarColorSeed(profile.avatarColorSeed)
     }
 
     func withdrawCommunityAccount() async {

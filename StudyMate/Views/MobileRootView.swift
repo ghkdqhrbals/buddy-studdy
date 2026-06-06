@@ -847,6 +847,12 @@ private enum PixelAvatarPattern {
             return artist
         case "pixel-star":
             return star
+        case "pixel-girl":
+            return girl
+        case "pixel-princess":
+            return princess
+        case "pixel-flower":
+            return flower
         default:
             return buddy
         }
@@ -920,6 +926,32 @@ private enum PixelAvatarPattern {
             + points(.light, (1, 4), (7, 4), (2, 7), (6, 7))
             + row(8, 3...5, .accent)
     }
+
+    static var girl: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .accent)
+            + points(.accent, (1, 3), (7, 3), (1, 4), (7, 4), (2, 5), (6, 5), (2, 6), (6, 6))
+            + baseFace
+            + points(.light, (3, 7), (5, 7))
+            + row(8, 2...6, .accent)
+    }
+
+    static var princess: [PixelAvatarCell] {
+        points(.light, (2, 0), (4, 0), (6, 0), (3, 1), (4, 1), (5, 1))
+            + row(2, 2...6, .accent)
+            + points(.accent, (1, 3), (7, 3), (1, 4), (7, 4), (2, 6), (6, 6))
+            + baseFace
+            + row(8, 2...6, .light)
+    }
+
+    static var flower: [PixelAvatarCell] {
+        points(.light, (4, 0), (3, 1), (5, 1), (4, 2))
+            + row(2, 2...6, .accent)
+            + points(.accent, (1, 3), (7, 3), (1, 4), (7, 4), (2, 5), (6, 5))
+            + baseFace
+            + points(.light, (2, 7), (6, 7))
+            + row(8, 2...6, .accent)
+    }
 }
 
 private extension Color {
@@ -969,7 +1001,7 @@ private struct MobileProfileSettingsSheet: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                             ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                 Button {
-                                    appState.updateProfileAvatarSymbolName(option)
+                                    appState.updateCommunityProfileAvatar(symbolName: option)
                                 } label: {
                                     HomeProfileAvatar(
                                         symbolName: option,
@@ -1003,7 +1035,7 @@ private struct MobileProfileSettingsSheet: View {
                         HStack(spacing: 12) {
                             ForEach(ProfileAvatarColorOption.all) { option in
                                 Button {
-                                    appState.updateProfileAvatarColorSeed(option.id)
+                                    appState.updateCommunityProfileAvatar(colorSeed: option.id)
                                 } label: {
                                     Circle()
                                         .fill(option.color)
@@ -1108,6 +1140,8 @@ private struct MobileProfileSettingsSheet: View {
                         Task {
                             await appState.updateCommunityProfile(
                                 displayName: profileDisplayName,
+                                avatarSymbolName: appState.profileAvatarSymbolName,
+                                avatarColorSeed: appState.profileAvatarColorSeed,
                                 pageAccess: CommunityPageAccess(
                                     publicQuestions: allowPublicQuestionsAccess,
                                     statistics: true,
@@ -1257,7 +1291,10 @@ private enum ProfileAvatarOption {
         "pixel-coder",
         "pixel-explorer",
         "pixel-artist",
-        "pixel-star"
+        "pixel-star",
+        "pixel-girl",
+        "pixel-princess",
+        "pixel-flower"
     ]
 
     static func glyphName(for symbolName: String) -> String {
@@ -1608,9 +1645,9 @@ private struct MobileCommunityQuestionRow: View {
                 if let author = question.author {
                     HStack(spacing: 4) {
                         HomeProfileAvatar(
-                            symbolName: ProfileAvatarOption.defaultSymbolName,
+                            symbolName: author.avatarSymbolName,
                             displayName: author.displayName,
-                            colorSeed: "user-\(author.id)",
+                            colorSeed: author.avatarColorSeed,
                             size: 16
                         )
 
@@ -1750,9 +1787,9 @@ private struct CommunityAnswerMessage: View {
             if let author {
                 VStack(spacing: 3) {
                     HomeProfileAvatar(
-                        symbolName: ProfileAvatarOption.defaultSymbolName,
+                        symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
-                        colorSeed: "user-\(author.id)",
+                        colorSeed: author.avatarColorSeed,
                         size: 30
                     )
 

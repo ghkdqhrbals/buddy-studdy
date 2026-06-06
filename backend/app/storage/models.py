@@ -63,6 +63,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    avatar_symbol_name: Mapped[str] = mapped_column(String(64), nullable=False, default="pixel-buddy")
+    avatar_color_seed: Mapped[str] = mapped_column(String(64), nullable=False, default="avatar-color-mint")
     bio: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     allow_public_questions: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False)

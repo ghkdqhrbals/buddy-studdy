@@ -299,6 +299,16 @@ class Database:
                             f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
                         )
                     )
+                if "avatar_symbol_name" not in user_columns:
+                    session.execute(
+                        text("ALTER TABLE users ADD COLUMN avatar_symbol_name VARCHAR(64) NOT NULL DEFAULT 'pixel-buddy'")
+                    )
+                    user_columns.add("avatar_symbol_name")
+                if "avatar_color_seed" not in user_columns:
+                    session.execute(
+                        text("ALTER TABLE users ADD COLUMN avatar_color_seed VARCHAR(64) NOT NULL DEFAULT 'avatar-color-mint'")
+                    )
+                    user_columns.add("avatar_color_seed")
 
             if "user_devices" in table_names:
                 if "idx_user_devices_user_id" not in {idx["name"] for idx in inspector.get_indexes("user_devices")}:
@@ -433,6 +443,8 @@ class Database:
                 email=f"{device_id}@anonymous.buddystuddy.local",
                 display_name="BuddyStuddy user",
                 avatar_url=None,
+                avatar_symbol_name="pixel-buddy",
+                avatar_color_seed="avatar-color-mint",
                 bio="",
                 allow_public_questions=False,
                 created_at=now,
@@ -474,6 +486,8 @@ class Database:
                     email=f"{device_id}@anonymous.buddystuddy.local",
                     display_name="BuddyStuddy user",
                     avatar_url=None,
+                    avatar_symbol_name="pixel-buddy",
+                    avatar_color_seed="avatar-color-mint",
                     bio="",
                     allow_public_questions=False,
                     created_at=now,
@@ -756,6 +770,8 @@ class Database:
                     email=email,
                     display_name=normalized_name,
                     avatar_url=avatar_url,
+                    avatar_symbol_name="pixel-buddy",
+                    avatar_color_seed="avatar-color-mint",
                     bio="",
                     allow_public_questions=True,
                     created_at=now,
@@ -819,6 +835,8 @@ class Database:
                     email=normalized_email,
                     display_name=display_name,
                     avatar_url=None,
+                    avatar_symbol_name="pixel-buddy",
+                    avatar_color_seed="avatar-color-mint",
                     bio="",
                     allow_public_questions=True,
                     created_at=now,
@@ -878,6 +896,8 @@ class Database:
         display_name: str | None = None,
         bio: str | None = None,
         allow_public_questions: bool | None = None,
+        avatar_symbol_name: str | None = None,
+        avatar_color_seed: str | None = None,
     ) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:
@@ -900,6 +920,14 @@ class Database:
                 user.bio = bio.strip()[:500]
             if allow_public_questions is not None:
                 user.allow_public_questions = bool(allow_public_questions)
+            if avatar_symbol_name is not None:
+                next_avatar_symbol_name = avatar_symbol_name.strip()
+                if next_avatar_symbol_name:
+                    user.avatar_symbol_name = next_avatar_symbol_name[:64]
+            if avatar_color_seed is not None:
+                next_avatar_color_seed = avatar_color_seed.strip()
+                if next_avatar_color_seed:
+                    user.avatar_color_seed = next_avatar_color_seed[:64]
             user.updated_at = now
             mapping.updated_at = now
             mapping.last_seen_at = now
@@ -970,6 +998,8 @@ class Database:
                     email=f"{device_id}@anonymous.buddystuddy.local",
                     display_name="BuddyStuddy user",
                     avatar_url=None,
+                    avatar_symbol_name="pixel-buddy",
+                    avatar_color_seed="avatar-color-mint",
                     bio="",
                     allow_public_questions=False,
                     created_at=now,
@@ -1684,6 +1714,8 @@ class Database:
             "displayName": row.display_name,
             "bio": row.bio or "",
             "avatarUrl": None,
+            "avatarSymbolName": row.avatar_symbol_name or "pixel-buddy",
+            "avatarColorSeed": row.avatar_color_seed or "avatar-color-mint",
             "pageAccess": {
                 "publicQuestions": bool(row.allow_public_questions),
                 "statistics": True,

@@ -140,6 +140,8 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
+        avatarSymbolName: String?,
+        avatarColorSeed: String?,
         pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile
 
@@ -517,6 +519,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
+        avatarSymbolName: String? = nil,
+        avatarColorSeed: String? = nil,
         pageAccess: CommunityPageAccess? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
@@ -525,7 +529,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(ProfileUpdateRequest(displayName: displayName, bio: bio, pageAccess: pageAccess))
+        request.httpBody = try encoder.encode(
+            ProfileUpdateRequest(
+                displayName: displayName,
+                bio: bio,
+                avatarSymbolName: avatarSymbolName,
+                avatarColorSeed: avatarColorSeed,
+                pageAccess: pageAccess
+            )
+        )
         let data = try await perform(request)
         return try decoder.decode(CommunityUserProfile.self, from: data)
     }
@@ -914,6 +926,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct ProfileUpdateRequest: Encodable {
         var displayName: String?
         var bio: String?
+        var avatarSymbolName: String?
+        var avatarColorSeed: String?
         var pageAccess: CommunityPageAccess?
     }
 
@@ -1019,6 +1033,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var displayName: String
     var bio: String
     var avatarURL: URL?
+    var avatarSymbolName: String
+    var avatarColorSeed: String
     var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
@@ -1026,6 +1042,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         case displayName
         case bio
         case avatarURL = "avatarUrl"
+        case avatarSymbolName
+        case avatarColorSeed
         case pageAccess
     }
 
@@ -1034,12 +1052,16 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         displayName: String,
         bio: String,
         avatarURL: URL?,
+        avatarSymbolName: String = "pixel-buddy",
+        avatarColorSeed: String = "avatar-color-mint",
         pageAccess: CommunityPageAccess = .restricted
     ) {
         self.id = id
         self.displayName = displayName
         self.bio = bio
         self.avatarURL = avatarURL
+        self.avatarSymbolName = avatarSymbolName
+        self.avatarColorSeed = avatarColorSeed
         self.pageAccess = pageAccess
     }
 
@@ -1049,6 +1071,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         displayName = try container.decode(String.self, forKey: .displayName)
         bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
         avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
+        avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-buddy"
+        avatarColorSeed = try container.decodeIfPresent(String.self, forKey: .avatarColorSeed) ?? "avatar-color-mint"
         pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
     }
 }

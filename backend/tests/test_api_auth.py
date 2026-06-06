@@ -267,6 +267,19 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert token_response.status_code == 200
     headers = {"Authorization": f"Bearer {token_response.json()['accessToken']}"}
 
+    profile_response = client.patch(
+        "/api/v1/me/profile",
+        headers=headers,
+        json={
+            "displayName": "Owner",
+            "avatarSymbolName": "pixel-princess",
+            "avatarColorSeed": "avatar-color-rose",
+        },
+    )
+    assert profile_response.status_code == 200
+    assert profile_response.json()["avatarSymbolName"] == "pixel-princess"
+    assert profile_response.json()["avatarColorSeed"] == "avatar-color-rose"
+
     record = main.database.create_question(
         device_id=registered["deviceId"],
         user_id=profile["id"],
@@ -304,6 +317,8 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
         "explanation": "StateObject owns the lifecycle.",
     }
     assert public_questions[0]["answeredAt"] is not None
+    assert public_questions[0]["author"]["avatarSymbolName"] == "pixel-princess"
+    assert public_questions[0]["author"]["avatarColorSeed"] == "avatar-color-rose"
 
     privacy_response = client.patch(
         f"/api/v1/me/records/{record['id']}/publicity",

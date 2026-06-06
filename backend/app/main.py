@@ -534,6 +534,8 @@ async def update_my_profile(
             if payload.page_access is not None
             else None
         ),
+        avatar_symbol_name=payload.avatar_symbol_name,
+        avatar_color_seed=payload.avatar_color_seed,
     )
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")

@@ -161,6 +161,8 @@ Response:
     "displayName": "Buddy",
     "bio": "",
     "avatarUrl": null,
+    "avatarSymbolName": "pixel-buddy",
+    "avatarColorSeed": "avatar-color-mint",
     "pageAccess": {
       "publicQuestions": true,
       "statistics": false,

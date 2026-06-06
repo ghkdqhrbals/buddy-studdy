@@ -55,6 +55,8 @@ class UserProfileResponse(CamelModel):
     display_name: str = Field(alias="displayName")
     bio: str = ""
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
+    avatar_symbol_name: str = Field(default="pixel-buddy", alias="avatarSymbolName")
+    avatar_color_seed: str = Field(default="avatar-color-mint", alias="avatarColorSeed")
     page_access: PageAccessResponse = Field(alias="pageAccess")
 
 
@@ -93,6 +95,8 @@ class EmailLoginRequest(CamelModel):
 class ProfileUpdateRequest(CamelModel):
     display_name: str | None = Field(default=None, alias="displayName", max_length=120)
     bio: str | None = Field(default=None, max_length=500)
+    avatar_symbol_name: str | None = Field(default=None, alias="avatarSymbolName", max_length=64)
+    avatar_color_seed: str | None = Field(default=None, alias="avatarColorSeed", max_length=64)
     page_access: PageAccessUpdateRequest | None = Field(default=None, alias="pageAccess")
 
 
