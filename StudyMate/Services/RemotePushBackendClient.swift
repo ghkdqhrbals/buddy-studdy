@@ -66,6 +66,11 @@ struct CommunityLoginResult: Equatable {
     var registration: RemotePushRegistration
 }
 
+struct EmailVerificationCodeResult: Equatable {
+    var email: String
+    var expiresInSeconds: Int
+}
+
 @MainActor
 protocol RemotePushBackendClientProtocol {
     func registerDevice(
@@ -128,10 +133,16 @@ protocol RemotePushBackendClientProtocol {
         idToken: String
     ) async throws -> CommunityLoginResult
 
+    func requestEmailVerificationCode(
+        registration: RemotePushRegistration,
+        email: String
+    ) async throws -> EmailVerificationCodeResult
+
     func loginWithEmail(
         registration: RemotePushRegistration,
         email: String,
-        password: String
+        password: String,
+        verificationCode: String?
     ) async throws -> CommunityLoginResult
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
@@ -295,16 +306,21 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         apiKey: String?,
         enabled: Bool
     ) async throws {
+        let activeCategory = settings.activeCategory
+        let scheduleTopic = activeCategory?.normalizedTitle ?? settings.effectiveTopic
+        let scheduleDifficulty = activeCategory?.difficulty ?? settings.difficulty
+        let schedulePrompt = activeCategory?.normalizedCustomPrompt ?? settings.customPrompt
+        let scheduleModel = activeCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel
         let requestBody = ScheduleRequest(
-            topic: settings.topic,
-            difficultyLevel: settings.difficulty.level,
+            topic: scheduleTopic,
+            difficultyLevel: scheduleDifficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
             openAIAPIKey: apiKey,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: settings.customPrompt,
+            customPrompt: schedulePrompt,
             appLanguage: settings.appLanguage.backendCode,
-            openAIModel: settings.sanitizedOpenAIModel,
+            openAIModel: scheduleModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
             isQuestionPublic: settings.isQuestionPublic
         )
@@ -481,10 +497,27 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
     }
 
+    func requestEmailVerificationCode(
+        registration: RemotePushRegistration,
+        email: String
+    ) async throws -> EmailVerificationCodeResult {
+        var request = loginRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "email", "code")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(EmailVerificationCodeRequest(email: email))
+        let data = try await perform(request)
+        let response = try decoder.decode(EmailVerificationCodeResponse.self, from: data)
+        return EmailVerificationCodeResult(email: response.email, expiresInSeconds: response.expiresInSeconds)
+    }
+
     func loginWithEmail(
         registration: RemotePushRegistration,
         email: String,
-        password: String
+        password: String,
+        verificationCode: String?
     ) async throws -> CommunityLoginResult {
         var request = loginRequest(
             registration: registration,
@@ -492,7 +525,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(EmailLoginRequest(email: email, password: password))
+        request.httpBody = try encoder.encode(
+            EmailLoginRequest(
+                email: email,
+                password: password,
+                verificationCode: verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        )
         let data = try await perform(request)
         let response = try decoder.decode(CommunityLoginResponse.self, from: data)
         let updatedRegistration = RemotePushRegistration(
@@ -819,6 +858,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 with: #"$1\"[REDACTED]\""#,
                 options: .regularExpression
             )
+            .replacingOccurrences(
+                of: #"("verificationCode"\s*:\s*)\"[^\"]+\""#,
+                with: #"$1\"[REDACTED]\""#,
+                options: .regularExpression
+            )
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return sanitized
@@ -928,9 +972,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var idToken: String
     }
 
+    private struct EmailVerificationCodeRequest: Encodable {
+        var email: String
+    }
+
+    private struct EmailVerificationCodeResponse: Decodable {
+        var email: String
+        var expiresInSeconds: Int
+    }
+
     private struct EmailLoginRequest: Encodable {
         var email: String
         var password: String
+        var verificationCode: String?
     }
 
     private struct ProfileUpdateRequest: Encodable {

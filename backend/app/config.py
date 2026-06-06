@@ -16,6 +16,16 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _int_secret_env(name: str, secret_values: dict[str, str], secret_key: str, default: int) -> int:
+    raw_value = os.getenv(name) or secret_values.get(secret_key)
+    if raw_value is None:
+        return default
+    try:
+        return int(str(raw_value).strip())
+    except ValueError:
+        return default
+
+
 @lru_cache(maxsize=1)
 def _load_aws_secret_values() -> dict[str, str]:
     secret_id = os.getenv("AWS_SECRET_ID")
@@ -73,6 +83,12 @@ class Settings:
     smtp_username: str | None
     smtp_password: str | None
     smtp_from: str | None
+    redis_host: str | None
+    redis_port: int
+    redis_password: str | None
+    redis_db: int
+    redis_ssl: bool
+    email_verification_ttl_seconds: int
 
     @classmethod
     def load(cls) -> "Settings":
@@ -122,10 +138,19 @@ class Settings:
             google_ios_client_id=_secret_env("GOOGLE_IOS_CLIENT_ID", secret_values, "googleIOSClientId"),
             report_email_to=_secret_env("REPORT_EMAIL_TO", secret_values, "reportEmailTo"),
             smtp_host=_secret_env("SMTP_HOST", secret_values, "smtpHost"),
-            smtp_port=int(os.getenv("SMTP_PORT", "587")),
+            smtp_port=_int_secret_env("SMTP_PORT", secret_values, "smtpPort", 587),
             smtp_username=_secret_env("SMTP_USERNAME", secret_values, "smtpUsername"),
             smtp_password=_secret_env("SMTP_PASSWORD", secret_values, "smtpPassword"),
             smtp_from=_secret_env("SMTP_FROM", secret_values, "smtpFrom"),
+            redis_host=_secret_env("REDIS_HOST", secret_values, "redisHost"),
+            redis_port=_int_secret_env("REDIS_PORT", secret_values, "redisPort", 6379),
+            redis_password=_secret_env("REDIS_PASSWORD", secret_values, "redisPassword"),
+            redis_db=_int_secret_env("REDIS_DB", secret_values, "redisDB", 0),
+            redis_ssl=_bool_env("REDIS_SSL", (secret_values.get("redisSSL") or "").strip().lower() in {"1", "true", "yes", "on"}),
+            email_verification_ttl_seconds=max(
+                30,
+                _int_secret_env("EMAIL_VERIFICATION_TTL_SECONDS", secret_values, "emailVerificationTTLSeconds", 180),
+            ),
         )
 
     @property

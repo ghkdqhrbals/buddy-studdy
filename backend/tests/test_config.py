@@ -21,6 +21,15 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "apnsBundleId": "io.github.ghkdqhrbals.StudyMate",
         "apnsEnv": "sandbox",
         "googleIOSClientId": "google-client",
+        "redisHost": "redis.example.com",
+        "redisPort": "6379",
+        "redisPassword": "redis-password",
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": "587",
+        "smtpUsername": "sender@example.com",
+        "smtpPassword": "smtp-password",
+        "smtpFrom": "BuddyStuddy <sender@example.com>",
+        "emailVerificationTTLSeconds": "180",
     }
 
     class FakeSecretsManager:
@@ -45,6 +54,15 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.apns_bundle_id == "io.github.ghkdqhrbals.StudyMate"
     assert settings.apns_env == "sandbox"
     assert settings.google_ios_client_id == "google-client"
+    assert settings.redis_host == "redis.example.com"
+    assert settings.redis_port == 6379
+    assert settings.redis_password == "redis-password"
+    assert settings.smtp_host == "smtp.gmail.com"
+    assert settings.smtp_port == 587
+    assert settings.smtp_username == "sender@example.com"
+    assert settings.smtp_password == "smtp-password"
+    assert settings.smtp_from == "BuddyStuddy <sender@example.com>"
+    assert settings.email_verification_ttl_seconds == 180
 
     clear_secret_cache()
 

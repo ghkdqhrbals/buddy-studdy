@@ -133,7 +133,32 @@ Request:
 
 The backend verifies the ID token against `GOOGLE_IOS_CLIENT_ID`, then links the Google identity to the device.
 
-Tester email/password login is also supported:
+Tester email/password login is also supported. New email accounts must verify a 6-digit signup code first.
+
+```http
+POST /api/v1/auth/email/code
+Content-Type: application/json
+Authorization: Bearer <accessToken>
+```
+
+Request:
+
+```json
+{
+  "email": "tester@example.com"
+}
+```
+
+Response:
+
+```json
+{
+  "email": "tester@example.com",
+  "expiresInSeconds": 180
+}
+```
+
+The code is stored in Redis with a 180-second TTL and is sent through Gmail SMTP when SMTP settings are configured.
 
 ```http
 POST /api/v1/auth/email
@@ -146,11 +171,12 @@ Request:
 ```json
 {
   "email": "tester@example.com",
-  "password": "secret123"
+  "password": "secret123",
+  "verificationCode": "123456"
 }
 ```
 
-If the email does not exist, the backend creates an active `EMAIL` user. Passwords are stored only as SHA-256 hashes.
+If the email already exists, `verificationCode` can be omitted. If it does not exist, the backend verifies the code and creates an active `EMAIL` user. Passwords are stored only as SHA-256 hashes.
 
 Response:
 

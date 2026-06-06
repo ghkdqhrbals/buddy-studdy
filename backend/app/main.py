@@ -31,6 +31,8 @@ from .models import (
     BackendSettingsResponse,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
+    EmailVerificationCodeRequest,
+    EmailVerificationCodeResponse,
     EmailLoginResponse,
     EmailLoginRequest,
     GoogleLoginResponse,
@@ -49,15 +51,17 @@ from .models import (
     StudyRecordResponse,
     UserProfileResponse,
 )
+from .email_verification import EmailVerificationStore, EmailVerificationUnavailable
 from .openai_client import OpenAIQuestionClient
 from .openai_models import DEFAULT_OPENAI_MODEL, OPENAI_MODEL_OPTIONS, normalize_openai_model
 from .google_auth import GoogleAuthError, verify_google_id_token
-from .reporting import send_report_email
+from .reporting import send_email_verification_code, send_report_email
 from .scheduler import QuestionScheduler
 
 
 settings = Settings.load()
 database = Database(path=settings.database_path, url=settings.database_url)
+email_verification_store = EmailVerificationStore(settings)
 scheduler: QuestionScheduler | None = None
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -483,11 +487,51 @@ async def google_login(
     )
 
 
+@app.post("/api/v1/auth/email/code", response_model=EmailVerificationCodeResponse)
+async def request_email_verification_code(
+    payload: EmailVerificationCodeRequest,
+    principal: AuthenticatedPrincipal = Depends(authenticate_login_principal),
+) -> EmailVerificationCodeResponse:
+    _ = principal
+    try:
+        issued = email_verification_store.issue_code(payload.email)
+    except EmailVerificationUnavailable as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email verification is not configured.") from error
+
+    try:
+        sent = send_email_verification_code(settings, issued.email, issued.code, issued.expires_in_seconds)
+    except Exception as error:
+        logger.warning("email verification send failed email=%s error=%s", issued.email, error)
+        sent = False
+
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email verification email could not be sent.",
+        )
+
+    return EmailVerificationCodeResponse(email=issued.email, expiresInSeconds=issued.expires_in_seconds)
+
+
 @app.post("/api/v1/auth/email", response_model=EmailLoginResponse)
 async def email_login(
     payload: EmailLoginRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_login_principal),
 ) -> EmailLoginResponse:
+    is_existing_email_user = database.email_user_exists(payload.email)
+    if not is_existing_email_user:
+        if not payload.verification_code:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email verification code is required.")
+        try:
+            verified = email_verification_store.verify_and_consume(payload.email, payload.verification_code)
+        except EmailVerificationUnavailable as error:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email verification is not configured.") from error
+        if not verified:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired email verification code.",
+            )
+
     profile, password_mismatch = database.link_email_user_to_device(
         device_id=principal.device_id,
         email=payload.email,

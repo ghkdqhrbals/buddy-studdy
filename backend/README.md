@@ -34,7 +34,10 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`: Redis settings for email signup verification-code sessions.
+- `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
+- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager source. The backend reads secret keys such as `redisHost`, `redisPort`, `redisPassword`, `smtpHost`, `smtpUsername`, and `smtpPassword`.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 

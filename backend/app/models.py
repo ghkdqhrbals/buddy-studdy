@@ -82,6 +82,7 @@ class GoogleLoginRequest(CamelModel):
 class EmailLoginRequest(CamelModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=6, max_length=256)
+    verification_code: str | None = Field(default=None, alias="verificationCode", min_length=4, max_length=12)
 
     @field_validator("email")
     @classmethod
@@ -90,6 +91,20 @@ class EmailLoginRequest(CamelModel):
         if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
             raise ValueError("Email address is invalid.")
         return normalized
+
+
+class EmailVerificationCodeRequest(CamelModel):
+    email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return EmailLoginRequest.normalize_email(value)
+
+
+class EmailVerificationCodeResponse(CamelModel):
+    email: str
+    expires_in_seconds: int = Field(alias="expiresInSeconds")
 
 
 class ProfileUpdateRequest(CamelModel):

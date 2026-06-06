@@ -1217,7 +1217,10 @@ private struct EmailSignInSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
+    @State private var verificationCode = ""
     @State private var isSubmitting = false
+    @State private var isSendingCode = false
+    @State private var didSendCode = false
     var onSignedIn: () -> Void
 
     private var strings: AppStrings {
@@ -1227,6 +1230,11 @@ private struct EmailSignInSheet: View {
     private var canSubmit: Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         return normalizedEmail.contains("@") && password.count >= 6 && !isSubmitting
+    }
+
+    private var canSendCode: Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedEmail.contains("@") && !isSendingCode && !isSubmitting
     }
 
     var body: some View {
@@ -1243,8 +1251,47 @@ private struct EmailSignInSheet: View {
                     SecureField(strings.password, text: $password)
                         .textContentType(.password)
                         .submitLabel(.done)
+
+                    TextField(strings.emailVerificationCode, text: $verificationCode)
+                        .textContentType(.oneTimeCode)
+                        .keyboardType(.numberPad)
+                        .submitLabel(.done)
                 } footer: {
                     Text(strings.emailLoginHelp)
+                }
+
+                Section {
+                    Button {
+                        Task {
+                            isSendingCode = true
+                            let didSend = await appState.requestEmailVerificationCode(email: email)
+                            didSendCode = didSend
+                            isSendingCode = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(didSendCode ? strings.resendVerificationCode : strings.sendVerificationCode)
+                            Spacer()
+                            if isSendingCode {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(!canSendCode)
+
+                    if didSendCode {
+                        Text(strings.emailVerificationSent)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let message = appState.communityErrorMessage,
+                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .keyboardDoneToolbar(strings.done)
@@ -1261,7 +1308,12 @@ private struct EmailSignInSheet: View {
                     Button {
                         Task {
                             isSubmitting = true
-                            let didSignIn = await appState.signInToCommunity(email: email, password: password)
+                            let code = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let didSignIn = await appState.signInToCommunity(
+                                email: email,
+                                password: password,
+                                verificationCode: code.isEmpty ? nil : code
+                            )
                             isSubmitting = false
                             if didSignIn {
                                 onSignedIn()

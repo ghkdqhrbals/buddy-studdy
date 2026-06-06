@@ -204,14 +204,41 @@ def test_google_login_accepts_access_token_or_legacy_device_credentials(monkeypa
 def test_email_login_creates_user_reuses_user_and_hashes_password(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)
+    sent_codes: dict[str, str] = {}
+
+    def fake_send_email_verification_code(settings, email, code, ttl_seconds):
+        _ = settings
+        assert ttl_seconds == 180
+        sent_codes[email] = code
+        return True
+
+    main.send_email_verification_code = fake_send_email_verification_code
 
     registered = _register(client, "apns-token-email-login-" + "e" * 32)
     body = {"email": "Tester@Example.com", "password": "secret123"}
 
-    response = client.post(
+    missing_code_response = client.post(
         "/api/v1/auth/email",
         headers={"Authorization": f"Bearer {registered['accessToken']}"},
         json=body,
+    )
+    assert missing_code_response.status_code == 403
+    assert missing_code_response.json()["error"]["code"] == "AUTH_EMAIL_VERIFICATION_REQUIRED"
+
+    code_response = client.post(
+        "/api/v1/auth/email/code",
+        headers={"Authorization": f"Bearer {registered['accessToken']}"},
+        json={"email": "Tester@Example.com"},
+    )
+    assert code_response.status_code == 200
+    assert code_response.json()["email"] == "tester@example.com"
+    assert code_response.json()["expiresInSeconds"] == 180
+    assert sent_codes["tester@example.com"]
+
+    response = client.post(
+        "/api/v1/auth/email",
+        headers={"Authorization": f"Bearer {registered['accessToken']}"},
+        json={**body, "verificationCode": sent_codes["tester@example.com"]},
     )
     assert response.status_code == 200
     payload = response.json()
@@ -244,13 +271,26 @@ def test_email_login_creates_user_reuses_user_and_hashes_password(monkeypatch, t
     assert wrong_password_response.json()["error"]["code"] == "AUTH_INVALID_EMAIL_CREDENTIALS"
 
     legacy_device = _register(client, "apns-token-email-login-" + "g" * 32)
+    legacy_code_response = client.post(
+        "/api/v1/auth/email/code",
+        headers={
+            "X-Device-Id": legacy_device["deviceId"],
+            "X-Client-Secret": legacy_device["clientSecret"],
+        },
+        json={"email": "legacy@example.com"},
+    )
+    assert legacy_code_response.status_code == 200
     legacy_response = client.post(
         "/api/v1/auth/email",
         headers={
             "X-Device-Id": legacy_device["deviceId"],
             "X-Client-Secret": legacy_device["clientSecret"],
         },
-        json={"email": "legacy@example.com", "password": "secret123"},
+        json={
+            "email": "legacy@example.com",
+            "password": "secret123",
+            "verificationCode": sent_codes["legacy@example.com"],
+        },
     )
     assert legacy_response.status_code == 200
     assert legacy_response.json()["profile"]["displayName"] == "legacy"

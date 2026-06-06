@@ -868,6 +868,16 @@ class Database:
             session.flush()
             return self.user_profile_response(user), False
 
+    def email_user_exists(self, email: str) -> bool:
+        normalized_email = email.strip().lower()
+        with self.connect() as session:
+            return (
+                session.query(User.id)
+                .filter(User.provider == PROVIDER_EMAIL, User.provider_id == normalized_email)
+                .first()
+                is not None
+            )
+
     def get_device_profile(self, device_id: str) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:

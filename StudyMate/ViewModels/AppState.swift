@@ -1127,7 +1127,28 @@ final class AppState: ObservableObject {
         }
     }
 
-    func signInToCommunity(email: String, password: String) async -> Bool {
+    func requestEmailVerificationCode(email: String) async -> Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-code") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return false
+        }
+
+        do {
+            communityErrorMessage = nil
+            _ = try await remotePushBackendClient.requestEmailVerificationCode(
+                registration: registration,
+                email: normalizedEmail
+            )
+            return true
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
             communityErrorMessage = strings.communityRequestFailed
@@ -1139,7 +1160,8 @@ final class AppState: ObservableObject {
             let result = try await remotePushBackendClient.loginWithEmail(
                 registration: registration,
                 email: normalizedEmail,
-                password: password
+                password: password,
+                verificationCode: verificationCode
             )
             applyCommunityProfile(result.profile)
             settingsStore.saveRemotePushRegistration(result.registration)

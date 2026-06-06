@@ -31,6 +31,8 @@ SENSITIVE_FIELD_HINTS = (
     "password",
     "secret",
     "token",
+    "verificationcode",
+    "verification_code",
 )
 
 
