@@ -274,7 +274,7 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert public_response.json()["questions"] == []
 
 
-def test_profile_withdrawal_deidentifies_user_and_returns_anonymous_token(monkeypatch, tmp_path):
+def test_profile_withdrawal_deletes_user_data_and_returns_anonymous_token(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)
 
@@ -326,6 +326,15 @@ def test_profile_withdrawal_deidentifies_user_and_returns_anonymous_token(monkey
     assert token_payload["is_anonymous"] is True
 
     assert client.get("/api/v1/public/questions").json()["questions"] == []
+    records, records_total = main.database.list_records(
+        registered["deviceId"],
+        user_id=profile["id"],
+        include_deleted=True,
+        limit=20,
+        offset=0,
+    )
+    assert records == []
+    assert records_total == 0
     assert client.get("/api/v1/me/profile", headers={"Authorization": f"Bearer {anonymous_token}"}).status_code == 401
     assert main.database.get_public_profile(profile["id"]) is None
 

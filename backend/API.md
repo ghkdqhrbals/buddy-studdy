@@ -173,7 +173,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/me/profile` withdraws the active Google-linked account for the current device. The backend immediately de-identifies direct profile fields, disables public question exposure, expires that login mapping, reconnects the device to an anonymous user, and returns a fresh anonymous `accessToken`. Minimal operational records required for legal obligations or dispute handling may be retained for up to 30 days, then deleted or anonymized.
+`DELETE /api/v1/me/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
 
 ### Report Public Question
 
@@ -347,7 +347,7 @@ DELETE /api/v1/me/records
 ```
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
-`PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints are soft-delete operations.
+`PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
 
 ### Statistics
 

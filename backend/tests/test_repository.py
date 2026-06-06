@@ -310,13 +310,21 @@ def test_records_paging_and_clear(db: Database):
     page_after, total_after = db.list_records(device_id, limit=20, offset=0)
     assert total_after == 10
     assert all(item["status"] != "deleted" for item in page_after)
+    all_records_after_delete, all_total_after_delete = db.list_records(
+        device_id,
+        include_deleted=True,
+        limit=20,
+        offset=0,
+    )
+    assert all_total_after_delete == 10
+    assert all(item["id"] not in {record_ids[0], record_ids[1]} for item in all_records_after_delete)
 
     db.clear_records(device_id)
     page_after_clear, total_after_clear = db.list_records(device_id, limit=20, offset=0)
     assert total_after_clear == 0
     all_records, all_total = db.list_records(device_id, include_deleted=True, limit=20, offset=0)
-    assert all_total == 12
-    assert any(item["status"] == "deleted" for item in all_records)
+    assert all_total == 0
+    assert all_records == []
 
 
 def test_due_schedules(db: Database):

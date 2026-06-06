@@ -855,23 +855,40 @@ class Database:
                 return None
 
             withdrawn_user_id = int(user.id)
-            user.status = USER_STATUS_WITHDRAWN
-            user.provider_id = f"withdrawn:{withdrawn_user_id}:{int(now.timestamp())}"
-            user.email = f"withdrawn-{withdrawn_user_id}@withdrawn.buddystuddy.local"
-            user.display_name = "Withdrawn user"
-            user.avatar_url = None
-            user.bio = ""
-            user.allow_public_questions = False
-            user.updated_at = now
-            mapping.session_expires_at = now
-            mapping.updated_at = now
-            mapping.last_seen_at = now
-
-            (
-                session.query(Question)
+            question_ids = [
+                row_id
+                for (row_id,) in session.query(Question.id)
                 .filter(Question.user_id == withdrawn_user_id)
-                .update({"is_public": False, "updated_at": now}, synchronize_session=False)
+                .all()
+            ]
+            if question_ids:
+                (
+                    session.query(Report)
+                    .filter(Report.question_id.in_(question_ids))
+                    .delete(synchronize_session=False)
+                )
+                (
+                    session.query(Question)
+                    .filter(Question.id.in_(question_ids))
+                    .delete(synchronize_session=False)
+                )
+            (
+                session.query(Report)
+                .filter(Report.reporter_user_id == withdrawn_user_id)
+                .delete(synchronize_session=False)
             )
+            (
+                session.query(UserDevice)
+                .filter(UserDevice.user_id == withdrawn_user_id)
+                .delete(synchronize_session=False)
+            )
+            if device.user_id == withdrawn_user_id:
+                device.user_id = None
+                device.google_session_expires_at = None
+                device.updated_at = now
+                device.last_seen_at = now
+            session.delete(user)
+            session.flush()
 
             provider_id = f"anonymous:{device_id}"
             anonymous_user = (
@@ -1333,7 +1350,6 @@ class Database:
         row_id = self._record_id_value(record_id)
         if row_id is None:
             return
-        now = self._utc_now()
         with self.connect() as session:
             row = (
                 session.query(Question)
@@ -1344,12 +1360,10 @@ class Database:
                 return
             if row is None:
                 return
-            row.deleted_at = now
-            row.status = "deleted"
-            row.updated_at = now
+            session.query(Report).filter(Report.question_id == row.id).delete(synchronize_session=False)
+            session.delete(row)
 
     def clear_records(self, device_id: str, user_id: int | None = None) -> None:
-        now = self._utc_now()
         with self.connect() as session:
             rows = (
                 session.query(Question)
@@ -1358,10 +1372,11 @@ class Database:
             )
             if user_id is not None:
                 rows = [row for row in rows if row.user_id == user_id]
+            row_ids = [int(row.id) for row in rows]
+            if row_ids:
+                session.query(Report).filter(Report.question_id.in_(row_ids)).delete(synchronize_session=False)
             for row in rows:
-                row.deleted_at = now
-                row.status = "deleted"
-                row.updated_at = now
+                session.delete(row)
 
     def defer_schedule(self, device_id: str, minutes: int, error: str | None = None) -> None:
         now = self._utc_now()
