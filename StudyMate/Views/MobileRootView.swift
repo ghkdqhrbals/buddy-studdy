@@ -354,9 +354,22 @@ private struct MobileHomeView: View {
                     homeToolbarSearchControl(strings: strings)
                 }
                 .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
+
+                if shouldShowHomeAddToolbarButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeAddToolbarButton(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     homeToolbarSearchControl(strings: strings)
+                }
+
+                if shouldShowHomeAddToolbarButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeAddToolbarButton(strings: strings)
+                    }
                 }
             }
             #else
@@ -436,6 +449,10 @@ private struct MobileHomeView: View {
         isSearchVisible || !activeTrimmedSearchText.isEmpty
     }
 
+    private var shouldShowHomeAddToolbarButton: Bool {
+        !isHomeSearchActive && selectedHomeScope == .my && appState.isCommunitySignedIn
+    }
+
     private var profileToolbarControl: some View {
         let strings = appState.strings
 
@@ -486,7 +503,7 @@ private struct MobileHomeView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
-            collapsedWidth: selectedHomeScope == .my && appState.isCommunitySignedIn ? 84 : 34,
+            collapsedWidth: 34,
             onSubmit: {
                 guard selectedHomeScope == .all else {
                     return
@@ -500,7 +517,7 @@ private struct MobileHomeView: View {
                 closeHomeSearch(clearText: true)
             }
         ) {
-            homeToolbarItems(strings: strings)
+            homeSearchToolbarButton(strings: strings)
         }
     }
 
@@ -526,6 +543,26 @@ private struct MobileHomeView: View {
             }
         }
         .fixedSize()
+    }
+
+    private func homeSearchToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            showHomeSearch()
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.search)
+    }
+
+    private func homeAddToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            isAddingStudyCategory = true
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "plus")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.newStudyCategory)
     }
 
     @MainActor

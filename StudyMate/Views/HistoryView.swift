@@ -173,9 +173,22 @@ struct HistoryView: View {
                     recordToolbarSearchControl(strings: strings)
                 }
                 .sharedBackgroundVisibility(isRecordSearchActive ? .hidden : .automatic)
+
+                if !isRecordSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordSettingsToolbarControl(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     recordToolbarSearchControl(strings: strings)
+                }
+
+                if !isRecordSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordSettingsToolbarControl(strings: strings)
+                    }
                 }
             }
             #else
@@ -243,12 +256,12 @@ struct HistoryView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
-            collapsedWidth: 84,
+            collapsedWidth: 34,
             onClose: {
                 closeRecordSearch(clearText: true)
             }
         ) {
-            recordToolbarItems(strings: strings)
+            recordSearchToolbarButton(strings: strings)
         }
         #else
         TextField(strings.searchRecords, text: $searchText)
@@ -260,34 +273,42 @@ struct HistoryView: View {
     @ViewBuilder
     private func recordToolbarItems(strings: AppStrings) -> some View {
         HStack(spacing: 16) {
-            Button {
-                showRecordSearch()
-            } label: {
-                #if os(iOS)
-                MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
-                #else
-                Image(systemName: "magnifyingglass")
-                #endif
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(strings.search)
-
-            Menu {
-                Button {
-                    showsRecordSettings = true
-                } label: {
-                    Label(strings.recordSettings, systemImage: "slider.horizontal.3")
-                }
-            } label: {
-                #if os(iOS)
-                MobileToolbarIconButtonLabel(systemName: "ellipsis")
-                #else
-                Image(systemName: "ellipsis")
-                #endif
-            }
-            .accessibilityLabel(strings.recordSettings)
+            recordSearchToolbarButton(strings: strings)
+            recordSettingsToolbarControl(strings: strings)
         }
         .fixedSize()
+    }
+
+    private func recordSearchToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            showRecordSearch()
+        } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+            #else
+            Image(systemName: "magnifyingglass")
+            #endif
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.search)
+    }
+
+    @ViewBuilder
+    private func recordSettingsToolbarControl(strings: AppStrings) -> some View {
+        Menu {
+            Button {
+                showsRecordSettings = true
+            } label: {
+                Label(strings.recordSettings, systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+            #else
+            Image(systemName: "ellipsis")
+            #endif
+        }
+        .accessibilityLabel(strings.recordSettings)
     }
 
     @MainActor
