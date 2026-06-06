@@ -872,19 +872,6 @@ private struct StatisticsPeriodControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(strings.period)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(rangeText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-            }
-
             Picker(strings.period, selection: $selectedPeriod) {
                 ForEach(StatisticsPeriod.allCases) { period in
                     Text(period.shortTitle(strings: strings)).tag(period)
@@ -919,20 +906,6 @@ private struct StatisticsPeriodControls: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
-
-    private var rangeText: String {
-        if selectedPeriod == .custom {
-            return "\(Self.dateFormatter.string(from: customStartDate)) - \(Self.dateFormatter.string(from: customEndDate))"
-        }
-
-        return selectedPeriod.title(strings: strings)
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
-        return formatter
-    }()
 
 }
 
@@ -1213,7 +1186,7 @@ private struct TopicStatRow: View {
                         .font(.title3.weight(.semibold))
                         .monospacedDigit()
                         .lineLimit(1)
-                    Text(strings.range)
+                    Text(strings.level)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
