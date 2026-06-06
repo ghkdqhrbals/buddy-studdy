@@ -409,7 +409,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             throw RemotePushBackendError.invalidResponse
         }
 
-        var request = authenticatedRequest(registration: registration, url: url)
+        _ = registration
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionsResponse.self, from: data)

@@ -89,13 +89,19 @@ def test_access_token_is_the_request_principal(monkeypatch, tmp_path):
     assert mismatch.json()["error"]["status"] == 403
 
     community = client.get("/api/v1/public/questions")
-    assert community.status_code == 401
-    assert community.json()["error"]["code"] == "AUTH_ACCESS_TOKEN_REQUIRED"
+    assert community.status_code == 200
+    assert community.json()["questions"] == []
 
     guest_community = client.get("/api/v1/public/questions", headers=headers)
-    assert guest_community.status_code == 401
-    assert guest_community.json()["error"]["code"] == "AUTH_GOOGLE_REQUIRED"
-    assert guest_community.json()["error"]["message"] == "Google Login is required."
+    assert guest_community.status_code == 200
+    assert guest_community.json()["questions"] == []
+
+    invalid_token_community = client.get(
+        "/api/v1/public/questions",
+        headers={"Authorization": "Bearer invalid-access-token"},
+    )
+    assert invalid_token_community.status_code == 200
+    assert invalid_token_community.json()["questions"] == []
 
 
 def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_path):

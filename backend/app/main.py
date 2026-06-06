@@ -851,9 +851,7 @@ async def list_public_questions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     exclude_device_id: str | None = Query(default=None, alias="excludeDeviceId"),
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> CommunityQuestionsResponse:
-    require_google_principal(principal)
     questions, total = database.list_public_questions(
         exclude_device_id=exclude_device_id,
         limit=limit,

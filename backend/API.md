@@ -31,7 +31,7 @@ X-Device-Id: <deviceId>
 X-Client-Secret: <clientSecret>
 ```
 
-Community profile and community question endpoints require device credentials. Google Login links a Google account to that device identity.
+Public question listing is readable without login. Profile editing, reports, records, statistics, study details, and private device data require an access token. Google Login links a Google account to that device identity.
 
 ## Endpoints
 
@@ -144,6 +144,15 @@ GET /api/v1/devices/{deviceId}/profile
 PATCH /api/v1/devices/{deviceId}/profile
 GET /api/v1/public/users/{userId}/profile
 ```
+
+Public question listing:
+
+```http
+GET /api/v1/public/questions
+GET /api/v1/public/questions?topic=SwiftUI&limit=20&offset=0
+```
+
+This endpoint is public and must not require `Authorization`.
 
 Patch request:
 
