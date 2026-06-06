@@ -59,7 +59,7 @@ struct MobileRootView: View {
                 Alert(
                     title: Text(prompt.title),
                     message: Text(prompt.message),
-                    primaryButton: .default(Text(strings.goToSignIn)) {
+                    primaryButton: .default(Text(strings.signInWithGoogle)) {
                         appState.dismissPageAccessPrompt()
                         appState.signInToCommunity()
                     },
