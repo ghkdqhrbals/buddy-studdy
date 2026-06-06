@@ -1671,6 +1671,12 @@ struct AppStrings {
     var accountDeleted: String { text("탈퇴 처리되었습니다.", "Account deleted.") }
     var pageAccess: String { text("페이지 접근 허용", "Page Access") }
     var publicQuestionsPage: String { text("공개 질문", "Public Questions") }
+    var publicQuestionsPageHelp: String {
+        text(
+            "켜두면 개별 기록에서 공개로 설정한 채점 완료 질문만 다른 사용자에게 표시됩니다.",
+            "When enabled, only graded questions that you individually mark public are shown to other users."
+        )
+    }
     var statisticsPage: String { text("통계", "Statistics") }
     var studyDetailPage: String { text("내 학습 내부", "My Study Detail") }
     var recordsPage: String { text("기록", "Records") }

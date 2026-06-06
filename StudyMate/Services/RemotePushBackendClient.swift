@@ -968,11 +968,14 @@ struct BackendStats: Decodable, Equatable {
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var id: String
     var question: String
+    var answer: String?
+    var gradingResult: GradingResult?
     var topic: String
     var difficultyLevel: Int
     var status: String
     var source: String
     var createdAt: Date
+    var answeredAt: Date?
     var author: CommunityUserProfile?
 }
 

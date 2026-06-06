@@ -1575,14 +1575,25 @@ class Database:
         author = row.device.user if row.device is not None else None
         if author is not None and author.status != USER_STATUS_ACTIVE:
             author = None
+        grading_result = None
+        if row.score is not None:
+            grading_result = {
+                "score": int(row.score),
+                "isCorrect": bool(row.is_correct),
+                "feedback": row.feedback or "",
+                "explanation": row.explanation or "",
+            }
         return {
             "id": str(row.id),
             "question": row.question,
+            "answer": row.answer,
+            "gradingResult": grading_result,
             "topic": row.topic,
             "difficultyLevel": row.difficulty_level,
             "status": row.status,
             "source": row.source,
             "createdAt": self._response_timestamp(row.created_at),
+            "answeredAt": self._response_timestamp(row.answered_at),
             "author": self.user_profile_response(author) if author is not None else None,
         }
 

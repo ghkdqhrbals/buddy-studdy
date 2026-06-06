@@ -250,7 +250,16 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
 
     public_response = client.get("/api/v1/public/questions", headers=headers)
     assert public_response.status_code == 200
-    assert [item["id"] for item in public_response.json()["questions"]] == [record["id"]]
+    public_questions = public_response.json()["questions"]
+    assert [item["id"] for item in public_questions] == [record["id"]]
+    assert public_questions[0]["answer"] == "Use it for owned observable state."
+    assert public_questions[0]["gradingResult"] == {
+        "score": 90,
+        "isCorrect": True,
+        "feedback": "Good",
+        "explanation": "StateObject owns the lifecycle.",
+    }
+    assert public_questions[0]["answeredAt"] is not None
 
     privacy_response = client.patch(
         f"/api/v1/me/records/{record['id']}/publicity",

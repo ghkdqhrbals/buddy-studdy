@@ -138,11 +138,14 @@ class BackendSettingsResponse(CamelModel):
 class CommunityQuestionResponse(CamelModel):
     id: str
     question: str
+    answer: str | None = None
+    grading_result: GradingPayload | None = Field(default=None, alias="gradingResult")
     topic: str
     difficulty_level: int = Field(alias="difficultyLevel")
     status: str
     source: str
     created_at: str = Field(alias="createdAt")
+    answered_at: str | None = Field(default=None, alias="answeredAt")
     author: UserProfileResponse | None = None
 
 

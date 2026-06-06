@@ -803,6 +803,8 @@ private struct MobileProfileSettingsSheet: View {
 
                     Section {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
+                    } footer: {
+                        Text(strings.publicQuestionsPageHelp)
                     }
 
                     Section {
@@ -1281,18 +1283,51 @@ private struct CommunityQuestionDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(strings.communityQuestion) {
-                    Text(question.question)
-                        .font(.body)
-                        .textSelection(.enabled)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    communityQuestionMeta
 
-                    LabeledContent(strings.topic, value: question.topic.isEmpty ? "Swift" : question.topic)
-                    LabeledContent(strings.level, value: "Lv.\(question.difficultyLevel)")
-                }
+                    CommunityMessageBubble(role: .question) {
+                        Text(question.question)
+                            .font(.body)
+                            .foregroundStyle(.white)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                if let author = question.author {
-                    Section(strings.profile) {
+                    if let answer = question.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !answer.isEmpty {
+                        CommunityMessageBubble(role: .answer) {
+                            Text(answer)
+                                .font(.body)
+                                .foregroundStyle(.white)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+
+                    if let gradingResult = question.gradingResult {
+                        CommunityMessageBubble(role: .feedback) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label(gradingResult.gradeTitle(strings: strings), systemImage: gradingResult.gradeIconName)
+                                    Spacer(minLength: 12)
+                                    Text("\(gradingResult.score)/100")
+                                        .font(.headline)
+                                }
+
+                                Text(gradingResult.feedback)
+                                    .font(.body)
+
+                                Text(gradingResult.explanation)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if let author = question.author {
                         HStack(spacing: 12) {
                             HomeProfileAvatar(
                                 symbolName: ProfileAvatarOption.defaultSymbolName,
@@ -1305,10 +1340,9 @@ private struct CommunityQuestionDetailSheet: View {
                                     .font(.headline)
                             }
                         }
+                        .padding(.top, 4)
                     }
-                }
 
-                Section {
                     Button(role: .destructive) {
                         Task {
                             await appState.reportCommunityQuestion(
@@ -1320,7 +1354,10 @@ private struct CommunityQuestionDetailSheet: View {
                     } label: {
                         Label(strings.report, systemImage: "exclamationmark.bubble")
                     }
+                    .buttonStyle(.borderless)
+                    .padding(.top, 8)
                 }
+                .padding(16)
             }
             .navigationTitle(strings.communityQuestion)
             .navigationBarTitleDisplayMode(.inline)
@@ -1332,6 +1369,91 @@ private struct CommunityQuestionDetailSheet: View {
                 }
             }
         }
+    }
+
+    private var communityQuestionMeta: some View {
+        HStack(spacing: 8) {
+            Text(question.topic.isEmpty ? "Swift" : question.topic)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text("Lv.\(question.difficultyLevel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let answeredAt = question.answeredAt {
+                Text(answeredAt, style: .date)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private enum CommunityMessageBubbleRole: Equatable {
+    case question
+    case answer
+    case feedback
+
+    var alignment: Alignment {
+        switch self {
+        case .question, .feedback:
+            .leading
+        case .answer:
+            .trailing
+        }
+    }
+
+    var foregroundBackground: Color {
+        switch self {
+        case .question:
+            Color.green.opacity(0.92)
+        case .answer:
+            Color.accentColor
+        case .feedback:
+            Color.secondary.opacity(0.06)
+        }
+    }
+
+    var borderColor: Color {
+        switch self {
+        case .question, .answer:
+            Color.clear
+        case .feedback:
+            Color.secondary.opacity(0.12)
+        }
+    }
+}
+
+private struct CommunityMessageBubble<Content: View>: View {
+    var role: CommunityMessageBubbleRole
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            if role == .answer {
+                Spacer(minLength: 42)
+            }
+
+            content()
+                .padding(.vertical, 11)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: role == .answer ? 280 : .infinity, alignment: .leading)
+                .background(role.foregroundBackground)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(role.borderColor, lineWidth: 1)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            if role != .answer {
+                Spacer(minLength: 42)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: role.alignment)
     }
 }
 

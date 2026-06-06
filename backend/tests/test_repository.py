@@ -783,6 +783,14 @@ def test_public_questions_filters_and_paginates(db: Database):
     swift_only, swift_total = db.list_public_questions(exclude_device_id=None, topic="Swift", limit=20, offset=0)
     assert swift_total == 1
     assert swift_only[0]["id"] == public_one["id"]
+    assert swift_only[0]["answer"] == "answer"
+    assert swift_only[0]["gradingResult"] == {
+        "score": 92,
+        "isCorrect": True,
+        "feedback": "ok",
+        "explanation": "ok",
+    }
+    assert swift_only[0]["answeredAt"] is not None
 
     # Pagination returns next page correctly.
     page_one, page_total = db.list_public_questions(exclude_device_id=None, limit=1, offset=0)
