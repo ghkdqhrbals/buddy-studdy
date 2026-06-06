@@ -106,6 +106,7 @@ private struct MobileHomeView: View {
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var communitySearchDebounceTask: Task<Void, Never>?
+    @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private var strings: AppStrings {
@@ -150,8 +151,6 @@ private struct MobileHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                homeTopControlsSpacer
-
                 MobileRootLargeTitle(strings.tabHome)
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                     .listRowSeparator(.hidden)
@@ -327,10 +326,6 @@ private struct MobileHomeView: View {
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .top) {
-            homeTopControls(strings: strings)
-                .zIndex(20)
-        }
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !activeTrimmedSearchText.isEmpty,
@@ -340,6 +335,15 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
+            ToolbarItem(placement: .topBarLeading) {
+                if !isHomeSearchActive {
+                    profileToolbarControl
+                }
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                homeToolbarSearchControl(strings: strings)
+            }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
                 profileToolbarButton
@@ -381,6 +385,8 @@ private struct MobileHomeView: View {
         }
         .onDisappear {
             communitySearchDebounceTask?.cancel()
+            searchFocusTask?.cancel()
+            searchFocusTask = nil
             if activeTrimmedSearchText.isEmpty {
                 closeHomeSearch(clearText: false)
             }
@@ -411,42 +417,28 @@ private struct MobileHomeView: View {
         }
     }
 
-    @ViewBuilder
-    private var homeTopControlsSpacer: some View {
-        #if os(iOS)
-        Color.clear
-            .frame(height: 48)
-            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-        #else
-        EmptyView()
-        #endif
-    }
-
-    @ViewBuilder
-    private func homeTopControls(strings: AppStrings) -> some View {
-        #if os(iOS)
-        HStack(alignment: .center, spacing: 12) {
-            if !isHomeSearchActive {
-                profileToolbarButton
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
-            }
-
-            Spacer(minLength: 12)
-
-            homeToolbarSearchControl(strings: strings)
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.top, 4)
-        .animation(.smooth(duration: 0.22), value: isHomeSearchActive)
-        #else
-        EmptyView()
-        #endif
-    }
-
     private var isHomeSearchActive: Bool {
         isSearchVisible || !activeTrimmedSearchText.isEmpty
+    }
+
+    private var profileToolbarControl: some View {
+        let strings = appState.strings
+
+        return HomeProfileAvatar(
+            symbolName: appState.profileAvatarSymbolName,
+            displayName: appState.communityProfile?.displayName,
+            imageData: appState.profileAvatarImageData,
+            colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+            usesNeutralColor: !appState.isCommunitySignedIn,
+            size: 34
+        )
+        .frame(width: 34, height: 34)
+        .contentShape(Circle())
+        .onTapGesture {
+            isShowingProfileSettings = true
+        }
+        .accessibilityLabel(strings.profile)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var profileToolbarButton: some View {
@@ -532,15 +524,23 @@ private struct MobileHomeView: View {
         withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
-        Task { @MainActor in
+        searchFocusTask?.cancel()
+        searchFocusTask = Task { @MainActor in
             await Task.yield()
             try? await Task.sleep(nanoseconds: 60_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
             isSearchFocused = true
         }
     }
 
     @MainActor
     private func closeHomeSearch(clearText: Bool) {
+        searchFocusTask?.cancel()
+        searchFocusTask = nil
+        isSearchFocused = false
+
         if clearText {
             setActiveSearchText("")
         }

@@ -16,6 +16,7 @@ struct StatisticsView: View {
     @State private var statsSearchDebounceTask: Task<Void, Never>?
     @State private var isPullRefreshing = false
     @State private var isSearchVisible = false
+    @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private static let topicPageSize = 8
@@ -260,6 +261,8 @@ struct StatisticsView: View {
         .onDisappear {
             statsSearchDebounceTask?.cancel()
             statsSearchDebounceTask = nil
+            searchFocusTask?.cancel()
+            searchFocusTask = nil
         }
         .onChange(of: isSearchFocused) { _, isFocused in
             guard !isFocused,
@@ -322,15 +325,23 @@ struct StatisticsView: View {
         withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
-        Task { @MainActor in
+        searchFocusTask?.cancel()
+        searchFocusTask = Task { @MainActor in
             await Task.yield()
             try? await Task.sleep(nanoseconds: 60_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
             isSearchFocused = true
         }
     }
 
     @MainActor
     private func closeStatsSearch(clearText: Bool) {
+        searchFocusTask?.cancel()
+        searchFocusTask = nil
+        isSearchFocused = false
+
         if clearText {
             topicSearch = ""
         }

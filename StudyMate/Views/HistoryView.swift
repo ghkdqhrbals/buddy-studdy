@@ -11,6 +11,7 @@ struct HistoryView: View {
     @State private var showsRecordSettings = false
     @State private var isRefreshing = false
     @State private var isSearchVisible = false
+    @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private let pageSize = 10
@@ -200,6 +201,10 @@ struct HistoryView: View {
 
             closeRecordSearch(clearText: false)
         }
+        .onDisappear {
+            searchFocusTask?.cancel()
+            searchFocusTask = nil
+        }
         .sheet(isPresented: $showsRecordSettings) {
             RecordSettingsSheet()
         }
@@ -289,15 +294,23 @@ struct HistoryView: View {
         withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
-        Task { @MainActor in
+        searchFocusTask?.cancel()
+        searchFocusTask = Task { @MainActor in
             await Task.yield()
             try? await Task.sleep(nanoseconds: 60_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
             isSearchFocused = true
         }
     }
 
     @MainActor
     private func closeRecordSearch(clearText: Bool) {
+        searchFocusTask?.cancel()
+        searchFocusTask = nil
+        isSearchFocused = false
+
         if clearText {
             searchText = ""
         }
