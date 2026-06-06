@@ -814,6 +814,18 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var topic: String
     var difficulty: Difficulty
     var answeredAt: Date?
+    var isPublic: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case question
+        case answer
+        case gradingResult
+        case topic
+        case difficulty
+        case answeredAt
+        case isPublic
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -822,7 +834,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingResult: GradingResult? = nil,
         topic: String,
         difficulty: Difficulty,
-        answeredAt: Date? = nil
+        answeredAt: Date? = nil,
+        isPublic: Bool = false
     ) {
         self.id = id
         self.question = question
@@ -831,6 +844,19 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
+        self.isPublic = isPublic
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        question = try container.decode(QuestionItem.self, forKey: .question)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
+        topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
+        difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
+        answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
     }
 }
 
@@ -1463,6 +1489,8 @@ struct AppStrings {
     }
     var editInHome: String { text("홈에서 관리", "Manage in Home") }
     var questionVisibility: String { text("질문 공개", "Question Visibility") }
+    var makeQuestionPublic: String { text("질문 공개", "Make Question Public") }
+    var makeQuestionPrivate: String { text("질문 비공개", "Make Question Private") }
     var questionVisibilityHelp: String {
         text(
             "로그인한 사용자에게만 공개됩니다. OFF로 설정하면 내가 생성한 질문이 커뮤니티에 노출되지 않습니다.",

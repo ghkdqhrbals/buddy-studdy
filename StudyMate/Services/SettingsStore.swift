@@ -186,6 +186,11 @@ final class SettingsStore {
         recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
+    func saveStudyRecord(_ record: StudyRecord) {
+        recordStore.save(record)
+        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
+    }
+
     func deleteStudyRecord(_ record: StudyRecord) {
         markStudyRecordDeleted(record)
         recordStore.delete(record)

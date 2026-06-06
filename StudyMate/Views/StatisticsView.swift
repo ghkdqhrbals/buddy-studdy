@@ -271,6 +271,7 @@ struct StatisticsView: View {
     @ViewBuilder
     private func statsToolbarSearchField(strings: AppStrings) -> some View {
         if isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            #if os(iOS)
             MobileToolbarSearchField(
                 text: $topicSearch,
                 prompt: strings.topicSearch,
@@ -280,6 +281,11 @@ struct StatisticsView: View {
                     closeStatsSearch(clearText: true)
                 }
             )
+            #else
+            TextField(strings.topicSearch, text: $topicSearch)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+            #endif
         }
     }
 
@@ -287,7 +293,11 @@ struct StatisticsView: View {
         Button {
             showStatsSearch()
         } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+            #else
             Image(systemName: "magnifyingglass")
+            #endif
         }
         .accessibilityLabel(strings.search)
     }
@@ -708,6 +718,13 @@ private struct RecordChatBubble<Content: View>: View {
             if role == .input {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if role == .answer {
+                content()
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
+                    .background(role.fill)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
                 content()
                     .padding(.vertical, 11)

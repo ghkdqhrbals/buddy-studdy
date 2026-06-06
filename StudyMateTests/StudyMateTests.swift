@@ -3452,7 +3452,20 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         self.registration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
-            apnsToken: apnsToken
+            apnsToken: apnsToken,
+            accessToken: registration.accessToken,
+            accessTokenExpiresAt: registration.accessTokenExpiresAt
+        )
+        return self.registration
+    }
+
+    func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        self.registration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: "test-access-token",
+            accessTokenExpiresAt: Date().addingTimeInterval(3600)
         )
         return self.registration
     }
@@ -3541,8 +3554,18 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
-    ) async throws -> CommunityUserProfile {
-        CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
+    ) async throws -> CommunityLoginResult {
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: "google-access-token",
+            accessTokenExpiresAt: Date().addingTimeInterval(3600)
+        )
+        return CommunityLoginResult(
+            profile: CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil),
+            registration: updatedRegistration
+        )
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
@@ -3608,6 +3631,14 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         recordID: String
     ) async throws {}
+
+    func updateRecordPublicity(
+        registration: RemotePushRegistration,
+        recordID: String,
+        isPublic: Bool
+    ) async throws -> StudyRecord {
+        throw RemotePushBackendError.invalidResponse
+    }
 
     func clearRecords(registration: RemotePushRegistration) async throws {}
 

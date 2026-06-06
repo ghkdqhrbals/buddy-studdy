@@ -2,7 +2,7 @@
 
 ## Project
 
-BuddyStuddy is a SwiftUI iOS app plus a macOS menu bar app. It generates short study questions with OpenAI, stores records locally, syncs through CloudKit, and shows topic-level statistics. Current public release work targets only the iOS app; macOS DMG/Sparkle release is paused. Internal Xcode targets and CloudKit identifiers still use `StudyMate` for release continuity.
+BuddyStuddy is a SwiftUI iOS app. It generates short study questions with OpenAI, stores records, syncs with the backend, and shows topic-level statistics. Current public release work targets only the iOS app; macOS menu bar, DMG, Sparkle, and macOS test/build work are out of scope unless explicitly requested. Internal Xcode targets and identifiers still use `StudyMate` for release continuity.
 
 Read these first:
 
@@ -17,7 +17,7 @@ Read these first:
 - Keep logs paginated and dense. Do not render all persisted logs at once.
 - Only the regular OpenAI API key is supported and synced.
 - Keep Korean and English strings in `AppStrings` for new UI labels.
-- Do not add macOS release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
+- Do not add or verify macOS app/release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
 
 ## Storage
 
@@ -33,12 +33,6 @@ Read these first:
 - Push arrival should sync quietly. Only explicit notification taps/replies should navigate to the pushed question.
 
 ## Verification
-
-Run macOS tests after shared logic changes:
-
-```sh
-xcodebuild -project StudyMate.xcodeproj -scheme StudyMate -destination 'platform=macOS,arch=arm64' -derivedDataPath build/MacTestDerivedData CODE_SIGNING_ALLOWED=NO test
-```
 
 Run iOS generic build after shared UI, CloudKit, notification, or model changes:
 

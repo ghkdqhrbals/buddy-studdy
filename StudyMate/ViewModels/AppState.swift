@@ -143,8 +143,15 @@ final class AppState: ObservableObject {
     }
 
     var hasUnsavedSettingsChanges: Bool {
-        normalizedSettings(activeSettingsForEditing) != savedSettings ||
-            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey
+        var comparableActiveSettings = normalizedSettings(activeSettingsForEditing)
+        var comparableSavedSettings = normalizedSettings(savedSettings)
+        if !isCommunitySignedIn {
+            comparableActiveSettings = comparableActiveSettings.withQuestionPrivacy(false)
+            comparableSavedSettings = comparableSavedSettings.withQuestionPrivacy(false)
+        }
+
+        return comparableActiveSettings != comparableSavedSettings ||
+            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var mobileVisibleTab: AppTab {
@@ -542,7 +549,8 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func refreshBackendSnapshotIfPossible(updateVisibleQuestion: Bool = true) async -> Bool {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "snapshot") else {
             return false
         }
 
@@ -666,7 +674,7 @@ final class AppState: ObservableObject {
                 topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
                 offset: normalizedOffset,
-                excludeDeviceID: registration.deviceID
+                excludeDeviceID: nil
             )
 
             guard communityQuestionLoadRequestID == requestID else {
@@ -1002,13 +1010,14 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.loginWithGoogle(
+            let result = try await remotePushBackendClient.loginWithGoogle(
                 registration: registration,
                 idToken: idToken
             )
+            communityProfile = result.profile
+            settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            statusMessage = strings.communitySignedIn
             await syncRemotePushScheduleIfPossible(reason: "google-login")
             await loadCommunityQuestions(reset: true, userInitiated: true)
         } catch {
@@ -1942,7 +1951,7 @@ final class AppState: ObservableObject {
             isBackendOpenAIKeyConfigured = true
             errorMessage = nil
         }
-        statusMessage = "설정을 저장했습니다."
+        statusMessage = nil
         StudyNotificationDelegate.shared.register(language: sanitizedSettings.appLanguage)
         log(.info, "설정을 저장했습니다. interval=\(sanitizedSettings.sanitizedIntervalMinutes), maxHistory=\(sanitizedSettings.sanitizedMaxHistoryCount)")
         markCloudDataChanged()
@@ -2015,7 +2024,7 @@ final class AppState: ObservableObject {
         }
 
         isValidatingAPIKey = true
-        statusMessage = "API 키를 확인 중입니다."
+        statusMessage = nil
         errorMessage = nil
 
         do {
@@ -2029,7 +2038,7 @@ final class AppState: ObservableObject {
             )
             _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
             hasAPIKeyError = false
-            statusMessage = "설정을 저장했고 API 키도 확인했습니다."
+            statusMessage = nil
             isBackendOpenAIKeyConfigured = true
             log(.info, "백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
@@ -2634,7 +2643,8 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func handleBackendRecordPush(recordID: String, openStudy: Bool, replyText: String? = nil) async -> Bool {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
             log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
             return false
         }
@@ -2870,8 +2880,11 @@ final class AppState: ObservableObject {
         log(.warning, "학습 기록을 모두 삭제했습니다.")
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
+                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "clear-records") else {
+                    return
+                }
                 do {
-                    try await remotePushBackendClient.clearRecords(registration: registration)
+                    try await remotePushBackendClient.clearRecords(registration: tokenRegistration)
                     await syncRemotePushScheduleIfPossible(reason: "clear-records")
                 } catch {
                     log(.warning, "백엔드 학습 기록 전체삭제 실패: \(error.localizedDescription)")
@@ -2901,8 +2914,11 @@ final class AppState: ObservableObject {
         log(.info, "학습 기록을 1개 삭제했습니다.")
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
+                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "delete-record") else {
+                    return
+                }
                 do {
-                    try await remotePushBackendClient.deleteRecord(registration: registration, recordID: record.id)
+                    try await remotePushBackendClient.deleteRecord(registration: tokenRegistration, recordID: record.id)
                     await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "delete-record")
                 } catch {
@@ -2911,6 +2927,43 @@ final class AppState: ObservableObject {
             }
         }
         markCloudDataChanged(syncDelaySeconds: 0)
+    }
+
+    func updateStudyRecordPublicity(_ record: StudyRecord, isPublic: Bool) {
+        let updatedRecord = StudyRecord(
+            id: record.id,
+            question: record.question,
+            answer: record.answer,
+            gradingResult: record.gradingResult,
+            topic: record.topic,
+            difficulty: record.difficulty,
+            answeredAt: record.answeredAt,
+            isPublic: isPublic
+        )
+        settingsStore.saveStudyRecord(updatedRecord)
+        studyRecords = settingsStore.loadStudyRecords()
+        markCloudDataChanged()
+
+        guard let registration = settingsStore.loadRemotePushRegistration() else {
+            return
+        }
+
+        Task {
+            guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "record-publicity") else {
+                return
+            }
+            do {
+                let backendRecord = try await remotePushBackendClient.updateRecordPublicity(
+                    registration: tokenRegistration,
+                    recordID: record.id,
+                    isPublic: isPublic
+                )
+                settingsStore.saveStudyRecord(backendRecord)
+                studyRecords = settingsStore.loadStudyRecords()
+            } catch {
+                log(.warning, "기록 공개 상태 변경 실패: \(error.localizedDescription)")
+            }
+        }
     }
 
     func clearAppLogs() {
@@ -3266,7 +3319,7 @@ final class AppState: ObservableObject {
 
     private func backendRegistrationForOpenAIRequests(reason: String) async -> RemotePushRegistration? {
         if let registration = settingsStore.loadRemotePushRegistration() {
-            return registration
+            return await registrationWithAccessToken(registration, reason: reason)
         }
 
         do {
@@ -3286,6 +3339,25 @@ final class AppState: ObservableObject {
             return registration
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func registrationWithAccessToken(
+        _ registration: RemotePushRegistration,
+        reason: String
+    ) async -> RemotePushRegistration? {
+        guard !registration.hasAccessToken else {
+            return registration
+        }
+
+        do {
+            let updatedRegistration = try await remotePushBackendClient.bootstrapAccessToken(registration: registration)
+            settingsStore.saveRemotePushRegistration(updatedRegistration)
+            log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
+            return updatedRegistration
+        } catch {
+            log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
     }
@@ -3330,10 +3402,16 @@ final class AppState: ObservableObject {
 
             if let existingRegistration,
                existingRegistration.apnsToken == token {
-                registration = existingRegistration
+                guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-existing") else {
+                    return
+                }
+                registration = tokenRegistration
             } else if let existingRegistration {
+                guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-update") else {
+                    return
+                }
                 registration = try await remotePushBackendClient.updatePushToken(
-                    registration: existingRegistration,
+                    registration: tokenRegistration,
                     apnsToken: token,
                     apnsEnvironment: Self.backendAPNSEnvironment
                 )
@@ -3361,7 +3439,8 @@ final class AppState: ObservableObject {
     }
 
     private func syncRemotePushScheduleIfPossible(reason: String) async {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
             return
         }
 

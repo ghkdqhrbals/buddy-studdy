@@ -4,12 +4,34 @@ struct RemotePushRegistration: Codable, Equatable {
     var deviceID: String
     var clientSecret: String
     var apnsToken: String
+    var accessToken: String? = nil
+    var accessTokenExpiresAt: Date? = nil
 
     enum CodingKeys: String, CodingKey {
         case deviceID = "deviceId"
         case clientSecret
         case apnsToken
+        case accessToken
+        case accessTokenExpiresAt
     }
+
+    var hasAccessToken: Bool {
+        guard let accessToken,
+              !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+
+        if let accessTokenExpiresAt {
+            return accessTokenExpiresAt > Date().addingTimeInterval(60)
+        }
+
+        return true
+    }
+}
+
+struct CommunityLoginResult: Equatable {
+    var profile: CommunityUserProfile
+    var registration: RemotePushRegistration
 }
 
 @MainActor
@@ -26,6 +48,8 @@ protocol RemotePushBackendClientProtocol {
         apnsToken: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration
+
+    func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
     func updateSchedule(
         registration: RemotePushRegistration,
@@ -70,7 +94,7 @@ protocol RemotePushBackendClientProtocol {
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
-    ) async throws -> CommunityUserProfile
+    ) async throws -> CommunityLoginResult
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
 
@@ -110,6 +134,12 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         recordID: String
     ) async throws
+
+    func updateRecordPublicity(
+        registration: RemotePushRegistration,
+        recordID: String,
+        isPublic: Bool
+    ) async throws -> StudyRecord
 
     func clearRecords(registration: RemotePushRegistration) async throws
 
@@ -166,7 +196,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return RemotePushRegistration(
             deviceID: response.deviceID,
             clientSecret: response.clientSecret,
-            apnsToken: apnsToken ?? ""
+            apnsToken: apnsToken ?? "",
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
         )
     }
 
@@ -191,7 +223,26 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
-            apnsToken: apnsToken
+            apnsToken: apnsToken,
+            accessToken: registration.accessToken,
+            accessTokenExpiresAt: registration.accessTokenExpiresAt
+        )
+    }
+
+    func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        var request = URLRequest(url: endpoint("api", "v1", "devices", registration.deviceID, "auth", "token"))
+        request.httpMethod = "POST"
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+
+        let data = try await perform(request)
+        let response = try decoder.decode(AccessTokenResponse.self, from: data)
+        return RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
         )
     }
 
@@ -366,7 +417,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
-    ) async throws -> CommunityUserProfile {
+    ) async throws -> CommunityLoginResult {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "devices", registration.deviceID, "auth", "google")
@@ -375,7 +426,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(GoogleLoginRequest(idToken: idToken))
         let data = try await perform(request)
-        return try decoder.decode(CommunityUserProfile.self, from: data)
+        let response = try decoder.decode(GoogleLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
@@ -485,6 +544,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "DELETE"
         _ = try await perform(request)
+    }
+
+    func updateRecordPublicity(
+        registration: RemotePushRegistration,
+        recordID: String,
+        isPublic: Bool
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID, "publicity")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(RecordPublicityRequest(isPublic: isPublic))
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
     }
 
     func clearRecords(registration: RemotePushRegistration) async throws {
@@ -661,8 +736,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func authenticatedRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
         var request = URLRequest(url: url)
-        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
-        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        if let accessToken = registration.accessToken,
+           !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+            request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        }
         return request
     }
 
@@ -684,11 +764,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct RegisterDeviceResponse: Decodable {
         var deviceID: String
         var clientSecret: String
+        var accessToken: String
+        var accessTokenExpiresAt: Date
 
         enum CodingKeys: String, CodingKey {
             case deviceID = "deviceId"
             case clientSecret
+            case accessToken
+            case accessTokenExpiresAt
         }
+    }
+
+    private struct AccessTokenResponse: Decodable {
+        var accessToken: String
+        var accessTokenExpiresAt: Date
     }
 
     private struct ScheduleRequest: Encodable {
@@ -730,6 +819,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct ProfileUpdateRequest: Encodable {
         var displayName: String?
         var bio: String?
+    }
+
+    private struct GoogleLoginResponse: Decodable {
+        var profile: CommunityUserProfile
+        var accessToken: String
+        var accessTokenExpiresAt: Date
+    }
+
+    private struct RecordPublicityRequest: Encodable {
+        var isPublic: Bool
     }
 
     private struct ReportQuestionRequest: Encodable {

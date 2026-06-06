@@ -415,6 +415,7 @@ private struct MobileHomeView: View {
                 displayName: appState.communityProfile?.displayName,
                 imageData: appState.profileAvatarImageData,
                 colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+                usesNeutralColor: !appState.isCommunitySignedIn,
                 size: 34
             )
             .frame(width: 34, height: 34)
@@ -452,7 +453,7 @@ private struct MobileHomeView: View {
         Button {
             showHomeSearch()
         } label: {
-            Image(systemName: "magnifyingglass")
+            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
         }
         .accessibilityLabel(strings.search)
 
@@ -460,7 +461,7 @@ private struct MobileHomeView: View {
             Button {
                 isAddingStudyCategory = true
             } label: {
-                Image(systemName: "plus")
+                MobileToolbarIconButtonLabel(systemName: "plus")
             }
             .accessibilityLabel(strings.newStudyCategory)
         }
@@ -576,6 +577,7 @@ private struct HomeProfileAvatar: View {
     var displayName: String?
     var imageData: Data? = nil
     var colorSeed: String = "profile"
+    var usesNeutralColor: Bool = false
     var size: CGFloat = 34
 
     var body: some View {
@@ -596,7 +598,7 @@ private struct HomeProfileAvatar: View {
     }
 
     private var defaultGlyph: some View {
-        PersonAvatarGlyph(colorSeed: defaultColorSeed)
+        PersonAvatarGlyph(colorSeed: defaultColorSeed, usesNeutralColor: usesNeutralColor)
             .frame(width: size, height: size)
     }
 
@@ -628,6 +630,7 @@ private struct HomeProfileAvatar: View {
 
 private struct PersonAvatarGlyph: View {
     var colorSeed: String
+    var usesNeutralColor: Bool = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -635,7 +638,7 @@ private struct PersonAvatarGlyph: View {
 
             ZStack {
                 Circle()
-                    .fill(stableAvatarColor(seed: colorSeed))
+                    .fill(usesNeutralColor ? Color.secondary.opacity(0.42) : stableAvatarColor(seed: colorSeed))
 
                 Image(systemName: "person.fill")
                     .font(.system(size: iconSize, weight: .semibold))
@@ -736,6 +739,7 @@ private struct MobileProfileSettingsSheet: View {
                                 displayName: nil,
                                 imageData: appState.profileAvatarImageData,
                                 colorSeed: appState.profileAvatarColorSeed,
+                                usesNeutralColor: true,
                                 size: 58
                             )
 
@@ -1157,10 +1161,6 @@ private struct StudyCategoryEditorSheet: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    Text(strings.difficultyScaleHint)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
                     Picker(strings.openAIModel, selection: $openAIModel) {
                         ForEach(modelOptions) { option in
                             Text(option.displayName).tag(option.id)
@@ -1181,12 +1181,6 @@ private struct StudyCategoryEditorSheet: View {
 
                     TextEditor(text: $customPrompt)
                         .frame(minHeight: 130)
-                }
-
-                Section {
-                    Text(strings.studyProfileHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 if let onDelete {
@@ -1535,14 +1529,7 @@ private struct MobileSettingsView: View {
                             )
                         )
 
-                        Text(strings.questionVisibilityHelp)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
-
-                    Text(strings.studyProfileHelp)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("OpenAI") {
@@ -1561,12 +1548,6 @@ private struct MobileSettingsView: View {
                         }
                     }
 
-                    if let statusMessage = appState.statusMessage {
-                        Text(statusMessage)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
                     if let validationMessage = appState.apiKeyValidationMessage {
                         Text(validationMessage)
                             .font(.caption)
@@ -1574,10 +1555,6 @@ private struct MobileSettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(strings.openAIBillingHelp)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
                         Link(strings.openAIUsageAndCostsPage, destination: URL(string: "https://platform.openai.com/usage")!)
                         Link(strings.openAIBillingPage, destination: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!)
                     }

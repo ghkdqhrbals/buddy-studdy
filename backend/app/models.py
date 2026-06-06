@@ -24,6 +24,8 @@ class DeviceRegisterRequest(CamelModel):
 class DeviceRegisterResponse(CamelModel):
     device_id: str = Field(alias="deviceId")
     client_secret: str = Field(alias="clientSecret")
+    access_token: str = Field(alias="accessToken")
+    access_token_expires_at: str = Field(alias="accessTokenExpiresAt")
 
 
 class UserProfileResponse(CamelModel):
@@ -31,6 +33,17 @@ class UserProfileResponse(CamelModel):
     display_name: str = Field(alias="displayName")
     bio: str = ""
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
+
+
+class AccessTokenResponse(CamelModel):
+    access_token: str = Field(alias="accessToken")
+    access_token_expires_at: str = Field(alias="accessTokenExpiresAt")
+
+
+class GoogleLoginResponse(CamelModel):
+    profile: UserProfileResponse
+    access_token: str = Field(alias="accessToken")
+    access_token_expires_at: str = Field(alias="accessTokenExpiresAt")
 
 
 class GoogleLoginRequest(CamelModel):
@@ -165,6 +178,7 @@ class StudyRecordResponse(CamelModel):
     difficulty: int
     answered_at: str | None = Field(alias="answeredAt")
     status: str
+    is_public: bool = Field(alias="isPublic")
 
 
 class RecordsPageResponse(CamelModel):
@@ -216,3 +230,7 @@ class BackendSnapshotResponse(CamelModel):
 
 class AnswerRequest(CamelModel):
     answer: str = Field(min_length=1, max_length=20_000)
+
+
+class RecordPublicityRequest(CamelModel):
+    is_public: bool = Field(alias="isPublic")

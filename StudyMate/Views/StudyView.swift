@@ -24,7 +24,6 @@ struct StudyView: View {
                 StudySettingsSummarySection(
                     topic: studyTopicLabel(strings: strings),
                     level: selectedDifficulty.displayName(language: appState.settings.appLanguage),
-                    interval: strings.minuteLabel(appState.settings.sanitizedIntervalMinutes),
                     strings: strings
                 )
 
@@ -343,14 +342,28 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            StudyChatBubble(role: .learnerInput) {
-                MessageAnswerInput(
-                    strings: strings,
-                    isGradingAnswer: isGradingAnswer,
-                    canSubmitAnswer: canSubmitAnswer,
-                    answerEditor: answerEditor,
-                    onSubmit: onSubmit
-                )
+            if gradingResult == nil {
+                StudyChatBubble(role: .learnerInput) {
+                    MessageAnswerInput(
+                        strings: strings,
+                        isGradingAnswer: isGradingAnswer,
+                        canSubmitAnswer: canSubmitAnswer,
+                        answerEditor: answerEditor,
+                        onSubmit: onSubmit
+                    )
+                }
+            } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                StudyChatBubble(role: .learnerAnswer) {
+                    Text(draftAnswer)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 13)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
 
             if let gradingResult {
@@ -407,13 +420,14 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
 private enum StudyChatBubbleRole: Equatable {
     case tutor
     case learnerInput
+    case learnerAnswer
     case feedback
 
     var frameAlignment: Alignment {
         switch self {
         case .tutor, .feedback:
             .leading
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             .trailing
         }
     }
@@ -422,7 +436,7 @@ private enum StudyChatBubbleRole: Equatable {
         switch self {
         case .tutor:
             Color.green.opacity(0.92)
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
             Color.secondary.opacity(0.06)
@@ -433,7 +447,7 @@ private enum StudyChatBubbleRole: Equatable {
         switch self {
         case .tutor:
             Color.green.opacity(0.0)
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
             Color.secondary.opacity(0.12)
@@ -447,13 +461,16 @@ private struct StudyChatBubble<Content: View>: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            if role == .learnerInput {
+            if role == .learnerInput || role == .learnerAnswer {
                 Spacer(minLength: 34)
             }
 
             if role == .learnerInput {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if role == .learnerAnswer {
+                content()
+                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
             } else {
                 content()
                     .padding(.vertical, 11)
@@ -467,7 +484,7 @@ private struct StudyChatBubble<Content: View>: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
-            if role != .learnerInput {
+            if role != .learnerInput && role != .learnerAnswer {
                 Spacer(minLength: 34)
             }
         }
@@ -530,7 +547,6 @@ private struct MessageAnswerInput<AnswerEditorContent: View>: View {
 private struct StudySettingsSummarySection: View {
     var topic: String
     var level: String
-    var interval: String
     var strings: AppStrings
 
     var body: some View {
@@ -545,7 +561,6 @@ private struct StudySettingsSummarySection: View {
             HStack(spacing: 8) {
                 StudySummaryMetric(title: strings.studyTopicShort, value: topic)
                 StudySummaryMetric(title: strings.studyLevelShort, value: level)
-                StudySummaryMetric(title: strings.studyIntervalShort, value: interval)
             }
         }
     }

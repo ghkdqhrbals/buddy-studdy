@@ -239,12 +239,28 @@ class Database:
                             f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(False)}"
                         )
                     )
+                if "user_id" not in question_columns:
+                    session.execute(text("ALTER TABLE questions ADD COLUMN user_id INTEGER"))
+                    session.execute(
+                        text(
+                            "UPDATE questions "
+                            "SET user_id = (SELECT devices.user_id FROM devices WHERE devices.device_id = questions.device_id) "
+                            "WHERE user_id IS NULL"
+                        )
+                    )
 
             if "idx_questions_public" not in {idx["name"] for idx in inspector.get_indexes("questions")}:
                 session.execute(
                     text(
                         "CREATE INDEX IF NOT EXISTS idx_questions_public "
                         "ON questions (is_public, deleted_at, created_at DESC)"
+                    )
+                )
+            if "idx_questions_user_created" not in {idx["name"] for idx in inspector.get_indexes("questions")}:
+                session.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_questions_user_created "
+                        "ON questions (user_id, created_at DESC)"
                     )
                 )
 
@@ -282,6 +298,60 @@ class Database:
             session.add(row)
 
         return device_id, client_secret
+
+    def ensure_anonymous_user_for_device(self, device_id: str) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if device is None:
+                return None
+            if device.user is not None:
+                return self.user_profile_response(device.user)
+
+            google_sub = f"anonymous:{device_id}"
+            user = session.query(User).filter(User.google_sub == google_sub).first()
+            if user is None:
+                user = User(
+                    google_sub=google_sub,
+                    email=f"{device_id}@anonymous.buddystuddy.local",
+                    display_name="BuddyStuddy user",
+                    avatar_url=None,
+                    bio="",
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(user)
+                session.flush()
+
+            device.user_id = user.id
+            device.updated_at = now
+            device.last_seen_at = now
+            session.flush()
+            return self.user_profile_response(user)
+
+    def get_device_principal(self, device_id: str) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if device is None or device.user is None:
+                return None
+            is_anonymous = device.user.google_sub.startswith("anonymous:")
+            has_active_google_session = (
+                not is_anonymous
+                and device.google_session_expires_at is not None
+                and as_utc_datetime(device.google_session_expires_at) > now
+            )
+            return {
+                "device_id": device.device_id,
+                "user_id": int(device.user.id),
+                "isAnonymous": is_anonymous,
+                "hasActiveGoogleSession": has_active_google_session,
+            }
+
+    def device_belongs_to_user(self, device_id: str, user_id: int) -> bool:
+        with self.connect() as session:
+            row = self._get_device(session, device_id)
+            return bool(row is not None and row.user_id == user_id)
 
     def authenticate_device(self, device_id: str, client_secret: str) -> bool:
         now = self._utc_now()
@@ -590,34 +660,30 @@ class Database:
             "creditsUrl": "https://platform.openai.com/settings/organization/billing/credit-grants",
         }
 
-    def pending_record_count(self, device_id: str) -> int:
+    def pending_record_count(self, device_id: str, user_id: int | None = None) -> int:
         with self.connect() as session:
-            return int(
-                session.query(Question)
-                .filter(
-                    Question.device_id == device_id,
-                    Question.deleted_at.is_(None),
-                    Question.skipped_at.is_(None),
-                    Question.score.is_(None),
-                    Question.status.in_(
-                        [
-                            "sent",
-                            "ungraded",
-                        ]
-                    ),
-                )
-                .count()
+            query = session.query(Question).filter(
+                Question.device_id == device_id,
+                Question.deleted_at.is_(None),
+                Question.skipped_at.is_(None),
+                Question.score.is_(None),
+                Question.status.in_(
+                    [
+                        "sent",
+                        "ungraded",
+                    ]
+                ),
             )
+            if user_id is not None:
+                query = query.filter(Question.user_id == user_id)
+            return int(query.count())
 
-    def recent_questions(self, device_id: str, limit: int = 80) -> list[str]:
+    def recent_questions(self, device_id: str, limit: int = 80, user_id: int | None = None) -> list[str]:
         with self.connect() as session:
-            rows = (
-                session.query(Question.question)
-                .filter(Question.device_id == device_id)
-                .order_by(Question.created_at.desc())
-                .limit(limit)
-                .all()
-            )
+            query = session.query(Question.question).filter(Question.device_id == device_id)
+            if user_id is not None:
+                query = query.filter(Question.user_id == user_id)
+            rows = query.order_by(Question.created_at.desc()).limit(limit).all()
         return [row[0] for row in rows]
 
     def list_records(
@@ -626,11 +692,17 @@ class Database:
         limit: int = 100,
         offset: int = 0,
         include_deleted: bool = False,
+        user_id: int | None = None,
+        include_ungraded: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         with self.connect() as session:
             query = session.query(Question).filter(Question.device_id == device_id)
+            if user_id is not None:
+                query = query.filter(Question.user_id == user_id)
             if not include_deleted:
                 query = query.filter(Question.deleted_at.is_(None))
+            if not include_ungraded:
+                query = query.filter(Question.score.isnot(None))
             total_row = query.count()
             rows = (
                 query.order_by(Question.created_at.desc())
@@ -642,7 +714,7 @@ class Database:
 
     def list_public_questions(
         self,
-        exclude_device_id: str,
+        exclude_device_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
         topic: str | None = None,
@@ -673,6 +745,7 @@ class Database:
     def stats_response(
         self,
         device_id: str,
+        user_id: int | None = None,
         start_at: datetime | str | None = None,
         end_at: datetime | str | None = None,
         search: str = "",
@@ -687,6 +760,8 @@ class Database:
                 Question.deleted_at.is_(None),
                 Question.score.isnot(None),
             )
+            if user_id is not None:
+                query = query.filter(Question.user_id == user_id)
             if start_at is not None:
                 query = query.filter(func.coalesce(Question.answered_at, Question.created_at) >= as_utc_datetime(start_at))
             if end_at is not None:
@@ -728,12 +803,20 @@ class Database:
             "generatedAt": self._response_timestamp(self._utc_now()),
         }
 
-    def get_record(self, device_id: str, record_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_record(
+        self,
+        device_id: str,
+        record_id: str,
+        include_deleted: bool = False,
+        user_id: int | None = None,
+    ) -> dict[str, Any] | None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
             return None
         with self.connect() as session:
             query = session.query(Question).filter(Question.device_id == device_id, Question.id == row_id)
+            if user_id is not None:
+                query = query.filter(Question.user_id == user_id)
             if not include_deleted:
                 query = query.filter(Question.deleted_at.is_(None))
             row = query.first()
@@ -749,6 +832,7 @@ class Database:
         question: str,
         expected_answer_hint: str | None = None,
         is_public: bool = False,
+        user_id: int | None = None,
         scheduled_for: datetime | str | None = None,
         sent_at: datetime | str | None = None,
         source: str = "manual",
@@ -758,10 +842,14 @@ class Database:
         created_dt = as_utc_datetime(created_at) if created_at is not None else self._utc_now()
         scheduled_dt = as_utc_datetime(scheduled_for) if scheduled_for is not None else created_dt
         sent_dt = as_utc_datetime(sent_at) if sent_at is not None else None
+        if user_id is None:
+            principal = self.get_device_principal(device_id)
+            user_id = int(principal["user_id"]) if principal is not None else None
 
         with self.connect() as session:
             row = Question(
                 device_id=device_id,
+                user_id=user_id,
                 question=question,
                 hint=expected_answer_hint,
                 topic=topic,
@@ -778,39 +866,17 @@ class Database:
             session.flush()
             record_id = row.id
 
-        record = self.get_record(device_id, str(record_id))
+        record = self.get_record(device_id, str(record_id), user_id=user_id)
         if record is None:
             raise RuntimeError("Inserted question could not be loaded.")
         return record
 
-    def set_record_answer(self, device_id: str, record_id: str, answer: str) -> dict[str, Any] | None:
-        row_id = self._record_id_value(record_id)
-        if row_id is None:
-            return None
-        now = self._utc_now()
-        with self.connect() as session:
-            row = (
-                session.query(Question)
-                .filter(Question.device_id == device_id, Question.id == row_id, Question.deleted_at.is_(None))
-                .first()
-            )
-            if row is None:
-                return None
-            row.answer = answer
-            if row.answered_at is None:
-                row.answered_at = now
-            row.updated_at = now
-        return self.get_record(device_id, record_id)
-
-    def grade_record(
+    def set_record_publicity(
         self,
         device_id: str,
         record_id: str,
-        answer: str,
-        score: int,
-        is_correct: bool,
-        feedback: str,
-        explanation: str,
+        is_public: bool,
+        user_id: int | None = None,
     ) -> dict[str, Any] | None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
@@ -824,6 +890,64 @@ class Database:
             )
             if row is None:
                 return None
+            if user_id is not None and row.user_id != user_id:
+                return None
+            row.is_public = bool(is_public)
+            row.updated_at = now
+        return self.get_record(device_id, record_id, user_id=user_id)
+
+    def set_record_answer(
+        self,
+        device_id: str,
+        record_id: str,
+        answer: str,
+        user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
+        now = self._utc_now()
+        with self.connect() as session:
+            row = (
+                session.query(Question)
+                .filter(Question.device_id == device_id, Question.id == row_id, Question.deleted_at.is_(None))
+                .first()
+            )
+            if row is not None and user_id is not None and row.user_id != user_id:
+                return None
+            if row is None:
+                return None
+            row.answer = answer
+            if row.answered_at is None:
+                row.answered_at = now
+            row.updated_at = now
+        return self.get_record(device_id, record_id, user_id=user_id)
+
+    def grade_record(
+        self,
+        device_id: str,
+        record_id: str,
+        answer: str,
+        score: int,
+        is_correct: bool,
+        feedback: str,
+        explanation: str,
+        user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        row_id = self._record_id_value(record_id)
+        if row_id is None:
+            return None
+        now = self._utc_now()
+        with self.connect() as session:
+            row = (
+                session.query(Question)
+                .filter(Question.device_id == device_id, Question.id == row_id, Question.deleted_at.is_(None))
+                .first()
+            )
+            if row is not None and user_id is not None and row.user_id != user_id:
+                return None
+            if row is None:
+                return None
             row.answer = answer
             row.answered_at = row.answered_at or now
             row.score = score
@@ -833,9 +957,9 @@ class Database:
             row.graded_at = now
             row.status = "graded"
             row.updated_at = now
-        return self.get_record(device_id, record_id)
+        return self.get_record(device_id, record_id, user_id=user_id)
 
-    def skip_record(self, device_id: str, record_id: str) -> dict[str, Any] | None:
+    def skip_record(self, device_id: str, record_id: str, user_id: int | None = None) -> dict[str, Any] | None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
             return None
@@ -851,14 +975,16 @@ class Database:
                 )
                 .first()
             )
+            if row is not None and user_id is not None and row.user_id != user_id:
+                return None
             if row is None:
                 return None
             row.skipped_at = now
             row.status = "skipped"
             row.updated_at = now
-        return self.get_record(device_id, record_id)
+        return self.get_record(device_id, record_id, user_id=user_id)
 
-    def delete_record(self, device_id: str, record_id: str) -> None:
+    def delete_record(self, device_id: str, record_id: str, user_id: int | None = None) -> None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
             return
@@ -869,13 +995,15 @@ class Database:
                 .filter(Question.device_id == device_id, Question.id == row_id)
                 .first()
             )
+            if row is not None and user_id is not None and row.user_id != user_id:
+                return
             if row is None:
                 return
             row.deleted_at = now
             row.status = "deleted"
             row.updated_at = now
 
-    def clear_records(self, device_id: str) -> None:
+    def clear_records(self, device_id: str, user_id: int | None = None) -> None:
         now = self._utc_now()
         with self.connect() as session:
             rows = (
@@ -883,6 +1011,8 @@ class Database:
                 .filter(Question.device_id == device_id, Question.deleted_at.is_(None))
                 .all()
             )
+            if user_id is not None:
+                rows = [row for row in rows if row.user_id == user_id]
             for row in rows:
                 row.deleted_at = now
                 row.status = "deleted"
@@ -922,6 +1052,7 @@ class Database:
             "difficulty": row.difficulty_level,
             "answeredAt": self._response_timestamp(row.answered_at),
             "status": row.status,
+            "isPublic": bool(row.is_public),
         }
 
     def due_schedules(self, limit: int = 25) -> list[dict[str, Any]]:
@@ -959,6 +1090,7 @@ class Database:
                     "is_question_public": bool(row.is_question_public),
                     "openai_api_key_cipher": row.openai_api_key_cipher,
                     "next_due_at": as_utc_datetime(row.next_due_at) if row.next_due_at is not None else None,
+                    "user_id": device.user_id,
                 }
             )
 
@@ -974,13 +1106,18 @@ class Database:
         question: str,
         expected_answer_hint: str | None,
         is_public: bool = False,
+        user_id: int | None = None,
         created_at: datetime | str | None = None,
     ) -> dict[str, Any]:
         now = self._utc_now()
         created_dt = as_utc_datetime(created_at) if created_at is not None else now
+        if user_id is None:
+            principal = self.get_device_principal(device_id)
+            user_id = int(principal["user_id"]) if principal is not None else None
         with self.connect() as session:
             record = Question(
                 device_id=device_id,
+                user_id=user_id,
                 question=question,
                 hint=expected_answer_hint,
                 topic=topic,
@@ -1004,7 +1141,7 @@ class Database:
                 schedule.last_error = None
                 schedule.updated_at = now
 
-        created = self.get_record(device_id, str(record_id))
+        created = self.get_record(device_id, str(record_id), user_id=user_id)
         if created is None:
             raise RuntimeError("Inserted scheduled question could not be loaded.")
         return created

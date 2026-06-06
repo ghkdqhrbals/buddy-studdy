@@ -3,7 +3,6 @@ import SwiftUI
 struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecordID: String?
-    @State private var openSwipeRecordID: String?
     @State private var searchText = ""
     @State private var visibleCount = 0
     @State private var showsRecordSettings = false
@@ -14,16 +13,9 @@ struct HistoryView: View {
     private let pageSize = 10
 
     private var orderedRecords: [StudyRecord] {
-        appState.studyRecords.sorted { lhs, rhs in
-            let lhsIsUngraded = lhs.gradingResult == nil
-            let rhsIsUngraded = rhs.gradingResult == nil
-
-            if lhsIsUngraded != rhsIsUngraded {
-                return lhsIsUngraded
-            }
-
-            return sortDate(for: lhs) > sortDate(for: rhs)
-        }
+        appState.studyRecords
+            .filter { $0.gradingResult != nil }
+            .sorted { sortDate(for: $0) > sortDate(for: $1) }
     }
 
     private var filteredRecords: [StudyRecord] {
@@ -79,7 +71,7 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    if appState.studyRecords.isEmpty {
+                    if orderedRecords.isEmpty {
                         ContentUnavailableView(
                             strings.noRecords,
                             systemImage: "clock.arrow.circlepath",
@@ -102,49 +94,35 @@ struct HistoryView: View {
                             .frame(maxWidth: .infinity, minHeight: 320)
                         } else {
                             ForEach(displayedVisibleRecords) { record in
-                                SwipeRevealRow(
-                                    isOpen: swipeBinding(for: record.id),
-                                    actionWidth: 82,
-                                    onTap: {
-                                        if openSwipeRecordID != nil,
-                                           openSwipeRecordID != record.id {
-                                            closeOpenSwipe(animated: true)
-                                            return
-                                        }
-
-                                        selectedRecordID = record.id
-                                    },
-                                    onFullSwipe: {
-                                        delete(record)
-                                    },
-                                    content: {
-                                        HistoryRow(
-                                            record: record,
-                                            strings: strings,
-                                            isSelected: selectedRecordID == record.id
-                                        )
-                                    },
-                                    action: {
-                                        Button(role: .destructive) {
-                                            delete(record)
+                                HistoryRow(
+                                    record: record,
+                                    strings: strings,
+                                    isSelected: selectedRecordID == record.id
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedRecordID = record.id
+                                }
+                                .contextMenu {
+                                    if appState.isCommunitySignedIn {
+                                        Button {
+                                            appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
                                         } label: {
-                                            SwipeActionButton(
-                                                title: strings.clear,
-                                                systemImage: "trash",
-                                                tint: .red,
-                                                width: 82
+                                            Label(
+                                                record.isPublic ? strings.makeQuestionPrivate : strings.makeQuestionPublic,
+                                                systemImage: record.isPublic ? "lock.fill" : "globe"
                                             )
                                         }
-                                        .buttonStyle(.plain)
                                     }
-                                )
+
+                                    Button(role: .destructive) {
+                                        delete(record)
+                                    } label: {
+                                        Label(strings.clear, systemImage: "trash")
+                                    }
+                                }
                                 .onAppear {
                                     loadNextPageIfNeeded(for: record)
-                                }
-                                .onDisappear {
-                                    if openSwipeRecordID == record.id {
-                                        openSwipeRecordID = nil
-                                    }
                                 }
                             }
 
@@ -197,15 +175,10 @@ struct HistoryView: View {
         }
         .onChange(of: appState.studyRecords.count) {
             reconcileVisibleCount()
-            if let openSwipeRecordID,
-               !appState.studyRecords.contains(where: { $0.id == openSwipeRecordID }) {
-                self.openSwipeRecordID = nil
-            }
         }
         .onChange(of: searchText) {
             resetVisibleCount()
             selectedRecordID = nil
-            openSwipeRecordID = nil
         }
         .onChange(of: appState.focusedRecordRequest) {
             showFocusedRecord()
@@ -245,6 +218,7 @@ struct HistoryView: View {
     @ViewBuilder
     private func recordToolbarSearchField(strings: AppStrings) -> some View {
         if isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            #if os(iOS)
             MobileToolbarSearchField(
                 text: $searchText,
                 prompt: strings.searchRecords,
@@ -254,6 +228,11 @@ struct HistoryView: View {
                     closeRecordSearch(clearText: true)
                 }
             )
+            #else
+            TextField(strings.searchRecords, text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+            #endif
         }
     }
 
@@ -262,7 +241,11 @@ struct HistoryView: View {
         Button {
             showRecordSearch()
         } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+            #else
             Image(systemName: "magnifyingglass")
+            #endif
         }
         .accessibilityLabel(strings.search)
 
@@ -273,7 +256,11 @@ struct HistoryView: View {
                 Label(strings.recordSettings, systemImage: "slider.horizontal.3")
             }
         } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+            #else
             Image(systemName: "ellipsis")
+            #endif
         }
         .accessibilityLabel(strings.recordSettings)
     }
@@ -381,7 +368,6 @@ struct HistoryView: View {
 
         await MainActor.run {
             isRefreshing = true
-            closeOpenSwipe(animated: false)
         }
 
         await appState.refreshVisibleData()
@@ -392,44 +378,10 @@ struct HistoryView: View {
         }
     }
 
-    private func closeOpenSwipe(animated: Bool) {
-        guard openSwipeRecordID != nil else {
-            return
-        }
-
-        if animated {
-            withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-                openSwipeRecordID = nil
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                openSwipeRecordID = nil
-            }
-        }
-    }
-
-    private func swipeBinding(for recordID: String) -> Binding<Bool> {
-        Binding(
-            get: { openSwipeRecordID == recordID },
-            set: { isOpen in
-                if isOpen {
-                    withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-                        openSwipeRecordID = recordID
-                    }
-                } else if openSwipeRecordID == recordID {
-                    closeOpenSwipe(animated: true)
-                }
-            }
-        )
-    }
-
     private func delete(_ record: StudyRecord) {
         withAnimation(.easeOut(duration: 0.22)) {
             appState.deleteStudyRecord(record)
             reconcileVisibleCount()
-            openSwipeRecordID = nil
             if selectedRecordID == record.id {
                 selectedRecordID = nil
             }

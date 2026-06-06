@@ -9,6 +9,8 @@ import jwt
 @dataclass(frozen=True)
 class AccessTokenClaims:
     user_id: int
+    device_id: str
+    is_anonymous: bool
     expires_at: datetime
 
 
@@ -16,7 +18,14 @@ class AccessTokenError(ValueError):
     pass
 
 
-def create_access_token(user_id: int, secret: str, expires_in: timedelta = timedelta(days=90)) -> tuple[str, datetime]:
+def create_access_token(
+    user_id: int,
+    device_id: str,
+    secret: str,
+    *,
+    is_anonymous: bool = True,
+    expires_in: timedelta = timedelta(days=90),
+) -> tuple[str, datetime]:
     now = datetime.now(tz=UTC)
     expires_at = now + expires_in
     token = jwt.encode(
@@ -24,6 +33,8 @@ def create_access_token(user_id: int, secret: str, expires_in: timedelta = timed
             "iss": "buddystuddy",
             "sub": str(user_id),
             "user_id": int(user_id),
+            "device_id": device_id,
+            "is_anonymous": bool(is_anonymous),
             "iat": int(now.timestamp()),
             "exp": int(expires_at.timestamp()),
         },
@@ -49,7 +60,13 @@ def decode_access_token(token: str, secret: str) -> AccessTokenClaims:
     if raw_exp is None:
         raise AccessTokenError("Access token does not contain an expiration.")
 
+    raw_device_id = str(payload.get("device_id") or "").strip()
+    if not raw_device_id:
+        raise AccessTokenError("Access token does not contain a valid device_id.")
+
     return AccessTokenClaims(
         user_id=user_id,
+        device_id=raw_device_id,
+        is_anonymous=bool(payload.get("is_anonymous", True)),
         expires_at=datetime.fromtimestamp(int(raw_exp), tz=UTC),
     )

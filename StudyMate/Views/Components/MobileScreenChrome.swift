@@ -34,6 +34,22 @@ extension View {
 }
 
 #if os(iOS)
+struct MobileToolbarIconButtonLabel: View {
+    var systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 18, weight: .semibold))
+            .frame(width: 42, height: 34)
+            .background(Color(.secondarySystemBackground), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color(.separator).opacity(0.34), lineWidth: 0.7)
+            }
+            .contentShape(Capsule())
+    }
+}
+
 struct MobileToolbarSearchField: View {
     @Binding var text: String
     var prompt: String

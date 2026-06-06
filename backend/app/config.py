@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 
 from .openai_models import DEFAULT_OPENAI_MODEL
 
@@ -12,6 +14,35 @@ def _bool_env(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@lru_cache(maxsize=1)
+def _load_aws_secret_values() -> dict[str, str]:
+    secret_id = os.getenv("AWS_SECRET_ID")
+    if not secret_id:
+        return {}
+
+    region = os.getenv("AWS_REGION", "ap-northeast-2")
+    try:
+        import boto3  # type: ignore
+
+        client = boto3.client("secretsmanager", region_name=region)
+        response = client.get_secret_value(SecretId=secret_id)
+    except Exception:
+        return {}
+
+    raw_secret = response.get("SecretString") or ""
+    if not raw_secret:
+        return {}
+    try:
+        parsed = json.loads(raw_secret)
+    except json.JSONDecodeError:
+        return {}
+    return {str(key): str(value) for key, value in parsed.items() if value is not None}
+
+
+def _secret_env(name: str, secret_values: dict[str, str], secret_key: str, default: str | None = None) -> str | None:
+    return os.getenv(name) or secret_values.get(secret_key) or default
 
 
 @dataclass(frozen=True)
@@ -27,6 +58,7 @@ class Settings:
     openai_api_key: str | None
     backend_api_token: str | None
     backend_master_key: str | None
+    auth_jwt_secret: str
     apns_auth_key_p8: str | None
     apns_key_id: str | None
     apns_team_id: str | None
@@ -44,12 +76,15 @@ class Settings:
 
     @classmethod
     def load(cls) -> "Settings":
+        secret_values = _load_aws_secret_values()
         auth_key = os.getenv("APNS_AUTH_KEY_P8")
         auth_key_base64 = os.getenv("APNS_AUTH_KEY_BASE64")
+        if not auth_key_base64:
+            auth_key_base64 = secret_values.get("apnsAuthKeyBase64")
         if not auth_key and auth_key_base64:
             auth_key = base64.b64decode(auth_key_base64).decode("utf-8")
 
-        database_url = os.getenv("DATABASE_URL")
+        database_url = _secret_env("DATABASE_URL", secret_values, "databaseUrl")
         allow_sqlite_fallback = _bool_env("ALLOW_SQLITE_FALLBACK", False)
         if not database_url and not allow_sqlite_fallback:
             raise RuntimeError(
@@ -67,22 +102,30 @@ class Settings:
             scheduler_poll_seconds=max(5, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
             openai_model=os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
-            backend_api_token=os.getenv("BACKEND_API_TOKEN"),
-            backend_master_key=os.getenv("BACKEND_MASTER_KEY"),
+            backend_api_token=_secret_env("BACKEND_API_TOKEN", secret_values, "backendApiToken"),
+            backend_master_key=_secret_env("BACKEND_MASTER_KEY", secret_values, "backendMasterKey"),
+            auth_jwt_secret=_secret_env("AUTH_JWT_SECRET", secret_values, "authJwtSecret")
+            or _secret_env("BACKEND_MASTER_KEY", secret_values, "backendMasterKey")
+            or "local-dev-auth-secret",
             apns_auth_key_p8=auth_key,
-            apns_key_id=os.getenv("APNS_KEY_ID"),
-            apns_team_id=os.getenv("APNS_TEAM_ID"),
-            apns_bundle_id=os.getenv("APNS_BUNDLE_ID", "io.github.ghkdqhrbals.StudyMate"),
-            apns_env=os.getenv("APNS_ENV", "production").strip().lower(),
+            apns_key_id=_secret_env("APNS_KEY_ID", secret_values, "apnsKeyId"),
+            apns_team_id=_secret_env("APNS_TEAM_ID", secret_values, "apnsTeamId"),
+            apns_bundle_id=_secret_env(
+                "APNS_BUNDLE_ID",
+                secret_values,
+                "apnsBundleId",
+                "io.github.ghkdqhrbals.StudyMate",
+            ),
+            apns_env=(_secret_env("APNS_ENV", secret_values, "apnsEnv", "production") or "production").strip().lower(),
             enable_openapi_docs=_bool_env("ENABLE_OPENAPI_DOCS", False),
-            openapi_access_token=os.getenv("OPENAPI_ACCESS_TOKEN"),
-            google_ios_client_id=os.getenv("GOOGLE_IOS_CLIENT_ID"),
-            report_email_to=os.getenv("REPORT_EMAIL_TO"),
-            smtp_host=os.getenv("SMTP_HOST"),
+            openapi_access_token=_secret_env("OPENAPI_ACCESS_TOKEN", secret_values, "openapiAccessToken"),
+            google_ios_client_id=_secret_env("GOOGLE_IOS_CLIENT_ID", secret_values, "googleIOSClientId"),
+            report_email_to=_secret_env("REPORT_EMAIL_TO", secret_values, "reportEmailTo"),
+            smtp_host=_secret_env("SMTP_HOST", secret_values, "smtpHost"),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
-            smtp_username=os.getenv("SMTP_USERNAME"),
-            smtp_password=os.getenv("SMTP_PASSWORD"),
-            smtp_from=os.getenv("SMTP_FROM"),
+            smtp_username=_secret_env("SMTP_USERNAME", secret_values, "smtpUsername"),
+            smtp_password=_secret_env("SMTP_PASSWORD", secret_values, "smtpPassword"),
+            smtp_from=_secret_env("SMTP_FROM", secret_values, "smtpFrom"),
         )
 
     @property
