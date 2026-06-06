@@ -113,16 +113,14 @@ struct MobileToolbarSearchField: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(closeAccessibilityLabel)
+            Image(systemName: "xmark")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onClose)
+                .accessibilityLabel(closeAccessibilityLabel)
+                .accessibilityAddTraits(.isButton)
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
@@ -162,11 +160,11 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
         let containerWidth = isExpanded ? fullWidth : collapsedWidth
 
         ZStack(alignment: .trailing) {
-            collapsedContent()
-                .frame(width: collapsedWidth, height: height, alignment: .trailing)
-                .opacity(isExpanded ? 0 : 1)
-                .scaleEffect(isExpanded ? 0.96 : 1, anchor: .trailing)
-                .allowsHitTesting(!isExpanded)
+            if !isExpanded {
+                collapsedContent()
+                    .frame(width: collapsedWidth, height: height, alignment: .trailing)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
+            }
 
             ZStack(alignment: .trailing) {
                 MobileSearchCapsuleBackground(
