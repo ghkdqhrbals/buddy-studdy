@@ -69,8 +69,25 @@ class GoogleLoginResponse(CamelModel):
     access_token_expires_at: str = Field(alias="accessTokenExpiresAt")
 
 
+class EmailLoginResponse(GoogleLoginResponse):
+    pass
+
+
 class GoogleLoginRequest(CamelModel):
     id_token: str = Field(alias="idToken", min_length=20, max_length=8192)
+
+
+class EmailLoginRequest(CamelModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=6, max_length=256)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("Email address is invalid.")
+        return normalized
 
 
 class ProfileUpdateRequest(CamelModel):

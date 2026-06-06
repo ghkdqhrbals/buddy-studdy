@@ -115,7 +115,7 @@ Request:
 
 Use this after iOS returns an APNs token for an already registered backend device. This preserves the same backend identity instead of creating a second device.
 
-### Google Login And Profile
+### Login And Profile
 
 ```http
 POST /api/v1/auth/google
@@ -133,14 +133,43 @@ Request:
 
 The backend verifies the ID token against `GOOGLE_IOS_CLIENT_ID`, then links the Google identity to the device.
 
+Tester email/password login is also supported:
+
+```http
+POST /api/v1/auth/email
+Content-Type: application/json
+Authorization: Bearer <accessToken>
+```
+
+Request:
+
+```json
+{
+  "email": "tester@example.com",
+  "password": "secret123"
+}
+```
+
+If the email does not exist, the backend creates an active `EMAIL` user. Passwords are stored only as SHA-256 hashes.
+
 Response:
 
 ```json
 {
-  "id": 1,
-  "displayName": "Buddy",
-  "bio": "",
-  "avatarUrl": "https://..."
+  "profile": {
+    "id": 1,
+    "displayName": "Buddy",
+    "bio": "",
+    "avatarUrl": null,
+    "pageAccess": {
+      "publicQuestions": true,
+      "statistics": false,
+      "studyDetail": false,
+      "records": false
+    }
+  },
+  "accessToken": "jwt",
+  "accessTokenExpiresAt": "2026-09-05T00:00:00+00:00"
 }
 ```
 

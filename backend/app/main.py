@@ -31,6 +31,8 @@ from .models import (
     BackendSettingsResponse,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
+    EmailLoginResponse,
+    EmailLoginRequest,
     GoogleLoginResponse,
     GoogleLoginRequest,
     HealthResponse,
@@ -475,6 +477,29 @@ async def google_login(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
     token_response = issue_access_token_for_device(device_id)
     return GoogleLoginResponse(
+        profile=UserProfileResponse.model_validate(profile),
+        accessToken=token_response.access_token,
+        accessTokenExpiresAt=token_response.access_token_expires_at,
+    )
+
+
+@app.post("/api/v1/auth/email", response_model=EmailLoginResponse)
+async def email_login(
+    payload: EmailLoginRequest,
+    principal: AuthenticatedPrincipal = Depends(authenticate_login_principal),
+) -> EmailLoginResponse:
+    profile, password_mismatch = database.link_email_user_to_device(
+        device_id=principal.device_id,
+        email=payload.email,
+        password=payload.password,
+    )
+    if password_mismatch:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+
+    token_response = issue_access_token_for_device(principal.device_id)
+    return EmailLoginResponse(
         profile=UserProfileResponse.model_validate(profile),
         accessToken=token_response.access_token,
         accessTokenExpiresAt=token_response.access_token_expires_at,

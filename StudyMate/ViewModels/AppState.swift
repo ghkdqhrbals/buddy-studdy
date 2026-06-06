@@ -1127,6 +1127,34 @@ final class AppState: ObservableObject {
         }
     }
 
+    func signInToCommunity(email: String, password: String) async -> Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return false
+        }
+
+        do {
+            communityErrorMessage = nil
+            let result = try await remotePushBackendClient.loginWithEmail(
+                registration: registration,
+                email: normalizedEmail,
+                password: password
+            )
+            communityProfile = result.profile
+            settingsStore.saveRemotePushRegistration(result.registration)
+            isCommunitySignedIn = true
+            settingsStore.saveIsCommunitySignedIn(true)
+            await syncRemotePushScheduleIfPossible(reason: "email-login")
+            await loadCommunityQuestions(reset: true, userInitiated: true)
+            return true
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func signOutFromCommunity() {
         isCommunitySignedIn = false
         communityProfile = nil

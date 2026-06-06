@@ -22,6 +22,7 @@ from ..services.stats_service import TopicStatisticsService
 
 PROVIDER_ANONYMOUS = "ANONYMOUS"
 PROVIDER_GOOGLE = "GOOGLE"
+PROVIDER_EMAIL = "EMAIL"
 USER_STATUS_ANONYMOUS = "ANONYMOUS"
 USER_STATUS_ACTIVE = "ACTIVE"
 USER_STATUS_WITHDRAWN = "WITHDRAWN"
@@ -255,6 +256,9 @@ class Database:
                         text("UPDATE users SET provider_id = 'legacy:' || CAST(id AS VARCHAR) WHERE provider_id IS NULL")
                     )
                     user_columns.add("provider_id")
+                if "password_hash" not in user_columns:
+                    session.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(64)"))
+                    user_columns.add("password_hash")
                 if "status" not in user_columns:
                     session.execute(
                         text(
@@ -783,6 +787,68 @@ class Database:
                 )
             session.flush()
             return self.user_profile_response(user)
+
+    def link_email_user_to_device(
+        self,
+        device_id: str,
+        email: str,
+        password: str,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        now = self._utc_now()
+        normalized_email = email.strip().lower()
+        password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+        display_name = normalized_email.split("@")[0] or "BuddyStuddy user"
+
+        with self.connect() as session:
+            device = self._get_device(session, device_id)
+            if device is None:
+                return None, False
+
+            previous_user_id = device.user_id
+            user = (
+                session.query(User)
+                .filter(User.provider == PROVIDER_EMAIL, User.provider_id == normalized_email)
+                .first()
+            )
+            if user is None:
+                user = User(
+                    provider=PROVIDER_EMAIL,
+                    provider_id=normalized_email,
+                    password_hash=password_hash,
+                    status=USER_STATUS_ACTIVE,
+                    email=normalized_email,
+                    display_name=display_name,
+                    avatar_url=None,
+                    bio="",
+                    allow_public_questions=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(user)
+                session.flush()
+            elif user.password_hash != password_hash:
+                return None, True
+            else:
+                user.status = USER_STATUS_ACTIVE
+                user.email = normalized_email
+                user.display_name = user.display_name or display_name
+                user.updated_at = now
+
+            self._attach_device_to_user(
+                session,
+                device=device,
+                user=user,
+                session_expires_at=now + timedelta(days=90),
+                now=now,
+            )
+            if previous_user_id is not None and int(previous_user_id) != int(user.id):
+                (
+                    session.query(Question)
+                    .filter(Question.device_id == device_id, Question.user_id == previous_user_id)
+                    .update({"user_id": int(user.id), "updated_at": now}, synchronize_session=False)
+                )
+            session.flush()
+            return self.user_profile_response(user), False
 
     def get_device_profile(self, device_id: str) -> dict[str, Any] | None:
         now = self._utc_now()

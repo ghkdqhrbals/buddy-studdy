@@ -128,6 +128,12 @@ protocol RemotePushBackendClientProtocol {
         idToken: String
     ) async throws -> CommunityLoginResult
 
+    func loginWithEmail(
+        registration: RemotePushRegistration,
+        email: String,
+        password: String
+    ) async throws -> CommunityLoginResult
+
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
 
     func updateMyProfile(
@@ -462,7 +468,31 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(GoogleLoginRequest(idToken: idToken))
         let data = try await perform(request)
-        let response = try decoder.decode(GoogleLoginResponse.self, from: data)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+    }
+
+    func loginWithEmail(
+        registration: RemotePushRegistration,
+        email: String,
+        password: String
+    ) async throws -> CommunityLoginResult {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "email")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(EmailLoginRequest(email: email, password: password))
+        let data = try await perform(request)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
         let updatedRegistration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -876,13 +906,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var idToken: String
     }
 
+    private struct EmailLoginRequest: Encodable {
+        var email: String
+        var password: String
+    }
+
     private struct ProfileUpdateRequest: Encodable {
         var displayName: String?
         var bio: String?
         var pageAccess: CommunityPageAccess?
     }
 
-    private struct GoogleLoginResponse: Decodable {
+    private struct CommunityLoginResponse: Decodable {
         var profile: CommunityUserProfile
         var accessToken: String
         var accessTokenExpiresAt: Date

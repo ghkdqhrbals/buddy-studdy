@@ -58,6 +58,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="ANONYMOUS")
     provider_id: Mapped[str] = mapped_column(String(191), nullable=False, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ANONYMOUS")
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)

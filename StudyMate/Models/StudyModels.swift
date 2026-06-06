@@ -1631,6 +1631,15 @@ struct AppStrings {
     var communityQuestion: String { text("공개 질문", "Community Question") }
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { "Sign in with Google" }
+    var signInWithEmail: String { "Sign in with Email" }
+    var email: String { text("이메일", "Email") }
+    var password: String { text("비밀번호", "Password") }
+    var emailLoginHelp: String {
+        text(
+            "테스터용 이메일 로그인입니다. 처음 입력한 이메일과 비밀번호로 계정이 생성됩니다.",
+            "Tester email sign-in. The first email and password you enter creates the account."
+        )
+    }
     var signInRequiredTitle: String { text("로그인이 필요합니다", "Sign In Required") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }

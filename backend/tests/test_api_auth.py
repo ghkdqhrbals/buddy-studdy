@@ -1,4 +1,5 @@
 import importlib
+import hashlib
 from dataclasses import replace
 
 import jwt
@@ -198,6 +199,49 @@ def test_google_login_accepts_access_token_or_legacy_device_credentials(monkeypa
     assert access_token_response.status_code == 200
     assert access_token_response.json()["profile"]["displayName"] == "Login User"
     assert access_token_response.json()["accessToken"]
+
+
+def test_email_login_creates_user_reuses_user_and_hashes_password(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    registered = _register(client, "apns-token-email-login-" + "e" * 32)
+    body = {"email": "Tester@Example.com", "password": "secret123"}
+
+    response = client.post(
+        "/api/v1/auth/email",
+        headers={"Authorization": f"Bearer {registered['accessToken']}"},
+        json=body,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile"]["displayName"] == "tester"
+    assert payload["profile"]["id"]
+    assert payload["accessToken"]
+
+    with main.database.connect() as session:
+        from app.storage.models import User
+
+        user = session.query(User).filter(User.provider == "EMAIL", User.provider_id == "tester@example.com").one()
+        assert user.password_hash == hashlib.sha256("secret123".encode("utf-8")).hexdigest()
+        assert user.password_hash != "secret123"
+
+    second = _register(client, "apns-token-email-login-" + "f" * 32)
+    second_response = client.post(
+        "/api/v1/auth/email",
+        headers={"Authorization": f"Bearer {second['accessToken']}"},
+        json={"email": "tester@example.com", "password": "secret123"},
+    )
+    assert second_response.status_code == 200
+    assert second_response.json()["profile"]["id"] == payload["profile"]["id"]
+
+    wrong_password_response = client.post(
+        "/api/v1/auth/email",
+        headers={"Authorization": f"Bearer {second['accessToken']}"},
+        json={"email": "tester@example.com", "password": "wrong123"},
+    )
+    assert wrong_password_response.status_code == 401
+    assert wrong_password_response.json()["error"]["code"] == "AUTH_INVALID_EMAIL_CREDENTIALS"
 
 
 def test_public_questions_include_own_public_records_and_allow_privacy_override(monkeypatch, tmp_path):

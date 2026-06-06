@@ -775,6 +775,7 @@ private struct MobileProfileSettingsSheet: View {
     @State private var profileDisplayName = ""
     @State private var allowPublicQuestionsAccess = true
     @State private var isConfirmingWithdrawal = false
+    @State private var isShowingEmailSignIn = false
 
     private var strings: AppStrings {
         appState.strings
@@ -851,6 +852,23 @@ private struct MobileProfileSettingsSheet: View {
                                 GoogleSignInButtonLabel(title: strings.signInWithGoogle)
                             }
                             .buttonStyle(.plain)
+
+                            Button {
+                                isShowingEmailSignIn = true
+                            } label: {
+                                Label(strings.signInWithEmail, systemImage: "envelope.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                    .background(Color.secondary.opacity(0.06))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
                         }
                         .padding(.vertical, 6)
                     }
@@ -920,6 +938,13 @@ private struct MobileProfileSettingsSheet: View {
                     ProgressView()
                 }
             }
+            .sheet(isPresented: $isShowingEmailSignIn) {
+                EmailSignInSheet {
+                    isShowingEmailSignIn = false
+                    dismiss()
+                }
+                .environmentObject(appState)
+            }
         }
     }
 
@@ -931,6 +956,76 @@ private struct MobileProfileSettingsSheet: View {
         return strings.save
     }
 
+}
+
+private struct EmailSignInSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var email = ""
+    @State private var password = ""
+    @State private var isSubmitting = false
+    var onSignedIn: () -> Void
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    private var canSubmit: Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedEmail.contains("@") && password.count >= 6 && !isSubmitting
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(strings.email, text: $email)
+                        .textInputAutocapitalization(.never)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+
+                    SecureField(strings.password, text: $password)
+                        .textContentType(.password)
+                        .submitLabel(.done)
+                } footer: {
+                    Text(strings.emailLoginHelp)
+                }
+            }
+            .keyboardDoneToolbar(strings.done)
+            .navigationTitle(strings.signInWithEmail)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task {
+                            isSubmitting = true
+                            let didSignIn = await appState.signInToCommunity(email: email, password: password)
+                            isSubmitting = false
+                            if didSignIn {
+                                onSignedIn()
+                            }
+                        }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(strings.done)
+                        }
+                    }
+                    .disabled(!canSubmit)
+                }
+            }
+        }
+    }
 }
 
 private enum ProfileAvatarOption {
