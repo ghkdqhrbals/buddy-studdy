@@ -146,7 +146,6 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 
     var body: some View {
         let fullWidth = resolvedWidth
-        let searchWidth = isExpanded ? fullWidth : height
         let containerWidth = isExpanded ? fullWidth : collapsedWidth
 
         ZStack(alignment: .trailing) {
@@ -159,6 +158,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
             ZStack(alignment: .trailing) {
                 Capsule()
                     .fill(searchBackground)
+                    .frame(width: containerWidth, height: height)
 
                 MobileToolbarSearchField(
                     text: $text,
@@ -171,14 +171,12 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
                     onSubmit: onSubmit,
                     onClose: onClose
                 )
+                .frame(width: fullWidth, height: height, alignment: .trailing)
             }
-            .frame(width: fullWidth, height: height, alignment: .trailing)
-            .mask(alignment: .trailing) {
-                Capsule()
-                    .frame(width: searchWidth, height: height)
-            }
+            .frame(width: containerWidth, height: height, alignment: .trailing)
             .opacity(isExpanded ? 1 : 0)
             .allowsHitTesting(isExpanded)
+            .clipped()
         }
         .frame(width: containerWidth, height: height, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
