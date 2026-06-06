@@ -243,6 +243,19 @@ def test_email_login_creates_user_reuses_user_and_hashes_password(monkeypatch, t
     assert wrong_password_response.status_code == 401
     assert wrong_password_response.json()["error"]["code"] == "AUTH_INVALID_EMAIL_CREDENTIALS"
 
+    legacy_device = _register(client, "apns-token-email-login-" + "g" * 32)
+    legacy_response = client.post(
+        "/api/v1/auth/email",
+        headers={
+            "X-Device-Id": legacy_device["deviceId"],
+            "X-Client-Secret": legacy_device["clientSecret"],
+        },
+        json={"email": "legacy@example.com", "password": "secret123"},
+    )
+    assert legacy_response.status_code == 200
+    assert legacy_response.json()["profile"]["displayName"] == "legacy"
+    assert legacy_response.json()["accessToken"]
+
 
 def test_public_questions_include_own_public_records_and_allow_privacy_override(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)

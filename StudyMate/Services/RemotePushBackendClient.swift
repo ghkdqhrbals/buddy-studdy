@@ -462,7 +462,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         idToken: String
     ) async throws -> CommunityLoginResult {
-        var request = authenticatedRequest(
+        var request = loginRequest(
             registration: registration,
             url: endpoint("api", "v1", "auth", "google")
         )
@@ -486,7 +486,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         email: String,
         password: String
     ) async throws -> CommunityLoginResult {
-        var request = authenticatedRequest(
+        var request = loginRequest(
             registration: registration,
             url: endpoint("api", "v1", "auth", "email")
         )
@@ -841,9 +841,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func authenticatedRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
         var request = URLRequest(url: url)
-        if let accessToken = registration.accessToken,
+        if registration.hasAccessToken,
+           let accessToken = registration.accessToken,
            !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private func loginRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
+        var request = authenticatedRequest(registration: registration, url: url)
+        if request.value(forHTTPHeaderField: "Authorization") == nil {
+            request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+            request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         }
         return request
     }
