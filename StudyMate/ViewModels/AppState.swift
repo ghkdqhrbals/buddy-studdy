@@ -262,8 +262,6 @@ final class AppState: ObservableObject {
             title: strings.signInRequiredTitle,
             message: message
         )
-        statusMessage = message
-        communityErrorMessage = message
     }
 
     func dismissPageAccessPrompt() {
