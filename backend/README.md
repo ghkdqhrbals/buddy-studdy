@@ -35,7 +35,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`: Redis settings for email signup verification-code sessions.
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`, `REDIS_CLUSTER`: Redis settings for email signup verification-code sessions. Set `REDIS_CLUSTER=true` for Redis Cluster endpoints.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager source. The backend reads secret keys such as `redisHost`, `redisPort`, `redisPassword`, `smtpHost`, `smtpUsername`, and `smtpPassword`.
 

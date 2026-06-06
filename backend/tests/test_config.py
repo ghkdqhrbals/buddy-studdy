@@ -24,6 +24,7 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "redisHost": "redis.example.com",
         "redisPort": "6379",
         "redisPassword": "redis-password",
+        "redisCluster": "true",
         "smtpHost": "smtp.gmail.com",
         "smtpPort": "587",
         "smtpUsername": "sender@example.com",
@@ -57,6 +58,7 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.redis_host == "redis.example.com"
     assert settings.redis_port == 6379
     assert settings.redis_password == "redis-password"
+    assert settings.redis_cluster is True
     assert settings.smtp_host == "smtp.gmail.com"
     assert settings.smtp_port == 587
     assert settings.smtp_username == "sender@example.com"

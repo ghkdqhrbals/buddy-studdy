@@ -26,6 +26,15 @@ def _int_secret_env(name: str, secret_values: dict[str, str], secret_key: str, d
         return default
 
 
+def _bool_secret_env(name: str, secret_values: dict[str, str], secret_key: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        raw_value = secret_values.get(secret_key)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @lru_cache(maxsize=1)
 def _load_aws_secret_values() -> dict[str, str]:
     secret_id = os.getenv("AWS_SECRET_ID")
@@ -88,6 +97,7 @@ class Settings:
     redis_password: str | None
     redis_db: int
     redis_ssl: bool
+    redis_cluster: bool
     email_verification_ttl_seconds: int
 
     @classmethod
@@ -146,7 +156,8 @@ class Settings:
             redis_port=_int_secret_env("REDIS_PORT", secret_values, "redisPort", 6379),
             redis_password=_secret_env("REDIS_PASSWORD", secret_values, "redisPassword"),
             redis_db=_int_secret_env("REDIS_DB", secret_values, "redisDB", 0),
-            redis_ssl=_bool_env("REDIS_SSL", (secret_values.get("redisSSL") or "").strip().lower() in {"1", "true", "yes", "on"}),
+            redis_ssl=_bool_secret_env("REDIS_SSL", secret_values, "redisSSL", False),
+            redis_cluster=_bool_secret_env("REDIS_CLUSTER", secret_values, "redisCluster", False),
             email_verification_ttl_seconds=max(
                 30,
                 _int_secret_env("EMAIL_VERIFICATION_TTL_SECONDS", secret_values, "emailVerificationTTLSeconds", 180),

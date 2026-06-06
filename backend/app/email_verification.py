@@ -41,7 +41,10 @@ class EmailVerificationStore:
         redis_client = self._redis()
         key = self._key(normalized_email)
         if redis_client is not None:
-            redis_client.setex(key, ttl, value)
+            try:
+                redis_client.setex(key, ttl, value)
+            except Exception as error:
+                raise EmailVerificationUnavailable("Email verification Redis is not available.") from error
         elif self.settings.allow_sqlite_fallback:
             self._memory[key] = (time.time() + ttl, value)
         else:
@@ -58,7 +61,10 @@ class EmailVerificationStore:
         key = self._key(normalized_email)
         redis_client = self._redis()
         if redis_client is not None:
-            raw_value = redis_client.get(key)
+            try:
+                raw_value = redis_client.get(key)
+            except Exception as error:
+                raise EmailVerificationUnavailable("Email verification Redis is not available.") from error
             if raw_value is None:
                 return False
             if isinstance(raw_value, bytes):
@@ -100,17 +106,21 @@ class EmailVerificationStore:
 
         try:
             import redis
+            from redis.cluster import RedisCluster
 
-            self._redis_client = redis.Redis(
-                host=self.settings.redis_host,
-                port=self.settings.redis_port,
-                password=self.settings.redis_password,
-                db=self.settings.redis_db,
-                ssl=self.settings.redis_ssl,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                decode_responses=True,
-            )
+            client_class = RedisCluster if self.settings.redis_cluster else redis.Redis
+            kwargs = {
+                "host": self.settings.redis_host,
+                "port": self.settings.redis_port,
+                "password": self.settings.redis_password,
+                "ssl": self.settings.redis_ssl,
+                "socket_connect_timeout": 5,
+                "socket_timeout": 5,
+                "decode_responses": True,
+            }
+            if not self.settings.redis_cluster:
+                kwargs["db"] = self.settings.redis_db
+            self._redis_client = client_class(**kwargs)
             self._redis_client.ping()
             return self._redis_client
         except Exception as error:
@@ -120,7 +130,10 @@ class EmailVerificationStore:
     def _delete(self, key: str) -> None:
         redis_client = self._redis()
         if redis_client is not None:
-            redis_client.delete(key)
+            try:
+                redis_client.delete(key)
+            except Exception:
+                self._redis_client = None
         else:
             self._memory.pop(key, None)
 
