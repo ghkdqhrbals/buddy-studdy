@@ -78,7 +78,6 @@ struct StudyView: View {
         }
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
-        .keyboardDoneToolbar(strings.done)
         #endif
         .refreshable {
             await appState.refreshVisibleData()
