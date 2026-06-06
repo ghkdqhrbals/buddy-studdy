@@ -1263,10 +1263,20 @@ private struct MobileCommunityQuestionRow: View {
                     .foregroundStyle(.secondary)
 
                 if let author = question.author {
-                    Text(author.displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        HomeProfileAvatar(
+                            symbolName: ProfileAvatarOption.defaultSymbolName,
+                            displayName: author.displayName,
+                            colorSeed: "user-\(author.id)",
+                            size: 16
+                        )
+
+                        Text(author.displayName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
 
                 Spacer(minLength: 2)
