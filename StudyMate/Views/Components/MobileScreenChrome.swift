@@ -62,6 +62,19 @@ struct MobileToolbarIconButtonLabel: View {
     }
 }
 
+private struct MobileSearchCapsuleBackground: View {
+    var color: Color
+
+    var body: some View {
+        Capsule()
+            .fill(color)
+            .overlay {
+                Capsule()
+                    .stroke(color, lineWidth: 4)
+            }
+    }
+}
+
 struct MobileToolbarSearchField: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -158,8 +171,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
                 .allowsHitTesting(!isExpanded)
 
             ZStack(alignment: .trailing) {
-                Capsule()
-                    .fill(searchBackground)
+                MobileSearchCapsuleBackground(color: searchBackground)
                     .frame(width: containerWidth, height: height)
 
                 if keepsSearchFieldMounted {
@@ -183,7 +195,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
             .allowsHitTesting(isExpanded)
             .clipped()
         }
-        .frame(width: fullWidth, height: height, alignment: .trailing)
+        .frame(width: containerWidth, height: height, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
         .clipped()
         .onAppear {
@@ -230,7 +242,9 @@ private extension View {
     @ViewBuilder
     func mobileToolbarSearchBackground(_ color: Color?) -> some View {
         if let color {
-            background(color, in: Capsule())
+            background {
+                MobileSearchCapsuleBackground(color: color)
+            }
         } else {
             self
         }
