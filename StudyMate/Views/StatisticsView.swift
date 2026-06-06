@@ -287,6 +287,7 @@ struct StatisticsView: View {
             focus: $isSearchFocused,
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
+            collapsedWidth: 34,
             onClose: {
                 closeStatsSearch(clearText: true)
             }
@@ -312,6 +313,7 @@ struct StatisticsView: View {
         }
         .accessibilityLabel(strings.search)
         .buttonStyle(.plain)
+        .fixedSize()
     }
 
     @MainActor

@@ -183,7 +183,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
             .allowsHitTesting(isExpanded)
             .clipped()
         }
-        .frame(width: containerWidth, height: height, alignment: .trailing)
+        .frame(width: fullWidth, height: height, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
         .clipped()
         .onAppear {

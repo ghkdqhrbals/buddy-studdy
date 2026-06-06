@@ -265,12 +265,8 @@ struct HistoryView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(strings.search)
 
-            Menu {
-                Button {
-                    showsRecordSettings = true
-                } label: {
-                    Label(strings.recordSettings, systemImage: "slider.horizontal.3")
-                }
+            Button {
+                showsRecordSettings = true
             } label: {
                 #if os(iOS)
                 MobileToolbarIconButtonLabel(systemName: "ellipsis")
@@ -278,6 +274,7 @@ struct HistoryView: View {
                 Image(systemName: "ellipsis")
                 #endif
             }
+            .buttonStyle(.plain)
             .accessibilityLabel(strings.recordSettings)
         }
         .fixedSize()
