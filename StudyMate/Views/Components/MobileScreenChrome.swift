@@ -76,8 +76,6 @@ private struct MobileSearchCapsuleBackground: View {
 }
 
 struct MobileToolbarSearchField: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     @Binding var text: String
     var prompt: String
     var focus: FocusState<Bool>.Binding
@@ -138,12 +136,11 @@ struct MobileToolbarSearchField: View {
     }
 
     private var searchBackground: Color {
-        colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color(uiColor: .secondarySystemFill)
+        Color(uiColor: .secondarySystemFill)
     }
 }
 
 struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
     @State private var keepsSearchFieldMounted = false
     @State private var searchFieldUnmountTask: Task<Void, Never>?
 
@@ -216,7 +213,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     }
 
     private var searchBackground: Color {
-        colorScheme == .dark ? Color(uiColor: .secondarySystemBackground) : Color(uiColor: .secondarySystemFill)
+        Color(uiColor: .secondarySystemFill)
     }
 
     private func updateSearchFieldMountState(isExpanded expanded: Bool) {
