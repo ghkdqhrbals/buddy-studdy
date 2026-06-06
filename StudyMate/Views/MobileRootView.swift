@@ -421,19 +421,22 @@ private struct MobileHomeView: View {
     private var profileToolbarButton: some View {
         let strings = appState.strings
 
-        return HomeProfileAvatar(
-            symbolName: appState.profileAvatarSymbolName,
-            displayName: appState.communityProfile?.displayName,
-            imageData: appState.profileAvatarImageData,
-            colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
-            usesNeutralColor: !appState.isCommunitySignedIn,
-            size: 34
-        )
-        .frame(width: 34, height: 34)
-        .contentShape(Circle())
-        .onTapGesture {
+        return Button {
             isShowingProfileSettings = true
+        } label: {
+            HomeProfileAvatar(
+                symbolName: appState.profileAvatarSymbolName,
+                displayName: appState.communityProfile?.displayName,
+                imageData: appState.profileAvatarImageData,
+                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+                usesNeutralColor: !appState.isCommunitySignedIn,
+                size: 34
+            )
+            .frame(width: 34, height: 34)
+            .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
         .accessibilityLabel(strings.profile)
     }
 

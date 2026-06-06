@@ -70,6 +70,7 @@ struct MobileToolbarSearchField: View {
     var focus: FocusState<Bool>.Binding
     var closeAccessibilityLabel: String
     var width: CGFloat = 284
+    var height: CGFloat = 50
     var showsBackground: Bool = true
     var onSubmit: () -> Void = {}
     var onClose: () -> Void
@@ -98,6 +99,7 @@ struct MobileToolbarSearchField: View {
                     .focused(focus)
                     .onSubmit(onSubmit)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
                 onClose()
@@ -112,10 +114,9 @@ struct MobileToolbarSearchField: View {
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-        .frame(width: resolvedWidth, height: 46)
-        .background(showsBackground ? searchBackground : Color.clear, in: Capsule())
+        .frame(width: resolvedWidth, height: height)
+        .mobileToolbarSearchBackground(showsBackground ? searchBackground : nil)
         .contentShape(Capsule())
-        .clipped()
     }
 
     private var resolvedWidth: CGFloat {
@@ -138,40 +139,48 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     var closeAccessibilityLabel: String
     var width: CGFloat = 430
     var collapsedWidth: CGFloat = 84
+    var height: CGFloat = 50
     var onSubmit: () -> Void = {}
     var onClose: () -> Void
     @ViewBuilder var collapsedContent: () -> CollapsedContent
 
     var body: some View {
         let fullWidth = resolvedWidth
-        let searchWidth = isExpanded ? fullWidth : 44
+        let searchWidth = isExpanded ? fullWidth : height
         let containerWidth = isExpanded ? fullWidth : collapsedWidth
 
         ZStack(alignment: .trailing) {
             collapsedContent()
-                .frame(width: collapsedWidth, height: 46, alignment: .trailing)
+                .frame(width: collapsedWidth, height: height, alignment: .trailing)
                 .opacity(isExpanded ? 0 : 1)
                 .scaleEffect(isExpanded ? 0.96 : 1, anchor: .trailing)
                 .allowsHitTesting(!isExpanded)
 
-            MobileToolbarSearchField(
-                text: $text,
-                prompt: prompt,
-                focus: focus,
-                closeAccessibilityLabel: closeAccessibilityLabel,
-                width: fullWidth,
-                showsBackground: false,
-                onSubmit: onSubmit,
-                onClose: onClose
-            )
-            .frame(width: fullWidth, height: 46, alignment: .trailing)
-            .frame(width: searchWidth, height: 46, alignment: .trailing)
-            .background(searchBackground, in: Capsule())
-            .clipShape(Capsule())
+            ZStack(alignment: .trailing) {
+                Capsule()
+                    .fill(searchBackground)
+
+                MobileToolbarSearchField(
+                    text: $text,
+                    prompt: prompt,
+                    focus: focus,
+                    closeAccessibilityLabel: closeAccessibilityLabel,
+                    width: fullWidth,
+                    height: height,
+                    showsBackground: false,
+                    onSubmit: onSubmit,
+                    onClose: onClose
+                )
+            }
+            .frame(width: fullWidth, height: height, alignment: .trailing)
+            .mask(alignment: .trailing) {
+                Capsule()
+                    .frame(width: searchWidth, height: height)
+            }
             .opacity(isExpanded ? 1 : 0)
             .allowsHitTesting(isExpanded)
         }
-        .frame(width: containerWidth, height: 46, alignment: .trailing)
+        .frame(width: containerWidth, height: height, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
         .clipped()
     }
@@ -183,6 +192,17 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 
     private var searchBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func mobileToolbarSearchBackground(_ color: Color?) -> some View {
+        if let color {
+            background(color, in: Capsule())
+        } else {
+            self
+        }
     }
 }
 #endif
