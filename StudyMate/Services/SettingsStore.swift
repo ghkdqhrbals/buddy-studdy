@@ -453,7 +453,7 @@ final class SettingsStore {
     }
 
     func loadProfileAvatarSymbolName() -> String {
-        defaults.string(forKey: Keys.profileAvatarSymbolName) ?? "person.fill"
+        defaults.string(forKey: Keys.profileAvatarSymbolName) ?? "pixel-buddy"
     }
 
     func saveProfileAvatarSymbolName(_ symbolName: String) {

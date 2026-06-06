@@ -1180,6 +1180,11 @@ final class AppState: ObservableObject {
         settingsStore.saveProfileAvatarSymbolName(symbolName)
     }
 
+    func updateProfileAvatarColorSeed(_ seed: String) {
+        profileAvatarColorSeed = seed
+        settingsStore.saveProfileAvatarColorSeed(seed)
+    }
+
     func updateProfileAvatarImageData(_ data: Data?) {
         profileAvatarImageData = data
         settingsStore.saveProfileAvatarImageData(data)

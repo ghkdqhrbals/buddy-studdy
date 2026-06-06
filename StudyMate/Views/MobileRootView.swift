@@ -491,11 +491,11 @@ private struct MobileHomeView: View {
 
     private var signedInProfileColorSeed: String? {
         guard appState.isCommunitySignedIn,
-              let profileID = appState.communityProfile?.id else {
+              !appState.profileAvatarColorSeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
 
-        return "user-\(profileID)"
+        return appState.profileAvatarColorSeed
     }
 
     private func homeToolbarSearchControl(strings: AppStrings) -> some View {
@@ -706,7 +706,11 @@ private struct HomeProfileAvatar: View {
     }
 
     private var defaultGlyph: some View {
-        PersonAvatarGlyph(colorSeed: defaultColorSeed, usesNeutralColor: usesNeutralColor)
+        PixelAvatarGlyph(
+            avatarName: ProfileAvatarOption.glyphName(for: symbolName),
+            colorSeed: defaultColorSeed,
+            usesNeutralColor: usesNeutralColor
+        )
             .frame(width: size, height: size)
     }
 
@@ -736,25 +740,86 @@ private struct HomeProfileAvatar: View {
     #endif
 }
 
-private struct PersonAvatarGlyph: View {
+private struct PixelAvatarGlyph: View {
+    var avatarName: String
     var colorSeed: String
     var usesNeutralColor: Bool = false
 
     var body: some View {
         GeometryReader { proxy in
-            let iconSize = min(proxy.size.width, proxy.size.height) * 0.48
+            let length = min(proxy.size.width, proxy.size.height)
+            let palette = PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor)
+            let cells = PixelAvatarPattern.cells(for: avatarName)
+            let pixelSize = length / 11
+            let origin = CGPoint(x: (proxy.size.width - pixelSize * 9) / 2, y: (proxy.size.height - pixelSize * 9) / 2)
 
             ZStack {
                 Circle()
-                    .fill(usesNeutralColor ? Color.secondary.opacity(0.42) : stableAvatarColor(seed: colorSeed))
+                    .fill(palette.background)
 
-                Image(systemName: "person.fill")
-                    .font(.system(size: iconSize, weight: .semibold))
-                    .foregroundStyle(.white)
+                ForEach(cells) { cell in
+                    Rectangle()
+                        .fill(palette.color(for: cell.tone))
+                        .frame(width: pixelSize, height: pixelSize)
+                        .position(
+                            x: origin.x + CGFloat(cell.x) * pixelSize + pixelSize / 2,
+                            y: origin.y + CGFloat(cell.y) * pixelSize + pixelSize / 2
+                        )
+                }
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityHidden(true)
+    }
+}
+
+private struct PixelAvatarCell: Identifiable {
+    enum Tone {
+        case outline
+        case shade
+        case skin
+        case light
+        case accent
+        case eye
+    }
+
+    let id = UUID()
+    var x: Int
+    var y: Int
+    var tone: Tone
+}
+
+private struct PixelAvatarPalette {
+    var seed: String
+    var usesNeutralColor: Bool
+
+    var background: Color {
+        usesNeutralColor ? Color.secondary.opacity(0.42) : accent.opacity(0.92)
+    }
+
+    var accent: Color {
+        if let option = ProfileAvatarColorOption.option(for: seed) {
+            return option.color
+        }
+
+        return stableAvatarColor(seed: seed)
+    }
+
+    func color(for tone: PixelAvatarCell.Tone) -> Color {
+        switch tone {
+        case .outline:
+            return usesNeutralColor ? Color.white.opacity(0.88) : Color.black.opacity(0.70)
+        case .shade:
+            return usesNeutralColor ? Color.white.opacity(0.32) : accent.opacity(0.62)
+        case .skin:
+            return usesNeutralColor ? Color.white.opacity(0.86) : Color(red: 1.0, green: 0.79, blue: 0.58)
+        case .light:
+            return Color.white.opacity(0.96)
+        case .accent:
+            return usesNeutralColor ? Color.white.opacity(0.68) : accent.lighter()
+        case .eye:
+            return usesNeutralColor ? Color.black.opacity(0.55) : Color.black.opacity(0.82)
+        }
     }
 
     private func stableAvatarColor(seed: String) -> Color {
@@ -766,6 +831,100 @@ private struct PersonAvatarGlyph: View {
 
         let hue = Double(hash % 360) / 360.0
         return Color(hue: hue, saturation: 0.48, brightness: 0.74)
+    }
+}
+
+private enum PixelAvatarPattern {
+    static func cells(for avatarName: String) -> [PixelAvatarCell] {
+        switch avatarName {
+        case "pixel-scholar":
+            return scholar
+        case "pixel-coder":
+            return coder
+        case "pixel-explorer":
+            return explorer
+        case "pixel-artist":
+            return artist
+        case "pixel-star":
+            return star
+        default:
+            return buddy
+        }
+    }
+
+    private static func row(_ y: Int, _ xRange: ClosedRange<Int>, _ tone: PixelAvatarCell.Tone) -> [PixelAvatarCell] {
+        xRange.map { PixelAvatarCell(x: $0, y: y, tone: tone) }
+    }
+
+    private static func points(_ tone: PixelAvatarCell.Tone, _ values: (Int, Int)...) -> [PixelAvatarCell] {
+        values.map { PixelAvatarCell(x: $0.0, y: $0.1, tone: tone) }
+    }
+
+    private static var baseFace: [PixelAvatarCell] {
+        row(3, 3...5, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + row(6, 3...5, .skin)
+            + points(.eye, (3, 4), (5, 4))
+            + row(7, 3...5, .outline)
+    }
+
+    static var buddy: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .accent)
+            + points(.outline, (2, 3), (6, 3), (2, 4), (6, 4), (2, 5), (6, 5), (3, 6), (5, 6))
+            + baseFace
+            + row(8, 2...6, .accent)
+    }
+
+    static var scholar: [PixelAvatarCell] {
+        row(1, 2...6, .outline)
+            + row(2, 1...7, .accent)
+            + row(3, 3...5, .outline)
+            + points(.accent, (1, 3), (7, 3), (1, 4), (7, 4))
+            + baseFace
+            + row(8, 2...6, .outline)
+    }
+
+    static var coder: [PixelAvatarCell] {
+        row(1, 3...5, .shade)
+            + row(2, 2...6, .outline)
+            + row(3, 2...6, .skin)
+            + points(.outline, (1, 4), (2, 4), (6, 4), (7, 4), (1, 5), (7, 5))
+            + baseFace
+            + points(.light, (2, 4), (6, 4))
+            + row(8, 1...7, .accent)
+    }
+
+    static var explorer: [PixelAvatarCell] {
+        row(1, 2...6, .accent)
+            + row(2, 1...7, .outline)
+            + row(3, 2...6, .shade)
+            + baseFace
+            + points(.outline, (1, 5), (7, 5), (2, 6), (6, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var artist: [PixelAvatarCell] {
+        points(.accent, (3, 1), (4, 1), (5, 1), (2, 2), (6, 2))
+            + points(.light, (6, 1), (7, 2))
+            + row(3, 2...6, .skin)
+            + baseFace
+            + points(.accent, (1, 7), (2, 8), (6, 8), (7, 7))
+    }
+
+    static var star: [PixelAvatarCell] {
+        points(.light, (4, 0), (3, 1), (4, 1), (5, 1), (2, 2), (6, 2))
+            + row(3, 2...6, .accent)
+            + baseFace
+            + points(.light, (1, 4), (7, 4), (2, 7), (6, 7))
+            + row(8, 3...5, .accent)
+    }
+}
+
+private extension Color {
+    func lighter() -> Color {
+        self.opacity(0.82)
     }
 }
 
@@ -790,10 +949,10 @@ private struct MobileProfileSettingsSheet: View {
                     Section {
                         HStack(spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: ProfileAvatarOption.defaultSymbolName,
+                                symbolName: appState.profileAvatarSymbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
-                                colorSeed: appState.communityProfile.map { "user-\($0.id)" },
+                                colorSeed: appState.profileAvatarColorSeed,
                                 usesNeutralColor: appState.communityProfile == nil,
                                 size: 54
                             )
@@ -804,6 +963,67 @@ private struct MobileProfileSettingsSheet: View {
                                 .submitLabel(.done)
                         }
                         .padding(.vertical, 4)
+                    }
+
+                    Section(strings.profileCharacter) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                            ForEach(ProfileAvatarOption.all, id: \.self) { option in
+                                Button {
+                                    appState.updateProfileAvatarSymbolName(option)
+                                } label: {
+                                    HomeProfileAvatar(
+                                        symbolName: option,
+                                        displayName: profileDisplayName,
+                                        imageData: nil,
+                                        colorSeed: appState.profileAvatarColorSeed,
+                                        usesNeutralColor: false,
+                                        size: 50
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? 0.16 : 0.06))
+                                    )
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(
+                                                ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
+                                                lineWidth: 1
+                                            )
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    Section(strings.profileColor) {
+                        HStack(spacing: 12) {
+                            ForEach(ProfileAvatarColorOption.all) { option in
+                                Button {
+                                    appState.updateProfileAvatarColorSeed(option.id)
+                                } label: {
+                                    Circle()
+                                        .fill(option.color)
+                                        .frame(width: 28, height: 28)
+                                        .overlay {
+                                            if appState.profileAvatarColorSeed == option.id {
+                                                Image(systemName: "checkmark")
+                                                    .font(.caption.weight(.bold))
+                                                    .foregroundStyle(.white)
+                                            }
+                                        }
+                                        .overlay {
+                                            Circle()
+                                                .stroke(Color.primary.opacity(appState.profileAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
+                                        }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 6)
                     }
 
                     Section {
@@ -1029,17 +1249,15 @@ private struct EmailSignInSheet: View {
 }
 
 private enum ProfileAvatarOption {
-    static let defaultSymbolName = "person.fill"
+    static let defaultSymbolName = "pixel-buddy"
 
     static let all = [
         defaultSymbolName,
-        "graduationcap.fill",
-        "book.fill",
-        "brain.head.profile",
-        "sparkles",
-        "star.fill",
-        "bolt.fill",
-        "leaf.fill"
+        "pixel-scholar",
+        "pixel-coder",
+        "pixel-explorer",
+        "pixel-artist",
+        "pixel-star"
     ]
 
     static func glyphName(for symbolName: String) -> String {
@@ -1048,21 +1266,51 @@ private enum ProfileAvatarOption {
 
     static func canonicalName(for symbolName: String) -> String {
         switch symbolName {
-        case "person.crop.circle.fill", "pencil.tip":
+        case "person.fill", "person.crop.circle.fill", "pencil.tip":
             return defaultSymbolName
         case "graduationcap.circle.fill":
-            return "graduationcap.fill"
+            return "pixel-scholar"
         case "book.circle.fill":
-            return "book.fill"
+            return "pixel-buddy"
         case "star.circle.fill":
-            return "star.fill"
+            return "pixel-star"
         case "bolt.circle.fill":
-            return "bolt.fill"
+            return "pixel-coder"
         case "leaf.circle.fill":
-            return "leaf.fill"
+            return "pixel-explorer"
+        case "graduationcap.fill":
+            return "pixel-scholar"
+        case "book.fill", "brain.head.profile":
+            return "pixel-buddy"
+        case "sparkles", "star.fill":
+            return "pixel-star"
+        case "bolt.fill":
+            return "pixel-coder"
+        case "leaf.fill":
+            return "pixel-explorer"
         default:
-            return symbolName
+            return all.contains(symbolName) ? symbolName : defaultSymbolName
         }
+    }
+}
+
+private struct ProfileAvatarColorOption: Identifiable {
+    var id: String
+    var color: Color
+
+    static let all: [ProfileAvatarColorOption] = [
+        ProfileAvatarColorOption(id: "avatar-color-mint", color: Color(red: 0.20, green: 0.72, blue: 0.52)),
+        ProfileAvatarColorOption(id: "avatar-color-sky", color: Color(red: 0.20, green: 0.50, blue: 0.86)),
+        ProfileAvatarColorOption(id: "avatar-color-violet", color: Color(red: 0.50, green: 0.36, blue: 0.82)),
+        ProfileAvatarColorOption(id: "avatar-color-rose", color: Color(red: 0.84, green: 0.33, blue: 0.47)),
+        ProfileAvatarColorOption(id: "avatar-color-amber", color: Color(red: 0.86, green: 0.56, blue: 0.20)),
+        ProfileAvatarColorOption(id: "avatar-color-teal", color: Color(red: 0.16, green: 0.62, blue: 0.70)),
+        ProfileAvatarColorOption(id: "avatar-color-graphite", color: Color(red: 0.36, green: 0.38, blue: 0.42)),
+        ProfileAvatarColorOption(id: "avatar-color-lime", color: Color(red: 0.48, green: 0.70, blue: 0.28))
+    ]
+
+    static func option(for seed: String) -> ProfileAvatarColorOption? {
+        all.first { $0.id == seed }
     }
 }
 

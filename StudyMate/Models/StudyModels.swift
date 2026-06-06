@@ -1658,6 +1658,8 @@ struct AppStrings {
     var profile: String { text("프로필", "Profile") }
     var profileDisplayName: String { text("이름", "Name") }
     var profileAvatar: String { text("프로필 사진", "Profile Picture") }
+    var profileCharacter: String { text("프로필 캐릭터", "Profile Character") }
+    var profileColor: String { text("프로필 색상", "Profile Color") }
     var chooseProfilePhoto: String { text("사진 선택", "Choose Photo") }
     var removeProfilePhoto: String { text("사진 제거", "Remove Photo") }
     var profilePhotoScale: String { text("사진 크기", "Photo Size") }
