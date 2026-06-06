@@ -6,6 +6,8 @@ This dashboard contains a Kibana-style log timeline plus one log search panel: *
 
 Import `docs/observability/grafana-loki-search-dashboard.json` in Grafana, then select the Loki data source from the dashboard variables.
 
+To apply collapsed-row truncation, inject `docs/observability/grafana-log-row-truncation.css` into the deployed Grafana frontend. Grafana's dashboard JSON does not provide a native "clamp log rows to N lines" option for the Logs panel.
+
 ## Query Controls
 
 - `Label selector`: raw LogQL stream selector, for example `{job="buddystuddy-backend"}` or `{container="buddystuddy-nginx"}`. Loki labels are the indexed fields, so narrow this first.
@@ -45,9 +47,9 @@ The `Search Results` panel uses Grafana's `Logs` visualization. It is intentiona
 
 The list shows time, level, and the log message first. Loki labels are hidden from the list to avoid excessive horizontal scrolling. Grafana log syntax highlighting is enabled, so terms from `LogQL Search` line filters are highlighted in the displayed log line.
 
-Do not add display-only `regexp` field extraction or truncation inside the `Search Results` LogQL. Grafana's Loki logs panel requests `categorize-labels`; named regexp captures, `printf`, or `trunc` can put long or split UTF-8 content into extracted fields and make `/api/ds/query` fail with `invalid UTF-8 rune`. Keep the query as the raw log stream and handle row-height limiting in Grafana display behavior or a narrowly targeted frontend override.
+Do not add display-only `regexp` field extraction or truncation inside the `Search Results` LogQL. Grafana's Loki logs panel requests `categorize-labels`; named regexp captures, `printf`, or `trunc` can put long or split UTF-8 content into extracted fields and make `/api/ds/query` fail with `invalid UTF-8 rune`. Keep the query as the raw log stream and handle row-height limiting through `grafana-log-row-truncation.css`.
 
-If row truncation is needed, clamp only the collapsed list row and never the inline detail body. Validate with Korean text and UTC offset timestamps before deploying, because byte-oriented truncation can split UTF-8 and make Hangul render incorrectly.
+`grafana-log-row-truncation.css` clamps only the collapsed list row to 3 wrapped lines with CSS; it never truncates the log bytes. The inline detail body is excluded from the clamp, and the Grafana detail containers are forced to `overflow: visible` so clicking a row shows the full original log without a nested scrollbar. Validate with Korean text and UTC offset timestamps before deploying any selector changes.
 
 Click a log row to open the log details inline under the row. The deployed Grafana override removes the default nested scroll areas from inline details so the selected log can expand in the page flow.
 

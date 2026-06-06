@@ -1,0 +1,52 @@
+/*
+ * BuddyStuddy Grafana Logs row truncation.
+ *
+ * Keep Loki queries raw. Truncating in LogQL can split UTF-8 text and can make
+ * Grafana's Loki logs panel fail while categorizing labels. This override only
+ * clamps the collapsed row text in the browser. Clicking a row still opens the
+ * original full log line in inline details.
+ */
+
+[data-testid="data-testid panel content"] span.field.log-syntax-highlight {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 3 !important;
+  overflow: hidden !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  max-height: 4.8em !important;
+}
+
+[data-testid="data-testid panel content"] div.field.log-syntax-highlight {
+  display: block !important;
+  max-height: none !important;
+  overflow: visible !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+[data-testid="data-testid panel content"] .log-line-inline-details,
+[data-testid="data-testid panel content"] .log-line-inline-details > div,
+[data-testid="data-testid panel content"] .log-line-inline-details > div > div {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+}
+
+[data-testid="data-testid panel content"] .log-line-inline-details * {
+  max-height: none !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+}
+
+[data-testid="data-testid panel content"] .log-line-inline-details span.field.log-syntax-highlight {
+  display: block !important;
+  max-height: none !important;
+  overflow: visible !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
