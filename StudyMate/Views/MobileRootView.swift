@@ -334,9 +334,18 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) {
-                if !isHomeSearchActive {
-                    profileToolbarControl
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !isHomeSearchActive {
+                        profileToolbarControl
+                    }
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !isHomeSearchActive {
+                        profileToolbarControl
+                    }
                 }
             }
 
