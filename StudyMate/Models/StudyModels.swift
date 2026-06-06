@@ -1631,6 +1631,8 @@ struct AppStrings {
     var communityQuestion: String { text("공개 질문", "Community Question") }
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { text("Google로 로그인", "Sign in with Google") }
+    var signInRequiredTitle: String { text("로그인이 필요합니다", "Sign In Required") }
+    var goToSignIn: String { text("로그인하기", "Sign In") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
     var communitySignedOut: String { text("다른 사용자 질문 기능을 껐습니다.", "Community questions are disabled.") }

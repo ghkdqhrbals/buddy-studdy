@@ -29,6 +29,12 @@ private enum ProtectedAppPage {
     }
 }
 
+struct PageAccessPrompt: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+    var message: String
+}
+
 #if os(iOS)
 private final class BackgroundTaskExpiration: @unchecked Sendable {
     private let lock = NSLock()
@@ -121,6 +127,7 @@ final class AppState: ObservableObject {
     @Published var communityErrorMessage: String?
     @Published var communityProfile: CommunityUserProfile?
     @Published var isUpdatingCommunityProfile = false
+    @Published var pageAccessPrompt: PageAccessPrompt?
     @Published var profileAvatarSymbolName: String
     @Published var profileAvatarImageData: Data?
     @Published var profileAvatarColorSeed: String
@@ -251,8 +258,16 @@ final class AppState: ObservableObject {
         homeStudyRoute = nil
         focusedRecordRequest = nil
         let message = strings.pageAccessDenied(page.title(strings: strings))
+        pageAccessPrompt = PageAccessPrompt(
+            title: strings.signInRequiredTitle,
+            message: message
+        )
         statusMessage = message
         communityErrorMessage = message
+    }
+
+    func dismissPageAccessPrompt() {
+        pageAccessPrompt = nil
     }
 
     @discardableResult

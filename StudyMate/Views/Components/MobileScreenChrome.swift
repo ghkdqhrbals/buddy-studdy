@@ -56,6 +56,7 @@ struct MobileToolbarIconButtonLabel: View {
     var body: some View {
         Image(systemName: systemName)
             .font(.system(size: 21, weight: .semibold))
+            .foregroundStyle(.primary)
             .frame(width: 34, height: 34)
             .contentShape(Rectangle())
     }
@@ -144,6 +145,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     var body: some View {
         let fullWidth = resolvedWidth
         let searchWidth = isExpanded ? fullWidth : 44
+        let containerWidth = isExpanded ? fullWidth : collapsedWidth
 
         ZStack(alignment: .trailing) {
             collapsedContent()
@@ -169,7 +171,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
             .opacity(isExpanded ? 1 : 0)
             .allowsHitTesting(isExpanded)
         }
-        .frame(width: fullWidth, height: 46, alignment: .trailing)
+        .frame(width: containerWidth, height: 46, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
         .clipped()
     }

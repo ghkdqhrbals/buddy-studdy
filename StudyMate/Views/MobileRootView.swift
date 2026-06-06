@@ -55,6 +55,19 @@ struct MobileRootView: View {
                 .tag(AppTab.settings)
             }
             .background(Color(.systemBackground))
+            .alert(item: $appState.pageAccessPrompt) { prompt in
+                Alert(
+                    title: Text(prompt.title),
+                    message: Text(prompt.message),
+                    primaryButton: .default(Text(strings.goToSignIn)) {
+                        appState.dismissPageAccessPrompt()
+                        appState.signInToCommunity()
+                    },
+                    secondaryButton: .cancel(Text(strings.cancel)) {
+                        appState.dismissPageAccessPrompt()
+                    }
+                )
+            }
             .onAppear {
                 appState.normalizeSelectedTabForMobile()
             }
