@@ -256,12 +256,6 @@ private struct MobileHomeView: View {
                     }
                 } else if selectedHomeScope == .all {
                     Section {
-                        if let message = appState.communityErrorMessage {
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-
                         if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
                             ProgressView()
                                 .frame(maxWidth: .infinity, alignment: .center)

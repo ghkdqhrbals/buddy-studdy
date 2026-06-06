@@ -1085,8 +1085,12 @@ final class AppState: ObservableObject {
         Task {
             #if os(iOS)
             do {
+                communityErrorMessage = nil
                 let idToken = try await GoogleOAuthService().signIn()
                 await signInToCommunity(idToken: idToken)
+            } catch GoogleOAuthError.cancelled {
+                communityErrorMessage = nil
+                log(.info, "Google Login이 사용자에 의해 취소되었습니다.")
             } catch GoogleOAuthError.notConfigured {
                 statusMessage = strings.googleLoginSetupRequired
                 log(.warning, "Google Login 설정이 없습니다.")
