@@ -1175,6 +1175,15 @@ enum RemotePushBackendError: LocalizedError {
         }
     }
 
+    var isPageAccessDenied: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.code == "PAGE_ACCESS_DENIED" || apiError?.code == "AUTH_GOOGLE_REQUIRED"
+        case .invalidResponse:
+            return false
+        }
+    }
+
     var responseBody: String? {
         switch self {
         case .httpStatus(_, let body, _):

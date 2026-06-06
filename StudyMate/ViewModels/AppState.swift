@@ -12,6 +12,23 @@ private enum QuestionGenerationSkip: Error {
     case duplicateQuestion
 }
 
+private enum ProtectedAppPage {
+    case records
+    case statistics
+    case studyDetail
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.tabRecords
+        case .statistics:
+            return strings.tabStatistics
+        case .studyDetail:
+            return strings.tabStudy
+        }
+    }
+}
+
 #if os(iOS)
 private final class BackgroundTaskExpiration: @unchecked Sendable {
     private let lock = NSLock()
@@ -175,10 +192,78 @@ final class AppState: ObservableObject {
             cancelSettingsEditing()
         }
 
+        if let protectedPage = protectedPage(for: nextTab),
+           !canAccess(protectedPage) {
+            redirectToPageAccessGuide(for: protectedPage)
+            return
+        }
+
         selectedTab = nextTab
         if nextTab == .home {
             homeStudyRoute = nil
         }
+    }
+
+    private func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
+        switch tab {
+        case .records:
+            return .records
+        case .statistics:
+            return .statistics
+        case .study:
+            return .studyDetail
+        case .home, .settings:
+            return nil
+        }
+    }
+
+    private func canAccess(_ page: ProtectedAppPage) -> Bool {
+        guard isCommunitySignedIn else {
+            return false
+        }
+
+        guard let access = communityProfile?.pageAccess else {
+            return true
+        }
+
+        switch page {
+        case .records:
+            return access.records
+        case .statistics:
+            return access.statistics
+        case .studyDetail:
+            return access.studyDetail
+        }
+    }
+
+    @discardableResult
+    private func requirePageAccess(_ page: ProtectedAppPage) -> Bool {
+        guard canAccess(page) else {
+            redirectToPageAccessGuide(for: page)
+            return false
+        }
+
+        return true
+    }
+
+    private func redirectToPageAccessGuide(for page: ProtectedAppPage) {
+        selectedTab = .home
+        homeStudyRoute = nil
+        focusedRecordRequest = nil
+        let message = strings.pageAccessDenied(page.title(strings: strings))
+        statusMessage = message
+        communityErrorMessage = message
+    }
+
+    @discardableResult
+    private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
+        guard let backendError = error as? RemotePushBackendError,
+              backendError.isPageAccessDenied else {
+            return false
+        }
+
+        redirectToPageAccessGuide(for: page)
+        return true
     }
 
     var apiKeyValidationMessage: String? {
@@ -627,6 +712,11 @@ final class AppState: ObservableObject {
             log(.info, "통계 조회 완료. topics=\(stats.topics.count), totalTopics=\(stats.totalTopics), totalResponses=\(stats.totalResponses), offset=\(stats.offset)")
         } catch {
             guard requestID == backendStatsRequestID else {
+                return
+            }
+
+            if handlePageAccessError(error, page: .statistics) {
+                backendStatsErrorMessage = strings.pageAccessDenied(strings.tabStatistics)
                 return
             }
 
@@ -1873,6 +1963,9 @@ final class AppState: ObservableObject {
             isBackendOpenAIKeyConfigured = true
             log(.info, "온보딩 완료 후 백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
         }
@@ -2040,6 +2133,9 @@ final class AppState: ObservableObject {
             isBackendOpenAIKeyConfigured = true
             log(.info, "백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
         }
@@ -2142,6 +2238,10 @@ final class AppState: ObservableObject {
     }
 
     private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool) async {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         guard await canCreateQuestionAfterGlobalPendingCheck(
             reason: "백엔드 새 질문 생성",
             updateVisibleQuestion: manual
@@ -2178,6 +2278,9 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
             await syncRemotePushScheduleIfPossible(reason: "manual-question")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
             log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
@@ -2523,6 +2626,9 @@ final class AppState: ObservableObject {
                     await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
                 } catch {
+                    if self.handlePageAccessError(error, page: .studyDetail) {
+                        return
+                    }
                     log(.warning, "백엔드 미제출 질문 넘기기 실패: \(error.localizedDescription)")
                 }
             }
@@ -2552,6 +2658,10 @@ final class AppState: ObservableObject {
     }
 
     func selectStudyRecord(_ record: StudyRecord) {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         notificationLandingMessage = nil
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
@@ -2566,6 +2676,10 @@ final class AppState: ObservableObject {
     }
 
     func prepareToOpenQuestionFromNotification() {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         showStudyScreen(categoryID: nil)
         notificationLandingMessage = strings.openingNotificationQuestion
         statusMessage = strings.openingNotificationQuestion
@@ -2580,6 +2694,10 @@ final class AppState: ObservableObject {
     ) -> Bool {
         if let recordID,
            settingsStore.loadRemotePushRegistration() != nil {
+            guard requirePageAccess(.studyDetail) else {
+                return false
+            }
+
             showStudyScreen(categoryID: nil)
             notificationLandingMessage = strings.openingNotificationQuestion
             statusMessage = strings.openingNotificationQuestion
@@ -2683,6 +2801,9 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 push record를 처리했습니다. recordID=\(recordID), openStudy=\(openStudy)")
             return true
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return false
+            }
             if openStudy {
                 showNotificationQuestionUnavailable(preserveCurrentQuestion: true)
             }
@@ -4695,6 +4816,10 @@ final class AppState: ObservableObject {
     }
 
     private func showStudyScreen(categoryID: String?) {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         #if os(iOS)
         selectedTab = .home
         homeStudyRoute = HomeStudyRoute(categoryID: categoryID)

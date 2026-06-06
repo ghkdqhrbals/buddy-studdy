@@ -1263,9 +1263,9 @@ class Database:
             "avatarUrl": row.avatar_url,
             "pageAccess": {
                 "publicQuestions": bool(row.allow_public_questions),
-                "statistics": False,
-                "studyDetail": False,
-                "records": False,
+                "statistics": True,
+                "studyDetail": True,
+                "records": True,
             },
         }
 

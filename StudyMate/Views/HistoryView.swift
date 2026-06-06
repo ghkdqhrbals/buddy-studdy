@@ -74,6 +74,10 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    MobileRootLargeTitle(strings.tabRecords)
+                        .padding(.top, 6)
+                        .padding(.bottom, 8)
+
                     if orderedRecords.isEmpty {
                         ContentUnavailableView(
                             strings.noRecords,
@@ -151,9 +155,9 @@ struct HistoryView: View {
             .searchSafeRefreshControlOffset(isRefreshing: isRefreshing)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .navigationTitle(isRecordSearchActive ? "" : strings.tabRecords)
+        .navigationTitle("")
         #if os(iOS)
-        .navigationBarTitleDisplayMode(isRecordSearchActive ? .inline : .large)
+        .navigationBarTitleDisplayMode(.inline)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !searchText.isEmpty,
@@ -163,14 +167,8 @@ struct HistoryView: View {
         )
         .toolbar {
             #if os(iOS)
-            if isRecordSearchActive {
-                ToolbarItem(placement: .principal) {
-                    recordToolbarSearchField(strings: strings)
-                }
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    recordToolbarItems(strings: strings)
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                recordToolbarSearchControl(strings: strings)
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
@@ -224,26 +222,26 @@ struct HistoryView: View {
         isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    @ViewBuilder
-    private func recordToolbarSearchField(strings: AppStrings) -> some View {
-        if isRecordSearchActive {
-            #if os(iOS)
-            MobileToolbarSearchField(
-                text: $searchText,
-                prompt: strings.searchRecords,
-                focus: $isSearchFocused,
-                closeAccessibilityLabel: strings.clearSearch,
-                width: min(UIScreen.main.bounds.width - 32, 430),
-                onClose: {
-                    closeRecordSearch(clearText: true)
-                }
-            )
-            #else
-            TextField(strings.searchRecords, text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
-            #endif
+    private func recordToolbarSearchControl(strings: AppStrings) -> some View {
+        #if os(iOS)
+        MobileExpandingToolbarSearch(
+            isExpanded: isRecordSearchActive,
+            text: $searchText,
+            prompt: strings.searchRecords,
+            focus: $isSearchFocused,
+            closeAccessibilityLabel: strings.clearSearch,
+            width: min(UIScreen.main.bounds.width - 32, 430),
+            onClose: {
+                closeRecordSearch(clearText: true)
+            }
+        ) {
+            recordToolbarItems(strings: strings)
         }
+        #else
+        TextField(strings.searchRecords, text: $searchText)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 220)
+        #endif
     }
 
     @ViewBuilder
@@ -287,7 +285,7 @@ struct HistoryView: View {
             return
         }
 
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
         Task { @MainActor in
@@ -303,7 +301,7 @@ struct HistoryView: View {
             searchText = ""
         }
 
-        withAnimation(.snappy(duration: 0.18)) {
+        withAnimation(.smooth(duration: 0.22)) {
             isSearchVisible = false
         }
     }

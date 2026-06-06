@@ -33,6 +33,22 @@ extension View {
     }
 }
 
+struct MobileRootLargeTitle: View {
+    var title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 34, weight: .bold))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 #if os(iOS)
 struct MobileToolbarIconButtonLabel: View {
     var systemName: String
@@ -46,45 +62,125 @@ struct MobileToolbarIconButtonLabel: View {
 }
 
 struct MobileToolbarSearchField: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @Binding var text: String
     var prompt: String
     var focus: FocusState<Bool>.Binding
     var closeAccessibilityLabel: String
     var width: CGFloat = 284
+    var showsBackground: Bool = true
     var onSubmit: () -> Void = {}
     var onClose: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
 
-            TextField(prompt, text: $text)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .lineLimit(1)
-                .submitLabel(.search)
-                .focused(focus)
-                .onSubmit(onSubmit)
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(prompt)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .lineLimit(1)
+                    .submitLabel(.search)
+                    .focused(focus)
+                    .onSubmit(onSubmit)
+            }
 
             Button {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(closeAccessibilityLabel)
         }
-        .padding(.leading, 14)
+        .padding(.leading, 16)
         .padding(.trailing, 8)
-        .frame(width: width, height: 41)
-        .background(Color(.secondarySystemBackground), in: Capsule())
+        .frame(width: resolvedWidth, height: 46)
+        .background(showsBackground ? searchBackground : Color.clear, in: Capsule())
         .contentShape(Capsule())
-        .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .center)))
+        .clipped()
+    }
+
+    private var resolvedWidth: CGFloat {
+        let safeToolbarWidth = max(UIScreen.main.bounds.width - 48, 292)
+        return min(width, safeToolbarWidth, 430)
+    }
+
+    private var searchBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
+    }
+}
+
+struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var isExpanded: Bool
+    @Binding var text: String
+    var prompt: String
+    var focus: FocusState<Bool>.Binding
+    var closeAccessibilityLabel: String
+    var width: CGFloat = 430
+    var collapsedWidth: CGFloat = 84
+    var onSubmit: () -> Void = {}
+    var onClose: () -> Void
+    @ViewBuilder var collapsedContent: () -> CollapsedContent
+
+    var body: some View {
+        let fullWidth = resolvedWidth
+        let searchWidth = isExpanded ? fullWidth : 44
+
+        ZStack(alignment: .trailing) {
+            collapsedContent()
+                .frame(width: collapsedWidth, height: 46, alignment: .trailing)
+                .opacity(isExpanded ? 0 : 1)
+                .scaleEffect(isExpanded ? 0.96 : 1, anchor: .trailing)
+                .allowsHitTesting(!isExpanded)
+
+            MobileToolbarSearchField(
+                text: $text,
+                prompt: prompt,
+                focus: focus,
+                closeAccessibilityLabel: closeAccessibilityLabel,
+                width: fullWidth,
+                showsBackground: false,
+                onSubmit: onSubmit,
+                onClose: onClose
+            )
+            .frame(width: fullWidth, height: 46, alignment: .trailing)
+            .frame(width: searchWidth, height: 46, alignment: .trailing)
+            .background(searchBackground, in: Capsule())
+            .clipShape(Capsule())
+            .opacity(isExpanded ? 1 : 0)
+            .allowsHitTesting(isExpanded)
+        }
+        .frame(width: fullWidth, height: 46, alignment: .trailing)
+        .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
+        .clipped()
+    }
+
+    private var resolvedWidth: CGFloat {
+        let safeToolbarWidth = max(UIScreen.main.bounds.width - 48, 292)
+        return min(width, safeToolbarWidth, 430)
+    }
+
+    private var searchBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
     }
 }
 #endif

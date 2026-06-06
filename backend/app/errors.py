@@ -22,6 +22,7 @@ class APIErrorCode(str, Enum):
     OPENAI_API_KEY_INVALID = "OPENAI_API_KEY_INVALID"
     OPENAI_API_KEY_MISSING = "OPENAI_API_KEY_MISSING"
     OPENAPI_TOKEN_REQUIRED = "OPENAPI_TOKEN_REQUIRED"
+    PAGE_ACCESS_DENIED = "PAGE_ACCESS_DENIED"
     PROFILE_NOT_FOUND = "PROFILE_NOT_FOUND"
     QUESTION_NOT_FOUND = "QUESTION_NOT_FOUND"
     RECORD_ALREADY_GRADED = "RECORD_ALREADY_GRADED"
@@ -46,6 +47,7 @@ DETAIL_CODE_MAP: dict[str, APIErrorCode] = {
     "OpenAI API key is not configured for this device.": APIErrorCode.OPENAI_API_KEY_MISSING,
     "OpenAPI access token is not configured.": APIErrorCode.OPENAPI_TOKEN_REQUIRED,
     "OpenAPI access token is required.": APIErrorCode.OPENAPI_TOKEN_REQUIRED,
+    "Page access is denied.": APIErrorCode.PAGE_ACCESS_DENIED,
     "Profile not found.": APIErrorCode.PROFILE_NOT_FOUND,
     "Question not found.": APIErrorCode.QUESTION_NOT_FOUND,
     "Record is already graded.": APIErrorCode.RECORD_ALREADY_GRADED,
@@ -72,6 +74,8 @@ def error_code_for(status_code: int, detail: Any) -> APIErrorCode:
             return APIErrorCode.GOOGLE_TOKEN_INVALID
         if detail.startswith("Record is "):
             return APIErrorCode.RECORD_STATUS_INVALID
+        if detail.startswith("Page access denied:"):
+            return APIErrorCode.PAGE_ACCESS_DENIED
         if detail in DETAIL_CODE_MAP:
             return DETAIL_CODE_MAP[detail]
 

@@ -137,6 +137,11 @@ private struct MobileHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
+                MobileRootLargeTitle(strings.tabHome)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
                 Picker("", selection: $selectedHomeScope) {
                     ForEach(HomeFeedScope.allCases) { scope in
                         Text(scope.title(strings: strings))
@@ -201,7 +206,7 @@ private struct MobileHomeView: View {
                                     )
                                 } else {
                                     Button {
-                                        appState.homeStudyRoute = HomeStudyRoute(categoryID: category.id)
+                                        appState.selectStudyCategory(category.id)
                                     } label: {
                                         MobileHomeCategoryRow(
                                             category: category,
@@ -251,10 +256,10 @@ private struct MobileHomeView: View {
                         }
 
                         if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
-                            Text(strings.noCommunityQuestions)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 8)
+                            MobileCommunityEmptyState(strings: strings)
+                                .frame(maxWidth: .infinity, minHeight: 320)
+                                .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                                .listRowSeparator(.hidden)
                         } else {
                             ForEach(appState.communityQuestions) { question in
                                 Button {
@@ -292,12 +297,6 @@ private struct MobileHomeView: View {
                                 .padding(.vertical, 6)
                             }
                         }
-
-                    } header: {
-                        Text(strings.communityFeed)
-                    } footer: {
-                        Text(appState.communityQuestions.isEmpty ? strings.communitySearchHelp : strings.communityQuestionLimit)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -310,9 +309,9 @@ private struct MobileHomeView: View {
         }
         .background(Color(.systemBackground))
         .environment(\.editMode, $editMode)
-        .navigationTitle(isHomeSearchActive ? "" : strings.tabHome)
+        .navigationTitle("")
         #if os(iOS)
-        .navigationBarTitleDisplayMode(isHomeSearchActive ? .inline : .large)
+        .navigationBarTitleDisplayMode(.inline)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !activeTrimmedSearchText.isEmpty,
@@ -322,18 +321,14 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
-            if isHomeSearchActive {
-                ToolbarItem(placement: .principal) {
-                    homeToolbarSearchField(strings: strings)
-                }
-            } else {
+            if !isHomeSearchActive {
                 ToolbarItem(placement: .topBarLeading) {
                     profileToolbarButton
                 }
+            }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarItems(strings: strings)
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                homeToolbarSearchControl(strings: strings)
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
@@ -429,28 +424,28 @@ private struct MobileHomeView: View {
         .accessibilityLabel(strings.profile)
     }
 
-    @ViewBuilder
-    private func homeToolbarSearchField(strings: AppStrings) -> some View {
-        if isHomeSearchActive {
-            MobileToolbarSearchField(
-                text: activeSearchText,
-                prompt: strings.topicSearch,
-                focus: $isSearchFocused,
-                closeAccessibilityLabel: strings.clearSearch,
-                width: min(UIScreen.main.bounds.width - 32, 430),
-                onSubmit: {
-                    guard selectedHomeScope == .all else {
-                        return
-                    }
-
-                    Task {
-                        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
-                    }
-                },
-                onClose: {
-                    closeHomeSearch(clearText: true)
+    private func homeToolbarSearchControl(strings: AppStrings) -> some View {
+        MobileExpandingToolbarSearch(
+            isExpanded: isHomeSearchActive,
+            text: activeSearchText,
+            prompt: strings.topicSearch,
+            focus: $isSearchFocused,
+            closeAccessibilityLabel: strings.clearSearch,
+            width: min(UIScreen.main.bounds.width - 32, 430),
+            onSubmit: {
+                guard selectedHomeScope == .all else {
+                    return
                 }
-            )
+
+                Task {
+                    await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+                }
+            },
+            onClose: {
+                closeHomeSearch(clearText: true)
+            }
+        ) {
+            homeToolbarItems(strings: strings)
         }
     }
 
@@ -486,7 +481,7 @@ private struct MobileHomeView: View {
             return
         }
 
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
         Task { @MainActor in
@@ -502,7 +497,7 @@ private struct MobileHomeView: View {
             setActiveSearchText("")
         }
 
-        withAnimation(.snappy(duration: 0.18)) {
+        withAnimation(.smooth(duration: 0.22)) {
             isSearchVisible = false
         }
     }
@@ -857,7 +852,7 @@ private struct MobileProfileSettingsSheet: View {
         HStack {
             Text(title)
             Spacer()
-            Text(strings.accessUnavailable)
+            Text(strings.accessAllowed)
                 .foregroundStyle(.secondary)
         }
     }
@@ -1104,6 +1099,25 @@ private extension StudyCategory {
         return searchableFields.contains { field in
             field.localizedCaseInsensitiveContains(query)
         }
+    }
+}
+
+private struct MobileCommunityEmptyState: View {
+    let strings: AppStrings
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 54, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Text(strings.noCommunityQuestions)
+                .font(.title2.weight(.bold))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 34)
     }
 }
 

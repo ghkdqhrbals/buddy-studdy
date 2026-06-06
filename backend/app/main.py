@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import Enum
 import json
 import time
 
@@ -74,6 +75,12 @@ class AuthenticatedPrincipal:
     @property
     def has_google_login(self) -> bool:
         return not self.is_anonymous
+
+
+class ProtectedPage(str, Enum):
+    RECORDS = "records"
+    STATISTICS = "statistics"
+    STUDY_DETAIL = "studyDetail"
 
 
 def _docs_urls() -> tuple[str | None, str | None, str | None]:
@@ -273,6 +280,36 @@ def authenticate_principal(authorization: str | None = Header(default=None)) -> 
     )
 
 
+def authenticate_login_principal(
+    authorization: str | None = Header(default=None),
+    x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
+    x_client_secret: str | None = Header(default=None, alias="X-Client-Secret"),
+) -> AuthenticatedPrincipal:
+    if authorization and authorization.startswith("Bearer "):
+        return authenticate_principal(authorization)
+
+    if x_device_id or x_client_secret:
+        if not x_device_id or not x_client_secret:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device credentials.")
+        if not database.authenticate_device(x_device_id, x_client_secret):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device credentials.")
+        token_principal = database.get_device_principal(x_device_id)
+        if token_principal is None:
+            profile = database.ensure_anonymous_user_for_device(x_device_id)
+            if profile is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+            token_principal = database.get_device_principal(x_device_id)
+        if token_principal is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+        return AuthenticatedPrincipal(
+            user_id=int(token_principal["user_id"]),
+            device_id=x_device_id,
+            is_anonymous=bool(token_principal["isAnonymous"]),
+        )
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token is required.")
+
+
 def require_matching_device(device_id: str, authenticated_device_id: str) -> None:
     if device_id != authenticated_device_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device mismatch.")
@@ -286,6 +323,34 @@ def require_matching_principal_device(device_id: str, principal: AuthenticatedPr
 def require_google_principal(principal: AuthenticatedPrincipal) -> None:
     if principal.is_anonymous:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google Login is required.")
+
+
+def principal_can_access_page(principal: AuthenticatedPrincipal, page: ProtectedPage) -> bool:
+    _ = page
+    return principal.has_google_login
+
+
+def require_page_access(principal: AuthenticatedPrincipal, page: ProtectedPage) -> None:
+    if not principal_can_access_page(principal, page):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Page access denied: {page.value}.",
+        )
+
+
+def require_records_access(principal: AuthenticatedPrincipal = Depends(authenticate_principal)) -> AuthenticatedPrincipal:
+    require_page_access(principal, ProtectedPage.RECORDS)
+    return principal
+
+
+def require_statistics_access(principal: AuthenticatedPrincipal = Depends(authenticate_principal)) -> AuthenticatedPrincipal:
+    require_page_access(principal, ProtectedPage.STATISTICS)
+    return principal
+
+
+def require_study_detail_access(principal: AuthenticatedPrincipal = Depends(authenticate_principal)) -> AuthenticatedPrincipal:
+    require_page_access(principal, ProtectedPage.STUDY_DETAIL)
+    return principal
 
 
 def device_api_key(schedule_row) -> str:
@@ -395,7 +460,7 @@ async def update_push_token(
 async def google_login(
     device_id: str,
     payload: GoogleLoginRequest,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(authenticate_login_principal),
 ) -> GoogleLoginResponse:
     require_matching_principal_device(device_id, principal)
     if not settings.google_ios_client_id:
@@ -558,8 +623,16 @@ async def get_snapshot(
 ) -> BackendSnapshotResponse:
     require_matching_principal_device(device_id, principal)
     schedule = database.get_schedule(device_id)
-    records, total_count = database.list_records(device_id, limit=limit, offset=offset, user_id=principal.user_id)
-    stats = database.stats_response(device_id=device_id, user_id=principal.user_id, limit=8, offset=0)
+    if principal_can_access_page(principal, ProtectedPage.RECORDS):
+        records, total_count = database.list_records(device_id, limit=limit, offset=offset, user_id=principal.user_id)
+    else:
+        records, total_count = [], 0
+
+    stats = (
+        database.stats_response(device_id=device_id, user_id=principal.user_id, limit=8, offset=0)
+        if principal_can_access_page(principal, ProtectedPage.STATISTICS)
+        else None
+    )
     return BackendSnapshotResponse(
         settings=database.schedule_settings_response(schedule),
         api=database.api_status_response(schedule),
@@ -573,7 +646,7 @@ async def get_snapshot(
 @app.get("/api/v1/devices/{device_id}/records", response_model=RecordsPageResponse)
 async def list_records(
     device_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_records_access),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ) -> RecordsPageResponse:
@@ -591,7 +664,7 @@ async def list_records(
 @app.get("/api/v1/devices/{device_id}/stats", response_model=StatsResponse)
 async def get_stats(
     device_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_statistics_access),
     period: str = Query(default="all", pattern="^(all|today|last7|last30|last90)$"),
     start_at: str | None = Query(default=None, alias="startAt"),
     end_at: str | None = Query(default=None, alias="endAt"),
@@ -620,7 +693,7 @@ async def get_stats(
 async def get_record(
     device_id: str,
     record_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     record = database.get_record(device_id, record_id, user_id=principal.user_id)
@@ -632,7 +705,7 @@ async def get_record(
 @app.post("/api/v1/devices/{device_id}/questions", response_model=StudyRecordResponse)
 async def create_question(
     device_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     schedule = database.get_schedule(device_id)
@@ -674,7 +747,7 @@ async def answer_record(
     device_id: str,
     record_id: str,
     payload: AnswerRequest,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     schedule = database.get_schedule(device_id)
@@ -717,7 +790,7 @@ async def save_record_answer(
     device_id: str,
     record_id: str,
     payload: AnswerRequest,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     record = database.get_record(device_id, record_id, user_id=principal.user_id)
@@ -743,7 +816,7 @@ async def save_record_answer(
 async def skip_record(
     device_id: str,
     record_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     updated = database.skip_record(device_id, record_id, user_id=principal.user_id)
@@ -757,7 +830,7 @@ async def update_record_publicity(
     device_id: str,
     record_id: str,
     payload: RecordPublicityRequest,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_records_access),
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
     require_google_principal(principal)
@@ -828,7 +901,7 @@ async def report_public_question(
 async def delete_record(
     device_id: str,
     record_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_records_access),
 ) -> Response:
     require_matching_principal_device(device_id, principal)
     database.delete_record(device_id, record_id, user_id=principal.user_id)
@@ -838,7 +911,7 @@ async def delete_record(
 @app.delete("/api/v1/devices/{device_id}/records", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_records(
     device_id: str,
-    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    principal: AuthenticatedPrincipal = Depends(require_records_access),
 ) -> Response:
     require_matching_principal_device(device_id, principal)
     database.clear_records(device_id, user_id=principal.user_id)

@@ -1660,6 +1660,19 @@ struct AppStrings {
     var studyDetailPage: String { text("내 학습 내부", "My Study Detail") }
     var recordsPage: String { text("기록", "Records") }
     var accessUnavailable: String { text("허용 불가", "Not allowed") }
+    var accessAllowed: String { text("허용됨", "Allowed") }
+    var pageAccessRequiresLogin: String {
+        text(
+            "이 페이지는 로그인 후 사용할 수 있습니다.",
+            "Sign in to use this page."
+        )
+    }
+    func pageAccessDenied(_ page: String) -> String {
+        text(
+            "\(page)은 로그인 후 사용할 수 있습니다.",
+            "\(page) is available after sign-in."
+        )
+    }
     var report: String { text("신고", "Report") }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }

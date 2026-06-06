@@ -18,6 +18,7 @@ Read these first:
 - Only the regular OpenAI API key is supported and synced.
 - Keep Korean and English strings in `AppStrings` for new UI labels.
 - Do not add or verify macOS app/release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
+- After completing feature work, always create a git commit that includes the completed implementation and verification updates unless the user explicitly says not to commit.
 
 ## Storage
 

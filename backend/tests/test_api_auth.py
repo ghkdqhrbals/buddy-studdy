@@ -123,6 +123,51 @@ def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_p
     assert settings_response.status_code == 200
 
 
+def test_google_login_accepts_access_token_or_legacy_device_credentials(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    async def fake_verify_google_id_token(id_token: str, expected_audience: str):
+        assert id_token == "google-id-token-for-tests"
+        assert expected_audience == "google-client"
+        return {
+            "sub": "google-login-sub",
+            "email": "login@example.com",
+            "name": "Login User",
+            "picture": None,
+        }
+
+    monkeypatch.setattr(main, "verify_google_id_token", fake_verify_google_id_token)
+    registered = _register(client, "apns-token-google-login-" + "g" * 32)
+    body = {"idToken": "google-id-token-for-tests"}
+
+    missing_auth_response = client.post(f"/api/v1/devices/{registered['deviceId']}/auth/google", json=body)
+    assert missing_auth_response.status_code == 401
+    assert missing_auth_response.json()["error"]["code"] == "AUTH_ACCESS_TOKEN_REQUIRED"
+
+    legacy_response = client.post(
+        f"/api/v1/devices/{registered['deviceId']}/auth/google",
+        headers={
+            "X-Device-Id": registered["deviceId"],
+            "X-Client-Secret": registered["clientSecret"],
+        },
+        json=body,
+    )
+    assert legacy_response.status_code == 200
+    assert legacy_response.json()["profile"]["displayName"] == "Login User"
+    assert legacy_response.json()["accessToken"]
+
+    second = _register(client, "apns-token-google-login-" + "h" * 32)
+    access_token_response = client.post(
+        f"/api/v1/devices/{second['deviceId']}/auth/google",
+        headers={"Authorization": f"Bearer {second['accessToken']}"},
+        json=body,
+    )
+    assert access_token_response.status_code == 200
+    assert access_token_response.json()["profile"]["displayName"] == "Login User"
+    assert access_token_response.json()["accessToken"]
+
+
 def test_public_questions_include_own_public_records_and_allow_privacy_override(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)
@@ -172,7 +217,7 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     assert public_response.json()["questions"] == []
 
 
-def test_profile_page_access_can_hide_public_questions_but_not_private_pages(monkeypatch, tmp_path):
+def test_profile_page_access_can_hide_public_questions_and_reports_private_page_access(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)
 
@@ -217,11 +262,71 @@ def test_profile_page_access_can_hide_public_questions_but_not_private_pages(mon
     page_access = profile_response.json()["pageAccess"]
     assert page_access == {
         "publicQuestions": False,
-        "statistics": False,
-        "studyDetail": False,
-        "records": False,
+        "statistics": True,
+        "studyDetail": True,
+        "records": True,
     }
 
     public_response = client.get("/api/v1/public/questions", headers=headers)
     assert public_response.status_code == 200
     assert public_response.json()["questions"] == []
+
+
+def test_records_stats_and_study_detail_require_page_access(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    registered = _register(client, "apns-token-protected-page-" + "f" * 32)
+    guest_headers = {"Authorization": f"Bearer {registered['accessToken']}"}
+
+    settings_response = client.put(
+        f"/api/v1/devices/{registered['deviceId']}/settings",
+        headers=guest_headers,
+        json=_schedule_payload(),
+    )
+    assert settings_response.status_code == 200
+
+    records_response = client.get(f"/api/v1/devices/{registered['deviceId']}/records", headers=guest_headers)
+    assert records_response.status_code == 403
+    assert records_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
+    assert records_response.json()["error"]["message"] == "Page access denied: records."
+
+    stats_response = client.get(f"/api/v1/devices/{registered['deviceId']}/stats", headers=guest_headers)
+    assert stats_response.status_code == 403
+    assert stats_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
+    assert stats_response.json()["error"]["message"] == "Page access denied: statistics."
+
+    create_response = client.post(f"/api/v1/devices/{registered['deviceId']}/questions", headers=guest_headers)
+    assert create_response.status_code == 403
+    assert create_response.json()["error"]["code"] == "PAGE_ACCESS_DENIED"
+    assert create_response.json()["error"]["message"] == "Page access denied: studyDetail."
+
+    snapshot_response = client.get(f"/api/v1/devices/{registered['deviceId']}/snapshot", headers=guest_headers)
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    assert snapshot["records"] == []
+    assert snapshot["stats"] is None
+    assert snapshot["totalCount"] == 0
+
+    profile = main.database.link_google_user_to_device(
+        device_id=registered["deviceId"],
+        google_sub="google-protected-page-owner",
+        email="protected@example.com",
+        display_name="Protected",
+    )
+    assert profile is not None
+    token_response = client.post(
+        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        headers={
+            "X-Device-Id": registered["deviceId"],
+            "X-Client-Secret": registered["clientSecret"],
+        },
+    )
+    assert token_response.status_code == 200
+    user_headers = {"Authorization": f"Bearer {token_response.json()['accessToken']}"}
+
+    records_response = client.get(f"/api/v1/devices/{registered['deviceId']}/records", headers=user_headers)
+    assert records_response.status_code == 200
+
+    stats_response = client.get(f"/api/v1/devices/{registered['deviceId']}/stats", headers=user_headers)
+    assert stats_response.status_code == 200

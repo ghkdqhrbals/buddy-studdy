@@ -245,9 +245,9 @@ class StatsResponse(CamelModel):
 
 class BackendSnapshotResponse(CamelModel):
     settings: BackendSettingsResponse
-    api: APIStatusResponse
+    api: APIStatusResponse | None
     records: list[StudyRecordResponse]
-    stats: StatsResponse
+    stats: StatsResponse | None
     total_count: int = Field(alias="totalCount")
     server_time: str = Field(alias="serverTime")
 

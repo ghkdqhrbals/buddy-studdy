@@ -74,6 +74,10 @@ struct StatisticsView: View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    MobileRootLargeTitle(strings.tabStatistics)
+                        .padding(.top, 6)
+                        .padding(.bottom, 8)
+
                     if count > 0 {
                         HStack {
                             Text(strings.itemCount(count))
@@ -204,9 +208,9 @@ struct StatisticsView: View {
             .searchSafeRefreshControlOffset(isRefreshing: isPullRefreshing)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .navigationTitle(isStatsSearchActive ? "" : strings.tabStatistics)
+        .navigationTitle("")
         #if os(iOS)
-        .navigationBarTitleDisplayMode(isStatsSearchActive ? .inline : .large)
+        .navigationBarTitleDisplayMode(.inline)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !topicSearch.isEmpty,
@@ -216,14 +220,8 @@ struct StatisticsView: View {
         )
         .toolbar {
             #if os(iOS)
-            if isStatsSearchActive {
-                ToolbarItem(placement: .principal) {
-                    statsToolbarSearchField(strings: strings)
-                }
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    statsSearchToolbarButton(strings: strings)
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                statsToolbarSearchControl(strings: strings)
             }
             #else
             ToolbarItem(placement: .primaryAction) {
@@ -277,26 +275,26 @@ struct StatisticsView: View {
         isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    @ViewBuilder
-    private func statsToolbarSearchField(strings: AppStrings) -> some View {
-        if isStatsSearchActive {
-            #if os(iOS)
-            MobileToolbarSearchField(
-                text: $topicSearch,
-                prompt: strings.topicSearch,
-                focus: $isSearchFocused,
-                closeAccessibilityLabel: strings.clearSearch,
-                width: min(UIScreen.main.bounds.width - 32, 430),
-                onClose: {
-                    closeStatsSearch(clearText: true)
-                }
-            )
-            #else
-            TextField(strings.topicSearch, text: $topicSearch)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
-            #endif
+    private func statsToolbarSearchControl(strings: AppStrings) -> some View {
+        #if os(iOS)
+        MobileExpandingToolbarSearch(
+            isExpanded: isStatsSearchActive,
+            text: $topicSearch,
+            prompt: strings.topicSearch,
+            focus: $isSearchFocused,
+            closeAccessibilityLabel: strings.clearSearch,
+            width: min(UIScreen.main.bounds.width - 32, 430),
+            onClose: {
+                closeStatsSearch(clearText: true)
+            }
+        ) {
+            statsSearchToolbarButton(strings: strings)
         }
+        #else
+        TextField(strings.topicSearch, text: $topicSearch)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 220)
+        #endif
     }
 
     private func statsSearchToolbarButton(strings: AppStrings) -> some View {
@@ -321,7 +319,7 @@ struct StatisticsView: View {
             return
         }
 
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(.smooth(duration: 0.28)) {
             isSearchVisible = true
         }
         Task { @MainActor in
@@ -337,7 +335,7 @@ struct StatisticsView: View {
             topicSearch = ""
         }
 
-        withAnimation(.snappy(duration: 0.18)) {
+        withAnimation(.smooth(duration: 0.22)) {
             isSearchVisible = false
         }
     }
