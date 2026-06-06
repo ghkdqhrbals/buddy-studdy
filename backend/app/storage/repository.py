@@ -342,6 +342,10 @@ class Database:
                     user_columns.add("avatar_color_seed")
 
             if "user_devices" in table_names:
+                user_device_columns = {column["name"] for column in inspector.get_columns("user_devices")}
+                if "last_login_at" not in user_device_columns:
+                    session.execute(text("ALTER TABLE user_devices ADD COLUMN last_login_at TIMESTAMP"))
+                    user_device_columns.add("last_login_at")
                 if "idx_user_devices_user_id" not in {idx["name"] for idx in inspector.get_indexes("user_devices")}:
                     session.execute(text("CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices (user_id)"))
                 if "idx_user_devices_device_id" not in {idx["name"] for idx in inspector.get_indexes("user_devices")}:
@@ -457,6 +461,7 @@ class Database:
         user: User,
         session_expires_at: datetime | None,
         now: datetime,
+        record_login: bool = False,
     ) -> UserDevice:
         mapping = self._get_user_device(session, int(user.id), device.device_id)
         if mapping is None:
@@ -474,7 +479,10 @@ class Database:
             mapping.updated_at = now
             mapping.last_seen_at = now
 
-        # Keep legacy devices.user_id populated for old reporting/scheduler code and existing SQL indexes.
+        if record_login:
+            mapping.last_login_at = now
+
+        # devices.user_id is the currently active user for this physical device.
         device.user_id = int(user.id)
         device.google_session_expires_at = session_expires_at
         device.updated_at = now
@@ -869,6 +877,7 @@ class Database:
                 user=user,
                 session_expires_at=now + timedelta(days=90),
                 now=now,
+                record_login=True,
             )
             self._migrate_anonymous_device_data_to_user(
                 session,
@@ -934,6 +943,7 @@ class Database:
                 user=user,
                 session_expires_at=now + timedelta(days=90),
                 now=now,
+                record_login=True,
             )
             self._migrate_anonymous_device_data_to_user(
                 session,
@@ -1608,6 +1618,8 @@ class Database:
                     Schedule.enabled.is_(True),
                     Schedule.next_due_at.is_not(None),
                     Schedule.next_due_at <= now,
+                    Device.user_id.is_not(None),
+                    (Schedule.user_id == Device.user_id) | Schedule.user_id.is_(None),
                 )
                 .order_by(asc(Schedule.next_due_at))
                 .limit(limit)
@@ -1633,7 +1645,7 @@ class Database:
                     "is_question_public": bool(row.is_question_public),
                     "openai_api_key_cipher": row.openai_api_key_cipher,
                     "next_due_at": as_utc_datetime(row.next_due_at) if row.next_due_at is not None else None,
-                    "user_id": row.user_id if row.user_id is not None else device.user_id,
+                    "user_id": device.user_id,
                 }
             )
 

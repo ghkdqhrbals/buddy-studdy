@@ -297,6 +297,30 @@ def test_email_login_creates_user_reuses_user_and_hashes_password(monkeypatch, t
     assert legacy_response.json()["accessToken"]
 
 
+def test_email_verification_quota_error_has_dedicated_code(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    def fake_send_email_verification_code(settings, email, code, ttl_seconds):
+        _ = settings, email, code, ttl_seconds
+        raise main.EmailDeliveryError(
+            main.EmailDeliveryFailureReason.QUOTA_EXCEEDED,
+            "Email verification email quota exceeded.",
+        )
+
+    main.send_email_verification_code = fake_send_email_verification_code
+
+    registered = _register(client, "apns-token-email-quota-" + "q" * 32)
+    response = client.post(
+        "/api/v1/auth/email/code",
+        headers={"Authorization": f"Bearer {registered['accessToken']}"},
+        json={"email": "quota@example.com"},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "AUTH_EMAIL_VERIFICATION_QUOTA_EXCEEDED"
+
+
 def test_public_questions_include_own_public_records_and_allow_privacy_override(monkeypatch, tmp_path):
     main = _load_test_app(monkeypatch, tmp_path)
     client = TestClient(main.app)

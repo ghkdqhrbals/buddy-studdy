@@ -55,7 +55,7 @@ from .email_verification import EmailVerificationStore, EmailVerificationUnavail
 from .openai_client import OpenAIQuestionClient
 from .openai_models import DEFAULT_OPENAI_MODEL, OPENAI_MODEL_OPTIONS, normalize_openai_model
 from .google_auth import GoogleAuthError, verify_google_id_token
-from .reporting import send_email_verification_code, send_report_email
+from .reporting import EmailDeliveryError, EmailDeliveryFailureReason, send_email_verification_code, send_report_email
 from .scheduler import QuestionScheduler
 
 
@@ -500,6 +500,17 @@ async def request_email_verification_code(
 
     try:
         sent = send_email_verification_code(settings, issued.email, issued.code, issued.expires_in_seconds)
+    except EmailDeliveryError as error:
+        logger.warning("email verification send failed email=%s reason=%s error=%s", issued.email, error.reason, error)
+        if error.reason == EmailDeliveryFailureReason.QUOTA_EXCEEDED:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Email verification email quota exceeded.",
+            ) from error
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email verification email could not be sent.",
+        ) from error
     except Exception as error:
         logger.warning("email verification send failed email=%s error=%s", issued.email, error)
         sent = False

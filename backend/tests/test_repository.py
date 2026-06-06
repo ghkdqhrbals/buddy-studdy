@@ -28,6 +28,14 @@ def test_device_registration_and_authentication(db):
     assert len(device_id) > 8
     assert db.authenticate_device(device_id, client_secret)
     assert not db.authenticate_device(device_id, client_secret + "x")
+    principal = db.get_device_principal(device_id)
+    with db.connect() as session:
+        mapping = (
+            session.query(UserDevice)
+            .filter(UserDevice.device_id == device_id, UserDevice.user_id == principal["user_id"])
+            .one()
+        )
+        assert mapping.last_login_at is None
 
 
 def test_upsert_and_get_schedule(db: Database):
@@ -148,6 +156,13 @@ def test_active_user_switch_does_not_reassign_schedule_or_records(db: Database):
     assert not mismatch_b
     assert profile_b is not None
     user_b = int(profile_b["id"])
+    with db.connect() as session:
+        mapping_b = (
+            session.query(UserDevice)
+            .filter(UserDevice.device_id == device_id, UserDevice.user_id == user_b)
+            .one()
+        )
+        assert mapping_b.last_login_at is not None
 
     assert db.get_schedule(device_id, user_id=user_b) is None
     records_b, total_b = db.list_records(device_id, user_id=user_b, limit=20, offset=0)
@@ -442,6 +457,74 @@ def test_due_schedules(db: Database):
     assert due_rows[0]["device_id"] == device_id
     assert due_rows[0]["next_due_at"] is not None
     assert due_rows[0]["next_due_at"] <= datetime.now(UTC)
+
+
+def test_due_schedules_use_current_device_user(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-active-schedule",
+        platform="ios",
+        apns_environment="production",
+        language="ko",
+        timezone="Asia/Seoul",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+
+    profile_a, mismatch_a = db.link_email_user_to_device(
+        device_id=device_id,
+        email="active-a@example.com",
+        password="secret123",
+    )
+    assert not mismatch_a
+    user_a = int(profile_a["id"])
+    db.upsert_schedule(
+        device_id=device_id,
+        user_id=user_a,
+        topic="A Topic",
+        difficulty_level=3,
+        interval_minutes=10,
+        enabled=True,
+        openai_api_key_cipher=None,
+        notification_sound="default",
+        custom_prompt="",
+        app_language="ko",
+        openai_model="gpt-5.4",
+        max_history_count=100,
+    )
+
+    profile_b, mismatch_b = db.link_email_user_to_device(
+        device_id=device_id,
+        email="active-b@example.com",
+        password="secret123",
+    )
+    assert not mismatch_b
+    user_b = int(profile_b["id"])
+    db.upsert_schedule(
+        device_id=device_id,
+        user_id=user_b,
+        topic="B Topic",
+        difficulty_level=6,
+        interval_minutes=10,
+        enabled=True,
+        openai_api_key_cipher=None,
+        notification_sound="default",
+        custom_prompt="",
+        app_language="ko",
+        openai_model="gpt-5.4",
+        max_history_count=100,
+    )
+
+    with db.connect() as session:
+        rows = session.query(Schedule).filter(Schedule.device_id == device_id).all()
+        assert len(rows) == 2
+        for row in rows:
+            row.next_due_at = datetime.now(UTC) - timedelta(minutes=1)
+            row.updated_at = datetime.now(UTC)
+
+    due_rows = db.due_schedules(limit=10)
+    due_for_device = [row for row in due_rows if row["device_id"] == device_id]
+    assert len(due_for_device) == 1
+    assert due_for_device[0]["user_id"] == user_b
+    assert due_for_device[0]["topic"] == "B Topic"
 
 
 def test_transactional_context_rolls_back_on_exception(db: Database):
