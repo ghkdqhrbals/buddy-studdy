@@ -1307,14 +1307,7 @@ private struct CommunityQuestionDetailSheet: View {
 
                     if let answer = question.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
                        !answer.isEmpty {
-                        CommunityMessageBubble(role: .answer) {
-                            Text(answer)
-                                .font(.body)
-                                .foregroundStyle(.white)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .multilineTextAlignment(.leading)
-                        }
+                        CommunityAnswerMessage(answer: answer, author: question.author)
                     }
 
                     if let gradingResult = question.gradingResult {
@@ -1335,23 +1328,6 @@ private struct CommunityQuestionDetailSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    }
-
-                    if let author = question.author {
-                        HStack(spacing: 12) {
-                            HomeProfileAvatar(
-                                symbolName: ProfileAvatarOption.defaultSymbolName,
-                                displayName: author.displayName,
-                                colorSeed: "user-\(author.id)",
-                                size: 42
-                            )
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(author.displayName)
-                                    .font(.headline)
-                            }
-                        }
-                        .padding(.top, 4)
                     }
 
                     Button(role: .destructive) {
@@ -1401,6 +1377,49 @@ private struct CommunityQuestionDetailSheet: View {
 
             Spacer(minLength: 0)
         }
+    }
+}
+
+private struct CommunityAnswerMessage: View {
+    var answer: String
+    var author: CommunityUserProfile?
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Spacer(minLength: 24)
+
+            Text(answer)
+                .font(.body)
+                .foregroundStyle(.white)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .padding(.vertical, 11)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: 260, alignment: .leading)
+                .background(CommunityMessageBubbleRole.answer.foregroundBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            if let author {
+                VStack(spacing: 3) {
+                    HomeProfileAvatar(
+                        symbolName: ProfileAvatarOption.defaultSymbolName,
+                        displayName: author.displayName,
+                        colorSeed: "user-\(author.id)",
+                        size: 30
+                    )
+
+                    Text(author.displayName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .frame(width: 42)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
