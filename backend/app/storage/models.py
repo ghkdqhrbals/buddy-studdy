@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.orm import declarative_base
 
@@ -44,13 +44,21 @@ class Device(Base):
         passive_deletes=True,
     )
     user: Mapped["User | None"] = relationship("User", back_populates="devices")
+    user_devices: Mapped[list["UserDevice"]] = relationship(
+        "UserDevice",
+        back_populates="device",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    google_sub: Mapped[str] = mapped_column(String(191), unique=True, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="ANONYMOUS")
+    provider_id: Mapped[str] = mapped_column(String(191), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ANONYMOUS")
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -60,6 +68,40 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
     devices: Mapped[list[Device]] = relationship("Device", back_populates="user")
+    user_devices: Mapped[list["UserDevice"]] = relationship(
+        "UserDevice",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_id", name="uq_users_provider_provider_id"),
+    )
+
+
+class UserDevice(Base):
+    __tablename__ = "user_devices"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(
+        String(191),
+        ForeignKey("devices.device_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    session_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    user: Mapped[User] = relationship("User", back_populates="user_devices")
+    device: Mapped[Device] = relationship("Device", back_populates="user_devices")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_id", name="uq_user_devices_user_device"),
+    )
 
 
 class Report(Base):

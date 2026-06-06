@@ -1,6 +1,7 @@
 import importlib
 from dataclasses import replace
 
+import jwt
 from fastapi.testclient import TestClient
 
 from app.storage.repository import Database
@@ -81,12 +82,18 @@ def test_access_token_is_the_request_principal(monkeypatch, tmp_path):
     assert settings_response.json()["topic"] == "SwiftUI"
     assert settings_response.json()["isQuestionPublic"] is False
 
+    token_payload = jwt.decode(first["accessToken"], "test-jwt-secret", algorithms=["HS256"], issuer="buddystuddy")
+    assert token_payload["user_id"]
+    assert token_payload["session_id"]
+    assert "device_id" not in token_payload
+
     mismatch = client.get(f"/api/v1/devices/{second['deviceId']}/settings", headers=headers)
-    assert mismatch.status_code == 403
-    assert mismatch.json()["error"]["code"] == "AUTH_DEVICE_MISMATCH"
-    assert mismatch.json()["error"]["message"] == "Device is not linked to this user."
-    assert mismatch.json()["error"]["requestId"]
-    assert mismatch.json()["error"]["status"] == 403
+    assert mismatch.status_code == 200
+    assert mismatch.json()["topic"] == "SwiftUI"
+
+    me_settings = client.get("/api/v1/me/settings", headers=headers)
+    assert me_settings.status_code == 200
+    assert me_settings.json()["topic"] == "SwiftUI"
 
     community = client.get("/api/v1/public/questions")
     assert community.status_code == 200
@@ -121,6 +128,16 @@ def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_p
     assert response.status_code == 200
     token = response.json()["accessToken"]
     assert token
+
+    pathless_response = client.post(
+        "/api/v1/auth/token",
+        headers={
+            "X-Device-Id": registered["deviceId"],
+            "X-Client-Secret": registered["clientSecret"],
+        },
+    )
+    assert pathless_response.status_code == 200
+    assert pathless_response.json()["accessToken"]
 
     settings_response = client.get(
         f"/api/v1/devices/{registered['deviceId']}/settings",

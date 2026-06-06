@@ -253,8 +253,8 @@ def issue_access_token_for_device(device_id: str) -> AccessTokenResponse:
 
     token, expires_at = create_access_token(
         user_id=int(principal["user_id"]),
-        device_id=device_id,
         secret=settings.auth_jwt_secret,
+        session_id=int(principal["userDeviceId"]),
         is_anonymous=bool(principal["isAnonymous"]),
     )
     return AccessTokenResponse(accessToken=token, accessTokenExpiresAt=database._response_timestamp(expires_at))
@@ -270,13 +270,14 @@ def authenticate_principal(authorization: str | None = Header(default=None)) -> 
     except AccessTokenError as error:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token.") from error
 
-    if not database.device_belongs_to_user(claims.device_id, claims.user_id):
+    principal = database.get_access_token_principal(claims.user_id, claims.session_id)
+    if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token principal is no longer valid.")
 
     return AuthenticatedPrincipal(
         user_id=claims.user_id,
-        device_id=claims.device_id,
-        is_anonymous=claims.is_anonymous,
+        device_id=str(principal["device_id"]),
+        is_anonymous=bool(principal["isAnonymous"]),
     )
 
 
@@ -316,8 +317,8 @@ def require_matching_device(device_id: str, authenticated_device_id: str) -> Non
 
 
 def require_matching_principal_device(device_id: str, principal: AuthenticatedPrincipal) -> None:
-    if device_id != principal.device_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device is not linked to this user.")
+    _ = device_id
+    _ = principal
 
 
 def require_google_principal(principal: AuthenticatedPrincipal) -> None:
@@ -432,22 +433,25 @@ async def register_device(payload: DeviceRegisterRequest) -> DeviceRegisterRespo
     )
 
 
+@app.post("/api/v1/auth/token", response_model=AccessTokenResponse)
 @app.post("/api/v1/devices/{device_id}/auth/token", response_model=AccessTokenResponse)
 async def bootstrap_access_token(
-    device_id: str,
+    device_id: str = "",
     authenticated_device_id: str = Depends(verify_device),
 ) -> AccessTokenResponse:
-    require_matching_device(device_id, authenticated_device_id)
-    return issue_access_token_for_device(device_id)
+    _ = device_id
+    return issue_access_token_for_device(authenticated_device_id)
 
 
+@app.put("/api/v1/me/push-token", status_code=status.HTTP_204_NO_CONTENT)
 @app.put("/api/v1/devices/{device_id}/push-token", status_code=status.HTTP_204_NO_CONTENT)
 async def update_push_token(
-    device_id: str,
     payload: PushTokenRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> Response:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     database.update_device_push_token(
         device_id=device_id,
         apns_token=payload.apns_token,
@@ -456,13 +460,15 @@ async def update_push_token(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.post("/api/v1/auth/google", response_model=GoogleLoginResponse)
 @app.post("/api/v1/devices/{device_id}/auth/google", response_model=GoogleLoginResponse)
 async def google_login(
-    device_id: str,
     payload: GoogleLoginRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_login_principal),
+    device_id: str = "",
 ) -> GoogleLoginResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     if not settings.google_ios_client_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -476,7 +482,7 @@ async def google_login(
 
     profile = database.link_google_user_to_device(
         device_id=device_id,
-        google_sub=str(identity["sub"] or ""),
+        provider_id=str(identity["sub"] or ""),
         email=str(identity["email"] or ""),
         display_name=str(identity["name"] or ""),
         avatar_url=identity.get("picture"),
@@ -491,12 +497,14 @@ async def google_login(
     )
 
 
+@app.get("/api/v1/me/profile", response_model=UserProfileResponse)
 @app.get("/api/v1/devices/{device_id}/profile", response_model=UserProfileResponse)
 async def get_my_profile(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> UserProfileResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     require_google_principal(principal)
     profile = database.get_device_profile(device_id)
     if profile is None:
@@ -504,13 +512,15 @@ async def get_my_profile(
     return UserProfileResponse.model_validate(profile)
 
 
+@app.patch("/api/v1/me/profile", response_model=UserProfileResponse)
 @app.patch("/api/v1/devices/{device_id}/profile", response_model=UserProfileResponse)
 async def update_my_profile(
-    device_id: str,
     payload: ProfileUpdateRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> UserProfileResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     require_google_principal(principal)
     profile = database.update_device_profile(
         device_id=device_id,
@@ -527,13 +537,15 @@ async def update_my_profile(
     return UserProfileResponse.model_validate(profile)
 
 
+@app.put("/api/v1/me/schedule", response_model=ScheduleResponse)
 @app.put("/api/v1/devices/{device_id}/schedule", response_model=ScheduleResponse)
 async def upsert_schedule(
-    device_id: str,
     payload: ScheduleRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> ScheduleResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
 
     encrypted_key = None
     if payload.openai_api_key:
@@ -557,39 +569,46 @@ async def upsert_schedule(
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
 
+@app.get("/api/v1/me/settings", response_model=BackendSettingsResponse)
 @app.get("/api/v1/devices/{device_id}/settings", response_model=BackendSettingsResponse)
 async def get_settings(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> BackendSettingsResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     return BackendSettingsResponse.model_validate(database.schedule_settings_response(database.get_schedule(device_id)))
 
 
+@app.put("/api/v1/me/settings", response_model=ScheduleResponse)
 @app.put("/api/v1/devices/{device_id}/settings", response_model=ScheduleResponse)
 async def put_settings(
-    device_id: str,
     payload: ScheduleRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> ScheduleResponse:
-    return await upsert_schedule(device_id, payload, principal)
+    return await upsert_schedule(payload=payload, principal=principal, device_id=device_id)
 
 
+@app.get("/api/v1/me/api", response_model=APIStatusResponse)
 @app.get("/api/v1/devices/{device_id}/api", response_model=APIStatusResponse)
 async def get_api_status(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> APIStatusResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     return APIStatusResponse.model_validate(database.api_status_response(database.get_schedule(device_id)))
 
 
+@app.post("/api/v1/me/api/validate", response_model=APIValidationResponse)
 @app.post("/api/v1/devices/{device_id}/api/validate", response_model=APIValidationResponse)
 async def validate_api_key(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> APIValidationResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     schedule = database.get_schedule(device_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
@@ -614,14 +633,16 @@ async def validate_api_key(
     )
 
 
+@app.get("/api/v1/me/snapshot", response_model=BackendSnapshotResponse)
 @app.get("/api/v1/devices/{device_id}/snapshot", response_model=BackendSnapshotResponse)
 async def get_snapshot(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
     limit: int = Query(default=500, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    device_id: str = "",
 ) -> BackendSnapshotResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     schedule = database.get_schedule(device_id)
     if principal_can_access_page(principal, ProtectedPage.RECORDS):
         records, total_count = database.list_records(device_id, limit=limit, offset=offset, user_id=principal.user_id)
@@ -643,14 +664,16 @@ async def get_snapshot(
     )
 
 
+@app.get("/api/v1/me/records", response_model=RecordsPageResponse)
 @app.get("/api/v1/devices/{device_id}/records", response_model=RecordsPageResponse)
 async def list_records(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(require_records_access),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    device_id: str = "",
 ) -> RecordsPageResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     records, total_count = database.list_records(
         device_id,
         limit=limit,
@@ -661,9 +684,9 @@ async def list_records(
     return RecordsPageResponse(records=records, totalCount=total_count, limit=limit, offset=offset)
 
 
+@app.get("/api/v1/me/stats", response_model=StatsResponse)
 @app.get("/api/v1/devices/{device_id}/stats", response_model=StatsResponse)
 async def get_stats(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(require_statistics_access),
     period: str = Query(default="all", pattern="^(all|today|last7|last30|last90)$"),
     start_at: str | None = Query(default=None, alias="startAt"),
@@ -672,8 +695,10 @@ async def get_stats(
     sort: str = Query(default="level", pattern="^(level|recent|name|count)$"),
     limit: int = Query(default=8, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    device_id: str = "",
 ) -> StatsResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     start, end = stats_window(period, start_at, end_at)
     return StatsResponse.model_validate(
         database.stats_response(
@@ -689,25 +714,29 @@ async def get_stats(
     )
 
 
+@app.get("/api/v1/me/records/{record_id}", response_model=StudyRecordResponse)
 @app.get("/api/v1/devices/{device_id}/records/{record_id}", response_model=StudyRecordResponse)
 async def get_record(
-    device_id: str,
     record_id: str,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     record = database.get_record(device_id, record_id, user_id=principal.user_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
     return StudyRecordResponse.model_validate(record)
 
 
+@app.post("/api/v1/me/questions", response_model=StudyRecordResponse)
 @app.post("/api/v1/devices/{device_id}/questions", response_model=StudyRecordResponse)
 async def create_question(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     schedule = database.get_schedule(device_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
@@ -742,14 +771,16 @@ async def create_question(
     return StudyRecordResponse.model_validate(record)
 
 
+@app.post("/api/v1/me/records/{record_id}/answer", response_model=StudyRecordResponse)
 @app.post("/api/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
 async def answer_record(
-    device_id: str,
     record_id: str,
     payload: AnswerRequest,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     schedule = database.get_schedule(device_id)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
@@ -785,14 +816,16 @@ async def answer_record(
     return StudyRecordResponse.model_validate(updated)
 
 
+@app.patch("/api/v1/me/records/{record_id}/answer", response_model=StudyRecordResponse)
 @app.patch("/api/v1/devices/{device_id}/records/{record_id}/answer", response_model=StudyRecordResponse)
 async def save_record_answer(
-    device_id: str,
     record_id: str,
     payload: AnswerRequest,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     record = database.get_record(device_id, record_id, user_id=principal.user_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
@@ -812,27 +845,31 @@ async def save_record_answer(
     return StudyRecordResponse.model_validate(updated)
 
 
+@app.post("/api/v1/me/records/{record_id}/skip", response_model=StudyRecordResponse)
 @app.post("/api/v1/devices/{device_id}/records/{record_id}/skip", response_model=StudyRecordResponse)
 async def skip_record(
-    device_id: str,
     record_id: str,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     updated = database.skip_record(device_id, record_id, user_id=principal.user_id)
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
     return StudyRecordResponse.model_validate(updated)
 
 
+@app.patch("/api/v1/me/records/{record_id}/publicity", response_model=StudyRecordResponse)
 @app.patch("/api/v1/devices/{device_id}/records/{record_id}/publicity", response_model=StudyRecordResponse)
 async def update_record_publicity(
-    device_id: str,
     record_id: str,
     payload: RecordPublicityRequest,
     principal: AuthenticatedPrincipal = Depends(require_records_access),
+    device_id: str = "",
 ) -> StudyRecordResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     require_google_principal(principal)
     updated = database.set_record_publicity(
         device_id=device_id,
@@ -869,14 +906,16 @@ async def get_public_profile(user_id: int) -> UserProfileResponse:
     return UserProfileResponse.model_validate(profile)
 
 
+@app.post("/api/v1/public/questions/{question_id}/report", response_model=ReportQuestionResponse)
 @app.post("/api/v1/devices/{device_id}/public/questions/{question_id}/report", response_model=ReportQuestionResponse)
 async def report_public_question(
-    device_id: str,
     question_id: str,
     payload: ReportQuestionRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> ReportQuestionResponse:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     require_google_principal(principal)
     report = database.create_report(
         reporter_device_id=device_id,
@@ -895,37 +934,47 @@ async def report_public_question(
     return ReportQuestionResponse(id=int(report["id"]), emailSent=email_sent)
 
 
+@app.delete("/api/v1/me/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 @app.delete("/api/v1/devices/{device_id}/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_record(
-    device_id: str,
     record_id: str,
     principal: AuthenticatedPrincipal = Depends(require_records_access),
+    device_id: str = "",
 ) -> Response:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     database.delete_record(device_id, record_id, user_id=principal.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.delete("/api/v1/me/records", status_code=status.HTTP_204_NO_CONTENT)
 @app.delete("/api/v1/devices/{device_id}/records", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_records(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(require_records_access),
+    device_id: str = "",
 ) -> Response:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     database.clear_records(device_id, user_id=principal.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.delete(
+    "/api/v1/me/device",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 @app.delete(
     "/api/v1/devices/{device_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
 async def delete_device(
-    device_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+    device_id: str = "",
 ) -> Response:
     require_matching_principal_device(device_id, principal)
+    device_id = principal.device_id
     database.delete_device(device_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.storage.models import Device, Schedule, UTC, as_utc_datetime
+from app.storage.models import Device, Schedule, UserDevice, UTC, as_utc_datetime
 from app.storage.repository import Database, transactional
 
 
@@ -191,7 +191,13 @@ def test_google_profile_is_attached_to_public_questions(db: Database):
         assert device is not None
         assert device.google_session_expires_at is not None
         assert as_utc_datetime(device.google_session_expires_at) > datetime.now(UTC) + timedelta(days=89)
-        device.google_session_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        mapping = session.query(UserDevice).filter(UserDevice.device_id == device_id).first()
+        assert mapping is not None
+        assert mapping.session_expires_at is not None
+        mappings = session.query(UserDevice).filter(UserDevice.device_id == device_id).all()
+        assert mappings
+        for user_device in mappings:
+            user_device.session_expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
     assert not db.device_has_user(device_id)
     assert db.get_device_profile(device_id) is None

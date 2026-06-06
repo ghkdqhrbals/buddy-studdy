@@ -15,9 +15,15 @@ from sqlalchemy import Index, asc, create_engine, func, text
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base, Device, Question, Report, Schedule, User, as_utc_datetime, to_iso
+from .models import Base, Device, Question, Report, Schedule, User, UserDevice, as_utc_datetime, to_iso
 from ..openai_models import DEFAULT_OPENAI_MODEL
 from ..services.stats_service import TopicStatisticsService
+
+
+PROVIDER_ANONYMOUS = "ANONYMOUS"
+PROVIDER_GOOGLE = "GOOGLE"
+USER_STATUS_ANONYMOUS = "ANONYMOUS"
+USER_STATUS_ACTIVE = "ACTIVE"
 
 
 _EntityT = TypeVar("_EntityT", bound=Base)
@@ -232,6 +238,55 @@ class Database:
 
             if "users" in table_names:
                 user_columns = {column["name"] for column in inspector.get_columns("users")}
+                if "provider" not in user_columns:
+                    session.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN provider "
+                            f"VARCHAR(32) NOT NULL DEFAULT '{PROVIDER_GOOGLE}'"
+                        )
+                    )
+                    user_columns.add("provider")
+                if "provider_id" not in user_columns:
+                    session.execute(text("ALTER TABLE users ADD COLUMN provider_id VARCHAR(191)"))
+                    if "google_sub" in user_columns:
+                        session.execute(text("UPDATE users SET provider_id = google_sub WHERE provider_id IS NULL"))
+                    session.execute(
+                        text("UPDATE users SET provider_id = 'legacy:' || CAST(id AS VARCHAR) WHERE provider_id IS NULL")
+                    )
+                    user_columns.add("provider_id")
+                if "status" not in user_columns:
+                    session.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN status "
+                            f"VARCHAR(32) NOT NULL DEFAULT '{USER_STATUS_ACTIVE}'"
+                        )
+                    )
+                    user_columns.add("status")
+                if "google_sub" in user_columns:
+                    session.execute(
+                        text(
+                            "UPDATE users "
+                            "SET provider = :anonymous_provider, status = :anonymous_status "
+                            "WHERE google_sub LIKE 'anonymous:%'"
+                        ),
+                        {
+                            "anonymous_provider": PROVIDER_ANONYMOUS,
+                            "anonymous_status": USER_STATUS_ANONYMOUS,
+                        },
+                    )
+                    session.execute(
+                        text(
+                            "UPDATE users "
+                            "SET provider = :google_provider, status = :active_status "
+                            "WHERE google_sub NOT LIKE 'anonymous:%'"
+                        ),
+                        {
+                            "google_provider": PROVIDER_GOOGLE,
+                            "active_status": USER_STATUS_ACTIVE,
+                        },
+                    )
+                if "idx_users_provider_id" not in {idx["name"] for idx in inspector.get_indexes("users")}:
+                    session.execute(text("CREATE INDEX IF NOT EXISTS idx_users_provider_id ON users (provider, provider_id)"))
                 if "allow_public_questions" not in user_columns:
                     session.execute(
                         text(
@@ -239,6 +294,26 @@ class Database:
                             f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
                         )
                     )
+
+            if "user_devices" in table_names:
+                if "idx_user_devices_user_id" not in {idx["name"] for idx in inspector.get_indexes("user_devices")}:
+                    session.execute(text("CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices (user_id)"))
+                if "idx_user_devices_device_id" not in {idx["name"] for idx in inspector.get_indexes("user_devices")}:
+                    session.execute(text("CREATE INDEX IF NOT EXISTS idx_user_devices_device_id ON user_devices (device_id)"))
+                session.execute(
+                    text(
+                        "INSERT INTO user_devices (user_id, device_id, session_expires_at, created_at, updated_at, last_seen_at) "
+                        "SELECT devices.user_id, devices.device_id, devices.google_session_expires_at, "
+                        "devices.created_at, devices.updated_at, devices.last_seen_at "
+                        "FROM devices "
+                        "WHERE devices.user_id IS NOT NULL "
+                        "AND NOT EXISTS ("
+                        "  SELECT 1 FROM user_devices "
+                        "  WHERE user_devices.user_id = devices.user_id "
+                        "  AND user_devices.device_id = devices.device_id"
+                        ")"
+                    )
+                )
 
             if "questions" in table_names:
                 question_columns = {column["name"] for column in inspector.get_columns("questions")}
@@ -280,6 +355,45 @@ class Database:
     def _get_schedule(self, session: Session, device_id: str) -> Schedule | None:
         return session.query(Schedule).filter(Schedule.device_id == device_id).first()
 
+    def _get_user_device(self, session: Session, user_id: int, device_id: str) -> UserDevice | None:
+        return (
+            session.query(UserDevice)
+            .filter(UserDevice.user_id == user_id, UserDevice.device_id == device_id)
+            .first()
+        )
+
+    def _attach_device_to_user(
+        self,
+        session: Session,
+        *,
+        device: Device,
+        user: User,
+        session_expires_at: datetime | None,
+        now: datetime,
+    ) -> UserDevice:
+        mapping = self._get_user_device(session, int(user.id), device.device_id)
+        if mapping is None:
+            mapping = UserDevice(
+                user_id=int(user.id),
+                device_id=device.device_id,
+                session_expires_at=session_expires_at,
+                created_at=now,
+                updated_at=now,
+                last_seen_at=now,
+            )
+            session.add(mapping)
+        else:
+            mapping.session_expires_at = session_expires_at
+            mapping.updated_at = now
+            mapping.last_seen_at = now
+
+        # Keep legacy devices.user_id populated for old reporting/scheduler code and existing SQL indexes.
+        device.user_id = int(user.id)
+        device.google_session_expires_at = session_expires_at
+        device.updated_at = now
+        device.last_seen_at = now
+        return mapping
+
     def register_device(
         self,
         apns_token: str,
@@ -306,6 +420,28 @@ class Database:
                 last_seen_at=now,
             )
             session.add(row)
+            session.flush()
+            user = User(
+                provider=PROVIDER_ANONYMOUS,
+                provider_id=f"anonymous:{device_id}",
+                status=USER_STATUS_ANONYMOUS,
+                email=f"{device_id}@anonymous.buddystuddy.local",
+                display_name="BuddyStuddy user",
+                avatar_url=None,
+                bio="",
+                allow_public_questions=False,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(user)
+            session.flush()
+            self._attach_device_to_user(
+                session,
+                device=row,
+                user=user,
+                session_expires_at=now + timedelta(days=90),
+                now=now,
+            )
 
         return device_id, client_secret
 
@@ -315,54 +451,134 @@ class Database:
             device = self._get_device(session, device_id)
             if device is None:
                 return None
-            if device.user is not None:
-                return self.user_profile_response(device.user)
+            principal = self._device_principal_row(session, device_id, now)
+            if principal is not None:
+                return self.user_profile_response(principal[0])
 
-            google_sub = f"anonymous:{device_id}"
-            user = session.query(User).filter(User.google_sub == google_sub).first()
+            provider_id = f"anonymous:{device_id}"
+            user = (
+                session.query(User)
+                .filter(User.provider == PROVIDER_ANONYMOUS, User.provider_id == provider_id)
+                .first()
+            )
             if user is None:
                 user = User(
-                    google_sub=google_sub,
+                    provider=PROVIDER_ANONYMOUS,
+                    provider_id=provider_id,
+                    status=USER_STATUS_ANONYMOUS,
                     email=f"{device_id}@anonymous.buddystuddy.local",
                     display_name="BuddyStuddy user",
                     avatar_url=None,
                     bio="",
-                    allow_public_questions=True,
+                    allow_public_questions=False,
                     created_at=now,
                     updated_at=now,
                 )
                 session.add(user)
                 session.flush()
 
-            device.user_id = user.id
-            device.updated_at = now
-            device.last_seen_at = now
+            self._attach_device_to_user(
+                session,
+                device=device,
+                user=user,
+                session_expires_at=now + timedelta(days=90),
+                now=now,
+            )
             session.flush()
             return self.user_profile_response(user)
+
+    def _device_principal_row(self, session: Session, device_id: str, now: datetime) -> tuple[User, UserDevice] | None:
+        row = (
+            session.query(User, UserDevice)
+            .join(UserDevice, UserDevice.user_id == User.id)
+            .filter(UserDevice.device_id == device_id)
+            .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
+            .order_by(UserDevice.last_seen_at.desc(), UserDevice.id.desc())
+            .first()
+        )
+        return row
+
+    def _user_principal_row(self, session: Session, user_id: int, now: datetime) -> tuple[User, UserDevice] | None:
+        row = (
+            session.query(User, UserDevice)
+            .join(UserDevice, UserDevice.user_id == User.id)
+            .filter(User.id == user_id)
+            .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
+            .order_by(UserDevice.last_seen_at.desc(), UserDevice.id.desc())
+            .first()
+        )
+        return row
 
     def get_device_principal(self, device_id: str) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:
-            device = self._get_device(session, device_id)
-            if device is None or device.user is None:
+            row = self._device_principal_row(session, device_id, now)
+            if row is None:
                 return None
-            is_anonymous = device.user.google_sub.startswith("anonymous:")
-            has_active_google_session = (
+            user, mapping = row
+            is_anonymous = user.status == USER_STATUS_ANONYMOUS
+            has_active_session = (
                 not is_anonymous
-                and device.google_session_expires_at is not None
-                and as_utc_datetime(device.google_session_expires_at) > now
+                and mapping.session_expires_at is not None
+                and as_utc_datetime(mapping.session_expires_at) > now
             )
             return {
-                "device_id": device.device_id,
-                "user_id": int(device.user.id),
+                "device_id": mapping.device_id,
+                "user_id": int(user.id),
+                "userDeviceId": int(mapping.id),
                 "isAnonymous": is_anonymous,
-                "hasActiveGoogleSession": has_active_google_session,
+                "hasActiveGoogleSession": has_active_session,
+            }
+
+    def get_user_principal(self, user_id: int) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            row = self._user_principal_row(session, user_id, now)
+            if row is None:
+                return None
+            user, mapping = row
+            is_anonymous = user.status == USER_STATUS_ANONYMOUS
+            return {
+                "device_id": mapping.device_id,
+                "user_id": int(user.id),
+                "userDeviceId": int(mapping.id),
+                "isAnonymous": is_anonymous,
+                "hasActiveGoogleSession": bool(not is_anonymous),
+            }
+
+    def get_access_token_principal(self, user_id: int, user_device_id: int | None = None) -> dict[str, Any] | None:
+        now = self._utc_now()
+        with self.connect() as session:
+            if user_device_id is None:
+                row = self._user_principal_row(session, user_id, now)
+            else:
+                row = (
+                    session.query(User, UserDevice)
+                    .join(UserDevice, UserDevice.user_id == User.id)
+                    .filter(User.id == user_id, UserDevice.id == user_device_id)
+                    .filter((UserDevice.session_expires_at.is_(None)) | (UserDevice.session_expires_at > now))
+                    .first()
+                )
+            if row is None:
+                return None
+            user, mapping = row
+            is_anonymous = user.status == USER_STATUS_ANONYMOUS
+            return {
+                "device_id": mapping.device_id,
+                "user_id": int(user.id),
+                "userDeviceId": int(mapping.id),
+                "isAnonymous": is_anonymous,
+                "hasActiveGoogleSession": bool(not is_anonymous),
             }
 
     def device_belongs_to_user(self, device_id: str, user_id: int) -> bool:
+        now = self._utc_now()
         with self.connect() as session:
-            row = self._get_device(session, device_id)
-            return bool(row is not None and row.user_id == user_id)
+            row = self._get_user_device(session, user_id, device_id)
+            return bool(
+                row is not None
+                and (row.session_expires_at is None or as_utc_datetime(row.session_expires_at) > now)
+            )
 
     def authenticate_device(self, device_id: str, client_secret: str) -> bool:
         now = self._utc_now()
@@ -382,12 +598,14 @@ class Database:
     def device_has_active_google_session(self, device_id: str) -> bool:
         now = self._utc_now()
         with self.connect() as session:
-            row = self._get_device(session, device_id)
+            principal = self._device_principal_row(session, device_id, now)
+            if principal is None:
+                return False
+            user, mapping = principal
             return bool(
-                row is not None
-                and row.user_id is not None
-                and row.google_session_expires_at is not None
-                and as_utc_datetime(row.google_session_expires_at) > now
+                user.status == USER_STATUS_ACTIVE
+                and mapping.session_expires_at is not None
+                and as_utc_datetime(mapping.session_expires_at) > now
             )
 
     def update_device_push_token(self, device_id: str, apns_token: str, apns_environment: str) -> None:
@@ -494,22 +712,33 @@ class Database:
     def link_google_user_to_device(
         self,
         device_id: str,
-        google_sub: str,
         email: str,
         display_name: str,
+        provider_id: str | None = None,
         avatar_url: str | None = None,
+        google_sub: str | None = None,
     ) -> dict[str, Any] | None:
         now = self._utc_now()
+        provider_id = (provider_id or google_sub or "").strip()
+        if not provider_id:
+            return None
         normalized_name = display_name.strip() or email.split("@")[0] or "BuddyStuddy user"
         with self.connect() as session:
             device = self._get_device(session, device_id)
             if device is None:
                 return None
 
-            user = session.query(User).filter(User.google_sub == google_sub).first()
+            previous_user_id = device.user_id
+            user = (
+                session.query(User)
+                .filter(User.provider == PROVIDER_GOOGLE, User.provider_id == provider_id)
+                .first()
+            )
             if user is None:
                 user = User(
-                    google_sub=google_sub,
+                    provider=PROVIDER_GOOGLE,
+                    provider_id=provider_id,
+                    status=USER_STATUS_ACTIVE,
                     email=email,
                     display_name=normalized_name,
                     avatar_url=avatar_url,
@@ -521,30 +750,44 @@ class Database:
                 session.add(user)
                 session.flush()
             else:
+                user.status = USER_STATUS_ACTIVE
+                user.provider = PROVIDER_GOOGLE
+                user.provider_id = provider_id
                 user.email = email
                 user.display_name = user.display_name or normalized_name
                 user.avatar_url = avatar_url or user.avatar_url
                 user.updated_at = now
 
-            device.user_id = user.id
-            device.google_session_expires_at = now + timedelta(days=90)
-            device.updated_at = now
-            device.last_seen_at = now
+            self._attach_device_to_user(
+                session,
+                device=device,
+                user=user,
+                session_expires_at=now + timedelta(days=90),
+                now=now,
+            )
+            if previous_user_id is not None and int(previous_user_id) != int(user.id):
+                (
+                    session.query(Question)
+                    .filter(Question.device_id == device_id, Question.user_id == previous_user_id)
+                    .update({"user_id": int(user.id), "updated_at": now}, synchronize_session=False)
+                )
             session.flush()
             return self.user_profile_response(user)
 
     def get_device_profile(self, device_id: str) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:
-            device = self._get_device(session, device_id)
+            principal = self._device_principal_row(session, device_id, now)
+            if principal is None:
+                return None
+            user, mapping = principal
             if (
-                device is None
-                or device.user is None
-                or device.google_session_expires_at is None
-                or as_utc_datetime(device.google_session_expires_at) <= now
+                user.status != USER_STATUS_ACTIVE
+                or mapping.session_expires_at is None
+                or as_utc_datetime(mapping.session_expires_at) <= now
             ):
                 return None
-            return self.user_profile_response(device.user)
+            return self.user_profile_response(user)
 
     def get_public_profile(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as session:
@@ -562,27 +805,30 @@ class Database:
     ) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:
-            device = self._get_device(session, device_id)
+            principal = self._device_principal_row(session, device_id, now)
+            if principal is None:
+                return None
+            user, mapping = principal
             if (
-                device is None
-                or device.user is None
-                or device.google_session_expires_at is None
-                or as_utc_datetime(device.google_session_expires_at) <= now
+                user.status != USER_STATUS_ACTIVE
+                or mapping.session_expires_at is None
+                or as_utc_datetime(mapping.session_expires_at) <= now
             ):
                 return None
 
             if display_name is not None:
                 next_name = display_name.strip()
                 if next_name:
-                    device.user.display_name = next_name[:120]
+                    user.display_name = next_name[:120]
             if bio is not None:
-                device.user.bio = bio.strip()[:500]
+                user.bio = bio.strip()[:500]
             if allow_public_questions is not None:
-                device.user.allow_public_questions = bool(allow_public_questions)
-            device.user.updated_at = now
-            device.updated_at = now
+                user.allow_public_questions = bool(allow_public_questions)
+            user.updated_at = now
+            mapping.updated_at = now
+            mapping.last_seen_at = now
             session.flush()
-            return self.user_profile_response(device.user)
+            return self.user_profile_response(user)
 
     def create_report(
         self,
