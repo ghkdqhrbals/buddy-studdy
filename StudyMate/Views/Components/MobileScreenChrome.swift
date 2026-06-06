@@ -39,14 +39,9 @@ struct MobileToolbarIconButtonLabel: View {
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: 18, weight: .semibold))
-            .frame(width: 42, height: 34)
-            .background(Color(.secondarySystemBackground), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Color(.separator).opacity(0.34), lineWidth: 0.7)
-            }
-            .contentShape(Capsule())
+            .font(.system(size: 21, weight: .semibold))
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
     }
 }
 
@@ -55,18 +50,19 @@ struct MobileToolbarSearchField: View {
     var prompt: String
     var focus: FocusState<Bool>.Binding
     var closeAccessibilityLabel: String
+    var width: CGFloat = 284
     var onSubmit: () -> Void = {}
     var onClose: () -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.secondary)
 
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
-                .font(.subheadline)
+                .font(.body)
                 .lineLimit(1)
                 .submitLabel(.search)
                 .focused(focus)
@@ -75,24 +71,20 @@ struct MobileToolbarSearchField: View {
             Button {
                 onClose()
             } label: {
-                Image(systemName: text.isEmpty ? "xmark" : "xmark.circle.fill")
-                    .font(.system(size: text.isEmpty ? 11 : 14, weight: .semibold))
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(closeAccessibilityLabel)
         }
-        .padding(.leading, 11)
-        .padding(.trailing, 6)
-        .frame(width: 236, height: 34)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .frame(width: width, height: 41)
         .background(Color(.secondarySystemBackground), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color(.separator).opacity(0.34), lineWidth: 0.7)
-        }
         .contentShape(Capsule())
-        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .center)))
+        .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .center)))
     }
 }
 #endif

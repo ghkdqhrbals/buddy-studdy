@@ -83,14 +83,19 @@ def test_access_token_is_the_request_principal(monkeypatch, tmp_path):
 
     mismatch = client.get(f"/api/v1/devices/{second['deviceId']}/settings", headers=headers)
     assert mismatch.status_code == 403
-    assert mismatch.json()["detail"] == "Device is not linked to this user."
+    assert mismatch.json()["error"]["code"] == "AUTH_DEVICE_MISMATCH"
+    assert mismatch.json()["error"]["message"] == "Device is not linked to this user."
+    assert mismatch.json()["error"]["requestId"]
+    assert mismatch.json()["error"]["status"] == 403
 
     community = client.get("/api/v1/public/questions")
     assert community.status_code == 401
+    assert community.json()["error"]["code"] == "AUTH_ACCESS_TOKEN_REQUIRED"
 
     guest_community = client.get("/api/v1/public/questions", headers=headers)
     assert guest_community.status_code == 401
-    assert guest_community.json()["detail"] == "Google Login is required."
+    assert guest_community.json()["error"]["code"] == "AUTH_GOOGLE_REQUIRED"
+    assert guest_community.json()["error"]["message"] == "Google Login is required."
 
 
 def test_legacy_device_credentials_can_bootstrap_access_token(monkeypatch, tmp_path):
@@ -161,6 +166,61 @@ def test_public_questions_include_own_public_records_and_allow_privacy_override(
     )
     assert privacy_response.status_code == 200
     assert privacy_response.json()["isPublic"] is False
+
+    public_response = client.get("/api/v1/public/questions", headers=headers)
+    assert public_response.status_code == 200
+    assert public_response.json()["questions"] == []
+
+
+def test_profile_page_access_can_hide_public_questions_but_not_private_pages(monkeypatch, tmp_path):
+    main = _load_test_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    registered = _register(client, "apns-token-page-access-" + "e" * 32)
+    profile = main.database.link_google_user_to_device(
+        device_id=registered["deviceId"],
+        google_sub="google-page-access-owner",
+        email="owner@example.com",
+        display_name="Owner",
+    )
+    assert profile is not None
+
+    token_response = client.post(
+        f"/api/v1/devices/{registered['deviceId']}/auth/token",
+        headers={
+            "X-Device-Id": registered["deviceId"],
+            "X-Client-Secret": registered["clientSecret"],
+        },
+    )
+    assert token_response.status_code == 200
+    headers = {"Authorization": f"Bearer {token_response.json()['accessToken']}"}
+
+    record = main.database.create_question(
+        device_id=registered["deviceId"],
+        user_id=profile["id"],
+        topic="SwiftUI",
+        difficulty_level=5,
+        question="What is view identity?",
+        is_public=True,
+    )
+
+    public_response = client.get("/api/v1/public/questions", headers=headers)
+    assert public_response.status_code == 200
+    assert [item["id"] for item in public_response.json()["questions"]] == [record["id"]]
+
+    profile_response = client.patch(
+        f"/api/v1/devices/{registered['deviceId']}/profile",
+        headers=headers,
+        json={"pageAccess": {"publicQuestions": False, "statistics": True, "studyDetail": True, "records": True}},
+    )
+    assert profile_response.status_code == 200
+    page_access = profile_response.json()["pageAccess"]
+    assert page_access == {
+        "publicQuestions": False,
+        "statistics": False,
+        "studyDetail": False,
+        "records": False,
+    }
 
     public_response = client.get("/api/v1/public/questions", headers=headers)
     assert public_response.status_code == 200

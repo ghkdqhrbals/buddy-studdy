@@ -9,13 +9,15 @@ import time
 import httpx
 import logging
 
+from fastapi.exceptions import RequestValidationError
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse
 from starlette.concurrency import iterate_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings
 from .crypto import KeyCipher
 from .db import Database, as_utc_datetime, utc_now
+from .errors import APIErrorCode, error_code_for, message_for, request_id, unified_error_response
 from .auth_tokens import AccessTokenError, create_access_token, decode_access_token
 from .request_logging import build_error_response_log, build_request_log, build_response_log
 from .models import (
@@ -104,9 +106,41 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(StarletteHTTPException)
+async def unified_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return unified_error_response(
+        request,
+        status_code=exc.status_code,
+        code=error_code_for(exc.status_code, exc.detail),
+        message=message_for(exc.status_code, exc.detail),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def unified_validation_exception_handler(request: Request, exc: RequestValidationError):
+    return unified_error_response(
+        request,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        code=APIErrorCode.VALIDATION_ERROR,
+        message=message_for(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.errors()),
+    )
+
+
+@app.exception_handler(Exception)
+async def unified_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled backend error request_id=%s error=%s", request_id(request), exc)
+    return unified_error_response(
+        request,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code=APIErrorCode.INTERNAL_SERVER_ERROR,
+        message=message_for(status.HTTP_500_INTERNAL_SERVER_ERROR, None),
+    )
+
+
 @app.middleware("http")
 async def log_api_request_response(request: Request, call_next):
     started = time.perf_counter()
+    request_id(request)
     request_body = await request.body()
 
     async def receive():
@@ -166,15 +200,19 @@ async def protect_openapi_docs(request: Request, call_next):
         settings, "enable_openapi_docs", False
     ):
         if not settings.openapi_access_token:
-            return JSONResponse(
+            return unified_error_response(
+                request,
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "OpenAPI access token is not configured."},
+                code=APIErrorCode.OPENAPI_TOKEN_REQUIRED,
+                message="OpenAPI access token is not configured.",
             )
         token = request.query_params.get("token") or request.headers.get("x-openapi-token")
         if token != settings.openapi_access_token:
-            return JSONResponse(
+            return unified_error_response(
+                request,
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "OpenAPI access token is required."},
+                code=APIErrorCode.OPENAPI_TOKEN_REQUIRED,
+                message="OpenAPI access token is required.",
             )
     return await call_next(request)
 
@@ -413,6 +451,11 @@ async def update_my_profile(
         device_id=device_id,
         display_name=payload.display_name,
         bio=payload.bio,
+        allow_public_questions=(
+            payload.page_access.public_questions
+            if payload.page_access is not None
+            else None
+        ),
     )
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")

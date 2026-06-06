@@ -230,6 +230,16 @@ class Database:
                 if "idx_devices_user_id" not in {idx["name"] for idx in inspector.get_indexes("devices")}:
                     session.execute(text("CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices (user_id)"))
 
+            if "users" in table_names:
+                user_columns = {column["name"] for column in inspector.get_columns("users")}
+                if "allow_public_questions" not in user_columns:
+                    session.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN allow_public_questions "
+                            f"BOOLEAN NOT NULL DEFAULT {self._boolean_default_sql(True)}"
+                        )
+                    )
+
             if "questions" in table_names:
                 question_columns = {column["name"] for column in inspector.get_columns("questions")}
                 if "is_public" not in question_columns:
@@ -317,6 +327,7 @@ class Database:
                     display_name="BuddyStuddy user",
                     avatar_url=None,
                     bio="",
+                    allow_public_questions=True,
                     created_at=now,
                     updated_at=now,
                 )
@@ -503,6 +514,7 @@ class Database:
                     display_name=normalized_name,
                     avatar_url=avatar_url,
                     bio="",
+                    allow_public_questions=True,
                     created_at=now,
                     updated_at=now,
                 )
@@ -546,6 +558,7 @@ class Database:
         device_id: str,
         display_name: str | None = None,
         bio: str | None = None,
+        allow_public_questions: bool | None = None,
     ) -> dict[str, Any] | None:
         now = self._utc_now()
         with self.connect() as session:
@@ -564,6 +577,8 @@ class Database:
                     device.user.display_name = next_name[:120]
             if bio is not None:
                 device.user.bio = bio.strip()[:500]
+            if allow_public_questions is not None:
+                device.user.allow_public_questions = bool(allow_public_questions)
             device.user.updated_at = now
             device.updated_at = now
             session.flush()
@@ -725,6 +740,7 @@ class Database:
                 Question.is_public.is_(True),
                 Device.user_id.isnot(None),
             )
+            query = query.join(User, Device.user_id == User.id).filter(User.allow_public_questions.is_(True))
             if exclude_device_id:
                 query = query.filter(Question.device_id != exclude_device_id)
 
@@ -1245,6 +1261,12 @@ class Database:
             "displayName": row.display_name,
             "bio": row.bio or "",
             "avatarUrl": row.avatar_url,
+            "pageAccess": {
+                "publicQuestions": bool(row.allow_public_questions),
+                "statistics": False,
+                "studyDetail": False,
+                "records": False,
+            },
         }
 
 def hash_secret(value: str) -> str:

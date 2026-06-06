@@ -13,6 +13,17 @@ class HealthResponse(CamelModel):
     ok: bool
 
 
+class APIErrorPayload(CamelModel):
+    code: str
+    message: str
+    request_id: str = Field(alias="requestId")
+    status: int
+
+
+class APIErrorResponse(CamelModel):
+    error: APIErrorPayload
+
+
 class DeviceRegisterRequest(CamelModel):
     apns_token: str = Field(default="", alias="apnsToken", max_length=512)
     platform: str = "ios"
@@ -28,11 +39,23 @@ class DeviceRegisterResponse(CamelModel):
     access_token_expires_at: str = Field(alias="accessTokenExpiresAt")
 
 
+class PageAccessResponse(CamelModel):
+    public_questions: bool = Field(alias="publicQuestions")
+    statistics: bool = False
+    study_detail: bool = Field(default=False, alias="studyDetail")
+    records: bool = False
+
+
+class PageAccessUpdateRequest(CamelModel):
+    public_questions: bool | None = Field(default=None, alias="publicQuestions")
+
+
 class UserProfileResponse(CamelModel):
     id: int
     display_name: str = Field(alias="displayName")
     bio: str = ""
     avatar_url: str | None = Field(default=None, alias="avatarUrl")
+    page_access: PageAccessResponse = Field(alias="pageAccess")
 
 
 class AccessTokenResponse(CamelModel):
@@ -53,6 +76,7 @@ class GoogleLoginRequest(CamelModel):
 class ProfileUpdateRequest(CamelModel):
     display_name: str | None = Field(default=None, alias="displayName", max_length=120)
     bio: str | None = Field(default=None, max_length=500)
+    page_access: PageAccessUpdateRequest | None = Field(default=None, alias="pageAccess")
 
 
 class ReportQuestionRequest(CamelModel):

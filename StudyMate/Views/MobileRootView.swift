@@ -82,7 +82,7 @@ struct MobileRootView: View {
 
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var selectedHomeScope: HomeFeedScope = .my
+    @State private var selectedHomeScope: HomeFeedScope = .all
     @State private var editMode: EditMode = .inactive
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
@@ -163,7 +163,23 @@ private struct MobileHomeView: View {
                     .accessibilityLabel(strings.refresh)
                 }
 
-                if selectedHomeScope == .my {
+                if selectedHomeScope == .my, !appState.isCommunitySignedIn {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(strings.myStudyLoginHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Button {
+                                appState.signInToCommunity()
+                            } label: {
+                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else if selectedHomeScope == .my {
                     Section {
                         if filteredStudyCategories.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
@@ -220,7 +236,7 @@ private struct MobileHomeView: View {
                             }
                         }
                     }
-                } else if appState.isCommunitySignedIn {
+                } else if selectedHomeScope == .all {
                     Section {
                         if let message = appState.communityErrorMessage {
                             Text(message)
@@ -248,15 +264,17 @@ private struct MobileHomeView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
-                                    Button(role: .destructive) {
-                                        Task {
-                                            await appState.reportCommunityQuestion(
-                                                question,
-                                                reason: strings.reportReasonInappropriate
-                                            )
+                                    if appState.isCommunitySignedIn {
+                                        Button(role: .destructive) {
+                                            Task {
+                                                await appState.reportCommunityQuestion(
+                                                    question,
+                                                    reason: strings.reportReasonInappropriate
+                                                )
+                                            }
+                                        } label: {
+                                            Label(strings.report, systemImage: "exclamationmark.bubble")
                                         }
-                                    } label: {
-                                        Label(strings.report, systemImage: "exclamationmark.bubble")
                                     }
                                 }
                                 .onAppear {
@@ -281,24 +299,6 @@ private struct MobileHomeView: View {
                         Text(appState.communityQuestions.isEmpty ? strings.communitySearchHelp : strings.communityQuestionLimit)
                             .foregroundStyle(.secondary)
                     }
-                } else {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(strings.communityLoginHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Button {
-                                appState.signInToCommunity()
-                            } label: {
-                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.vertical, 4)
-                    } header: {
-                        Text(strings.communityFeed)
-                    }
                 }
             }
             .listStyle(.plain)
@@ -310,9 +310,9 @@ private struct MobileHomeView: View {
         }
         .background(Color(.systemBackground))
         .environment(\.editMode, $editMode)
-        .navigationTitle(strings.tabHome)
+        .navigationTitle(isHomeSearchActive ? "" : strings.tabHome)
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(isHomeSearchActive ? .inline : .large)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !activeTrimmedSearchText.isEmpty,
@@ -322,16 +322,18 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarLeading) {
-                profileToolbarButton
-            }
+            if isHomeSearchActive {
+                ToolbarItem(placement: .principal) {
+                    homeToolbarSearchField(strings: strings)
+                }
+            } else {
+                ToolbarItem(placement: .topBarLeading) {
+                    profileToolbarButton
+                }
 
-            ToolbarItem(placement: .principal) {
-                homeToolbarSearchField(strings: strings)
-            }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                homeToolbarItems(strings: strings)
+                ToolbarItem(placement: .topBarTrailing) {
+                    homeToolbarItems(strings: strings)
+                }
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
@@ -404,34 +406,38 @@ private struct MobileHomeView: View {
         }
     }
 
+    private var isHomeSearchActive: Bool {
+        isSearchVisible || !activeTrimmedSearchText.isEmpty
+    }
+
     private var profileToolbarButton: some View {
         let strings = appState.strings
 
-        return Button {
+        return HomeProfileAvatar(
+            symbolName: appState.profileAvatarSymbolName,
+            displayName: appState.communityProfile?.displayName,
+            imageData: appState.profileAvatarImageData,
+            colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
+            usesNeutralColor: !appState.isCommunitySignedIn,
+            size: 34
+        )
+        .frame(width: 34, height: 34)
+        .contentShape(Circle())
+        .onTapGesture {
             isShowingProfileSettings = true
-        } label: {
-            HomeProfileAvatar(
-                symbolName: appState.profileAvatarSymbolName,
-                displayName: appState.communityProfile?.displayName,
-                imageData: appState.profileAvatarImageData,
-                colorSeed: appState.communityProfile.map { "community-\($0.id)" } ?? appState.profileAvatarColorSeed,
-                usesNeutralColor: !appState.isCommunitySignedIn,
-                size: 34
-            )
-            .frame(width: 34, height: 34)
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(strings.profile)
     }
 
     @ViewBuilder
     private func homeToolbarSearchField(strings: AppStrings) -> some View {
-        if isSearchVisible || !activeTrimmedSearchText.isEmpty {
+        if isHomeSearchActive {
             MobileToolbarSearchField(
                 text: activeSearchText,
                 prompt: strings.topicSearch,
                 focus: $isSearchFocused,
                 closeAccessibilityLabel: strings.clearSearch,
+                width: min(UIScreen.main.bounds.width - 32, 430),
                 onSubmit: {
                     guard selectedHomeScope == .all else {
                         return
@@ -450,21 +456,26 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private func homeToolbarItems(strings: AppStrings) -> some View {
-        Button {
-            showHomeSearch()
-        } label: {
-            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
-        }
-        .accessibilityLabel(strings.search)
-
-        if selectedHomeScope == .my {
+        HStack(spacing: 16) {
             Button {
-                isAddingStudyCategory = true
+                showHomeSearch()
             } label: {
-                MobileToolbarIconButtonLabel(systemName: "plus")
+                MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
             }
-            .accessibilityLabel(strings.newStudyCategory)
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.search)
+
+            if selectedHomeScope == .my, appState.isCommunitySignedIn {
+                Button {
+                    isAddingStudyCategory = true
+                } label: {
+                    MobileToolbarIconButtonLabel(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.newStudyCategory)
+            }
         }
+        .fixedSize()
     }
 
     @MainActor
@@ -480,6 +491,7 @@ private struct MobileHomeView: View {
         }
         Task { @MainActor in
             await Task.yield()
+            try? await Task.sleep(nanoseconds: 60_000_000)
             isSearchFocused = true
         }
     }
@@ -522,8 +534,7 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func loadCommunityQuestionsIfNeeded(userInitiated: Bool) async {
-        guard selectedHomeScope == .all,
-              appState.isCommunitySignedIn else {
+        guard selectedHomeScope == .all else {
             return
         }
 
@@ -538,8 +549,7 @@ private struct MobileHomeView: View {
     @MainActor
     private func scheduleCommunitySearchReload() {
         communitySearchDebounceTask?.cancel()
-        guard selectedHomeScope == .all,
-              appState.isCommunitySignedIn else {
+        guard selectedHomeScope == .all else {
             return
         }
 
@@ -556,8 +566,8 @@ private struct MobileHomeView: View {
 }
 
 private enum HomeFeedScope: String, CaseIterable, Identifiable {
-    case my
     case all
+    case my
 
     var id: String {
         rawValue
@@ -665,6 +675,7 @@ private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
+    @State private var allowPublicQuestionsAccess = true
     #if os(iOS)
     @State private var selectedProfilePhotoItem: PhotosPickerItem?
     @State private var pendingProfilePhotoData: Data?
@@ -723,6 +734,14 @@ private struct MobileProfileSettingsSheet: View {
                     }
                     #endif
 
+                    Section(strings.pageAccess) {
+                        Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
+
+                        lockedPageAccessRow(title: strings.statisticsPage, strings: strings)
+                        lockedPageAccessRow(title: strings.studyDetailPage, strings: strings)
+                        lockedPageAccessRow(title: strings.recordsPage, strings: strings)
+                    }
+
                     Section {
                         Button(role: .destructive) {
                             appState.signOutFromCommunity()
@@ -770,7 +789,15 @@ private struct MobileProfileSettingsSheet: View {
                         }
 
                         Task {
-                            await appState.updateCommunityProfile(displayName: profileDisplayName)
+                            await appState.updateCommunityProfile(
+                                displayName: profileDisplayName,
+                                pageAccess: CommunityPageAccess(
+                                    publicQuestions: allowPublicQuestionsAccess,
+                                    statistics: false,
+                                    studyDetail: false,
+                                    records: false
+                                )
+                            )
                             dismiss()
                         }
                     } label: {
@@ -786,9 +813,11 @@ private struct MobileProfileSettingsSheet: View {
             }
             .onAppear {
                 profileDisplayName = appState.communityProfile?.displayName ?? ""
+                allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
                 Task {
                     await appState.loadCommunityProfile()
                     profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
+                    allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? allowPublicQuestionsAccess
                 }
             }
             #if os(iOS)
@@ -822,6 +851,15 @@ private struct MobileProfileSettingsSheet: View {
         }
 
         return strings.save
+    }
+
+    private func lockedPageAccessRow(title: String, strings: AppStrings) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(strings.accessUnavailable)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -1532,8 +1570,8 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                Section("OpenAI") {
-                    HStack {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
                         Group {
                             if showsAPIKey {
                                 TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
@@ -1542,23 +1580,35 @@ private struct MobileSettingsView: View {
                             }
                         }
                         .textContentType(.password)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        #endif
 
-                        Button(showsAPIKey ? strings.hide : strings.show) {
-                            showsAPIKey.toggle()
+                        HStack {
+                            if let validationMessage = appState.apiKeyValidationMessage {
+                                Text(validationMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .lineLimit(2)
+                            }
+
+                            Spacer()
+
+                            Button(showsAPIKey ? strings.hide : strings.show) {
+                                showsAPIKey.toggle()
+                            }
+                            .font(.caption.weight(.semibold))
                         }
                     }
-
-                    if let validationMessage = appState.apiKeyValidationMessage {
-                        Text(validationMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Link(strings.openAIUsageAndCostsPage, destination: URL(string: "https://platform.openai.com/usage")!)
-                        Link(strings.openAIBillingPage, destination: URL(string: "https://platform.openai.com/settings/organization/billing/overview")!)
-                    }
                     .padding(.vertical, 2)
+                } header: {
+                    HStack(spacing: 6) {
+                        Text("OpenAI")
+                        Link("settings", destination: URL(string: "https://platform.openai.com/")!)
+                            .font(.caption)
+                            .textCase(nil)
+                    }
                 }
 
                 Section(strings.generalSettings) {
@@ -1680,42 +1730,16 @@ private struct MobileSettingsSaveButtonLabel: View {
                 .minimumScaleFactor(0.8)
         }
         .foregroundStyle(foregroundColor)
-        .padding(.horizontal, 13)
-        .frame(minWidth: 74, minHeight: 34)
-        .background(backgroundColor, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(borderColor, lineWidth: 0.6)
-        }
-        .contentShape(Capsule())
+        .frame(minWidth: 54, minHeight: 34)
+        .contentShape(Rectangle())
     }
 
     private var foregroundColor: Color {
-        isDirty ? .white : .secondary
-    }
-
-    private var backgroundColor: Color {
         if isDirty {
             return Color.accentColor
         }
 
-        #if os(iOS)
-        return Color(.secondarySystemBackground)
-        #else
-        return Color.secondary.opacity(0.12)
-        #endif
-    }
-
-    private var borderColor: Color {
-        if isDirty {
-            return Color.accentColor.opacity(0.28)
-        }
-
-        #if os(iOS)
-        return Color(.separator).opacity(0.35)
-        #else
-        return Color.secondary.opacity(0.18)
-        #endif
+        return .secondary
     }
 }
 

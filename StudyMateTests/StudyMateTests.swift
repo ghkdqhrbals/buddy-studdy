@@ -3575,9 +3575,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
-        bio: String?
+        bio: String?,
+        pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile {
-        CommunityUserProfile(id: 1, displayName: displayName ?? "Tester", bio: bio ?? "", avatarURL: nil)
+        CommunityUserProfile(
+            id: 1,
+            displayName: displayName ?? "Tester",
+            bio: bio ?? "",
+            avatarURL: nil,
+            pageAccess: pageAccess ?? .restricted
+        )
     }
 
     func reportCommunityQuestion(

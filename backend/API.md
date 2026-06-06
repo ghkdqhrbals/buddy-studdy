@@ -399,11 +399,16 @@ This endpoint is intended for deployment smoke tests and manual operations. The 
 
 ## Error Format
 
-FastAPI validation and auth failures return the standard JSON error shape:
+Validation, auth, and server failures return one unified JSON shape:
 
 ```json
 {
-  "detail": "Invalid device credentials."
+  "error": {
+    "code": "AUTH_INVALID_DEVICE_CREDENTIALS",
+    "message": "Invalid device credentials.",
+    "requestId": "9f4f2f8c-8ad1-45f4-9390-64d9a1f09ad0",
+    "status": 401
+  }
 }
 ```
 
@@ -412,3 +417,18 @@ Common statuses:
 - `401`: missing or invalid backend/device credentials.
 - `403`: authenticated device does not match the path `deviceId`.
 - `422`: request body failed validation.
+
+Common error codes:
+
+- `AUTH_ACCESS_TOKEN_REQUIRED`
+- `AUTH_DEVICE_MISMATCH`
+- `AUTH_GOOGLE_REQUIRED`
+- `AUTH_INVALID_ACCESS_TOKEN`
+- `AUTH_INVALID_DEVICE_CREDENTIALS`
+- `DEVICE_NOT_FOUND`
+- `OPENAI_API_KEY_INVALID`
+- `OPENAI_API_KEY_MISSING`
+- `RECORD_NOT_FOUND`
+- `STUDY_SETTINGS_MISSING`
+- `VALIDATION_ERROR`
+- `INTERNAL_SERVER_ERROR`

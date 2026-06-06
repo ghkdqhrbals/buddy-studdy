@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
@@ -148,9 +151,9 @@ struct HistoryView: View {
             .searchSafeRefreshControlOffset(isRefreshing: isRefreshing)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .navigationTitle(strings.tabRecords)
+        .navigationTitle(isRecordSearchActive ? "" : strings.tabRecords)
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(isRecordSearchActive ? .inline : .large)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !searchText.isEmpty,
@@ -160,12 +163,14 @@ struct HistoryView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .principal) {
-                recordToolbarSearchField(strings: strings)
-            }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                recordToolbarItems(strings: strings)
+            if isRecordSearchActive {
+                ToolbarItem(placement: .principal) {
+                    recordToolbarSearchField(strings: strings)
+                }
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    recordToolbarItems(strings: strings)
+                }
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
@@ -215,15 +220,20 @@ struct HistoryView: View {
         #endif
     }
 
+    private var isRecordSearchActive: Bool {
+        isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     @ViewBuilder
     private func recordToolbarSearchField(strings: AppStrings) -> some View {
-        if isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if isRecordSearchActive {
             #if os(iOS)
             MobileToolbarSearchField(
                 text: $searchText,
                 prompt: strings.searchRecords,
                 focus: $isSearchFocused,
                 closeAccessibilityLabel: strings.clearSearch,
+                width: min(UIScreen.main.bounds.width - 32, 430),
                 onClose: {
                     closeRecordSearch(clearText: true)
                 }
@@ -238,31 +248,35 @@ struct HistoryView: View {
 
     @ViewBuilder
     private func recordToolbarItems(strings: AppStrings) -> some View {
-        Button {
-            showRecordSearch()
-        } label: {
-            #if os(iOS)
-            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
-            #else
-            Image(systemName: "magnifyingglass")
-            #endif
-        }
-        .accessibilityLabel(strings.search)
-
-        Menu {
+        HStack(spacing: 16) {
             Button {
-                showsRecordSettings = true
+                showRecordSearch()
             } label: {
-                Label(strings.recordSettings, systemImage: "slider.horizontal.3")
+                #if os(iOS)
+                MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+                #else
+                Image(systemName: "magnifyingglass")
+                #endif
             }
-        } label: {
-            #if os(iOS)
-            MobileToolbarIconButtonLabel(systemName: "ellipsis")
-            #else
-            Image(systemName: "ellipsis")
-            #endif
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.search)
+
+            Menu {
+                Button {
+                    showsRecordSettings = true
+                } label: {
+                    Label(strings.recordSettings, systemImage: "slider.horizontal.3")
+                }
+            } label: {
+                #if os(iOS)
+                MobileToolbarIconButtonLabel(systemName: "ellipsis")
+                #else
+                Image(systemName: "ellipsis")
+                #endif
+            }
+            .accessibilityLabel(strings.recordSettings)
         }
-        .accessibilityLabel(strings.recordSettings)
+        .fixedSize()
     }
 
     @MainActor
@@ -278,6 +292,7 @@ struct HistoryView: View {
         }
         Task { @MainActor in
             await Task.yield()
+            try? await Task.sleep(nanoseconds: 60_000_000)
             isSearchFocused = true
         }
     }

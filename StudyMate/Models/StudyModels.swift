@@ -1475,6 +1475,12 @@ struct AppStrings {
     var studyCategories: String { text("내 학습", "My Studies") }
     var homeScopeMy: String { text("내 학습", "My Studies") }
     var homeScopeAll: String { text("모든 학습들", "All Studies") }
+    var myStudyLoginHelp: String {
+        text(
+            "내 학습을 만들고 답변하려면 먼저 로그인하세요.",
+            "Sign in first to create and answer your own studies."
+        )
+    }
     var editCategories: String { text("학습 편집", "Edit Studies") }
     var studyCategory: String { text("학습", "Study") }
     var newStudyCategory: String { text("학습 추가", "Add Study") }
@@ -1648,6 +1654,12 @@ struct AppStrings {
     var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }
     var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
+    var pageAccess: String { text("페이지 접근 허용", "Page Access") }
+    var publicQuestionsPage: String { text("공개 질문", "Public Questions") }
+    var statisticsPage: String { text("통계", "Statistics") }
+    var studyDetailPage: String { text("내 학습 내부", "My Study Detail") }
+    var recordsPage: String { text("기록", "Records") }
+    var accessUnavailable: String { text("허용 불가", "Not allowed") }
     var report: String { text("신고", "Report") }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }

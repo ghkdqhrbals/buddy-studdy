@@ -55,6 +55,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     bio: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    allow_public_questions: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 

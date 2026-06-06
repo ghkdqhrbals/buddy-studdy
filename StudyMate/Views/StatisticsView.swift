@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct StatisticsView: View {
     @EnvironmentObject private var appState: AppState
@@ -201,9 +204,9 @@ struct StatisticsView: View {
             .searchSafeRefreshControlOffset(isRefreshing: isPullRefreshing)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .navigationTitle(strings.tabStatistics)
+        .navigationTitle(isStatsSearchActive ? "" : strings.tabStatistics)
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(isStatsSearchActive ? .inline : .large)
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !topicSearch.isEmpty,
@@ -213,12 +216,14 @@ struct StatisticsView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .principal) {
-                statsToolbarSearchField(strings: strings)
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                statsSearchToolbarButton(strings: strings)
+            if isStatsSearchActive {
+                ToolbarItem(placement: .principal) {
+                    statsToolbarSearchField(strings: strings)
+                }
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    statsSearchToolbarButton(strings: strings)
+                }
             }
             #else
             ToolbarItem(placement: .primaryAction) {
@@ -268,15 +273,20 @@ struct StatisticsView: View {
         }
     }
 
+    private var isStatsSearchActive: Bool {
+        isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     @ViewBuilder
     private func statsToolbarSearchField(strings: AppStrings) -> some View {
-        if isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if isStatsSearchActive {
             #if os(iOS)
             MobileToolbarSearchField(
                 text: $topicSearch,
                 prompt: strings.topicSearch,
                 focus: $isSearchFocused,
                 closeAccessibilityLabel: strings.clearSearch,
+                width: min(UIScreen.main.bounds.width - 32, 430),
                 onClose: {
                     closeStatsSearch(clearText: true)
                 }
@@ -300,6 +310,7 @@ struct StatisticsView: View {
             #endif
         }
         .accessibilityLabel(strings.search)
+        .buttonStyle(.plain)
     }
 
     @MainActor
@@ -315,6 +326,7 @@ struct StatisticsView: View {
         }
         Task { @MainActor in
             await Task.yield()
+            try? await Task.sleep(nanoseconds: 60_000_000)
             isSearchFocused = true
         }
     }

@@ -101,7 +101,8 @@ protocol RemotePushBackendClientProtocol {
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
-        bio: String?
+        bio: String?,
+        pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile
 
     func reportCommunityQuestion(
@@ -450,7 +451,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
-        bio: String?
+        bio: String?,
+        pageAccess: CommunityPageAccess? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
@@ -458,7 +460,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(ProfileUpdateRequest(displayName: displayName, bio: bio))
+        request.httpBody = try encoder.encode(ProfileUpdateRequest(displayName: displayName, bio: bio, pageAccess: pageAccess))
         let data = try await perform(request)
         return try decoder.decode(CommunityUserProfile.self, from: data)
     }
@@ -622,6 +624,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             let responseBodyText = String(data: data, encoding: .utf8) ?? ""
 
             if !(200..<300).contains(statusCode) {
+                let backendError = Self.decodeBackendAPIError(from: data)
                 let entry = APITrafficLogEntry(
                     id: requestLog.id,
                     method: requestLog.method,
@@ -631,7 +634,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     requestHeaders: requestLog.requestHeaders,
                     requestBody: requestLog.requestBody,
                     responseBody: Self.safeResponseBody(responseBodyText),
-                    error: "HTTP \(statusCode)",
+                    error: backendError?.message ?? "HTTP \(statusCode)",
                     isError: true
                 )
                 NotificationCenter.default.post(
@@ -639,7 +642,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     object: self,
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
-                throw RemotePushBackendError.httpStatus(statusCode, responseBodyText)
+                throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 
             let entry = APITrafficLogEntry(
@@ -699,6 +702,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             .map { "\($0.key): \($0.value)" }
             .sorted()
             .joined(separator: "\n")
+    }
+
+    private static func decodeBackendAPIError(from data: Data) -> BackendAPIError? {
+        guard !data.isEmpty else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(BackendAPIErrorResponse.self, from: data).error
     }
 
     private static func safeBodyLog(data: Data?) -> String {
@@ -819,6 +830,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct ProfileUpdateRequest: Encodable {
         var displayName: String?
         var bio: String?
+        var pageAccess: CommunityPageAccess?
     }
 
     private struct GoogleLoginResponse: Decodable {
@@ -920,12 +932,58 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var displayName: String
     var bio: String
     var avatarURL: URL?
+    var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName
         case bio
         case avatarURL = "avatarUrl"
+        case pageAccess
+    }
+
+    init(
+        id: Int,
+        displayName: String,
+        bio: String,
+        avatarURL: URL?,
+        pageAccess: CommunityPageAccess = .restricted
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.bio = bio
+        self.avatarURL = avatarURL
+        self.pageAccess = pageAccess
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
+        avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
+        pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
+    }
+}
+
+struct CommunityPageAccess: Codable, Equatable {
+    var publicQuestions: Bool
+    var statistics: Bool
+    var studyDetail: Bool
+    var records: Bool
+
+    static let restricted = CommunityPageAccess(
+        publicQuestions: true,
+        statistics: false,
+        studyDetail: false,
+        records: false
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case publicQuestions
+        case statistics
+        case studyDetail
+        case records
     }
 }
 
@@ -1057,17 +1115,87 @@ private extension RemotePushBackendClient {
     }
 }
 
+struct BackendAPIErrorResponse: Decodable {
+    var error: BackendAPIError
+}
+
+struct BackendAPIError: Decodable, Equatable {
+    var code: String
+    var message: String
+    var requestID: String?
+    var status: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case requestID = "requestId"
+        case status
+    }
+}
+
 enum RemotePushBackendError: LocalizedError {
     case invalidResponse
-    case httpStatus(Int, String)
+    case httpStatus(Int, String, BackendAPIError?)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "Invalid backend response."
-        case .httpStatus(let statusCode, let body):
-            return "Backend request failed: HTTP \(statusCode) \(body)"
+        case .httpStatus(let statusCode, let body, let apiError):
+            if let apiError {
+                if let requestID = apiError.requestID, !requestID.isEmpty {
+                    return "\(apiError.message) (\(apiError.code), \(requestID))"
+                }
+                return "\(apiError.message) (\(apiError.code))"
+            }
+
+            if let legacyMessage = Self.legacyMessage(from: body) {
+                return legacyMessage
+            }
+
+            return "Backend request failed: HTTP \(statusCode)"
         }
+    }
+
+    var backendCode: String? {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.code
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    var backendMessage: String? {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.message
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    var responseBody: String? {
+        switch self {
+        case .httpStatus(_, let body, _):
+            return body
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    private static func legacyMessage(from body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = object["detail"] else {
+            return nil
+        }
+
+        if let message = detail as? String, !message.isEmpty {
+            return message
+        }
+
+        return nil
     }
 }
 

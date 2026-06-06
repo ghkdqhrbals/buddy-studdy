@@ -416,7 +416,11 @@ final class AppState: ObservableObject {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
         }
+        #if os(macOS)
         await generateDueQuestionIfNeeded(reason: "foreground")
+        #else
+        log(.info, "iOS foreground 진입은 조용한 동기화만 수행합니다. 예약 질문은 서버/APNs와 타이머 경로가 담당합니다.")
+        #endif
     }
 
     @discardableResult
@@ -626,23 +630,12 @@ final class AppState: ObservableObject {
                 return
             }
 
-            backendStatsErrorMessage = "통계 조회 실패: \(error.localizedDescription)"
+            backendStatsErrorMessage = backendErrorDisplayMessage(error, fallback: "통계 조회 실패")
             log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
         }
     }
 
     func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
-        guard isCommunitySignedIn else {
-            if reset {
-                communityQuestions = []
-                communityOffset = 0
-                communityTotalCount = 0
-            }
-            communityErrorMessage = nil
-            isLoadingCommunityQuestions = false
-            return
-        }
-
         let requestID = UUID()
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
@@ -1069,7 +1062,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    func updateCommunityProfile(displayName: String, bio: String = "") async {
+    func updateCommunityProfile(
+        displayName: String,
+        bio: String = "",
+        pageAccess: CommunityPageAccess? = nil
+    ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
         }
@@ -1082,7 +1079,8 @@ final class AppState: ObservableObject {
             communityProfile = try await remotePushBackendClient.updateMyProfile(
                 registration: registration,
                 displayName: displayName,
-                bio: bio
+                bio: bio,
+                pageAccess: pageAccess
             )
             statusMessage = strings.profileSaved
         } catch {
@@ -4707,12 +4705,26 @@ final class AppState: ObservableObject {
 
     private func communityErrorMessage(for error: Error) -> String {
         if let backendError = error as? RemotePushBackendError,
-           case let .httpStatus(statusCode, _) = backendError,
+           case let .httpStatus(statusCode, _, _) = backendError,
            statusCode == 404 {
             return strings.communityUnavailable
         }
 
-        return strings.communityRequestFailed
+        return backendErrorDisplayMessage(error, fallback: strings.communityRequestFailed)
+    }
+
+    private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
+        if let backendError = error as? RemotePushBackendError,
+           let message = backendError.backendMessage,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+
+        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !localized.isEmpty else {
+            return fallback
+        }
+        return localized
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {
@@ -4747,10 +4759,12 @@ final class AppState: ObservableObject {
     nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
         if let backendError = error as? RemotePushBackendError {
             switch backendError {
-            case .httpStatus(let status, let body):
-                let lowercasedBody = body.lowercased()
+            case .httpStatus(let status, let body, let apiError):
+                let lowercasedBody = (apiError?.message ?? body).lowercased()
+                let code = apiError?.code ?? ""
                 return status == 401 ||
                     status == 403 ||
+                    code.contains("OPENAI_API_KEY") ||
                     lowercasedBody.contains("api key") ||
                     lowercasedBody.contains("unauthorized")
             case .invalidResponse:
