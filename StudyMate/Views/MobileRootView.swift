@@ -1599,33 +1599,37 @@ private struct MobileSettingsView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Group {
-                            if showsAPIKey {
-                                TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
-                            } else {
-                                SecureField(strings.openAIAPIKey, text: $appState.draftAPIKey)
+                        HStack(spacing: 8) {
+                            Group {
+                                if showsAPIKey {
+                                    TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
+                                } else {
+                                    SecureField(strings.openAIAPIKey, text: $appState.draftAPIKey)
+                                }
                             }
-                        }
-                        .textContentType(.password)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
+                            .textContentType(.password)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            #endif
 
-                        HStack {
-                            if let validationMessage = appState.apiKeyValidationMessage {
-                                Text(validationMessage)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                                    .lineLimit(2)
-                            }
-
-                            Spacer()
-
-                            Button(showsAPIKey ? strings.hide : strings.show) {
+                            Button {
                                 showsAPIKey.toggle()
+                            } label: {
+                                Image(systemName: showsAPIKey ? "eye.slash" : "eye")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .frame(width: 32, height: 32)
                             }
-                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(showsAPIKey ? strings.hide : strings.show)
+                        }
+
+                        if let validationMessage = appState.apiKeyValidationMessage {
+                            Text(validationMessage)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .lineLimit(2)
                         }
                     }
                     .padding(.vertical, 2)

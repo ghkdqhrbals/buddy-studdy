@@ -441,8 +441,11 @@ private struct SecretsSettingsSection: View {
                     Button {
                         showsAPIKey.toggle()
                     } label: {
-                        Label(showsAPIKey ? strings.hide : strings.show, systemImage: showsAPIKey ? "eye.slash" : "eye")
+                        Image(systemName: showsAPIKey ? "eye.slash" : "eye")
+                            .frame(width: 28, height: 28)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showsAPIKey ? strings.hide : strings.show)
 
                     Button(strings.paste) {
                         appState.applyClipboardOpenAIAPIKey()
