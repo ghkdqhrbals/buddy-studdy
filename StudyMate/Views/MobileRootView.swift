@@ -150,15 +150,7 @@ private struct MobileHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                if !isHomeSearchActive {
-                    HStack {
-                        profileToolbarButton
-                        Spacer()
-                    }
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
+                homeTopControlsSpacer
 
                 MobileRootLargeTitle(strings.tabHome)
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
@@ -335,6 +327,10 @@ private struct MobileHomeView: View {
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .top) {
+            homeTopControls(strings: strings)
+                .zIndex(20)
+        }
         #endif
         .mobileToolbarSearchable(
             isPresented: isSearchVisible || !activeTrimmedSearchText.isEmpty,
@@ -344,9 +340,6 @@ private struct MobileHomeView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                homeToolbarSearchControl(strings: strings)
-            }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
                 profileToolbarButton
@@ -416,6 +409,40 @@ private struct MobileHomeView: View {
         .sheet(item: $selectedCommunityQuestion) { question in
             CommunityQuestionDetailSheet(question: question)
         }
+    }
+
+    @ViewBuilder
+    private var homeTopControlsSpacer: some View {
+        #if os(iOS)
+        Color.clear
+            .frame(height: 48)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        #else
+        EmptyView()
+        #endif
+    }
+
+    @ViewBuilder
+    private func homeTopControls(strings: AppStrings) -> some View {
+        #if os(iOS)
+        HStack(alignment: .center, spacing: 12) {
+            if !isHomeSearchActive {
+                profileToolbarButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
+            Spacer(minLength: 12)
+
+            homeToolbarSearchControl(strings: strings)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.top, 4)
+        .animation(.smooth(duration: 0.22), value: isHomeSearchActive)
+        #else
+        EmptyView()
+        #endif
     }
 
     private var isHomeSearchActive: Bool {
