@@ -221,8 +221,15 @@ struct StatisticsView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                statsToolbarSearchControl(strings: strings)
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    statsToolbarSearchControl(strings: strings)
+                }
+                .sharedBackgroundVisibility(isStatsSearchActive ? .hidden : .automatic)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    statsToolbarSearchControl(strings: strings)
+                }
             }
             #else
             ToolbarItem(placement: .primaryAction) {

@@ -340,8 +340,15 @@ private struct MobileHomeView: View {
                 }
             }
 
-            ToolbarItem(placement: .topBarTrailing) {
-                homeToolbarSearchControl(strings: strings)
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    homeToolbarSearchControl(strings: strings)
+                }
+                .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    homeToolbarSearchControl(strings: strings)
+                }
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {

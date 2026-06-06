@@ -168,8 +168,15 @@ struct HistoryView: View {
         )
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                recordToolbarSearchControl(strings: strings)
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    recordToolbarSearchControl(strings: strings)
+                }
+                .sharedBackgroundVisibility(isRecordSearchActive ? .hidden : .automatic)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    recordToolbarSearchControl(strings: strings)
+                }
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
