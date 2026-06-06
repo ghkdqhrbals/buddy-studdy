@@ -35,6 +35,12 @@ struct PageAccessPrompt: Identifiable, Equatable {
     var message: String
 }
 
+enum EmailCommunitySignInResult: Equatable {
+    case signedIn
+    case verificationRequired
+    case failed
+}
+
 #if os(iOS)
 private final class BackgroundTaskExpiration: @unchecked Sendable {
     private let lock = NSLock()
@@ -1162,11 +1168,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> Bool {
+    func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
             communityErrorMessage = strings.communityRequestFailed
-            return false
+            return .failed
         }
 
         do {
@@ -1186,11 +1192,17 @@ final class AppState: ObservableObject {
                 preserveLocalSettings: false
             )
             await loadCommunityQuestions(reset: true, userInitiated: true)
-            return true
+            return .signedIn
         } catch {
+            if let backendError = error as? RemotePushBackendError,
+               backendError.backendCode == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
+                communityErrorMessage = strings.emailVerificationRequired
+                log(.info, "Email 로그인에 인증코드가 필요합니다.")
+                return .verificationRequired
+            }
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
-            return false
+            return .failed
         }
     }
 

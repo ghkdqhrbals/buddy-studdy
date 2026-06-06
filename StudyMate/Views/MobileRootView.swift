@@ -1221,6 +1221,7 @@ private struct EmailSignInSheet: View {
     @State private var isSubmitting = false
     @State private var isSendingCode = false
     @State private var didSendCode = false
+    @State private var requiresVerification = false
     var onSignedIn: () -> Void
 
     private var strings: AppStrings {
@@ -1229,7 +1230,9 @@ private struct EmailSignInSheet: View {
 
     private var canSubmit: Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalizedEmail.contains("@") && password.count >= 6 && !isSubmitting
+        let trimmedCode = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasRequiredCode = !requiresVerification || trimmedCode.count >= 4
+        return normalizedEmail.contains("@") && password.count >= 6 && hasRequiredCode && !isSubmitting && !isSendingCode
     }
 
     private var canSendCode: Bool {
@@ -1252,15 +1255,20 @@ private struct EmailSignInSheet: View {
                         .textContentType(.password)
                         .submitLabel(.done)
 
-                    TextField(strings.emailVerificationCode, text: $verificationCode)
-                        .textContentType(.oneTimeCode)
-                        .keyboardType(.numberPad)
-                        .submitLabel(.done)
+                    if requiresVerification {
+                        TextField(strings.emailVerificationCode, text: $verificationCode)
+                            .textContentType(.oneTimeCode)
+                            .keyboardType(.numberPad)
+                            .submitLabel(.done)
+                    }
                 } footer: {
-                    Text(strings.emailLoginHelp)
+                    if requiresVerification {
+                        Text(strings.emailVerificationRequired)
+                    }
                 }
 
-                Section {
+                if requiresVerification {
+                    Section {
                     Button {
                         Task {
                             isSendingCode = true
@@ -1292,9 +1300,23 @@ private struct EmailSignInSheet: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+                    }
+                } else if let message = appState.communityErrorMessage,
+                          !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Section {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .keyboardDoneToolbar(strings.done)
+            .onChange(of: email) { _, _ in
+                requiresVerification = false
+                didSendCode = false
+                verificationCode = ""
+                appState.communityErrorMessage = nil
+            }
             .navigationTitle(strings.signInWithEmail)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1309,14 +1331,20 @@ private struct EmailSignInSheet: View {
                         Task {
                             isSubmitting = true
                             let code = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let didSignIn = await appState.signInToCommunity(
+                            let result = await appState.signInToCommunity(
                                 email: email,
                                 password: password,
                                 verificationCode: code.isEmpty ? nil : code
                             )
                             isSubmitting = false
-                            if didSignIn {
+                            switch result {
+                            case .signedIn:
                                 onSignedIn()
+                            case .verificationRequired:
+                                requiresVerification = true
+                                didSendCode = false
+                            case .failed:
+                                break
                             }
                         }
                     } label: {
@@ -1324,7 +1352,7 @@ private struct EmailSignInSheet: View {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
-                            Text(strings.done)
+                            Text(strings.communityLogin)
                         }
                     }
                     .disabled(!canSubmit)

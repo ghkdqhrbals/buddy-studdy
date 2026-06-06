@@ -1644,6 +1644,12 @@ struct AppStrings {
     var sendVerificationCode: String { text("인증코드 보내기", "Send Code") }
     var resendVerificationCode: String { text("다시 보내기", "Resend") }
     var emailVerificationSent: String { text("인증코드를 보냈습니다.", "Verification code sent.") }
+    var emailVerificationRequired: String {
+        text(
+            "처음 사용하는 이메일입니다. 인증코드를 보낸 뒤 입력해 로그인하세요.",
+            "This email is new. Send a verification code, then enter it to sign in."
+        )
+    }
     var signInRequiredTitle: String { text("로그인이 필요합니다", "Sign In Required") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
