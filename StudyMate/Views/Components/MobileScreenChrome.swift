@@ -131,6 +131,8 @@ struct MobileToolbarSearchField: View {
 
 struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var keepsSearchFieldMounted = false
+    @State private var searchFieldUnmountTask: Task<Void, Never>?
 
     var isExpanded: Bool
     @Binding var text: String
@@ -160,18 +162,21 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
                     .fill(searchBackground)
                     .frame(width: containerWidth, height: height)
 
-                MobileToolbarSearchField(
-                    text: $text,
-                    prompt: prompt,
-                    focus: focus,
-                    closeAccessibilityLabel: closeAccessibilityLabel,
-                    width: fullWidth,
-                    height: height,
-                    showsBackground: false,
-                    onSubmit: onSubmit,
-                    onClose: onClose
-                )
-                .frame(width: fullWidth, height: height, alignment: .trailing)
+                if keepsSearchFieldMounted {
+                    MobileToolbarSearchField(
+                        text: $text,
+                        prompt: prompt,
+                        focus: focus,
+                        closeAccessibilityLabel: closeAccessibilityLabel,
+                        width: fullWidth,
+                        height: height,
+                        showsBackground: false,
+                        onSubmit: onSubmit,
+                        onClose: onClose
+                    )
+                    .frame(width: fullWidth, height: height, alignment: .trailing)
+                    .disabled(!isExpanded)
+                }
             }
             .frame(width: containerWidth, height: height, alignment: .trailing)
             .opacity(isExpanded ? 1 : 0)
@@ -181,6 +186,16 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
         .frame(width: containerWidth, height: height, alignment: .trailing)
         .animation(.smooth(duration: isExpanded ? 0.34 : 0.22), value: isExpanded)
         .clipped()
+        .onAppear {
+            keepsSearchFieldMounted = isExpanded
+        }
+        .onChange(of: isExpanded) { _, expanded in
+            updateSearchFieldMountState(isExpanded: expanded)
+        }
+        .onDisappear {
+            searchFieldUnmountTask?.cancel()
+            searchFieldUnmountTask = nil
+        }
     }
 
     private var resolvedWidth: CGFloat {
@@ -190,6 +205,24 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 
     private var searchBackground: Color {
         colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.72)
+    }
+
+    private func updateSearchFieldMountState(isExpanded expanded: Bool) {
+        searchFieldUnmountTask?.cancel()
+
+        if expanded {
+            keepsSearchFieldMounted = true
+            return
+        }
+
+        focus.wrappedValue = false
+        searchFieldUnmountTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+            keepsSearchFieldMounted = false
+        }
     }
 }
 
