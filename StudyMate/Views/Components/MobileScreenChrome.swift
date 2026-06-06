@@ -63,11 +63,16 @@ struct MobileToolbarIconButtonLabel: View {
 }
 
 private struct MobileSearchCapsuleBackground: View {
-    var color: Color
+    var fill: Color
+    var stroke: Color
 
     var body: some View {
         Capsule()
-            .fill(color)
+            .fill(fill)
+            .overlay {
+                Capsule()
+                    .stroke(stroke, lineWidth: 0.2)
+            }
     }
 }
 
@@ -132,7 +137,7 @@ struct MobileToolbarSearchField: View {
     }
 
     private var searchBackground: Color {
-        MobileSearchColors.toolbarSearchBackground
+        MobileSearchColors.toolbarSearchFill
     }
 }
 
@@ -164,7 +169,10 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
                 .allowsHitTesting(!isExpanded)
 
             ZStack(alignment: .trailing) {
-                MobileSearchCapsuleBackground(color: searchBackground)
+                MobileSearchCapsuleBackground(
+                    fill: searchBackground,
+                    stroke: MobileSearchColors.toolbarSearchStroke
+                )
                     .frame(width: containerWidth, height: height)
 
                 if keepsSearchFieldMounted {
@@ -209,7 +217,7 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
     }
 
     private var searchBackground: Color {
-        MobileSearchColors.toolbarSearchBackground
+        MobileSearchColors.toolbarSearchFill
     }
 
     private func updateSearchFieldMountState(isExpanded expanded: Bool) {
@@ -232,9 +240,15 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 }
 
 private enum MobileSearchColors {
-    static var toolbarSearchBackground: Color {
+    static var toolbarSearchFill: Color {
         Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? .systemGray4 : .secondarySystemFill
+            traits.userInterfaceStyle == .dark ? .secondarySystemBackground : .secondarySystemFill
+        })
+    }
+
+    static var toolbarSearchStroke: Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? .separator : .separator
         })
     }
 }
@@ -244,7 +258,10 @@ private extension View {
     func mobileToolbarSearchBackground(_ color: Color?) -> some View {
         if let color {
             background {
-                MobileSearchCapsuleBackground(color: color)
+                MobileSearchCapsuleBackground(
+                    fill: color,
+                    stroke: MobileSearchColors.toolbarSearchStroke
+                )
             }
         } else {
             self
