@@ -6,13 +6,20 @@ This dashboard contains a Kibana-style log timeline plus one log search panel: *
 
 Import `docs/observability/grafana-loki-search-dashboard.json` in Grafana, then select the Loki data source from the dashboard variables.
 
-API latency percentiles are intentionally kept in a separate dashboard:
+API performance and latency metrics are intentionally kept in a separate dashboard:
 
 - `docs/observability/grafana-api-latency-dashboard.json`
 - Dashboard UID: `buddystuddy-api-latency`
-- Panels: `p50 API Latency`, `p95 API Latency`, `p99 API Latency`
+- Dashboard title: `BuddyStuddy API Performance`
 
-The latency dashboard is table/stat oriented, not time-series oriented. Each percentile panel groups all endpoints for that percentile together and calculates values over the selected dashboard time range.
+The performance dashboard combines Datadog/Sentry-style operational summaries with grouped latency tables:
+
+- Request summary: total requests, error responses, error rate, and worst p95 in the selected range.
+- Traffic trends: `API Calls by Route`, `Responses by Status`, and `Error Responses by Route`.
+- Latency trend: `p99 Trend by Route`.
+- Endpoint comparison tables: `p50 API Latency`, `p95 API Latency`, and `p99 API Latency`.
+
+The p50, p95, and p99 panels remain separate table panels. Each percentile panel groups endpoints for that percentile together and calculates values over the selected dashboard time range.
 
 ## Query Controls
 
@@ -47,16 +54,35 @@ The timeline query uses a hidden Grafana interval variable, `timelineBucket`, wi
 
 The time series uses full-width bars (`barWidthFactor=1`) so each bucket visually fills its interval instead of rendering as a thin spike.
 
-## API Latency Dashboard
+## API Performance Dashboard
 
-The `BuddyStuddy API Latency` dashboard calculates p50, p95, and p99 response latency from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables aggregate correctly:
+The `BuddyStuddy API Performance` dashboard calculates traffic, error, and latency metrics from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables aggregate correctly:
 
 ```text
 path=/api/v1/me/records/71
 route=/api/v1/me/records/{record_id}
 ```
 
-Each percentile is a separate table panel:
+API call frequency is shown as a route-level time series:
+
+```logql
+sum by (method, route) (
+  rate(
+    <selected log query>
+      |= `api_response`
+      | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
+      | status=~".+" [$__rate_interval]
+  )
+)
+```
+
+Errors are derived from HTTP status codes in the response log:
+
+```logql
+status=~"[45].."
+```
+
+Each percentile is still a separate table panel:
 
 - `p50 API Latency`
 - `p95 API Latency`
