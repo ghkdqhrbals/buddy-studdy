@@ -1,6 +1,6 @@
 # BuddyStuddy Loki Search Dashboard
 
-This dashboard contains a Kibana-style log timeline plus one log search panel: **Log Timeline** and **Search Results**.
+This dashboard contains a Kibana-style log timeline, API latency percentile graph, and one log search panel: **Log Timeline**, **API Latency Percentiles**, and **Search Results**.
 
 ## Import
 
@@ -40,6 +40,31 @@ The timeline query must stay aligned with `Search Results`: `${labelSelector:raw
 The timeline query uses a hidden Grafana interval variable, `timelineBucket`, with `auto_count=60` and `auto_min=10s`. This keeps the graph aggregated into roughly 60 time buckets for the selected range instead of rendering one-second spikes across the whole panel.
 
 The time series uses full-width bars (`barWidthFactor=1`) so each bucket visually fills its interval instead of rendering as a thin spike.
+
+## API Latency Percentiles
+
+The `API Latency Percentiles` panel calculates p50, p95, and p99 response latency by `method` and `path` from backend `api_response` logs.
+
+The backend emits response logs as prefixed JSON:
+
+```text
+api_response {"method":"GET","path":"/api/v1/...","status":200,"durationMs":12.34,...}
+```
+
+Because the log line is not pure JSON, the percentile panel intentionally uses `regexp` extraction instead of a raw `| json` parser:
+
+```logql
+quantile_over_time(
+  0.95,
+  <selected log query>
+    |= `api_response`
+    | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
+    | unwrap durationMs
+    | __error__="" [$timelineBucket]
+) by (method, path)
+```
+
+This panel follows the same `Label Selector`, `Label Filters`, and `LogQL Search` controls. Keep `LogQL Search` to line filters (`|=`, `!=`, `|~`, `!~`) when using latency percentiles; parser or formatting stages in the search box can conflict with the percentile extraction stages.
 
 ## Elasticsearch-Style Log Browsing
 
