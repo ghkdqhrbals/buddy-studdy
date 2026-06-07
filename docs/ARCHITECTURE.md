@@ -49,6 +49,7 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
   - Calls OpenAI for API-key validation, question generation, and answer grading.
   - Stores generated questions in PostgreSQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
+  - Public question like/comment counts use source-of-truth reaction tables plus a delayed `question_stats` read model; see `docs/REACTION_AGGREGATION.md`.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
 
 - `Views`

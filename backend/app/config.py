@@ -73,6 +73,10 @@ class Settings:
     app_port: int
     scheduler_enabled: bool
     scheduler_poll_seconds: int
+    reaction_aggregation_enabled: bool
+    reaction_aggregation_poll_seconds: int
+    reaction_aggregation_batch_size: int
+    reaction_reconcile_every_cycles: int
     openai_model: str
     openai_api_key: str | None
     backend_api_token: str | None
@@ -126,6 +130,19 @@ class Settings:
             app_port=int(os.getenv("APP_PORT", "8080")),
             scheduler_enabled=_bool_env("SCHEDULER_ENABLED", True),
             scheduler_poll_seconds=max(5, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
+            reaction_aggregation_enabled=_bool_env("REACTION_AGGREGATION_ENABLED", True),
+            reaction_aggregation_poll_seconds=max(
+                1,
+                _int_secret_env("REACTION_AGGREGATION_POLL_SECONDS", secret_values, "reactionAggregationPollSeconds", 3),
+            ),
+            reaction_aggregation_batch_size=max(
+                1,
+                _int_secret_env("REACTION_AGGREGATION_BATCH_SIZE", secret_values, "reactionAggregationBatchSize", 1000),
+            ),
+            reaction_reconcile_every_cycles=max(
+                1,
+                _int_secret_env("REACTION_RECONCILE_EVERY_CYCLES", secret_values, "reactionReconcileEveryCycles", 20),
+            ),
             openai_model=os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             backend_api_token=_secret_env("BACKEND_API_TOKEN", secret_values, "backendApiToken"),

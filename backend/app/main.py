@@ -62,6 +62,7 @@ from .openai_client import OpenAIQuestionClient
 from .openai_models import DEFAULT_OPENAI_MODEL, OPENAI_MODEL_OPTIONS, normalize_openai_model
 from .google_auth import GoogleAuthError, verify_google_id_token
 from .reporting import EmailDeliveryError, EmailDeliveryFailureReason, send_email_verification_code, send_report_email
+from .reaction_aggregator import QuestionReactionAggregator
 from .scheduler import QuestionScheduler
 
 
@@ -69,6 +70,7 @@ settings = Settings.load()
 database = Database(path=settings.database_path, url=settings.database_url)
 email_verification_store = EmailVerificationStore(settings)
 scheduler: QuestionScheduler | None = None
+reaction_aggregator: QuestionReactionAggregator | None = None
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -103,14 +105,19 @@ def _docs_urls() -> tuple[str | None, str | None, str | None]:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global scheduler
+    global scheduler, reaction_aggregator
     database.init()
     if settings.scheduler_enabled:
         scheduler = QuestionScheduler(settings=settings, database=database)
         scheduler.start()
+    if settings.reaction_aggregation_enabled:
+        reaction_aggregator = QuestionReactionAggregator(settings=settings, database=database)
+        reaction_aggregator.start()
     try:
         yield
     finally:
+        if reaction_aggregator is not None:
+            await reaction_aggregator.stop()
         if scheduler is not None:
             await scheduler.stop()
 
@@ -1089,3 +1096,23 @@ async def run_scheduler_once(request: Request) -> dict:
         local_scheduler = QuestionScheduler(settings=settings, database=database)
         count = await local_scheduler.run_once()
     return {"sent": count, "client": request.client.host if request.client else None}
+
+
+@app.post("/api/v1/admin/reactions/aggregate/run-once", dependencies=[Depends(verify_backend_token)])
+async def run_reaction_aggregation_once(request: Request) -> dict:
+    if reaction_aggregator is not None:
+        processed = await reaction_aggregator.run_once()
+    else:
+        local_aggregator = QuestionReactionAggregator(settings=settings, database=database)
+        processed = await local_aggregator.run_once()
+    return {"processed": processed, "client": request.client.host if request.client else None}
+
+
+@app.post("/api/v1/admin/reactions/reconcile/run-once", dependencies=[Depends(verify_backend_token)])
+async def run_reaction_reconcile_once(request: Request) -> dict:
+    if reaction_aggregator is not None:
+        reconciled = await reaction_aggregator.reconcile_once()
+    else:
+        local_aggregator = QuestionReactionAggregator(settings=settings, database=database)
+        reconciled = await local_aggregator.reconcile_once()
+    return {"reconciled": reconciled, "client": request.client.host if request.client else None}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
@@ -11,16 +12,19 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
-from sqlalchemy import Index, asc, create_engine, func, literal, text
+from sqlalchemy import Index, asc, create_engine, func, text
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
+    AggregationCheckpoint,
     Base,
     Device,
     Question,
     QuestionComment,
     QuestionLike,
+    QuestionReactionEvent,
+    QuestionStats,
     Report,
     Schedule,
     User,
@@ -112,6 +116,11 @@ class Database:
         self._lock = threading.RLock()
         self.engine = self._create_engine()
         self._session_factory = sessionmaker(bind=self.engine, class_=Session, expire_on_commit=False)
+        self._public_questions_cache: dict[
+            tuple[str, int, int, str, str],
+            tuple[float, list[dict[str, Any]], int],
+        ] = {}
+        self.public_questions_cache_ttl_seconds = 7.0
 
     def _create_engine(self):
         if self.url:
@@ -217,6 +226,7 @@ class Database:
     def init(self) -> None:
         Base.metadata.create_all(self.engine)
         self._ensure_schema_compatibility()
+        self.backfill_question_stats()
 
     def _ensure_schema_compatibility(self) -> None:
         inspector = inspect(self.engine)
@@ -419,6 +429,40 @@ class Database:
                         "ON questions (user_id, created_at DESC)"
                     )
                 )
+            if "question_likes" in table_names:
+                like_indexes = {idx["name"] for idx in inspector.get_indexes("question_likes")}
+                if "idx_question_likes_user_question" not in like_indexes:
+                    session.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_question_likes_user_question "
+                            "ON question_likes (user_id, question_id)"
+                        )
+                    )
+            if "question_comments" in table_names:
+                comment_indexes = {idx["name"] for idx in inspector.get_indexes("question_comments")}
+                if "idx_question_comments_question_created" not in comment_indexes:
+                    session.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_question_comments_question_created "
+                            "ON question_comments (question_id, deleted_at, created_at DESC)"
+                        )
+                    )
+            if "question_reaction_events" in table_names:
+                event_indexes = {idx["name"] for idx in inspector.get_indexes("question_reaction_events")}
+                if "idx_question_reaction_events_id" not in event_indexes:
+                    session.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_question_reaction_events_id "
+                            "ON question_reaction_events (id)"
+                        )
+                    )
+                if "idx_question_reaction_events_question_id" not in event_indexes:
+                    session.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_question_reaction_events_question_id "
+                            "ON question_reaction_events (question_id, id)"
+                        )
+                    )
 
     def _get_device(self, session: Session, device_id: str) -> Device | None:
         return session.query(Device).filter(Device.device_id == device_id).first()
@@ -1058,7 +1102,9 @@ class Database:
             mapping.updated_at = now
             mapping.last_seen_at = now
             session.flush()
-            return self.user_profile_response(user)
+            profile = self.user_profile_response(user)
+        self._public_questions_cache.clear()
+        return profile
 
     def withdraw_device_user(self, device_id: str) -> dict[str, Any] | None:
         now = self._utc_now()
@@ -1146,7 +1192,9 @@ class Database:
                 now=now,
             )
             session.flush()
-            return self.user_profile_response(anonymous_user)
+            profile = self.user_profile_response(anonymous_user)
+        self._public_questions_cache.clear()
+        return profile
 
     def create_report(
         self,
@@ -1301,46 +1349,33 @@ class Database:
         topic: str | None = None,
         viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        with self.connect() as session:
-            like_counts = (
-                session.query(
-                    QuestionLike.question_id.label("question_id"),
-                    func.count(QuestionLike.id).label("like_count"),
-                )
-                .group_by(QuestionLike.question_id)
-                .subquery()
-            )
-            comment_counts = (
-                session.query(
-                    QuestionComment.question_id.label("question_id"),
-                    func.count(QuestionComment.id).label("comment_count"),
-                )
-                .filter(QuestionComment.deleted_at.is_(None))
-                .group_by(QuestionComment.question_id)
-                .subquery()
-            )
-            viewer_likes = None
-            if viewer_user_id is not None:
-                viewer_likes = (
-                    session.query(QuestionLike.question_id.label("question_id"))
-                    .filter(QuestionLike.user_id == viewer_user_id)
-                    .subquery()
-                )
+        normalized_topic = (topic or "").strip()
+        cache_key = (
+            exclude_device_id or "",
+            int(limit),
+            int(offset),
+            normalized_topic.lower(),
+            "v1",
+        )
+        now_monotonic = time.monotonic()
+        cached = self._public_questions_cache.get(cache_key)
+        if cached is not None:
+            expires_at, cached_questions, cached_total = cached
+            if expires_at > now_monotonic:
+                return self._merge_public_question_viewer_likes(cached_questions, cached_total, viewer_user_id)
+            self._public_questions_cache.pop(cache_key, None)
 
+        with self.connect() as session:
             query = (
                 session.query(
                     Question,
                     User,
-                    func.coalesce(like_counts.c.like_count, 0),
-                    func.coalesce(comment_counts.c.comment_count, 0),
-                    viewer_likes.c.question_id.isnot(None) if viewer_likes is not None else literal(False),
+                    func.coalesce(QuestionStats.like_count, 0),
+                    func.coalesce(QuestionStats.comment_count, 0),
                 )
                 .join(User, Question.user_id == User.id)
-                .outerjoin(like_counts, like_counts.c.question_id == Question.id)
-                .outerjoin(comment_counts, comment_counts.c.question_id == Question.id)
+                .outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
             )
-            if viewer_likes is not None:
-                query = query.outerjoin(viewer_likes, viewer_likes.c.question_id == Question.id)
 
             query = query.filter(
                 Question.deleted_at.is_(None),
@@ -1353,8 +1388,8 @@ class Database:
             if exclude_device_id:
                 query = query.filter(Question.device_id != exclude_device_id)
 
-            if topic:
-                normalized = f"%{topic.strip()}%"
+            if normalized_topic:
+                normalized = f"%{normalized_topic}%"
                 query = query.filter(Question.topic.ilike(normalized))
 
             total_row = query.count()
@@ -1365,16 +1400,56 @@ class Database:
                 .all()
             )
 
-            return [
+            questions = [
                 self.community_question_response(
                     question,
                     author=author,
                     like_count=int(like_count or 0),
                     comment_count=int(comment_count or 0),
-                    is_liked_by_me=bool(is_liked_by_me),
+                    is_liked_by_me=False,
                 )
-                for question, author, like_count, comment_count, is_liked_by_me in rows
-            ], int(total_row)
+                for question, author, like_count, comment_count in rows
+            ]
+
+        self._public_questions_cache[cache_key] = (
+            now_monotonic + self.public_questions_cache_ttl_seconds,
+            questions,
+            int(total_row),
+        )
+        return self._merge_public_question_viewer_likes(questions, int(total_row), viewer_user_id)
+
+    def _merge_public_question_viewer_likes(
+        self,
+        questions: list[dict[str, Any]],
+        total: int,
+        viewer_user_id: int | None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        copied_questions = [dict(question) for question in questions]
+        if viewer_user_id is None or not copied_questions:
+            return copied_questions, total
+
+        question_ids = [
+            record_id
+            for record_id in (self._record_id_value(question.get("id")) for question in copied_questions)
+            if record_id is not None
+        ]
+        if not question_ids:
+            return copied_questions, total
+
+        with self.connect() as session:
+            liked_ids = {
+                row[0]
+                for row in (
+                    session.query(QuestionLike.question_id)
+                    .filter(QuestionLike.user_id == viewer_user_id, QuestionLike.question_id.in_(question_ids))
+                    .all()
+                )
+            }
+
+        for question in copied_questions:
+            record_id = self._record_id_value(question.get("id"))
+            question["isLikedByMe"] = record_id in liked_ids
+        return copied_questions, total
 
     def stats_response(
         self,
@@ -1500,6 +1575,8 @@ class Database:
             session.flush()
             record_id = row.id
 
+        if is_public:
+            self._public_questions_cache.clear()
         record = self.get_record(device_id, str(record_id), user_id=user_id)
         if record is None:
             raise RuntimeError("Inserted question could not be loaded.")
@@ -1528,6 +1605,7 @@ class Database:
                 return None
             row.is_public = bool(is_public)
             row.updated_at = now
+        self._public_questions_cache.clear()
         return self.get_record(device_id, record_id, user_id=user_id)
 
     def set_record_answer(
@@ -1591,6 +1669,9 @@ class Database:
             row.graded_at = now
             row.status = "graded"
             row.updated_at = now
+            should_clear_public_cache = row.is_public
+        if should_clear_public_cache:
+            self._public_questions_cache.clear()
         return self.get_record(device_id, record_id, user_id=user_id)
 
     def skip_record(self, device_id: str, record_id: str, user_id: int | None = None) -> dict[str, Any] | None:
@@ -1636,6 +1717,7 @@ class Database:
             session.query(QuestionLike).filter(QuestionLike.question_id == row.id).delete(synchronize_session=False)
             session.query(QuestionComment).filter(QuestionComment.question_id == row.id).delete(synchronize_session=False)
             session.delete(row)
+        self._public_questions_cache.clear()
 
     def clear_records(self, device_id: str, user_id: int | None = None) -> None:
         with self.connect() as session:
@@ -1653,6 +1735,8 @@ class Database:
                 session.query(QuestionComment).filter(QuestionComment.question_id.in_(row_ids)).delete(synchronize_session=False)
             for row in rows:
                 session.delete(row)
+        if row_ids:
+            self._public_questions_cache.clear()
 
     def defer_schedule(
         self,
@@ -1918,10 +2002,24 @@ class Database:
                 .filter(QuestionLike.question_id == question.id, QuestionLike.user_id == user_id)
                 .first()
             )
+            event_type: str | None = None
             if is_liked and existing is None:
-                session.add(QuestionLike(question_id=question.id, user_id=user_id, created_at=self._utc_now()))
+                now = self._utc_now()
+                session.add(QuestionLike(question_id=question.id, user_id=user_id, created_at=now))
+                event_type = "LIKE_CREATED"
             elif not is_liked and existing is not None:
                 session.delete(existing)
+                event_type = "LIKE_REMOVED"
+            if event_type is not None:
+                session.add(
+                    QuestionReactionEvent(
+                        question_id=question.id,
+                        user_id=user_id,
+                        event_type=event_type,
+                        target_id=None,
+                        created_at=self._utc_now(),
+                    )
+                )
             session.flush()
 
             like_count = session.query(QuestionLike).filter(QuestionLike.question_id == question.id).count()
@@ -1984,7 +2082,145 @@ class Database:
             )
             session.add(comment)
             session.flush()
+            session.add(
+                QuestionReactionEvent(
+                    question_id=question.id,
+                    user_id=user_id,
+                    event_type="COMMENT_CREATED",
+                    target_id=comment.id,
+                    created_at=now,
+                )
+            )
+            session.flush()
             return self.community_comment_response(comment, author)
+
+    def aggregate_question_reaction_events(self, batch_size: int = 1000) -> int:
+        with self.connect() as session:
+            checkpoint = (
+                session.query(AggregationCheckpoint)
+                .filter(AggregationCheckpoint.name == "question_reactions")
+                .with_for_update()
+                .first()
+            )
+            now = self._utc_now()
+            if checkpoint is None:
+                checkpoint = AggregationCheckpoint(
+                    name="question_reactions",
+                    last_event_id=0,
+                    updated_at=now,
+                )
+                session.add(checkpoint)
+                session.flush()
+
+            events = (
+                session.query(QuestionReactionEvent)
+                .filter(QuestionReactionEvent.id > checkpoint.last_event_id)
+                .order_by(QuestionReactionEvent.id.asc())
+                .limit(max(1, batch_size))
+                .all()
+            )
+            if not events:
+                return 0
+
+            deltas: dict[int, dict[str, int]] = {}
+            for event in events:
+                question_delta = deltas.setdefault(event.question_id, {"like": 0, "comment": 0})
+                if event.event_type == "LIKE_CREATED":
+                    question_delta["like"] += 1
+                elif event.event_type == "LIKE_REMOVED":
+                    question_delta["like"] -= 1
+                elif event.event_type == "COMMENT_CREATED":
+                    question_delta["comment"] += 1
+                elif event.event_type == "COMMENT_REMOVED":
+                    question_delta["comment"] -= 1
+
+            for question_id, delta in deltas.items():
+                stats = session.query(QuestionStats).filter(QuestionStats.question_id == question_id).first()
+                if stats is None:
+                    stats = QuestionStats(
+                        question_id=question_id,
+                        like_count=0,
+                        comment_count=0,
+                        verified_at=None,
+                        updated_at=now,
+                    )
+                    session.add(stats)
+                    session.flush()
+                stats.like_count = max(0, int(stats.like_count or 0) + delta["like"])
+                stats.comment_count = max(0, int(stats.comment_count or 0) + delta["comment"])
+                stats.updated_at = now
+
+            checkpoint.last_event_id = max(event.id for event in events)
+            checkpoint.updated_at = now
+            return len(events)
+
+    def reconcile_question_stats(self, question_ids: list[int] | None = None, limit: int = 100) -> int:
+        with self.connect() as session:
+            if question_ids is None:
+                rows = (
+                    session.query(QuestionStats.question_id)
+                    .order_by(QuestionStats.verified_at.isnot(None), QuestionStats.verified_at.asc(), QuestionStats.updated_at.asc())
+                    .limit(max(1, limit))
+                    .all()
+                )
+                question_ids = [row[0] for row in rows]
+            if not question_ids:
+                return 0
+
+            now = self._utc_now()
+            for question_id in question_ids:
+                real_like_count = (
+                    session.query(QuestionLike)
+                    .filter(QuestionLike.question_id == question_id)
+                    .count()
+                )
+                real_comment_count = (
+                    session.query(QuestionComment)
+                    .filter(QuestionComment.question_id == question_id, QuestionComment.deleted_at.is_(None))
+                    .count()
+                )
+                stats = session.query(QuestionStats).filter(QuestionStats.question_id == question_id).first()
+                if stats is None:
+                    stats = QuestionStats(question_id=question_id, like_count=0, comment_count=0, updated_at=now)
+                    session.add(stats)
+                    session.flush()
+                stats.like_count = int(real_like_count)
+                stats.comment_count = int(real_comment_count)
+                stats.verified_at = now
+                stats.updated_at = now
+            self._public_questions_cache.clear()
+            return len(question_ids)
+
+    def backfill_question_stats(self) -> int:
+        with self.connect() as session:
+            question_ids = [row[0] for row in session.query(Question.id).all()]
+            if not question_ids:
+                return 0
+
+            now = self._utc_now()
+            for question_id in question_ids:
+                if session.query(QuestionStats).filter(QuestionStats.question_id == question_id).first() is not None:
+                    continue
+                real_like_count = (
+                    session.query(QuestionLike)
+                    .filter(QuestionLike.question_id == question_id)
+                    .count()
+                )
+                real_comment_count = (
+                    session.query(QuestionComment)
+                    .filter(QuestionComment.question_id == question_id, QuestionComment.deleted_at.is_(None))
+                    .count()
+                )
+                session.add(
+                    QuestionStats(
+                        question_id=question_id,
+                        like_count=int(real_like_count),
+                        comment_count=int(real_comment_count),
+                        verified_at=now,
+                        updated_at=now,
+                    )
+                )
+            return len(question_ids)
 
     def community_comment_response(self, row: QuestionComment, author: User) -> dict[str, Any]:
         return {

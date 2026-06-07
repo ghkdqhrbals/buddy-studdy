@@ -211,6 +211,35 @@ class QuestionComment(Base):
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
+class QuestionStats(Base):
+    __tablename__ = "question_stats"
+
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), primary_key=True)
+    like_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    comment_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
+class QuestionReactionEvent(Base):
+    __tablename__ = "question_reaction_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
+class AggregationCheckpoint(Base):
+    __tablename__ = "aggregation_checkpoints"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_event_id: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
 Index("idx_schedules_due", Schedule.enabled, Schedule.next_due_at)
 Index("idx_schedules_due_device_user", Schedule.enabled, Schedule.next_due_at, Schedule.device_id, Schedule.user_id)
 Index("idx_schedules_device_user", Schedule.device_id, Schedule.user_id)
@@ -222,7 +251,10 @@ Index("idx_questions_device_visible_created", Question.device_id, Question.delet
 Index("idx_questions_device_pending", Question.device_id, Question.deleted_at, Question.skipped_at, Question.score, Question.status)
 Index("idx_questions_device_scored_activity", Question.device_id, Question.deleted_at, Question.score, Question.answered_at, Question.created_at)
 Index("idx_questions_public", Question.is_public, Question.deleted_at, Question.created_at.desc())
+Index("idx_question_likes_user_question", QuestionLike.user_id, QuestionLike.question_id)
 Index("idx_question_comments_question_created", QuestionComment.question_id, QuestionComment.deleted_at, QuestionComment.created_at.desc())
+Index("idx_question_reaction_events_id", QuestionReactionEvent.id)
+Index("idx_question_reaction_events_question_id", QuestionReactionEvent.question_id, QuestionReactionEvent.id)
 
 
 def utc_now() -> datetime:

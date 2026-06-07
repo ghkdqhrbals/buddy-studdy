@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.storage.models import Device, Schedule, UserDevice, UTC, as_utc_datetime
+from app.storage.models import Device, QuestionStats, Schedule, UserDevice, UTC, as_utc_datetime
 from app.storage.repository import Database, transactional
 
 
@@ -1181,6 +1181,7 @@ def test_public_question_likes_and_comments_are_counted(db: Database):
     assert created_comment is not None
     assert created_comment["body"] == "Helpful"
 
+    assert db.aggregate_question_reaction_events() == 2
     questions, total = db.list_public_questions(
         exclude_device_id=None,
         limit=20,
@@ -1197,3 +1198,145 @@ def test_public_question_likes_and_comments_are_counted(db: Database):
     comment_rows, comment_total = comments
     assert comment_total == 1
     assert comment_rows[0]["author"]["displayName"] == "Viewer"
+
+
+def test_public_question_list_uses_cached_counts_but_merges_viewer_like_state(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-social-cache",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-cache-author",
+        email="public-social-cache-author@example.com",
+        display_name="Author",
+    )
+    assert author is not None
+    author_id = int(author["id"])
+    question = db.create_question(
+        device_id=device_id,
+        user_id=author_id,
+        topic="Swift",
+        difficulty_level=7,
+        question="What is Sendable?",
+        expected_answer_hint="concurrency",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="It marks concurrency-safe values.",
+        score=90,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=author_id,
+    )
+
+    viewer = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-cache-viewer",
+        email="public-social-cache-viewer@example.com",
+        display_name="Viewer",
+    )
+    assert viewer is not None
+    viewer_id = int(viewer["id"])
+
+    questions, total = db.list_public_questions(exclude_device_id=None, limit=20, offset=0, viewer_user_id=viewer_id)
+    assert total == 1
+    assert questions[0]["likeCount"] == 0
+    assert questions[0]["isLikedByMe"] is False
+
+    db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    cached_questions, cached_total = db.list_public_questions(
+        exclude_device_id=None,
+        limit=20,
+        offset=0,
+        viewer_user_id=viewer_id,
+    )
+    assert cached_total == 1
+    assert cached_questions[0]["likeCount"] == 0
+    assert cached_questions[0]["isLikedByMe"] is True
+
+    assert db.aggregate_question_reaction_events() == 1
+    db._public_questions_cache.clear()
+    fresh_questions, fresh_total = db.list_public_questions(
+        exclude_device_id=None,
+        limit=20,
+        offset=0,
+        viewer_user_id=viewer_id,
+    )
+    assert fresh_total == 1
+    assert fresh_questions[0]["likeCount"] == 1
+    assert fresh_questions[0]["isLikedByMe"] is True
+
+
+def test_question_stats_checkpoint_and_reconcile_repair_counts(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-social-reconcile",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-reconcile-author",
+        email="public-social-reconcile-author@example.com",
+        display_name="Author",
+    )
+    viewer = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-reconcile-viewer",
+        email="public-social-reconcile-viewer@example.com",
+        display_name="Viewer",
+    )
+    assert author is not None
+    assert viewer is not None
+    author_id = int(author["id"])
+    viewer_id = int(viewer["id"])
+    question = db.create_question(
+        device_id=device_id,
+        user_id=author_id,
+        topic="Swift",
+        difficulty_level=7,
+        question="What is MainActor?",
+        expected_answer_hint="main thread isolation",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="It isolates work to the main actor.",
+        score=93,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=author_id,
+    )
+
+    db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    db.create_public_question_comment(question["id"], user_id=viewer_id, body="Useful")
+    assert db.aggregate_question_reaction_events(batch_size=1) == 1
+    assert db.aggregate_question_reaction_events(batch_size=10) == 1
+
+    questions, _ = db.list_public_questions(exclude_device_id=None, limit=20, offset=0)
+    assert questions[0]["likeCount"] == 1
+    assert questions[0]["commentCount"] == 1
+
+    with db.connect() as session:
+        stats = session.query(QuestionStats).filter(QuestionStats.question_id == int(question["id"])).first()
+        assert stats is not None
+        stats.like_count = 99
+        stats.comment_count = 99
+
+    assert db.reconcile_question_stats(question_ids=[int(question["id"])]) == 1
+    db._public_questions_cache.clear()
+    repaired_questions, _ = db.list_public_questions(exclude_device_id=None, limit=20, offset=0)
+    assert repaired_questions[0]["likeCount"] == 1
+    assert repaired_questions[0]["commentCount"] == 1
