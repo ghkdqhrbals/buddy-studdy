@@ -205,8 +205,8 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "quantile_over_time(0.50, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, path)",
-          "legendFormat": "p50 {{method}} {{path}}",
+          "expr": "quantile_over_time(0.50, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, route)",
+          "legendFormat": "p50 {{method}} {{route}}",
           "queryType": "range",
           "refId": "P50"
         },
@@ -216,8 +216,8 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "quantile_over_time(0.95, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, path)",
-          "legendFormat": "p95 {{method}} {{path}}",
+          "expr": "quantile_over_time(0.95, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, route)",
+          "legendFormat": "p95 {{method}} {{route}}",
           "queryType": "range",
           "refId": "P95"
         },
@@ -227,8 +227,8 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "quantile_over_time(0.99, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, path)",
-          "legendFormat": "p99 {{method}} {{path}}",
+          "expr": "quantile_over_time(0.99, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$timelineBucket]) by (method, route)",
+          "legendFormat": "p99 {{method}} {{route}}",
           "queryType": "range",
           "refId": "P99"
         }

@@ -43,13 +43,15 @@ The time series uses full-width bars (`barWidthFactor=1`) so each bucket visuall
 
 ## API Latency Percentiles
 
-The `API Latency Percentiles` panel calculates p50, p95, and p99 response latency by `method` and `path` from backend `api_response` logs.
+The `API Latency Percentiles` panel calculates p50, p95, and p99 response latency by `method` and normalized route template from backend `api_response` logs.
 
 The backend emits response logs as prefixed JSON:
 
 ```text
-api_response {"method":"GET","path":"/api/v1/...","status":200,"durationMs":12.34,...}
+api_response {"method":"GET","path":"/api/v1/me/records/71","route":"/api/v1/me/records/{record_id}","status":200,"durationMs":12.34,...}
 ```
+
+The `path` field preserves the actual request path for debugging. The `route` field is the FastAPI route template and is used for latency grouping so `/api/v1/me/records/71` and `/api/v1/me/records/72` aggregate into the same series.
 
 Because the log line is not pure JSON, the percentile panel intentionally uses `regexp` extraction instead of a raw `| json` parser:
 
@@ -58,10 +60,10 @@ quantile_over_time(
   0.95,
   <selected log query>
     |= `api_response`
-    | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
+    | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
     | unwrap durationMs
     | __error__="" [$timelineBucket]
-) by (method, path)
+) by (method, route)
 ```
 
 This panel follows the same `Label Selector`, `Label Filters`, and `LogQL Search` controls. Keep `LogQL Search` to line filters (`|=`, `!=`, `|~`, `!~`) when using latency percentiles; parser or formatting stages in the search box can conflict with the percentile extraction stages.

@@ -95,6 +95,7 @@ def build_request_log(request: Request, body: bytes) -> dict[str, Any]:
     return {
         "method": request.method,
         "path": request.url.path,
+        "route": route_path_for_log(request),
         "query": redact_query_params(request.query_params),
         "client": request.client.host if request.client else None,
         "headers": redact_headers(request.headers),
@@ -111,6 +112,7 @@ def build_response_log(
     return {
         "method": request.method,
         "path": request.url.path,
+        "route": route_path_for_log(request),
         "status": response.status_code,
         "durationMs": round(duration_ms, 2),
         "headers": redact_headers(response.headers),
@@ -122,11 +124,20 @@ def build_error_response_log(request: Request, error: BaseException, duration_ms
     return {
         "method": request.method,
         "path": request.url.path,
+        "route": route_path_for_log(request),
         "status": 500,
         "durationMs": round(duration_ms, 2),
         "errorType": type(error).__name__,
         "error": str(error),
     }
+
+
+def route_path_for_log(request: Request) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    return request.url.path
 
 
 def _is_sensitive_field(name: str) -> bool:
