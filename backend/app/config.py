@@ -64,6 +64,22 @@ def _secret_env(name: str, secret_values: dict[str, str], secret_key: str, defau
     return os.getenv(name) or secret_values.get(secret_key) or default
 
 
+def _secret_env_any(
+    name: str,
+    secret_values: dict[str, str],
+    secret_keys: tuple[str, ...],
+    default: str | None = None,
+) -> str | None:
+    value = os.getenv(name)
+    if value:
+        return value
+    for secret_key in secret_keys:
+        value = secret_values.get(secret_key)
+        if value:
+            return value
+    return default
+
+
 @dataclass(frozen=True)
 class Settings:
     database_path: str
@@ -173,11 +189,13 @@ class Settings:
                 "REACTION_STREAM_COORDINATOR_USERNAME",
                 secret_values,
                 "reactionStreamCoordinatorUsername",
-            ),
-            reaction_stream_coordinator_password=_secret_env(
+            )
+            or secret_values.get("REDIS_STREAM_COORDINATOR_USERNAME")
+            or ("admin" if secret_values.get("REDIS_STREAM_COORDINATOR_PASSWORD") else None),
+            reaction_stream_coordinator_password=_secret_env_any(
                 "REACTION_STREAM_COORDINATOR_PASSWORD",
                 secret_values,
-                "reactionStreamCoordinatorPassword",
+                ("reactionStreamCoordinatorPassword", "REDIS_STREAM_COORDINATOR_PASSWORD"),
             ),
             reaction_stream_prefix=_secret_env(
                 "REACTION_STREAM_PREFIX",

@@ -27,6 +27,7 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "redisCluster": "true",
         "reactionStreamCoordinatorBaseUrl": "https://coordinator.example.com",
         "reactionStreamCoordinatorToken": "coordinator-token",
+        "REDIS_STREAM_COORDINATOR_PASSWORD": "coordinator-password",
         "reactionStreamPrefix": "test-question-reactions",
         "reactionStreamGroupId": "test-question-reaction-workers",
         "reactionStreamConcurrency": "2",
@@ -68,6 +69,8 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.reaction_stream_enabled is True
     assert settings.reaction_stream_coordinator_base_url == "https://coordinator.example.com"
     assert settings.reaction_stream_coordinator_token == "coordinator-token"
+    assert settings.reaction_stream_coordinator_username == "admin"
+    assert settings.reaction_stream_coordinator_password == "coordinator-password"
     assert settings.reaction_stream_prefix == "test-question-reactions"
     assert settings.reaction_stream_group_id == "test-question-reaction-workers"
     assert settings.reaction_stream_concurrency == 2
