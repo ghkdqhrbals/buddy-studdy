@@ -101,3 +101,30 @@ def test_logging_middleware_can_replay_request_and_response_body():
     assert response.json() == {"received": "hello", "clientSecret": "server-secret"}
     assert captured_logs[0][0]["body"]["idToken"] == REDACTED
     assert captured_logs[0][1]["body"]["clientSecret"] == REDACTED
+
+
+def test_response_log_uses_route_template_for_variable_paths():
+    app = FastAPI()
+    captured_logs = []
+
+    @app.middleware("http")
+    async def test_logging_middleware(request: Request, call_next):
+        response = await call_next(request)
+        response_body = b""
+        async for chunk in response.body_iterator:
+            response_body += chunk
+        response_log = build_response_log(request, response, response_body, 2.3)
+        response.body_iterator = iterate_in_threadpool(iter([response_body]))
+        captured_logs.append(response_log)
+        return response
+
+    @app.get("/api/v1/me/records/{record_id}")
+    async def get_record(record_id: int):
+        return {"id": record_id}
+
+    client = TestClient(app)
+    response = client.get("/api/v1/me/records/71")
+
+    assert response.status_code == 200
+    assert captured_logs[0]["path"] == "/api/v1/me/records/71"
+    assert captured_logs[0]["route"] == "/api/v1/me/records/{record_id}"
