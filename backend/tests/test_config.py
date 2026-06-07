@@ -25,6 +25,12 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "redisPort": "6379",
         "redisPassword": "redis-password",
         "redisCluster": "true",
+        "reactionStreamCoordinatorBaseUrl": "https://coordinator.example.com",
+        "reactionStreamCoordinatorToken": "coordinator-token",
+        "reactionStreamPrefix": "test-question-reactions",
+        "reactionStreamGroupId": "test-question-reaction-workers",
+        "reactionStreamConcurrency": "2",
+        "reactionStreamXaddMaxLen": "5000",
         "smtpHost": "smtp.gmail.com",
         "smtpPort": "587",
         "smtpUsername": "sender@example.com",
@@ -59,6 +65,13 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.redis_port == 6379
     assert settings.redis_password == "redis-password"
     assert settings.redis_cluster is True
+    assert settings.reaction_stream_enabled is True
+    assert settings.reaction_stream_coordinator_base_url == "https://coordinator.example.com"
+    assert settings.reaction_stream_coordinator_token == "coordinator-token"
+    assert settings.reaction_stream_prefix == "test-question-reactions"
+    assert settings.reaction_stream_group_id == "test-question-reaction-workers"
+    assert settings.reaction_stream_concurrency == 2
+    assert settings.reaction_stream_xadd_max_len == 5000
     assert settings.smtp_host == "smtp.gmail.com"
     assert settings.smtp_port == 587
     assert settings.smtp_username == "sender@example.com"

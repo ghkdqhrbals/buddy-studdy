@@ -1990,7 +1990,14 @@ class Database:
             )
         )
 
-    def set_public_question_like(self, question_id: str, user_id: int, is_liked: bool) -> dict[str, Any] | None:
+    def set_public_question_like(
+        self,
+        question_id: str,
+        user_id: int,
+        is_liked: bool,
+        *,
+        emit_reaction_event: bool = True,
+    ) -> dict[str, Any] | None:
         with self.connect() as session:
             query = self._public_question_query(session, question_id)
             question = query.first() if query is not None else None
@@ -2010,7 +2017,7 @@ class Database:
             elif not is_liked and existing is not None:
                 session.delete(existing)
                 event_type = "LIKE_REMOVED"
-            if event_type is not None:
+            if emit_reaction_event and event_type is not None:
                 session.add(
                     QuestionReactionEvent(
                         question_id=question.id,
@@ -2064,6 +2071,8 @@ class Database:
         question_id: str,
         user_id: int,
         body: str,
+        *,
+        emit_reaction_event: bool = True,
     ) -> dict[str, Any] | None:
         with self.connect() as session:
             query = self._public_question_query(session, question_id)
@@ -2082,15 +2091,16 @@ class Database:
             )
             session.add(comment)
             session.flush()
-            session.add(
-                QuestionReactionEvent(
-                    question_id=question.id,
-                    user_id=user_id,
-                    event_type="COMMENT_CREATED",
-                    target_id=comment.id,
-                    created_at=now,
+            if emit_reaction_event:
+                session.add(
+                    QuestionReactionEvent(
+                        question_id=question.id,
+                        user_id=user_id,
+                        event_type="COMMENT_CREATED",
+                        target_id=comment.id,
+                        created_at=now,
+                    )
                 )
-            )
             session.flush()
             return self.community_comment_response(comment, author)
 

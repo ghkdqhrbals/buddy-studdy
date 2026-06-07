@@ -28,7 +28,7 @@ counts caused by other users.
 ```mermaid
 flowchart LR
   A["Like or comment request"] --> B["Source-of-truth table"]
-  B --> C["question_reaction_events append"]
+  B --> C["Redis Stream Coordinator event or DB fallback event"]
   C --> D["Aggregation worker"]
   D --> E["question_stats"]
   E --> F["Public list cache, TTL 7s"]
@@ -43,7 +43,8 @@ flowchart LR
 
 - `question_likes`: current like state, unique by `(question_id, user_id)`.
 - `question_comments`: current comment state, with `deleted_at` for soft delete.
-- `question_reaction_events`: durable append-only change log for aggregation.
+- Redis Stream Coordinator stream: primary append-only reaction change queue in production.
+- `question_reaction_events`: DB append-only fallback when Redis Stream Coordinator is unavailable or disabled.
 - `aggregation_checkpoints`: stores the last processed reaction event ID.
 - `question_stats`: materialized read model for `like_count` and
   `comment_count`.
@@ -81,11 +82,13 @@ For likes:
 ```text
 PUT /like
 -> insert question_likes if not exists
--> append LIKE_CREATED event only when insert succeeds
+-> publish LIKE_CHANGED to Redis Stream Coordinator when stream mode is active
+-> otherwise append LIKE_CREATED DB fallback event only when insert succeeds
 
 DELETE /like
 -> delete question_likes if exists
--> append LIKE_REMOVED event only when delete succeeds
+-> publish LIKE_CHANGED to Redis Stream Coordinator when stream mode is active
+-> otherwise append LIKE_REMOVED DB fallback event only when delete succeeds
 ```
 
 For comments:
@@ -93,11 +96,25 @@ For comments:
 ```text
 POST /comments
 -> insert question_comments
--> append COMMENT_CREATED event
+-> publish COMMENT_CHANGED to Redis Stream Coordinator when stream mode is active
+-> otherwise append COMMENT_CREATED DB fallback event
 ```
 
-The source-of-truth row and reaction event are written in the same database
-transaction.
+In Redis Stream Coordinator mode, the database source-of-truth write commits
+first, then the app publishes a small change event keyed by `questionId`. If the
+publish fails, the API path falls back to reconciling `question_stats` for that
+question from `question_likes` and `question_comments`.
+
+In DB fallback mode, the source-of-truth row and `question_reaction_events` row
+are written in the same database transaction.
+
+Redis Stream events are invalidation/recompute triggers, not trusted counter
+deltas. The worker recomputes counts from source-of-truth tables:
+
+```text
+like_count = count(question_likes where question_id = ?)
+comment_count = count(question_comments where question_id = ? and deleted_at is null)
+```
 
 ## Read Flow
 
@@ -114,9 +131,12 @@ GET /public/questions
 
 ## Consistency and Ordering
 
-- Reaction event ordering is by autoincrement `question_reaction_events.id`.
-- Aggregation is at-least-once recoverable and effectively-once inside the
-  `question_stats + aggregation_checkpoints` database transaction.
+- Redis Stream delivery is at-least-once. Duplicate delivery is safe because
+  stream-mode aggregation recomputes counts from source-of-truth tables instead
+  of applying `+1/-1` deltas.
+- DB fallback event ordering is by autoincrement `question_reaction_events.id`.
+- DB fallback aggregation is at-least-once recoverable and effectively-once
+  inside the `question_stats + aggregation_checkpoints` database transaction.
 - Counts shown in public lists are eventually consistent.
 - Current viewer like state is read from `question_likes` and remains accurate.
 
@@ -124,7 +144,9 @@ GET /public/questions
 
 - If process memory or list cache is lost, public list cache is rebuilt from
   `question_stats`.
-- If the aggregation worker stops, `aggregation_checkpoints.last_event_id`
+- If Redis Stream publishing fails after a successful source-of-truth DB write,
+  the API path reconciles the affected `question_stats` row directly.
+- If the DB fallback aggregation worker stops, `aggregation_checkpoints.last_event_id`
   preserves where processing should resume.
 - If a bug or outage causes count drift, reconciliation recomputes counts from
   `question_likes` and `question_comments` and overwrites `question_stats`.

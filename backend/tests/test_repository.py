@@ -1313,6 +1313,75 @@ def test_question_like_comment_events_sync_to_stats_by_checkpoint(db: Database):
     assert questions[0]["isLikedByMe"] is False
 
 
+def test_public_question_reactions_can_skip_db_event_log_for_stream_mode(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-social-stream-mode",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-stream-mode-author",
+        email="public-social-stream-mode-author@example.com",
+        display_name="Author",
+    )
+    viewer = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-stream-mode-viewer",
+        email="public-social-stream-mode-viewer@example.com",
+        display_name="Viewer",
+    )
+    assert author is not None
+    assert viewer is not None
+    question = db.create_question(
+        device_id=device_id,
+        user_id=int(author["id"]),
+        topic="Swift",
+        difficulty_level=7,
+        question="What is AsyncSequence?",
+        expected_answer_hint="An asynchronous sequence of values.",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="It yields values over time asynchronously.",
+        score=92,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=int(author["id"]),
+    )
+    question_id = int(question["id"])
+
+    db.set_public_question_like(
+        question["id"],
+        user_id=int(viewer["id"]),
+        is_liked=True,
+        emit_reaction_event=False,
+    )
+    db.create_public_question_comment(
+        question["id"],
+        user_id=int(viewer["id"]),
+        body="Nice",
+        emit_reaction_event=False,
+    )
+
+    with db.connect() as session:
+        assert session.query(QuestionLike).filter(QuestionLike.question_id == question_id).count() == 1
+        assert session.query(QuestionComment).filter(QuestionComment.question_id == question_id).count() == 1
+        assert session.query(QuestionReactionEvent).filter(QuestionReactionEvent.question_id == question_id).count() == 0
+
+    assert db.reconcile_question_stats(question_ids=[question_id]) == 1
+    db._public_questions_cache.clear()
+    questions, _ = db.list_public_questions(exclude_device_id=None, limit=20, offset=0)
+    assert questions[0]["likeCount"] == 1
+    assert questions[0]["commentCount"] == 1
+
+
 def test_public_question_list_uses_cached_counts_but_merges_viewer_like_state(db: Database):
     device_id, client_secret = db.register_device(
         apns_token="token-public-social-cache",

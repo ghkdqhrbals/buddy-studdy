@@ -77,6 +77,15 @@ class Settings:
     reaction_aggregation_poll_seconds: int
     reaction_aggregation_batch_size: int
     reaction_reconcile_every_cycles: int
+    reaction_stream_enabled: bool
+    reaction_stream_coordinator_base_url: str | None
+    reaction_stream_coordinator_token: str | None
+    reaction_stream_coordinator_username: str | None
+    reaction_stream_coordinator_password: str | None
+    reaction_stream_prefix: str
+    reaction_stream_group_id: str
+    reaction_stream_concurrency: int
+    reaction_stream_xadd_max_len: int
     openai_model: str
     openai_api_key: str | None
     backend_api_token: str | None
@@ -142,6 +151,55 @@ class Settings:
             reaction_reconcile_every_cycles=max(
                 1,
                 _int_secret_env("REACTION_RECONCILE_EVERY_CYCLES", secret_values, "reactionReconcileEveryCycles", 20),
+            ),
+            reaction_stream_enabled=_bool_secret_env(
+                "REACTION_STREAM_ENABLED",
+                secret_values,
+                "reactionStreamEnabled",
+                True,
+            ),
+            reaction_stream_coordinator_base_url=_secret_env(
+                "REACTION_STREAM_COORDINATOR_BASE_URL",
+                secret_values,
+                "reactionStreamCoordinatorBaseUrl",
+                "https://coordinator.ghkdqhrbals.org",
+            ),
+            reaction_stream_coordinator_token=_secret_env(
+                "REACTION_STREAM_COORDINATOR_TOKEN",
+                secret_values,
+                "reactionStreamCoordinatorToken",
+            ),
+            reaction_stream_coordinator_username=_secret_env(
+                "REACTION_STREAM_COORDINATOR_USERNAME",
+                secret_values,
+                "reactionStreamCoordinatorUsername",
+            ),
+            reaction_stream_coordinator_password=_secret_env(
+                "REACTION_STREAM_COORDINATOR_PASSWORD",
+                secret_values,
+                "reactionStreamCoordinatorPassword",
+            ),
+            reaction_stream_prefix=_secret_env(
+                "REACTION_STREAM_PREFIX",
+                secret_values,
+                "reactionStreamPrefix",
+                "buddystuddy-question-reactions",
+            )
+            or "buddystuddy-question-reactions",
+            reaction_stream_group_id=_secret_env(
+                "REACTION_STREAM_GROUP_ID",
+                secret_values,
+                "reactionStreamGroupId",
+                "buddystuddy-question-reaction-aggregators",
+            )
+            or "buddystuddy-question-reaction-aggregators",
+            reaction_stream_concurrency=max(
+                1,
+                _int_secret_env("REACTION_STREAM_CONCURRENCY", secret_values, "reactionStreamConcurrency", 1),
+            ),
+            reaction_stream_xadd_max_len=max(
+                100,
+                _int_secret_env("REACTION_STREAM_XADD_MAX_LEN", secret_values, "reactionStreamXaddMaxLen", 100_000),
             ),
             openai_model=os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
             openai_api_key=os.getenv("OPENAI_API_KEY"),

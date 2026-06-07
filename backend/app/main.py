@@ -103,6 +103,23 @@ def _docs_urls() -> tuple[str | None, str | None, str | None]:
     return "/docs", "/redoc", "/openapi.json"
 
 
+def _uses_reaction_stream() -> bool:
+    return bool(reaction_aggregator is not None and reaction_aggregator.uses_stream)
+
+
+def _publish_reaction_changed(question_id: str | int, event_type: str, user_id: int | None) -> None:
+    if reaction_aggregator is None or not reaction_aggregator.uses_stream:
+        return
+    try:
+        reaction_aggregator.publish_question_changed(question_id, event_type, user_id=user_id)
+    except Exception:
+        logger.exception("failed to publish question reaction event question_id=%s", question_id)
+        try:
+            database.reconcile_question_stats(question_ids=[int(question_id)])
+        except Exception:
+            logger.exception("failed to reconcile question stats after stream publish failure question_id=%s", question_id)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global scheduler, reaction_aggregator
@@ -981,9 +998,15 @@ async def like_public_question(
     question_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> CommunityLikeResponse:
-    like = database.set_public_question_like(question_id, user_id=principal.user_id, is_liked=True)
+    like = database.set_public_question_like(
+        question_id,
+        user_id=principal.user_id,
+        is_liked=True,
+        emit_reaction_event=not _uses_reaction_stream(),
+    )
     if like is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    _publish_reaction_changed(question_id, "LIKE_CHANGED", principal.user_id)
     return CommunityLikeResponse.model_validate(like)
 
 
@@ -992,9 +1015,15 @@ async def unlike_public_question(
     question_id: str,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> CommunityLikeResponse:
-    like = database.set_public_question_like(question_id, user_id=principal.user_id, is_liked=False)
+    like = database.set_public_question_like(
+        question_id,
+        user_id=principal.user_id,
+        is_liked=False,
+        emit_reaction_event=not _uses_reaction_stream(),
+    )
     if like is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    _publish_reaction_changed(question_id, "LIKE_CHANGED", principal.user_id)
     return CommunityLikeResponse.model_validate(like)
 
 
@@ -1017,9 +1046,15 @@ async def create_public_question_comment(
     payload: CommunityCommentRequest,
     principal: AuthenticatedPrincipal = Depends(authenticate_principal),
 ) -> CommunityCommentResponse:
-    comment = database.create_public_question_comment(question_id, user_id=principal.user_id, body=payload.body)
+    comment = database.create_public_question_comment(
+        question_id,
+        user_id=principal.user_id,
+        body=payload.body,
+        emit_reaction_event=not _uses_reaction_stream(),
+    )
     if comment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    _publish_reaction_changed(question_id, "COMMENT_CHANGED", principal.user_id)
     return CommunityCommentResponse.model_validate(comment)
 
 
