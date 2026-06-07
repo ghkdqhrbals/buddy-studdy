@@ -28,22 +28,6 @@ struct StudyView: View {
                     notificationLandingInlineView(message: notificationLandingMessage, strings: strings)
                 }
 
-                if !visiblePendingRecords.isEmpty {
-                    PendingQuestionsSection(
-                        records: visiblePendingRecords,
-                        currentQuestion: selectedCurrentQuestion,
-                        strings: strings
-                    ) { record in
-                        appState.selectStudyRecord(record)
-                    } onSkip: { record in
-                        withAnimation(.easeOut(duration: 0.22)) {
-                            appState.skipPendingQuestion(record)
-                        }
-                    }
-
-                    Divider()
-                }
-
                 Group {
                     if let question = selectedCurrentQuestion {
                         StudyConversationSection(
@@ -162,17 +146,6 @@ struct StudyView: View {
 
         let topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? appState.strings.studyFallback : topic
-    }
-
-    private var visiblePendingRecords: [StudyRecord] {
-        guard preferredCategoryID != nil else {
-            return appState.pendingStudyRecords
-        }
-
-        let normalizedSelectedTopic = normalizedTopicKey(selectedTopic)
-        return appState.pendingStudyRecords.filter {
-            normalizedTopicKey($0.topic) == normalizedSelectedTopic
-        }
     }
 
     private func normalizedTopicKey(_ topic: String) -> String {
@@ -642,142 +615,6 @@ private struct AnswerEditor: View {
         #endif
     }
 
-}
-
-private struct PendingQuestionsSection: View {
-    var records: [StudyRecord]
-    var currentQuestion: QuestionItem?
-    var strings: AppStrings
-    var onSelect: (StudyRecord) -> Void
-    var onSkip: (StudyRecord) -> Void
-    @State private var openSwipeRecordID: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(spacing: 4) {
-                ForEach(records) { record in
-                    let isSelected = isCurrent(record)
-
-                    SwipeRevealRow(
-                        isOpen: swipeBinding(for: record.id),
-                        actionWidth: 82,
-                        onTap: {
-                            if openSwipeRecordID != nil,
-                               openSwipeRecordID != record.id {
-                                closeOpenSwipe()
-                                return
-                            }
-                            onSelect(record)
-                        },
-                        onFullSwipe: {
-                            skip(record)
-                        },
-                        content: {
-                            PendingQuestionRow(record: record, strings: strings, isSelected: isSelected)
-                        },
-                        action: {
-                            Button {
-                                skip(record)
-                            } label: {
-                                SwipeActionButton(
-                                    title: strings.skipQuestion,
-                                    systemImage: "forward.end.fill",
-                                    tint: .orange,
-                                    width: 82
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    )
-                    .frame(height: 52)
-                    .onDisappear {
-                        if openSwipeRecordID == record.id {
-                            openSwipeRecordID = nil
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func isCurrent(_ record: StudyRecord) -> Bool {
-        guard let currentQuestion else {
-            return false
-        }
-
-        return record.question.createdAt == currentQuestion.createdAt ||
-            SettingsStore.normalizedQuestionText(record.question.question) ==
-            SettingsStore.normalizedQuestionText(currentQuestion.question)
-    }
-
-    private func swipeBinding(for recordID: String) -> Binding<Bool> {
-        Binding(
-            get: { openSwipeRecordID == recordID },
-            set: { isOpen in
-                withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-                    openSwipeRecordID = isOpen ? recordID : nil
-                }
-            }
-        )
-    }
-
-    private func closeOpenSwipe() {
-        withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-            openSwipeRecordID = nil
-        }
-    }
-
-    private func skip(_ record: StudyRecord) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            onSkip(record)
-            if openSwipeRecordID == record.id {
-                openSwipeRecordID = nil
-            }
-        }
-    }
-
-}
-
-private struct PendingQuestionRow: View {
-    var record: StudyRecord
-    var strings: AppStrings
-    var isSelected: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(isSelected ? Color.green : Color.clear)
-                .frame(width: 4, height: 34)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.question.question)
-                    .font(.callout)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .lineLimit(1)
-
-                HStack(spacing: 5) {
-                    Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
-                    Text("·")
-                    Text(record.difficulty.displayName(language: strings.language))
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.secondary.opacity(0.1) : Color.secondary.opacity(0.04))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.secondary.opacity(0.2) : Color.secondary.opacity(0.1), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .contentShape(Rectangle())
-    }
 }
 
 extension GradingResult {

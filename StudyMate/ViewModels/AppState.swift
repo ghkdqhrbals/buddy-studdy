@@ -66,7 +66,7 @@ private final class BackgroundTaskExpiration: @unchecked Sendable {
 @MainActor
 final class AppState: ObservableObject {
     static let developerLogPageSize = 50
-    static let maxPendingQuestionCount = 3
+    static let maxPendingQuestionCount = 1
     static let communityQuestionPageSize = 20
     static let maxAPITrafficLogs = 120
     private static let clipboardQuickReadAttempts = 10
@@ -2073,11 +2073,21 @@ final class AppState: ObservableObject {
 
     func openStudyCategory(_ categoryID: String) {
         let categories = synchronizedTopicCategories(for: settings).studyCategories
-        guard let targetCategoryID = categories.first(where: { $0.id == categoryID })?.id ?? categories.first?.id else {
+        guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
             return
         }
 
-        showStudyScreen(categoryID: targetCategoryID)
+        if let record = preferredPendingRecord(for: targetCategory) {
+            notificationLandingMessage = nil
+            currentQuestion = record.question
+            lastAnswer = record.answer ?? ""
+            gradingResult = record.gradingResult
+            settingsStore.saveQuestion(record.question)
+            settingsStore.saveLastAnswer(record.answer ?? "")
+            settingsStore.saveGradingResult(record.gradingResult)
+        }
+
+        showStudyScreen(categoryID: targetCategory.id)
     }
 
     func deleteStudyCategory(id: String) {
@@ -2524,7 +2534,7 @@ final class AppState: ObservableObject {
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             studyRecords = settingsStore.loadStudyRecords()
 
-            let shouldActivateQuestion = manual || !hasActiveUngradedCurrentQuestion
+            let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
             if shouldActivateQuestion {
                 currentQuestion = record.question
                 gradingResult = record.gradingResult
@@ -2535,7 +2545,7 @@ final class AppState: ObservableObject {
             }
 
             hasAPIKeyError = false
-            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 미제출 목록에 추가됐습니다."
+            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
             log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
             await syncRemotePushScheduleIfPossible(reason: "manual-question")
         } catch {
@@ -2704,6 +2714,19 @@ final class AppState: ObservableObject {
         }
 
         return gradingResult == nil
+    }
+
+    private func preferredPendingRecord(for category: StudyCategory) -> StudyRecord? {
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        let records = pendingRecordsIncludingCurrent
+            .filter { Self.normalizedCategoryText(for: $0.topic) == categoryKey }
+
+        if let currentQuestion,
+           let currentRecord = records.first(where: { studyRecordMatches($0, question: currentQuestion) }) {
+            return currentRecord
+        }
+
+        return records.max { $0.question.createdAt < $1.question.createdAt }
     }
 
     func gradeCurrentAnswer(answer submittedAnswer: String? = nil) async {

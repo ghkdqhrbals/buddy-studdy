@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class QuestionScheduler:
-    max_pending_questions = 3
+    max_pending_questions = 1
 
     def __init__(self, settings: Settings, database: Database):
         self.settings = settings

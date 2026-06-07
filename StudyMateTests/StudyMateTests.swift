@@ -2487,7 +2487,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
 
-        for index in 0..<3 {
+        for index in 0..<1 {
             let question = QuestionItem(
                 question: "미채점 질문 \(index)",
                 expectedAnswerHint: nil,
@@ -2504,7 +2504,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(appState.hasReachedPendingQuestionLimit)
         XCTAssertEqual(appState.statusMessage, appState.strings.pendingQuestionLimitTitle)
         XCTAssertEqual(backend.createQuestionCallCount, 0)
-        XCTAssertEqual(appState.pendingStudyRecords.count, 3)
+        XCTAssertEqual(appState.pendingStudyRecords.count, 1)
     }
 
     @MainActor
@@ -2524,15 +2524,6 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
 
-        for index in 0..<2 {
-            let question = QuestionItem(
-                question: "기록된 미채점 질문 \(index)",
-                expectedAnswerHint: nil,
-                createdAt: Date(timeIntervalSince1970: Double(index))
-            )
-            store.appendStudyRecord(question: question, settings: settings)
-        }
-
         let currentQuestion = QuestionItem(
             question: "현재 화면의 미채점 질문",
             expectedAnswerHint: nil,
@@ -2549,8 +2540,8 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertTrue(appState.hasReachedPendingQuestionLimit)
         XCTAssertEqual(backend.createQuestionCallCount, 0)
-        XCTAssertEqual(appState.pendingStudyRecords.count, 3)
-        XCTAssertEqual(store.loadStudyRecords().count, 2)
+        XCTAssertEqual(appState.pendingStudyRecords.count, 1)
+        XCTAssertEqual(store.loadStudyRecords().count, 0)
     }
 
     @MainActor
@@ -2571,7 +2562,7 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(settings)
         store.saveIsCloudSyncEnabled(true)
 
-        for index in 0..<3 {
+        for index in 0..<1 {
             let question = QuestionItem(
                 question: "기존 미채점 질문 \(index)",
                 expectedAnswerHint: nil,
@@ -2599,7 +2590,7 @@ final class StudyMateTests: XCTestCase {
         )
 
         XCTAssertTrue(didHandle)
-        XCTAssertEqual(appState.pendingStudyRecords.count, 3)
+        XCTAssertEqual(appState.pendingStudyRecords.count, 1)
         XCTAssertFalse(appState.studyRecords.contains { $0.question == pushedQuestion })
     }
 
@@ -3568,6 +3559,32 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func requestEmailVerificationCode(
+        registration: RemotePushRegistration,
+        email: String
+    ) async throws -> EmailVerificationCodeResult {
+        EmailVerificationCodeResult(email: email, expiresInSeconds: 180)
+    }
+
+    func loginWithEmail(
+        registration: RemotePushRegistration,
+        email: String,
+        password: String,
+        verificationCode: String?
+    ) async throws -> CommunityLoginResult {
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: "email-access-token",
+            accessTokenExpiresAt: Date().addingTimeInterval(3600)
+        )
+        return CommunityLoginResult(
+            profile: CommunityUserProfile(id: 1, displayName: email, bio: "", avatarURL: nil),
+            registration: updatedRegistration
+        )
+    }
+
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
         CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
     }
@@ -3576,6 +3593,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
+        avatarSymbolName: String?,
+        avatarColorSeed: String?,
         pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile {
         CommunityUserProfile(
@@ -3583,6 +3602,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             displayName: displayName ?? "Tester",
             bio: bio ?? "",
             avatarURL: nil,
+            avatarSymbolName: avatarSymbolName ?? "pixel-buddy",
+            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
             pageAccess: pageAccess ?? .restricted
         )
     }
@@ -3603,6 +3624,37 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         reason: String,
         message: String
     ) async throws {}
+
+    func setCommunityQuestionLike(
+        registration: RemotePushRegistration,
+        questionID: String,
+        isLiked: Bool
+    ) async throws -> CommunityLikeState {
+        CommunityLikeState(questionID: questionID, likeCount: isLiked ? 1 : 0, isLikedByMe: isLiked)
+    }
+
+    func fetchCommunityQuestionComments(
+        registration: RemotePushRegistration,
+        questionID: String,
+        limit: Int,
+        offset: Int
+    ) async throws -> CommunityCommentsResponse {
+        CommunityCommentsResponse(comments: [], totalCount: 0, limit: limit, offset: offset)
+    }
+
+    func createCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        body: String
+    ) async throws -> CommunityQuestionComment {
+        CommunityQuestionComment(
+            id: "comment-test",
+            questionID: questionID,
+            body: body,
+            createdAt: Date(),
+            author: CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
+        )
+    }
 
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
         createQuestionCallCount += 1

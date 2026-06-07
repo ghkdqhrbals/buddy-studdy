@@ -1550,11 +1550,11 @@ struct AppStrings {
     var continueOldestPending: String { text("오래된 질문 이어하기", "Continue Oldest") }
     var pendingQuestions: String { text("미제출 질문", "Pending Questions") }
     func pendingQuestionCount(_ count: Int) -> String { text("\(count)개 대기 중", "\(count) pending") }
-    var pendingQuestionLimitTitle: String { text("미채점 질문이 3개입니다.", "There are 3 ungraded questions.") }
+    var pendingQuestionLimitTitle: String { text("답변 대기 중인 질문이 있습니다.", "A question is waiting for your answer.") }
     var pendingQuestionLimitMessage: String {
         text(
-            "미채점 질문을 답변하거나 기록 탭에서 삭제한 뒤 다시 새 질문 생성을 실행하세요.",
-            "Answer an ungraded question or delete one from Records, then run New Question again."
+            "현재 학습룸의 질문에 먼저 답변한 뒤 새 질문을 생성하세요.",
+            "Answer the current study room question before creating a new one."
         )
     }
     var current: String { text("현재", "Current") }
