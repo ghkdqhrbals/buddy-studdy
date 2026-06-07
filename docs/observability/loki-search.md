@@ -67,11 +67,11 @@ API call frequency is shown as a route-level time series:
 
 ```logql
 sum by (method, route) (
-  rate(
+  count_over_time(
     <selected log query>
       |= `api_response`
       | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
-      | status=~".+" [$__rate_interval]
+      | status=~".+" [$__interval]
   )
 )
 ```
