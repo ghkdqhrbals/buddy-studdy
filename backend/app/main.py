@@ -25,6 +25,10 @@ from .models import (
     APIStatusResponse,
     APIValidationResponse,
     AnswerRequest,
+    CommunityCommentRequest,
+    CommunityCommentResponse,
+    CommunityCommentsResponse,
+    CommunityLikeResponse,
     CommunityQuestionsResponse,
     AccessTokenResponse,
     BackendSnapshotResponse,
@@ -288,6 +292,16 @@ def authenticate_principal(authorization: str | None = Header(default=None)) -> 
         device_id=claims.device_id,
         is_anonymous=bool(principal["isAnonymous"]),
     )
+
+
+def authenticate_optional_principal(authorization: str | None = Header(default=None)) -> AuthenticatedPrincipal | None:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+
+    try:
+        return authenticate_principal(authorization)
+    except HTTPException:
+        return None
 
 
 def authenticate_login_principal(
@@ -789,7 +803,7 @@ async def create_question(
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
 
-    pending_count = database.pending_record_count(device_id, user_id=principal.user_id)
+    pending_count = database.pending_record_count(device_id, user_id=principal.user_id, topic=schedule["topic"])
     if pending_count >= QuestionScheduler.max_pending_questions:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -924,14 +938,63 @@ async def list_public_questions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     exclude_device_id: str | None = Query(default=None, alias="excludeDeviceId"),
+    principal: AuthenticatedPrincipal | None = Depends(authenticate_optional_principal),
 ) -> CommunityQuestionsResponse:
     questions, total = database.list_public_questions(
         exclude_device_id=exclude_device_id,
         limit=limit,
         offset=offset,
         topic=topic,
+        viewer_user_id=principal.user_id if principal is not None else None,
     )
     return CommunityQuestionsResponse(questions=questions, totalCount=total, limit=limit, offset=offset)
+
+
+@app.put("/api/v1/public/questions/{question_id}/like", response_model=CommunityLikeResponse)
+async def like_public_question(
+    question_id: str,
+    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+) -> CommunityLikeResponse:
+    like = database.set_public_question_like(question_id, user_id=principal.user_id, is_liked=True)
+    if like is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    return CommunityLikeResponse.model_validate(like)
+
+
+@app.delete("/api/v1/public/questions/{question_id}/like", response_model=CommunityLikeResponse)
+async def unlike_public_question(
+    question_id: str,
+    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+) -> CommunityLikeResponse:
+    like = database.set_public_question_like(question_id, user_id=principal.user_id, is_liked=False)
+    if like is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    return CommunityLikeResponse.model_validate(like)
+
+
+@app.get("/api/v1/public/questions/{question_id}/comments", response_model=CommunityCommentsResponse)
+async def list_public_question_comments(
+    question_id: str,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> CommunityCommentsResponse:
+    result = database.list_public_question_comments(question_id, limit=limit, offset=offset)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    comments, total = result
+    return CommunityCommentsResponse(comments=comments, totalCount=total, limit=limit, offset=offset)
+
+
+@app.post("/api/v1/public/questions/{question_id}/comments", response_model=CommunityCommentResponse)
+async def create_public_question_comment(
+    question_id: str,
+    payload: CommunityCommentRequest,
+    principal: AuthenticatedPrincipal = Depends(authenticate_principal),
+) -> CommunityCommentResponse:
+    comment = database.create_public_question_comment(question_id, user_id=principal.user_id, body=payload.body)
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    return CommunityCommentResponse.model_validate(comment)
 
 
 @app.get("/api/v1/public/users/{user_id}/profile", response_model=UserProfileResponse)

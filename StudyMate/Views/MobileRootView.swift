@@ -92,6 +92,10 @@ struct MobileRootView: View {
     }
 }
 
+private struct CommunityQuestionRoute: Identifiable, Hashable {
+    var id: String
+}
+
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
@@ -99,7 +103,7 @@ private struct MobileHomeView: View {
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
-    @State private var selectedCommunityQuestion: CommunityQuestion?
+    @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var isShowingProfileSettings = false
     @State private var isPullRefreshing = false
     @State private var isSearchVisible = false
@@ -150,162 +154,10 @@ private struct MobileHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                MobileRootLargeTitle(strings.tabHome)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-
-                Picker("", selection: $selectedHomeScope) {
-                    ForEach(HomeFeedScope.allCases) { scope in
-                        Text(scope.title(strings: strings))
-                            .tag(scope)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-
-                if isPullRefreshing {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                            .controlSize(.small)
-                        Spacer()
-                    }
-                    .padding(.vertical, 10)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .accessibilityLabel(strings.refresh)
-                }
-
-                if selectedHomeScope == .my, !appState.isCommunitySignedIn {
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(strings.myStudyLoginHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Button {
-                                appState.signInToCommunity()
-                            } label: {
-                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                } else if selectedHomeScope == .my {
-                    Section {
-                        if filteredStudyCategories.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(strings.noMatchingTopics)
-                                    .font(.subheadline.weight(.semibold))
-
-                                Text(strings.noMatchingTopicsDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 8)
-                        } else {
-                            ForEach(filteredStudyCategories) { category in
-                                if editMode.isEditing {
-                                    MobileHomeCategoryRow(
-                                        category: category,
-                                        isActive: appState.settings.selectedStudyCategoryID == category.id,
-                                        strings: strings
-                                    )
-                                } else {
-                                    Button {
-                                        appState.selectStudyCategory(category.id)
-                                    } label: {
-                                        MobileHomeCategoryRow(
-                                            category: category,
-                                            isActive: appState.settings.selectedStudyCategoryID == category.id,
-                                            strings: strings
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button {
-                                            editingStudyCategory = category
-                                        } label: {
-                                            Label(strings.edit, systemImage: "pencil")
-                                        }
-
-                                        if appState.settings.selectedStudyCategoryID != category.id {
-                                            Button {
-                                                appState.activateStudyCategory(category.id)
-                                            } label: {
-                                                Label(strings.activateStudy, systemImage: "checkmark.circle")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            .onMove { offsets, destination in
-                                guard trimmedHomeStudySearchText.isEmpty else {
-                                    return
-                                }
-
-                                appState.moveStudyCategories(from: offsets, to: destination)
-                            }
-                        }
-                    }
-                } else if selectedHomeScope == .all {
-                    Section {
-                        if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
-                            ProgressView()
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 8)
-                        }
-
-                        if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
-                            MobileCommunityEmptyState(strings: strings)
-                                .frame(maxWidth: .infinity, minHeight: 320)
-                                .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                                .listRowSeparator(.hidden)
-                        } else {
-                            ForEach(appState.communityQuestions) { question in
-                                Button {
-                                    selectedCommunityQuestion = question
-                                } label: {
-                                    MobileCommunityQuestionRow(question: question)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    if appState.isCommunitySignedIn {
-                                        Button(role: .destructive) {
-                                            Task {
-                                                await appState.reportCommunityQuestion(
-                                                    question,
-                                                    reason: strings.reportReasonInappropriate
-                                                )
-                                            }
-                                        } label: {
-                                            Label(strings.report, systemImage: "exclamationmark.bubble")
-                                        }
-                                    }
-                                }
-                                .onAppear {
-                                    appState.shouldLoadNextCommunityQuestion(after: question.id)
-                                }
-                            }
-
-                            if appState.isLoadingCommunityQuestions && appState.canLoadCommunityQuestions {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        }
-                    }
-                }
+                homeTitleRow
+                homeScopePickerRow
+                homeRefreshRow
+                homeContentSection
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -434,8 +286,202 @@ private struct MobileHomeView: View {
                 )
             }
         }
-        .sheet(item: $selectedCommunityQuestion) { question in
-            CommunityQuestionDetailSheet(question: question)
+        .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
+            if let question = appState.communityQuestions.first(where: { $0.id == route.id }) {
+                CommunityQuestionDetailView(question: question)
+            } else {
+                ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
+            }
+        }
+    }
+
+    private var homeTitleRow: some View {
+        MobileRootLargeTitle(strings.tabHome)
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+
+    private var homeScopePickerRow: some View {
+        Picker("", selection: $selectedHomeScope) {
+            ForEach(HomeFeedScope.allCases) { scope in
+                Text(scope.title(strings: strings))
+                    .tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private var homeRefreshRow: some View {
+        if isPullRefreshing {
+            HStack {
+                Spacer()
+                ProgressView()
+                    .controlSize(.small)
+                Spacer()
+            }
+            .padding(.vertical, 10)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .accessibilityLabel(strings.refresh)
+        }
+    }
+
+    @ViewBuilder
+    private var homeContentSection: some View {
+        if selectedHomeScope == .my, !appState.isCommunitySignedIn {
+            myStudyLoginSection
+        } else if selectedHomeScope == .my {
+            myStudySection
+        } else {
+            communityQuestionSection
+        }
+    }
+
+    private var myStudyLoginSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(strings.myStudyLoginHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    appState.signInToCommunity()
+                } label: {
+                    GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var myStudySection: some View {
+        Section {
+            if filteredStudyCategories.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.noMatchingTopics)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(strings.noMatchingTopicsDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else {
+                ForEach(filteredStudyCategories) { category in
+                    myStudyCategoryRow(category)
+                }
+                .onMove { offsets, destination in
+                    guard trimmedHomeStudySearchText.isEmpty else {
+                        return
+                    }
+
+                    appState.moveStudyCategories(from: offsets, to: destination)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func myStudyCategoryRow(_ category: StudyCategory) -> some View {
+        if editMode.isEditing {
+            MobileHomeCategoryRow(
+                category: category,
+                isActive: appState.settings.selectedStudyCategoryID == category.id,
+                pendingCount: appState.pendingQuestionCount(for: category),
+                strings: strings
+            )
+        } else {
+            Button {
+                appState.selectStudyCategory(category.id)
+            } label: {
+                MobileHomeCategoryRow(
+                    category: category,
+                    isActive: appState.settings.selectedStudyCategoryID == category.id,
+                    pendingCount: appState.pendingQuestionCount(for: category),
+                    strings: strings
+                )
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    editingStudyCategory = category
+                } label: {
+                    Label(strings.edit, systemImage: "pencil")
+                }
+
+                if appState.settings.selectedStudyCategoryID != category.id {
+                    Button {
+                        appState.activateStudyCategory(category.id)
+                    } label: {
+                        Label(strings.activateStudy, systemImage: "checkmark.circle")
+                    }
+                }
+            }
+        }
+    }
+
+    private var communityQuestionSection: some View {
+        Section {
+            if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            }
+
+            if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
+                MobileCommunityEmptyState(strings: strings)
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(appState.communityQuestions) { question in
+                    communityQuestionRow(question)
+                }
+
+                if appState.isLoadingCommunityQuestions && appState.canLoadCommunityQuestions {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    private func communityQuestionRow(_ question: CommunityQuestion) -> some View {
+        Button {
+            selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
+        } label: {
+            MobileCommunityQuestionRow(question: question)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if appState.isCommunitySignedIn {
+                Button(role: .destructive) {
+                    Task {
+                        await appState.reportCommunityQuestion(
+                            question,
+                            reason: strings.reportReasonInappropriate
+                        )
+                    }
+                } label: {
+                    Label(strings.report, systemImage: "exclamationmark.bubble")
+                }
+            }
+        }
+        .onAppear {
+            appState.shouldLoadNextCommunityQuestion(after: question.id)
         }
     }
 
@@ -1537,6 +1583,7 @@ private struct MobileCommunityEmptyState: View {
 private struct MobileHomeCategoryRow: View {
     var category: StudyCategory
     var isActive: Bool
+    var pendingCount: Int
     var strings: AppStrings
 
     var body: some View {
@@ -1556,6 +1603,18 @@ private struct MobileHomeCategoryRow: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if pendingCount > 0 {
+                Text("\(pendingCount)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(pendingCount >= AppState.maxPendingQuestionCount ? Color.orange : Color.green)
+                    .clipShape(Capsule())
+                    .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
+            }
 
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
@@ -1709,6 +1768,14 @@ private struct MobileCommunityQuestionRow: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
+                Label("\(question.likeCount)", systemImage: question.isLikedByMe ? "heart.fill" : "heart")
+                    .font(.caption2)
+                    .foregroundStyle(question.isLikedByMe ? .red : .secondary)
+
+                Label("\(question.commentCount)", systemImage: "bubble.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                 Text(question.topic.isEmpty ? "Swift" : question.topic)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1746,100 +1813,246 @@ private struct MobileCommunityQuestionRow: View {
     }
 }
 
-private struct CommunityQuestionDetailSheet: View {
+private struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
-    @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
+    @State private var displayQuestion: CommunityQuestion
+    @State private var comments: [CommunityQuestionComment] = []
+    @State private var commentsTotalCount = 0
+    @State private var isLoadingComments = false
+    @State private var commentDraft = ""
+    @State private var isSendingComment = false
+
+    init(question: CommunityQuestion) {
+        self.question = question
+        _displayQuestion = State(initialValue: question)
+    }
 
     private var strings: AppStrings {
         appState.strings
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    communityQuestionMeta
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                communityQuestionMeta
 
-                    CommunityMessageBubble(role: .question) {
-                        Text(question.question)
-                            .font(.body)
-                            .foregroundStyle(.white)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                CommunityMessageBubble(role: .question) {
+                    Text(displayQuestion.question)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                    if let answer = question.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !answer.isEmpty {
-                        CommunityAnswerMessage(answer: answer, author: question.author)
-                    }
+                if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !answer.isEmpty {
+                    CommunityAnswerMessage(answer: answer, author: displayQuestion.author)
+                }
 
-                    if let gradingResult = question.gradingResult {
-                        CommunityMessageBubble(role: .feedback) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Label(gradingResult.gradeTitle(strings: strings), systemImage: gradingResult.gradeIconName)
-                                    Spacer(minLength: 12)
-                                    Text("\(gradingResult.score)/100")
-                                        .font(.headline)
-                                }
-
-                                Text(gradingResult.feedback)
-                                    .font(.body)
-
-                                Text(gradingResult.explanation)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                if let gradingResult = displayQuestion.gradingResult {
+                    CommunityMessageBubble(role: .feedback) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(gradingResult.gradeTitle(strings: strings), systemImage: gradingResult.gradeIconName)
+                                Spacer(minLength: 12)
+                                Text("\(gradingResult.score)/100")
+                                    .font(.headline)
                             }
-                        }
-                    }
 
-                    Button(role: .destructive) {
-                        Task {
-                            await appState.reportCommunityQuestion(
-                                question,
-                                reason: strings.reportReasonInappropriate
-                            )
-                            dismiss()
+                            Text(gradingResult.feedback)
+                                .font(.body)
+
+                            Text(gradingResult.explanation)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
-                    } label: {
-                        Label(strings.report, systemImage: "exclamationmark.bubble")
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.top, 8)
-                }
-                .padding(16)
-            }
-            .navigationTitle(strings.communityQuestion)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(strings.done) {
-                        dismiss()
                     }
                 }
+
+                communityActions
+
+                Divider()
+
+                commentsSection
+
+                Button(role: .destructive) {
+                    Task {
+                        await appState.reportCommunityQuestion(
+                            displayQuestion,
+                            reason: strings.reportReasonInappropriate
+                        )
+                    }
+                } label: {
+                    Label(strings.report, systemImage: "exclamationmark.bubble")
+                }
+                .buttonStyle(.borderless)
+                .padding(.top, 8)
             }
+            .padding(16)
+        }
+        .navigationTitle(strings.communityQuestion)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: displayQuestion.id) {
+            await loadComments()
         }
     }
 
     private var communityQuestionMeta: some View {
         HStack(spacing: 8) {
-            Text(question.topic.isEmpty ? "Swift" : question.topic)
+            Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            Text("Lv.\(question.difficultyLevel)")
+            Text("Lv.\(displayQuestion.difficultyLevel)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if let answeredAt = question.answeredAt {
+            if let answeredAt = displayQuestion.answeredAt {
                 Text(answeredAt, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)
+        }
+    }
+
+    private var communityActions: some View {
+        HStack(spacing: 14) {
+            Button {
+                toggleLike()
+            } label: {
+                Label("\(displayQuestion.likeCount)", systemImage: displayQuestion.isLikedByMe ? "heart.fill" : "heart")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
+
+            Label("\(commentsTotalCount)", systemImage: "bubble.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+    }
+
+    private var commentsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(strings.comments)
+                .font(.headline)
+
+            if isLoadingComments && comments.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+            } else if comments.isEmpty {
+                Text(strings.noComments)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(comments) { comment in
+                    CommunityCommentRow(comment: comment)
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(strings.writeComment, text: $commentDraft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .padding(.vertical, 9)
+                    .padding(.horizontal, 12)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Button {
+                    sendComment()
+                } label: {
+                    if isSendingComment {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+            }
+        }
+    }
+
+    private func toggleLike() {
+        let next = !displayQuestion.isLikedByMe
+        displayQuestion.isLikedByMe = next
+        displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
+
+        Task {
+            await appState.setCommunityQuestionLike(question, isLiked: next)
+        }
+    }
+
+    private func loadComments() async {
+        isLoadingComments = true
+        defer { isLoadingComments = false }
+        guard let response = await appState.loadCommunityQuestionComments(questionID: displayQuestion.id) else {
+            return
+        }
+
+        comments = response.comments
+        commentsTotalCount = response.totalCount
+        displayQuestion.commentCount = response.totalCount
+    }
+
+    private func sendComment() {
+        let body = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, !isSendingComment else {
+            return
+        }
+
+        isSendingComment = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isSendingComment = false
+                }
+            }
+            guard let comment = await appState.createCommunityQuestionComment(questionID: displayQuestion.id, body: body) else {
+                return
+            }
+            await MainActor.run {
+                comments.append(comment)
+                commentsTotalCount += 1
+                displayQuestion.commentCount = commentsTotalCount
+                commentDraft = ""
+            }
+        }
+    }
+}
+
+private struct CommunityCommentRow: View {
+    var comment: CommunityQuestionComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            HomeProfileAvatar(
+                symbolName: comment.author.avatarSymbolName,
+                displayName: comment.author.displayName,
+                colorSeed: comment.author.avatarColorSeed,
+                size: 26
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(comment.author.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(comment.body)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

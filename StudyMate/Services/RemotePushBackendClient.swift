@@ -165,6 +165,25 @@ protocol RemotePushBackendClientProtocol {
         message: String
     ) async throws
 
+    func setCommunityQuestionLike(
+        registration: RemotePushRegistration,
+        questionID: String,
+        isLiked: Bool
+    ) async throws -> CommunityLikeState
+
+    func fetchCommunityQuestionComments(
+        registration: RemotePushRegistration,
+        questionID: String,
+        limit: Int,
+        offset: Int
+    ) async throws -> CommunityCommentsResponse
+
+    func createCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        body: String
+    ) async throws -> CommunityQuestionComment
+
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord
 
     func gradeRecord(
@@ -467,8 +486,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             throw RemotePushBackendError.invalidResponse
         }
 
-        _ = registration
-        var request = URLRequest(url: url)
+        var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionsResponse.self, from: data)
@@ -612,6 +630,60 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(ReportQuestionRequest(reason: reason, message: message))
         _ = try await perform(request)
+    }
+
+    func setCommunityQuestionLike(
+        registration: RemotePushRegistration,
+        questionID: String,
+        isLiked: Bool
+    ) async throws -> CommunityLikeState {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID, "like")
+        )
+        request.httpMethod = isLiked ? "PUT" : "DELETE"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityLikeState.self, from: data)
+    }
+
+    func fetchCommunityQuestionComments(
+        registration: RemotePushRegistration,
+        questionID: String,
+        limit: Int = 30,
+        offset: Int = 0
+    ) async throws -> CommunityCommentsResponse {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "public", "questions", questionID, "comments"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
+            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityCommentsResponse.self, from: data)
+    }
+
+    func createCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        body: String
+    ) async throws -> CommunityQuestionComment {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID, "comments")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CommunityCommentRequest(body: body))
+        let data = try await perform(request)
+        return try decoder.decode(CommunityQuestionComment.self, from: data)
     }
 
     func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
@@ -1010,6 +1082,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var message: String
     }
 
+    private struct CommunityCommentRequest: Encodable {
+        var body: String
+    }
+
     private struct OpenAIModelDescriptor: Decodable {
         var id: String
         var displayName: String
@@ -1090,6 +1166,104 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var createdAt: Date
     var answeredAt: Date?
     var author: CommunityUserProfile?
+    var likeCount: Int
+    var commentCount: Int
+    var isLikedByMe: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case question
+        case answer
+        case gradingResult
+        case topic
+        case difficultyLevel
+        case status
+        case source
+        case createdAt
+        case answeredAt
+        case author
+        case likeCount
+        case commentCount
+        case isLikedByMe
+    }
+
+    init(
+        id: String,
+        question: String,
+        answer: String?,
+        gradingResult: GradingResult?,
+        topic: String,
+        difficultyLevel: Int,
+        status: String,
+        source: String,
+        createdAt: Date,
+        answeredAt: Date?,
+        author: CommunityUserProfile?,
+        likeCount: Int = 0,
+        commentCount: Int = 0,
+        isLikedByMe: Bool = false
+    ) {
+        self.id = id
+        self.question = question
+        self.answer = answer
+        self.gradingResult = gradingResult
+        self.topic = topic
+        self.difficultyLevel = difficultyLevel
+        self.status = status
+        self.source = source
+        self.createdAt = createdAt
+        self.answeredAt = answeredAt
+        self.author = author
+        self.likeCount = likeCount
+        self.commentCount = commentCount
+        self.isLikedByMe = isLikedByMe
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        question = try container.decode(String.self, forKey: .question)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
+        topic = try container.decode(String.self, forKey: .topic)
+        difficultyLevel = try container.decode(Int.self, forKey: .difficultyLevel)
+        status = try container.decode(String.self, forKey: .status)
+        source = try container.decode(String.self, forKey: .source)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        author = try container.decodeIfPresent(CommunityUserProfile.self, forKey: .author)
+        likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
+        commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe) ?? false
+    }
+}
+
+struct CommunityLikeState: Decodable, Equatable {
+    var questionID: String
+    var likeCount: Int
+    var isLikedByMe: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case questionID = "questionId"
+        case likeCount
+        case isLikedByMe
+    }
+}
+
+struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
+    var id: String
+    var questionID: String
+    var body: String
+    var createdAt: Date
+    var author: CommunityUserProfile
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case questionID = "questionId"
+        case body
+        case createdAt
+        case author
+    }
 }
 
 struct CommunityUserProfile: Codable, Equatable, Identifiable {
@@ -1164,6 +1338,13 @@ struct CommunityPageAccess: Codable, Equatable {
 
 struct CommunityQuestionsResponse: Decodable, Equatable {
     var questions: [CommunityQuestion]
+    var totalCount: Int
+    var limit: Int
+    var offset: Int
+}
+
+struct CommunityCommentsResponse: Decodable, Equatable {
+    var comments: [CommunityQuestionComment]
     var totalCount: Int
     var limit: Int
     var offset: Int

@@ -1024,3 +1024,119 @@ def test_public_question_author_uses_question_user_not_current_device_user(db: D
     assert questions[0]["id"] == public_question["id"]
     assert questions[0]["author"]["id"] == int(profile_a["id"])
     assert questions[0]["author"]["displayName"] == "Original Author"
+
+
+def test_pending_record_count_can_be_limited_per_topic(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-topic-pending",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    profile = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="topic-pending",
+        email="topic-pending@example.com",
+        display_name="Topic Pending",
+    )
+    assert profile is not None
+    user_id = int(profile["id"])
+
+    for index in range(3):
+        db.create_question(
+            device_id=device_id,
+            user_id=user_id,
+            topic="Swift",
+            difficulty_level=5,
+            question=f"Swift pending {index}",
+            expected_answer_hint="swift",
+            is_public=False,
+        )
+    db.create_question(
+        device_id=device_id,
+        user_id=user_id,
+        topic="Python",
+        difficulty_level=5,
+        question="Python pending",
+        expected_answer_hint="python",
+        is_public=False,
+    )
+
+    assert db.pending_record_count(device_id, user_id=user_id) == 4
+    assert db.pending_record_count(device_id, user_id=user_id, topic="Swift") == 3
+    assert db.pending_record_count(device_id, user_id=user_id, topic="python") == 1
+
+
+def test_public_question_likes_and_comments_are_counted(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-social",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-author",
+        email="public-social-author@example.com",
+        display_name="Author",
+    )
+    assert author is not None
+    author_id = int(author["id"])
+    question = db.create_question(
+        device_id=device_id,
+        user_id=author_id,
+        topic="Swift",
+        difficulty_level=7,
+        question="What is actor isolation?",
+        expected_answer_hint="actors",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="It protects mutable state.",
+        score=95,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=author_id,
+    )
+
+    viewer = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-viewer",
+        email="public-social-viewer@example.com",
+        display_name="Viewer",
+    )
+    assert viewer is not None
+    viewer_id = int(viewer["id"])
+
+    like = db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    assert like == {"questionId": question["id"], "likeCount": 1, "isLikedByMe": True}
+    duplicate_like = db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    assert duplicate_like == {"questionId": question["id"], "likeCount": 1, "isLikedByMe": True}
+
+    created_comment = db.create_public_question_comment(question["id"], user_id=viewer_id, body=" Helpful ")
+    assert created_comment is not None
+    assert created_comment["body"] == "Helpful"
+
+    questions, total = db.list_public_questions(
+        exclude_device_id=None,
+        limit=20,
+        offset=0,
+        viewer_user_id=viewer_id,
+    )
+    assert total == 1
+    assert questions[0]["likeCount"] == 1
+    assert questions[0]["commentCount"] == 1
+    assert questions[0]["isLikedByMe"] is True
+
+    comments = db.list_public_question_comments(question["id"], limit=20, offset=0)
+    assert comments is not None
+    comment_rows, comment_total = comments
+    assert comment_total == 1
+    assert comment_rows[0]["author"]["displayName"] == "Viewer"

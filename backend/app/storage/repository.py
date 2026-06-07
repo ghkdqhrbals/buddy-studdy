@@ -11,11 +11,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
-from sqlalchemy import Index, asc, create_engine, func, text
+from sqlalchemy import Index, asc, create_engine, func, literal, text
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base, Device, Question, Report, Schedule, User, UserDevice, as_utc_datetime, to_iso
+from .models import (
+    Base,
+    Device,
+    Question,
+    QuestionComment,
+    QuestionLike,
+    Report,
+    Schedule,
+    User,
+    UserDevice,
+    as_utc_datetime,
+    to_iso,
+)
 from ..openai_models import DEFAULT_OPENAI_MODEL
 from ..services.stats_service import TopicStatisticsService
 
@@ -1217,7 +1229,7 @@ class Database:
             "creditsUrl": "https://platform.openai.com/settings/organization/billing/credit-grants",
         }
 
-    def pending_record_count(self, device_id: str, user_id: int | None = None) -> int:
+    def pending_record_count(self, device_id: str, user_id: int | None = None, topic: str | None = None) -> int:
         with self.connect() as session:
             query = session.query(Question).filter(
                 Question.device_id == device_id,
@@ -1233,6 +1245,8 @@ class Database:
             )
             if user_id is not None:
                 query = query.filter(Question.user_id == user_id)
+            if topic is not None and topic.strip():
+                query = query.filter(func.lower(Question.topic) == topic.strip().lower())
             return int(query.count())
 
     def recent_questions(self, device_id: str, limit: int = 80, user_id: int | None = None) -> list[str]:
@@ -1275,12 +1289,54 @@ class Database:
         limit: int = 20,
         offset: int = 0,
         topic: str | None = None,
+        viewer_user_id: int | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         with self.connect() as session:
-            query = session.query(Question, User).join(User, Question.user_id == User.id).filter(
+            like_counts = (
+                session.query(
+                    QuestionLike.question_id.label("question_id"),
+                    func.count(QuestionLike.id).label("like_count"),
+                )
+                .group_by(QuestionLike.question_id)
+                .subquery()
+            )
+            comment_counts = (
+                session.query(
+                    QuestionComment.question_id.label("question_id"),
+                    func.count(QuestionComment.id).label("comment_count"),
+                )
+                .filter(QuestionComment.deleted_at.is_(None))
+                .group_by(QuestionComment.question_id)
+                .subquery()
+            )
+            viewer_likes = None
+            if viewer_user_id is not None:
+                viewer_likes = (
+                    session.query(QuestionLike.question_id.label("question_id"))
+                    .filter(QuestionLike.user_id == viewer_user_id)
+                    .subquery()
+                )
+
+            query = (
+                session.query(
+                    Question,
+                    User,
+                    func.coalesce(like_counts.c.like_count, 0),
+                    func.coalesce(comment_counts.c.comment_count, 0),
+                    viewer_likes.c.question_id.isnot(None) if viewer_likes is not None else literal(False),
+                )
+                .join(User, Question.user_id == User.id)
+                .outerjoin(like_counts, like_counts.c.question_id == Question.id)
+                .outerjoin(comment_counts, comment_counts.c.question_id == Question.id)
+            )
+            if viewer_likes is not None:
+                query = query.outerjoin(viewer_likes, viewer_likes.c.question_id == Question.id)
+
+            query = query.filter(
                 Question.deleted_at.is_(None),
                 Question.is_public.is_(True),
                 Question.status == "graded",
+                Question.score.isnot(None),
                 User.status == USER_STATUS_ACTIVE,
                 User.allow_public_questions.is_(True),
             )
@@ -1299,7 +1355,16 @@ class Database:
                 .all()
             )
 
-            return [self.community_question_response(question, author=author) for question, author in rows], int(total_row)
+            return [
+                self.community_question_response(
+                    question,
+                    author=author,
+                    like_count=int(like_count or 0),
+                    comment_count=int(comment_count or 0),
+                    is_liked_by_me=bool(is_liked_by_me),
+                )
+                for question, author, like_count, comment_count, is_liked_by_me in rows
+            ], int(total_row)
 
     def stats_response(
         self,
@@ -1558,6 +1623,8 @@ class Database:
             if row is None:
                 return
             session.query(Report).filter(Report.question_id == row.id).delete(synchronize_session=False)
+            session.query(QuestionLike).filter(QuestionLike.question_id == row.id).delete(synchronize_session=False)
+            session.query(QuestionComment).filter(QuestionComment.question_id == row.id).delete(synchronize_session=False)
             session.delete(row)
 
     def clear_records(self, device_id: str, user_id: int | None = None) -> None:
@@ -1572,6 +1639,8 @@ class Database:
             row_ids = [int(row.id) for row in rows]
             if row_ids:
                 session.query(Report).filter(Report.question_id.in_(row_ids)).delete(synchronize_session=False)
+                session.query(QuestionLike).filter(QuestionLike.question_id.in_(row_ids)).delete(synchronize_session=False)
+                session.query(QuestionComment).filter(QuestionComment.question_id.in_(row_ids)).delete(synchronize_session=False)
             for row in rows:
                 session.delete(row)
 
@@ -1793,7 +1862,121 @@ class Database:
             "timezone": device.timezone,
         }
 
-    def community_question_response(self, row: Question, author: User | None = None) -> dict[str, Any]:
+    def _public_question_query(self, session: Session, question_id: str):
+        row_id = self._record_id_value(question_id)
+        if row_id is None:
+            return None
+        return (
+            session.query(Question)
+            .join(User, Question.user_id == User.id)
+            .filter(
+                Question.id == row_id,
+                Question.deleted_at.is_(None),
+                Question.is_public.is_(True),
+                Question.status == "graded",
+                Question.score.isnot(None),
+                User.status == USER_STATUS_ACTIVE,
+                User.allow_public_questions.is_(True),
+            )
+        )
+
+    def set_public_question_like(self, question_id: str, user_id: int, is_liked: bool) -> dict[str, Any] | None:
+        with self.connect() as session:
+            query = self._public_question_query(session, question_id)
+            question = query.first() if query is not None else None
+            if question is None:
+                return None
+
+            existing = (
+                session.query(QuestionLike)
+                .filter(QuestionLike.question_id == question.id, QuestionLike.user_id == user_id)
+                .first()
+            )
+            if is_liked and existing is None:
+                session.add(QuestionLike(question_id=question.id, user_id=user_id, created_at=self._utc_now()))
+            elif not is_liked and existing is not None:
+                session.delete(existing)
+            session.flush()
+
+            like_count = session.query(QuestionLike).filter(QuestionLike.question_id == question.id).count()
+            return {
+                "questionId": str(question.id),
+                "likeCount": int(like_count),
+                "isLikedByMe": bool(is_liked),
+            }
+
+    def list_public_question_comments(
+        self,
+        question_id: str,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int] | None:
+        with self.connect() as session:
+            query = self._public_question_query(session, question_id)
+            question = query.first() if query is not None else None
+            if question is None:
+                return None
+
+            comments_query = (
+                session.query(QuestionComment, User)
+                .join(User, QuestionComment.user_id == User.id)
+                .filter(
+                    QuestionComment.question_id == question.id,
+                    QuestionComment.deleted_at.is_(None),
+                    User.status == USER_STATUS_ACTIVE,
+                )
+            )
+            total = comments_query.count()
+            rows = (
+                comments_query.order_by(QuestionComment.created_at.asc())
+                .limit(limit)
+                .offset(offset)
+                .all()
+            )
+            return [self.community_comment_response(comment, author) for comment, author in rows], int(total)
+
+    def create_public_question_comment(
+        self,
+        question_id: str,
+        user_id: int,
+        body: str,
+    ) -> dict[str, Any] | None:
+        with self.connect() as session:
+            query = self._public_question_query(session, question_id)
+            question = query.first() if query is not None else None
+            author = session.query(User).filter(User.id == user_id, User.status == USER_STATUS_ACTIVE).first()
+            if question is None or author is None:
+                return None
+
+            now = self._utc_now()
+            comment = QuestionComment(
+                question_id=question.id,
+                user_id=user_id,
+                body=body.strip(),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(comment)
+            session.flush()
+            return self.community_comment_response(comment, author)
+
+    def community_comment_response(self, row: QuestionComment, author: User) -> dict[str, Any]:
+        return {
+            "id": str(row.id),
+            "questionId": str(row.question_id),
+            "body": row.body,
+            "createdAt": self._response_timestamp(row.created_at),
+            "author": self.user_profile_response(author),
+        }
+
+    def community_question_response(
+        self,
+        row: Question,
+        author: User | None = None,
+        like_count: int = 0,
+        comment_count: int = 0,
+        is_liked_by_me: bool = False,
+    ) -> dict[str, Any]:
         if author is None and row.user_id is not None:
             with self.connect() as session:
                 author = session.query(User).filter(User.id == row.user_id).first()
@@ -1819,6 +2002,9 @@ class Database:
             "createdAt": self._response_timestamp(row.created_at),
             "answeredAt": self._response_timestamp(row.answered_at),
             "author": self.user_profile_response(author) if author is not None else None,
+            "likeCount": int(like_count),
+            "commentCount": int(comment_count),
+            "isLikedByMe": bool(is_liked_by_me),
         }
 
     def user_profile_response(self, row: User) -> dict[str, Any]:

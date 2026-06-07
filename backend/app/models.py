@@ -183,10 +183,46 @@ class CommunityQuestionResponse(CamelModel):
     created_at: str = Field(alias="createdAt")
     answered_at: str | None = Field(default=None, alias="answeredAt")
     author: UserProfileResponse | None = None
+    like_count: int = Field(default=0, alias="likeCount")
+    comment_count: int = Field(default=0, alias="commentCount")
+    is_liked_by_me: bool = Field(default=False, alias="isLikedByMe")
 
 
 class CommunityQuestionsResponse(CamelModel):
     questions: list[CommunityQuestionResponse]
+    total_count: int = Field(alias="totalCount")
+    limit: int
+    offset: int
+
+
+class CommunityLikeResponse(CamelModel):
+    question_id: str = Field(alias="questionId")
+    like_count: int = Field(alias="likeCount")
+    is_liked_by_me: bool = Field(alias="isLikedByMe")
+
+
+class CommunityCommentRequest(CamelModel):
+    body: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("body")
+    @classmethod
+    def normalize_body(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Comment body is required.")
+        return normalized
+
+
+class CommunityCommentResponse(CamelModel):
+    id: str
+    question_id: str = Field(alias="questionId")
+    body: str
+    created_at: str = Field(alias="createdAt")
+    author: UserProfileResponse
+
+
+class CommunityCommentsResponse(CamelModel):
+    comments: list[CommunityCommentResponse]
     total_count: int = Field(alias="totalCount")
     limit: int
     offset: int

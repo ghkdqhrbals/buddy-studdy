@@ -1629,6 +1629,9 @@ struct AppStrings {
     var topicBrowser: String { text("주제 탐색", "Topic Browser") }
     var communityFeed: String { text("다른 사용자 질문", "Community Questions") }
     var communityQuestion: String { text("공개 질문", "Community Question") }
+    var comments: String { text("댓글", "Comments") }
+    var noComments: String { text("아직 댓글이 없습니다.", "No comments yet.") }
+    var writeComment: String { text("댓글 쓰기", "Write a comment") }
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { "Sign in with Google" }
     var signInWithEmail: String { "Sign in with Email" }

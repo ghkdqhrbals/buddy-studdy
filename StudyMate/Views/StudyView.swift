@@ -15,12 +15,6 @@ struct StudyView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Spacer()
-
-                    newQuestionButton(strings: strings)
-                }
-
                 StudySettingsSummarySection(
                     topic: studyTopicLabel(strings: strings),
                     level: selectedDifficulty.displayName(language: appState.settings.appLanguage),
@@ -82,6 +76,13 @@ struct StudyView: View {
         .refreshable {
             await appState.refreshVisibleData()
         }
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .topBarTrailing) {
+                toolbarNewQuestionButton(strings: strings)
+            }
+            #endif
+        }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
             Button(strings.done, role: .cancel) {}
         } message: {
@@ -140,6 +141,14 @@ struct StudyView: View {
         return appState.settings.difficulty
     }
 
+    private var selectedCategory: StudyCategory? {
+        guard let preferredCategoryID else {
+            return appState.settings.category(for: appState.settings.selectedStudyCategoryID)
+        }
+
+        return appState.settings.category(for: preferredCategoryID)
+    }
+
     private func studyTopicLabel(strings: AppStrings) -> String {
         let topic = selectedTopic.trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? strings.studyFallback : topic
@@ -195,10 +204,7 @@ struct StudyView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                HStack(spacing: 10) {
-                    newQuestionButton(strings: strings, prominent: true)
-                }
-                .font(.caption)
+                EmptyView()
             }
             .frame(maxWidth: .infinity)
         } else {
@@ -220,8 +226,8 @@ struct StudyView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(appState.isGeneratingQuestion)
-            .opacity(appState.hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(appState.hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
         } else {
             Button {
                 requestNewQuestion()
@@ -230,9 +236,27 @@ struct StudyView: View {
             }
             .buttonStyle(.bordered)
             .disabled(appState.isGeneratingQuestion)
-            .opacity(appState.hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(appState.hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
         }
+    }
+
+    private func toolbarNewQuestionButton(strings: AppStrings) -> some View {
+        Button {
+            requestNewQuestion()
+        } label: {
+            if appState.isGeneratingQuestion {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+            }
+        }
+        .disabled(appState.isGeneratingQuestion)
+        .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+        .accessibilityLabel(strings.newQuestion)
+        .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
     }
 
     @ViewBuilder
@@ -250,7 +274,7 @@ struct StudyView: View {
             return
         }
 
-        if appState.hasReachedPendingQuestionLimit {
+        if hasReachedPendingQuestionLimit {
             showsPendingLimitHelp = true
             return
         }
@@ -258,6 +282,10 @@ struct StudyView: View {
         Task {
             await appState.generateQuestion()
         }
+    }
+
+    private var hasReachedPendingQuestionLimit: Bool {
+        appState.hasReachedPendingQuestionLimit(for: selectedCategory)
     }
 
     private func notificationLandingInlineView(message: String, strings: AppStrings) -> some View {

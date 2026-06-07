@@ -315,6 +315,21 @@ final class AppState: ObservableObject {
         pendingQuestionCount >= Self.maxPendingQuestionCount
     }
 
+    func pendingQuestionCount(for category: StudyCategory) -> Int {
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        return pendingRecordsIncludingCurrent.filter {
+            Self.normalizedCategoryText(for: $0.topic) == categoryKey
+        }.count
+    }
+
+    func hasReachedPendingQuestionLimit(for category: StudyCategory?) -> Bool {
+        guard let category else {
+            return hasReachedPendingQuestionLimit
+        }
+
+        return pendingQuestionCount(for: category) >= Self.maxPendingQuestionCount
+    }
+
     var pendingStudyRecords: [StudyRecord] {
         pendingRecordsIncludingCurrent
             .sorted { $0.question.createdAt > $1.question.createdAt }
@@ -1357,6 +1372,83 @@ final class AppState: ObservableObject {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
         }
+    }
+
+    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        let previous = communityQuestions.first(where: { $0.id == question.id })
+        updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: max(0, question.likeCount + (isLiked ? 1 : -1)))
+
+        do {
+            let state = try await remotePushBackendClient.setCommunityQuestionLike(
+                registration: registration,
+                questionID: question.id,
+                isLiked: isLiked
+            )
+            updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+        } catch {
+            if let previous {
+                updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
+            }
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func loadCommunityQuestionComments(questionID: String, limit: Int = 30, offset: Int = 0) async -> CommunityCommentsResponse? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comments") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            return try await remotePushBackendClient.fetchCommunityQuestionComments(
+                registration: registration,
+                questionID: questionID,
+                limit: limit,
+                offset: offset
+            )
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            let comment = try await remotePushBackendClient.createCommunityQuestionComment(
+                registration: registration,
+                questionID: questionID,
+                body: body
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index].commentCount += 1
+            }
+            return comment
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func updateCommunityQuestionLike(id: String, isLiked: Bool, likeCount: Int) {
+        guard let index = communityQuestions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        communityQuestions[index].isLikedByMe = isLiked
+        communityQuestions[index].likeCount = likeCount
     }
 
     func setDraftNotificationSound(_ sound: NotificationSoundOption, preview: Bool = true) {
@@ -2501,7 +2593,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        guard !hasReachedPendingQuestionLimit else {
+        guard !hasReachedPendingQuestionLimit(for: settings.category(for: settings.selectedStudyCategoryID)) else {
             showPendingQuestionLimitStatus(reason: reason)
             return false
         }

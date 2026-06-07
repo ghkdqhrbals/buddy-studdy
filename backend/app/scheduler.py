@@ -62,7 +62,7 @@ class QuestionScheduler:
             created_record_id: str | None = None
             try:
                 user_id = row.get("user_id")
-                pending_count = self.database.pending_record_count(device_id, user_id=user_id)
+                pending_count = self.database.pending_record_count(device_id, user_id=user_id, topic=row["topic"])
                 if pending_count >= self.max_pending_questions:
                     self.database.defer_schedule(
                         device_id=device_id,
