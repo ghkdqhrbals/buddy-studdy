@@ -1318,8 +1318,8 @@ final class AppState: ObservableObject {
                 avatarColorSeed: avatarColorSeed,
                 pageAccess: pageAccess
             )
+            settingsStore.saveCommunityProfileDisplayName(displayName)
             applyCommunityProfile(profile)
-            statusMessage = strings.profileSaved
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
@@ -1327,7 +1327,26 @@ final class AppState: ObservableObject {
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {
-        communityProfile = profile
+        let cachedDisplayName = settingsStore.loadCommunityProfileDisplayName()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let incomingDisplayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cachedProfileID = settingsStore.loadCommunityProfileID()
+        let shouldPreserveCachedName = cachedProfileID == profile.id
+            && !cachedDisplayName.isEmpty
+            && cachedDisplayName != incomingDisplayName
+        let resolvedProfile = shouldPreserveCachedName
+            ? CommunityUserProfile(
+                id: profile.id,
+                displayName: cachedDisplayName,
+                bio: profile.bio,
+                avatarURL: profile.avatarURL,
+                avatarSymbolName: profile.avatarSymbolName,
+                avatarColorSeed: profile.avatarColorSeed,
+                pageAccess: profile.pageAccess
+            )
+            : profile
+        communityProfile = resolvedProfile
+        settingsStore.saveCommunityProfileID(resolvedProfile.id)
+        settingsStore.saveCommunityProfileDisplayName(resolvedProfile.displayName)
         updateProfileAvatarSymbolName(profile.avatarSymbolName)
         updateProfileAvatarColorSeed(profile.avatarColorSeed)
     }
@@ -1347,6 +1366,8 @@ final class AppState: ObservableObject {
             let updatedRegistration = try await remotePushBackendClient.withdrawMyProfile(registration: registration)
             settingsStore.saveRemotePushRegistration(updatedRegistration)
             signOutFromCommunity()
+            settingsStore.saveCommunityProfileID(nil)
+            settingsStore.saveCommunityProfileDisplayName("")
             statusMessage = strings.accountDeleted
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)

@@ -844,6 +844,10 @@ private struct PixelAvatarPalette {
     }
 
     var accent: Color {
+        if let customColor = ProfileAvatarCustomColor(seed: seed)?.color {
+            return customColor
+        }
+
         if let option = ProfileAvatarColorOption.option(for: seed) {
             return option.color
         }
@@ -899,6 +903,28 @@ private enum PixelAvatarPattern {
             return princess
         case "pixel-flower":
             return flower
+        case "pixel-hero":
+            return hero
+        case "pixel-wizard":
+            return wizard
+        case "pixel-robot":
+            return robot
+        case "pixel-chef":
+            return chef
+        case "pixel-pilot":
+            return pilot
+        case "pixel-nurse":
+            return nurse
+        case "pixel-knight":
+            return knight
+        case "pixel-dancer":
+            return dancer
+        case "pixel-gamer":
+            return gamer
+        case "pixel-scientist":
+            return scientist
+        case "pixel-astronaut":
+            return astronaut
         default:
             return buddy
         }
@@ -998,6 +1024,91 @@ private enum PixelAvatarPattern {
             + points(.light, (2, 7), (6, 7))
             + row(8, 2...6, .accent)
     }
+
+    static var hero: [PixelAvatarCell] {
+        row(1, 2...6, .outline)
+            + row(2, 2...6, .accent)
+            + points(.light, (3, 3), (5, 3), (2, 7), (6, 7))
+            + baseFace
+            + row(8, 1...7, .accent)
+    }
+
+    static var wizard: [PixelAvatarCell] {
+        points(.accent, (4, 0), (3, 1), (4, 1), (5, 1), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2))
+            + points(.light, (5, 0), (6, 1))
+            + baseFace
+            + row(8, 2...6, .accent)
+    }
+
+    static var robot: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .shade)
+            + row(3, 2...6, .light)
+            + row(4, 2...6, .light)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + row(5, 2...6, .shade)
+            + row(8, 2...6, .accent)
+    }
+
+    static var chef: [PixelAvatarCell] {
+        points(.light, (3, 0), (4, 0), (5, 0), (2, 1), (4, 1), (6, 1))
+            + row(2, 2...6, .light)
+            + baseFace
+            + row(8, 2...6, .accent)
+    }
+
+    static var pilot: [PixelAvatarCell] {
+        row(1, 2...6, .accent)
+            + row(2, 1...7, .outline)
+            + points(.light, (2, 3), (6, 3), (2, 4), (6, 4))
+            + baseFace
+            + row(8, 2...6, .shade)
+    }
+
+    static var nurse: [PixelAvatarCell] {
+        row(1, 2...6, .light)
+            + points(.accent, (4, 0), (4, 1), (3, 1), (5, 1))
+            + row(2, 2...6, .outline)
+            + baseFace
+            + row(8, 2...6, .light)
+    }
+
+    static var knight: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .shade)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4))
+            + baseFace
+            + points(.accent, (3, 7), (4, 7), (5, 7), (4, 8))
+    }
+
+    static var dancer: [PixelAvatarCell] {
+        points(.accent, (2, 1), (3, 1), (5, 1), (6, 1), (1, 4), (7, 4))
+            + row(2, 2...6, .accent)
+            + baseFace
+            + points(.light, (2, 8), (6, 8))
+    }
+
+    static var gamer: [PixelAvatarCell] {
+        row(1, 2...6, .shade)
+            + points(.outline, (1, 4), (2, 4), (6, 4), (7, 4))
+            + baseFace
+            + points(.accent, (1, 8), (2, 8), (5, 8), (6, 8), (7, 8))
+    }
+
+    static var scientist: [PixelAvatarCell] {
+        row(1, 3...5, .shade)
+            + row(2, 2...6, .light)
+            + points(.outline, (2, 4), (3, 4), (5, 4), (6, 4))
+            + baseFace
+            + row(8, 2...6, .light)
+    }
+
+    static var astronaut: [PixelAvatarCell] {
+        row(1, 2...6, .light)
+            + points(.outline, (1, 2), (7, 2), (1, 3), (7, 3), (1, 4), (7, 4))
+            + baseFace
+            + points(.accent, (2, 8), (3, 8), (5, 8), (6, 8))
+    }
 }
 
 private extension Color {
@@ -1013,6 +1124,7 @@ private struct MobileProfileSettingsSheet: View {
     @State private var allowPublicQuestionsAccess = true
     @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
+    @State private var isShowingCustomColorEditor = false
 
     private var strings: AppStrings {
         appState.strings
@@ -1100,6 +1212,32 @@ private struct MobileProfileSettingsSheet: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+
+                            Button {
+                                isShowingCustomColorEditor = true
+                            } label: {
+                                Circle()
+                                    .fill(
+                                        AngularGradient(
+                                            colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
+                                            center: .center
+                                        )
+                                    )
+                                    .frame(width: 28, height: 28)
+                                    .overlay {
+                                        if ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil {
+                                            Image(systemName: "slider.horizontal.3")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
+                                    .overlay {
+                                        Circle()
+                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(strings.customProfileColor)
                         }
                         .padding(.vertical, 6)
                     }
@@ -1124,9 +1262,15 @@ private struct MobileProfileSettingsSheet: View {
                             isConfirmingWithdrawal = true
                         } label: {
                             Text(strings.deleteAccount)
+                                .font(.caption2)
+                                .foregroundStyle(.red.opacity(0.72))
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
+                        .buttonStyle(.plain)
                     } footer: {
                         Text(strings.deleteAccountNotice)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary.opacity(0.78))
                     }
                 } else {
                     Section {
@@ -1245,6 +1389,14 @@ private struct MobileProfileSettingsSheet: View {
                 }
                 .environmentObject(appState)
             }
+            .sheet(isPresented: $isShowingCustomColorEditor) {
+                ProfileAvatarColorEditorSheet(
+                    initialColor: ProfileAvatarCustomColor.from(seed: appState.profileAvatarColorSeed)
+                ) { color in
+                    appState.updateCommunityProfileAvatar(colorSeed: color.seed)
+                }
+                .environmentObject(appState)
+            }
         }
     }
 
@@ -1256,6 +1408,96 @@ private struct MobileProfileSettingsSheet: View {
         return strings.save
     }
 
+}
+
+private struct ProfileAvatarColorEditorSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var red: Double
+    @State private var green: Double
+    @State private var blue: Double
+    var onApply: (ProfileAvatarCustomColor) -> Void
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    private var selectedColor: ProfileAvatarCustomColor {
+        ProfileAvatarCustomColor(red: Int(red.rounded()), green: Int(green.rounded()), blue: Int(blue.rounded()))
+    }
+
+    init(initialColor: ProfileAvatarCustomColor, onApply: @escaping (ProfileAvatarCustomColor) -> Void) {
+        _red = State(initialValue: Double(initialColor.red))
+        _green = State(initialValue: Double(initialColor.green))
+        _blue = State(initialValue: Double(initialColor.blue))
+        self.onApply = onApply
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 16) {
+                        Circle()
+                            .fill(selectedColor.color)
+                            .frame(width: 64, height: 64)
+                            .overlay {
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                            }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(strings.customProfileColor)
+                                .font(.headline)
+                            Text("RGB \(selectedColor.red), \(selectedColor.green), \(selectedColor.blue)")
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                rgbSlider(title: strings.red, value: $red, tint: .red)
+                rgbSlider(title: strings.green, value: $green, tint: .green)
+                rgbSlider(title: strings.blue, value: $blue, tint: .blue)
+            }
+            .navigationTitle(strings.profileColor)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.done) {
+                        onApply(selectedColor)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func rgbSlider(title: String, value: Binding<Double>, tint: Color) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(value.wrappedValue.rounded()))")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(value: value, in: 0...255, step: 1)
+                    .tint(tint)
+            }
+            .padding(.vertical, 2)
+        }
+    }
 }
 
 private struct EmailSignInSheet: View {
@@ -1420,7 +1662,18 @@ private enum ProfileAvatarOption {
         "pixel-star",
         "pixel-girl",
         "pixel-princess",
-        "pixel-flower"
+        "pixel-flower",
+        "pixel-hero",
+        "pixel-wizard",
+        "pixel-robot",
+        "pixel-chef",
+        "pixel-pilot",
+        "pixel-nurse",
+        "pixel-knight",
+        "pixel-dancer",
+        "pixel-gamer",
+        "pixel-scientist",
+        "pixel-astronaut"
     ]
 
     static func glyphName(for symbolName: String) -> String {
@@ -1474,6 +1727,81 @@ private struct ProfileAvatarColorOption: Identifiable {
 
     static func option(for seed: String) -> ProfileAvatarColorOption? {
         all.first { $0.id == seed }
+    }
+}
+
+private struct ProfileAvatarCustomColor: Equatable {
+    var red: Int
+    var green: Int
+    var blue: Int
+
+    var seed: String {
+        "avatar-rgb-\(Self.clamped(red))-\(Self.clamped(green))-\(Self.clamped(blue))"
+    }
+
+    var color: Color {
+        Color(
+            red: Double(Self.clamped(red)) / 255,
+            green: Double(Self.clamped(green)) / 255,
+            blue: Double(Self.clamped(blue)) / 255
+        )
+    }
+
+    init(red: Int, green: Int, blue: Int) {
+        self.red = Self.clamped(red)
+        self.green = Self.clamped(green)
+        self.blue = Self.clamped(blue)
+    }
+
+    init?(seed: String) {
+        let parts = seed.split(separator: "-")
+        guard parts.count == 5,
+              parts[0] == "avatar",
+              parts[1] == "rgb",
+              let red = Int(parts[2]),
+              let green = Int(parts[3]),
+              let blue = Int(parts[4]) else {
+            return nil
+        }
+
+        self.init(red: red, green: green, blue: blue)
+    }
+
+    static func from(seed: String) -> ProfileAvatarCustomColor {
+        if let customColor = ProfileAvatarCustomColor(seed: seed) {
+            return customColor
+        }
+        if let preset = ProfileAvatarColorOption.option(for: seed),
+           let components = preset.color.avatarRGBComponents {
+            return ProfileAvatarCustomColor(red: components.red, green: components.green, blue: components.blue)
+        }
+        return ProfileAvatarCustomColor(red: 78, green: 163, blue: 122)
+    }
+
+    private static func clamped(_ value: Int) -> Int {
+        min(255, max(0, value))
+    }
+}
+
+private extension Color {
+    var avatarRGBComponents: (red: Int, green: Int, blue: Int)? {
+        #if canImport(UIKit)
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+        return (
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
+        #else
+        return nil
+        #endif
     }
 }
 

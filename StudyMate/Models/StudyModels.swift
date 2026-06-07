@@ -1673,6 +1673,10 @@ struct AppStrings {
     var profileAvatar: String { text("프로필 사진", "Profile Picture") }
     var profileCharacter: String { text("프로필 캐릭터", "Profile Character") }
     var profileColor: String { text("프로필 색상", "Profile Color") }
+    var customProfileColor: String { text("직접 설정", "Custom Color") }
+    var red: String { text("빨강", "Red") }
+    var green: String { text("초록", "Green") }
+    var blue: String { text("파랑", "Blue") }
     var chooseProfilePhoto: String { text("사진 선택", "Choose Photo") }
     var removeProfilePhoto: String { text("사진 제거", "Remove Photo") }
     var profilePhotoScale: String { text("사진 크기", "Photo Size") }
