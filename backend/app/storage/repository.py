@@ -1277,13 +1277,10 @@ class Database:
         topic: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         with self.connect() as session:
-            query = session.query(Question).join(Device, Question.device_id == Device.device_id).filter(
+            query = session.query(Question, User).join(User, Question.user_id == User.id).filter(
                 Question.deleted_at.is_(None),
                 Question.is_public.is_(True),
                 Question.status == "graded",
-                Device.user_id.isnot(None),
-            )
-            query = query.join(User, Device.user_id == User.id).filter(
                 User.status == USER_STATUS_ACTIVE,
                 User.allow_public_questions.is_(True),
             )
@@ -1302,7 +1299,7 @@ class Database:
                 .all()
             )
 
-            return [self.community_question_response(row) for row in rows], int(total_row)
+            return [self.community_question_response(question, author=author) for question, author in rows], int(total_row)
 
     def stats_response(
         self,
@@ -1796,8 +1793,10 @@ class Database:
             "timezone": device.timezone,
         }
 
-    def community_question_response(self, row: Question) -> dict[str, Any]:
-        author = row.device.user if row.device is not None else None
+    def community_question_response(self, row: Question, author: User | None = None) -> dict[str, Any]:
+        if author is None and row.user_id is not None:
+            with self.connect() as session:
+                author = session.query(User).filter(User.id == row.user_id).first()
         if author is not None and author.status != USER_STATUS_ACTIVE:
             author = None
         grading_result = None

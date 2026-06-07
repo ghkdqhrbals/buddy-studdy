@@ -972,3 +972,55 @@ def test_public_questions_filters_and_paginates(db: Database):
     assert page_one[0]["id"] != page_two[0]["id"]
     assert unlinked_public["id"] not in {page_one[0]["id"], page_two[0]["id"]}
     assert ungraded_public["id"] not in {page_one[0]["id"], page_two[0]["id"]}
+
+
+def test_public_question_author_uses_question_user_not_current_device_user(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-author-switch",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+
+    profile_a = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-author-switch-a",
+        email="author-switch-a@example.com",
+        display_name="Original Author",
+    )
+    assert profile_a is not None
+    public_question = db.create_question(
+        device_id=device_id,
+        user_id=int(profile_a["id"]),
+        topic="Swift",
+        difficulty_level=6,
+        question="Which user authored this?",
+        expected_answer_hint="Original author",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=public_question["id"],
+        answer="Original author",
+        score=90,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=int(profile_a["id"]),
+    )
+
+    profile_b = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-author-switch-b",
+        email="author-switch-b@example.com",
+        display_name="Current Device User",
+    )
+    assert profile_b is not None
+
+    questions, total = db.list_public_questions(exclude_device_id=None, limit=20, offset=0)
+    assert total == 1
+    assert questions[0]["id"] == public_question["id"]
+    assert questions[0]["author"]["id"] == int(profile_a["id"])
+    assert questions[0]["author"]["displayName"] == "Original Author"
