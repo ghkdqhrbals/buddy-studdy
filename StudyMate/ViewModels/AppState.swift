@@ -2071,6 +2071,15 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
+    func openStudyCategory(_ categoryID: String) {
+        let categories = synchronizedTopicCategories(for: settings).studyCategories
+        guard let targetCategoryID = categories.first(where: { $0.id == categoryID })?.id ?? categories.first?.id else {
+            return
+        }
+
+        showStudyScreen(categoryID: targetCategoryID)
+    }
+
     func deleteStudyCategory(id: String) {
         guard let index = studyCategoriesForDisplay.firstIndex(where: { $0.id == id }) else {
             return

@@ -400,7 +400,7 @@ private struct MobileHomeView: View {
             )
         } else {
             Button {
-                appState.selectStudyCategory(category.id)
+                appState.openStudyCategory(category.id)
             } label: {
                 MobileHomeCategoryRow(
                     category: category,
