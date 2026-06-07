@@ -1,0 +1,407 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": false,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Log Search",
+      "tooltip": "Open BuddyStuddy log search dashboard",
+      "type": "link",
+      "url": "/d/buddystuddy-logs/buddystuddy-logs"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystuddy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p50"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "p50"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystuddy-loki"
+          },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.50, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
+          "legendFormat": "{{method}} {{route}}",
+          "queryType": "instant",
+          "refId": "P50"
+        }
+      ],
+      "title": "p50 API Latency",
+      "transformations": [],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystuddy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p95"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 2,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "p95"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystuddy-loki"
+          },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.95, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
+          "legendFormat": "{{method}} {{route}}",
+          "queryType": "instant",
+          "refId": "P95"
+        }
+      ],
+      "title": "p95 API Latency",
+      "transformations": [],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystuddy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 2000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p99"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 3,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "p99"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystuddy-loki"
+          },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.99, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\",\"path\":\"(?P<path>[^\"]+)\",\"route\":\"(?P<route>[^\"]+)\",\"status\":(?P<status>[0-9]+),\"durationMs\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
+          "legendFormat": "{{method}} {{route}}",
+          "queryType": "instant",
+          "refId": "P99"
+        }
+      ],
+      "title": "p99 API Latency",
+      "transformations": [],
+      "type": "table"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 42,
+  "tags": [
+    "buddystuddy",
+    "api",
+    "latency",
+    "loki"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "{container=~\".+\"}",
+          "value": "{container=~\".+\"}"
+        },
+        "hide": 0,
+        "label": "Label Selector",
+        "name": "labelSelector",
+        "options": [],
+        "query": "{container=~\".+\"}",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "baseFilters": [],
+        "datasource": {
+          "type": "loki",
+          "uid": "buddystuddy-loki"
+        },
+        "filters": [],
+        "hide": 0,
+        "label": "Label Filters",
+        "name": "labelFilters",
+        "skipUrlSync": false,
+        "type": "adhoc"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "LogQL Search",
+        "name": "logqlSearch",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BuddyStuddy API Latency",
+  "uid": "buddystuddy-api-latency",
+  "version": 1
+}
