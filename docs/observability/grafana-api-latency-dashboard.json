@@ -54,7 +54,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -89,205 +89,13 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__range]))",
+          "expr": "sum(count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__range])) / ${__range_s}",
           "legendFormat": "",
           "queryType": "instant",
           "refId": "10"
         }
       ],
-      "title": "Requests",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystuddy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 0
-      },
-      "id": 11,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystuddy-loki"
-          },
-          "editorMode": "code",
-          "expr": "(sum(count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [$__range])) or vector(0))",
-          "legendFormat": "",
-          "queryType": "instant",
-          "refId": "11"
-        }
-      ],
-      "title": "Error Responses",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystuddy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "yellow",
-                "value": null
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "id": 12,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystuddy-loki"
-          },
-          "editorMode": "code",
-          "expr": "100 * ((sum(count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [$__range])) or vector(0)) / sum(count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__range])))",
-          "legendFormat": "",
-          "queryType": "instant",
-          "refId": "12"
-        }
-      ],
-      "title": "Error Rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystuddy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "yellow",
-                "value": null
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "id": 13,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystuddy-loki"
-          },
-          "editorMode": "code",
-          "expr": "max(quantile_over_time(0.95, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route))",
-          "legendFormat": "",
-          "queryType": "instant",
-          "refId": "13"
-        }
-      ],
-      "title": "Worst p95",
+      "title": "Requests/sec",
       "type": "stat"
     },
     {
@@ -340,15 +148,15 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 4
+        "w": 18,
+        "x": 6,
+        "y": 0
       },
       "id": 20,
       "options": {
@@ -375,7 +183,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (method, route) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__interval]))",
+          "expr": "sum by (method, route) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__interval])) / (${__interval_ms} / 1000)",
           "legendFormat": "{{method}} {{route}}",
           "queryType": "range",
           "refId": "20"
@@ -434,7 +242,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -442,7 +250,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 8
       },
       "id": 21,
       "options": {
@@ -469,7 +277,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (status) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__interval]))",
+          "expr": "sum by (status) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__interval])) / (${__interval_ms} / 1000)",
           "legendFormat": "{{status}}",
           "queryType": "range",
           "refId": "21"
@@ -528,7 +336,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -536,7 +344,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 8
       },
       "id": 22,
       "options": {
@@ -563,7 +371,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (method, route, status) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [$__interval]))",
+          "expr": "sum by (method, route, status) (count_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [$__interval])) / (${__interval_ms} / 1000)",
           "legendFormat": "{{status}} {{method}} {{route}}",
           "queryType": "range",
           "refId": "22"
@@ -630,7 +438,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 16
       },
       "id": 23,
       "options": {
@@ -723,7 +531,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 24
       },
       "id": 1,
       "options": {
@@ -828,7 +636,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 33
       },
       "id": 2,
       "options": {
@@ -933,7 +741,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 42
       },
       "id": 3,
       "options": {
@@ -1037,5 +845,5 @@
   "timezone": "browser",
   "title": "BuddyStuddy API Performance",
   "uid": "buddystuddy-api-latency",
-  "version": 3
+  "version": 4
 }

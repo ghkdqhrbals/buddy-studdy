@@ -12,9 +12,9 @@ API performance and latency metrics are intentionally kept in a separate dashboa
 - Dashboard UID: `buddystuddy-api-latency`
 - Dashboard title: `BuddyStuddy API Performance`
 
-The performance dashboard combines Datadog/Sentry-style operational summaries with grouped latency tables:
+The performance dashboard combines Datadog/Sentry-style traffic summaries with grouped latency tables:
 
-- Request summary: total requests, error responses, error rate, and worst p95 in the selected range.
+- Request summary: average requests per second in the selected range.
 - Traffic trends: `API Calls by Route`, `Responses by Status`, and `Error Responses by Route`.
 - Latency trend: `p99 Trend by Route`.
 - Endpoint comparison tables: `p50 API Latency`, `p95 API Latency`, and `p99 API Latency`.
@@ -73,7 +73,7 @@ sum by (method, route) (
       | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
       | status=~".+" [$__interval]
   )
-)
+) / (${__interval_ms} / 1000)
 ```
 
 Errors are derived from HTTP status codes in the response log:
