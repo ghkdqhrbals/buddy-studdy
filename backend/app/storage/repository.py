@@ -261,11 +261,13 @@ class Database:
                             "ON schedules (enabled, next_due_at, device_id, user_id)"
                         )
                     )
-                if "idx_schedules_device_user" not in schedule_indexes:
+                session.execute(text("DROP INDEX IF EXISTS idx_schedules_device_user"))
+                session.execute(text("CREATE INDEX IF NOT EXISTS idx_schedules_device_user ON schedules (device_id, user_id)"))
+                if "idx_schedules_device_user_topic" not in schedule_indexes:
                     session.execute(
                         text(
-                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_schedules_device_user "
-                            "ON schedules (device_id, user_id)"
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_schedules_device_user_topic "
+                            "ON schedules (device_id, user_id, topic)"
                         )
                     )
             if "devices" in table_names:
@@ -421,8 +423,16 @@ class Database:
     def _get_device(self, session: Session, device_id: str) -> Device | None:
         return session.query(Device).filter(Device.device_id == device_id).first()
 
-    def _get_schedule(self, session: Session, device_id: str, user_id: int | None = None) -> Schedule | None:
+    def _get_schedule(
+        self,
+        session: Session,
+        device_id: str,
+        user_id: int | None = None,
+        topic: str | None = None,
+    ) -> Schedule | None:
         query = session.query(Schedule).filter(Schedule.device_id == device_id)
+        if topic is not None and topic.strip():
+            query = query.filter(func.lower(Schedule.topic) == topic.strip().lower())
         if user_id is not None:
             schedule = query.filter(Schedule.user_id == user_id).first()
             if schedule is not None:
@@ -764,7 +774,7 @@ class Database:
     ) -> str | None:
         now = self._utc_now()
         with self.connect() as session:
-            existing = self._get_schedule(session, device_id, user_id)
+            existing = self._get_schedule(session, device_id, user_id, topic=topic)
 
             if existing is not None and openai_api_key_cipher is None:
                 cipher = existing.openai_api_key_cipher
@@ -1175,9 +1185,9 @@ class Database:
                 "createdAt": self._response_timestamp(report.created_at),
             }
 
-    def get_schedule(self, device_id: str, user_id: int | None = None) -> dict[str, Any] | None:
+    def get_schedule(self, device_id: str, user_id: int | None = None, topic: str | None = None) -> dict[str, Any] | None:
         with self.connect() as session:
-            schedule = self._get_schedule(session, device_id, user_id)
+            schedule = self._get_schedule(session, device_id, user_id, topic=topic)
             if schedule is None:
                 return None
             device = self._get_device(session, device_id)
@@ -1644,11 +1654,18 @@ class Database:
             for row in rows:
                 session.delete(row)
 
-    def defer_schedule(self, device_id: str, minutes: int, error: str | None = None, user_id: int | None = None) -> None:
+    def defer_schedule(
+        self,
+        device_id: str,
+        minutes: int,
+        error: str | None = None,
+        user_id: int | None = None,
+        topic: str | None = None,
+    ) -> None:
         now = self._utc_now()
         next_due_at = now + timedelta(minutes=max(1, minutes))
         with self.connect() as session:
-            row = self._get_schedule(session, device_id, user_id)
+            row = self._get_schedule(session, device_id, user_id, topic=topic)
             if row is None:
                 return
             row.next_due_at = next_due_at
@@ -1762,7 +1779,7 @@ class Database:
             session.flush()
             record_id = record.id
 
-            schedule = self._get_schedule(session, device_id, user_id)
+            schedule = self._get_schedule(session, device_id, user_id, topic=topic)
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_sent_at = now
@@ -1780,6 +1797,7 @@ class Database:
         record_id: str,
         interval_minutes: int,
         user_id: int | None = None,
+        topic: str | None = None,
     ) -> None:
         row_id = self._record_id_value(record_id)
         if row_id is None:
@@ -1795,7 +1813,7 @@ class Database:
                 record.sent_at = now
                 record.updated_at = now
 
-            schedule = self._get_schedule(session, device_id, user_id)
+            schedule = self._get_schedule(session, device_id, user_id, topic=topic or (record.topic if record is not None else None))
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_sent_at = now
@@ -1809,6 +1827,7 @@ class Database:
         interval_minutes: int,
         error: str,
         user_id: int | None = None,
+        topic: str | None = None,
     ) -> None:
         row_id = self._record_id_value(record_id)
         now = self._utc_now()
@@ -1822,17 +1841,24 @@ class Database:
                 if record is not None:
                     record.updated_at = now
 
-            schedule = self._get_schedule(session, device_id, user_id)
+            schedule = self._get_schedule(session, device_id, user_id, topic=topic or (record.topic if record is not None else None))
             if schedule is not None:
                 schedule.next_due_at = now + timedelta(minutes=interval_minutes)
                 schedule.last_error = error[:500]
                 schedule.updated_at = now
 
-    def mark_error(self, device_id: str, error: str, retry_minutes: int = 5, user_id: int | None = None) -> None:
+    def mark_error(
+        self,
+        device_id: str,
+        error: str,
+        retry_minutes: int = 5,
+        user_id: int | None = None,
+        topic: str | None = None,
+    ) -> None:
         now = self._utc_now()
         retry_at = now + timedelta(minutes=retry_minutes)
         with self.connect() as session:
-            schedule = self._get_schedule(session, device_id, user_id)
+            schedule = self._get_schedule(session, device_id, user_id, topic=topic)
             if schedule is None:
                 return
             schedule.next_due_at = retry_at

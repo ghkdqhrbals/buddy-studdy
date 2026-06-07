@@ -184,7 +184,7 @@ protocol RemotePushBackendClientProtocol {
         body: String
     ) async throws -> CommunityQuestionComment
 
-    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord
+    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord
 
     func gradeRecord(
         registration: RemotePushRegistration,
@@ -325,23 +325,36 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         apiKey: String?,
         enabled: Bool
     ) async throws {
-        let activeCategory = settings.activeCategory
-        let scheduleTopic = activeCategory?.normalizedTitle ?? settings.effectiveTopic
-        let scheduleDifficulty = activeCategory?.difficulty ?? settings.difficulty
-        let schedulePrompt = activeCategory?.normalizedCustomPrompt ?? settings.customPrompt
-        let scheduleModel = activeCategory?.sanitizedOpenAIModel ?? settings.sanitizedOpenAIModel
+        let scheduleItems = settings.studyCategories.isEmpty
+            ? [
+                ScheduleItemRequest(
+                    topic: settings.effectiveTopic,
+                    difficultyLevel: settings.difficulty.level,
+                    customPrompt: settings.customPrompt,
+                    openAIModel: settings.sanitizedOpenAIModel
+                )
+            ]
+            : settings.studyCategories.map { category in
+                ScheduleItemRequest(
+                    topic: category.normalizedTitle,
+                    difficultyLevel: category.difficulty.level,
+                    customPrompt: category.normalizedCustomPrompt,
+                    openAIModel: category.sanitizedOpenAIModel
+                )
+            }
         let requestBody = ScheduleRequest(
-            topic: scheduleTopic,
-            difficultyLevel: scheduleDifficulty.level,
+            topic: settings.effectiveTopic,
+            difficultyLevel: settings.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
             openAIAPIKey: apiKey,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: schedulePrompt,
+            customPrompt: settings.customPrompt,
             appLanguage: settings.appLanguage.backendCode,
-            openAIModel: scheduleModel,
+            openAIModel: settings.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            isQuestionPublic: settings.isQuestionPublic
+            isQuestionPublic: settings.isQuestionPublic,
+            schedules: scheduleItems
         )
         var request = authenticatedRequest(
             registration: registration,
@@ -686,12 +699,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(CommunityQuestionComment.self, from: data)
     }
 
-    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
+    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "me", "questions")
         )
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CreateQuestionRequest(topic: topic))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -1020,6 +1035,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var openAIModel: String
         var maxHistoryCount: Int
         var isQuestionPublic: Bool
+        var schedules: [ScheduleItemRequest]
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -1033,7 +1049,26 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case openAIModel = "openaiModel"
             case maxHistoryCount
             case isQuestionPublic = "isQuestionPublic"
+            case schedules
         }
+    }
+
+    private struct ScheduleItemRequest: Encodable {
+        var topic: String
+        var difficultyLevel: Int
+        var customPrompt: String
+        var openAIModel: String
+
+        enum CodingKeys: String, CodingKey {
+            case topic
+            case difficultyLevel
+            case customPrompt
+            case openAIModel = "openaiModel"
+        }
+    }
+
+    private struct CreateQuestionRequest: Encodable {
+        var topic: String?
     }
 
     private struct AnswerRequest: Encodable {

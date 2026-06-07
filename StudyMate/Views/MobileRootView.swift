@@ -394,8 +394,7 @@ private struct MobileHomeView: View {
         if editMode.isEditing {
             MobileHomeCategoryRow(
                 category: category,
-                isActive: appState.settings.selectedStudyCategoryID == category.id,
-                pendingCount: appState.pendingQuestionCount(for: category),
+                hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
                 strings: strings
             )
         } else {
@@ -404,8 +403,7 @@ private struct MobileHomeView: View {
             } label: {
                 MobileHomeCategoryRow(
                     category: category,
-                    isActive: appState.settings.selectedStudyCategoryID == category.id,
-                    pendingCount: appState.pendingQuestionCount(for: category),
+                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
                     strings: strings
                 )
             }
@@ -415,14 +413,6 @@ private struct MobileHomeView: View {
                     editingStudyCategory = category
                 } label: {
                     Label(strings.edit, systemImage: "pencil")
-                }
-
-                if appState.settings.selectedStudyCategoryID != category.id {
-                    Button {
-                        appState.activateStudyCategory(category.id)
-                    } label: {
-                        Label(strings.activateStudy, systemImage: "checkmark.circle")
-                    }
                 }
             }
         }
@@ -1910,20 +1900,15 @@ private struct MobileCommunityEmptyState: View {
 
 private struct MobileHomeCategoryRow: View {
     var category: StudyCategory
-    var isActive: Bool
-    var pendingCount: Int
+    var hasPendingQuestion: Bool
     var strings: AppStrings
 
     var body: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(isActive ? Color.green : Color.clear)
-                .frame(width: 4, height: 34)
-
             VStack(alignment: .leading, spacing: 2) {
                 Text(category.title)
                     .lineLimit(1)
-                    .fontWeight(isActive ? .semibold : .regular)
+                    .fontWeight(.regular)
 
                 Text("\(category.difficulty.displayName(language: strings.language)) · \(category.sanitizedOpenAIModel)")
                     .font(.caption2)
@@ -1932,16 +1917,16 @@ private struct MobileHomeCategoryRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if pendingCount > 0 {
-                Text("\(pendingCount)")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(pendingCount >= AppState.maxPendingQuestionCount ? Color.orange : Color.green)
-                    .clipShape(Capsule())
-                    .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
+            if hasPendingQuestion {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.14))
+                        .frame(width: 22, height: 22)
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 8, height: 8)
+                }
+                .accessibilityLabel(strings.pendingQuestionLimitTitle)
             }
 
             Image(systemName: "chevron.right")

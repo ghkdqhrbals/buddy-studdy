@@ -33,6 +33,7 @@ from .models import (
     AccessTokenResponse,
     BackendSnapshotResponse,
     BackendSettingsResponse,
+    CreateQuestionRequest,
     DeviceRegisterRequest,
     DeviceRegisterResponse,
     EmailVerificationCodeRequest,
@@ -48,6 +49,7 @@ from .models import (
     ProfileUpdateRequest,
     ReportQuestionRequest,
     ReportQuestionResponse,
+    ScheduleItemRequest,
     ScheduleRequest,
     OpenAIModelOptionResponse,
     ScheduleResponse,
@@ -635,21 +637,31 @@ async def upsert_schedule(
         encrypted_key = KeyCipher(settings.backend_master_key).encrypt(payload.openai_api_key)
 
     is_question_public = bool(payload.is_question_public and principal.has_google_login)
-    next_due_at = database.upsert_schedule(
-        device_id=device_id,
-        user_id=principal.user_id,
-        topic=payload.topic,
-        difficulty_level=payload.difficulty_level,
-        interval_minutes=payload.interval_minutes,
-        enabled=payload.enabled,
-        openai_api_key_cipher=encrypted_key,
-        notification_sound=payload.notification_sound,
-        custom_prompt=payload.custom_prompt,
-        app_language=payload.app_language,
-        openai_model=payload.openai_model,
-        max_history_count=payload.max_history_count,
-        is_question_public=is_question_public,
-    )
+    schedule_items = payload.schedules or [
+        ScheduleItemRequest(
+            topic=payload.topic,
+            difficultyLevel=payload.difficulty_level,
+            customPrompt=payload.custom_prompt,
+            openaiModel=payload.openai_model,
+        )
+    ]
+    next_due_at = None
+    for item in schedule_items:
+        next_due_at = database.upsert_schedule(
+            device_id=device_id,
+            user_id=principal.user_id,
+            topic=item.topic,
+            difficulty_level=item.difficulty_level,
+            interval_minutes=payload.interval_minutes,
+            enabled=payload.enabled,
+            openai_api_key_cipher=encrypted_key,
+            notification_sound=payload.notification_sound,
+            custom_prompt=item.custom_prompt,
+            app_language=payload.app_language,
+            openai_model=item.openai_model,
+            max_history_count=payload.max_history_count,
+            is_question_public=is_question_public,
+        )
     return ScheduleResponse(deviceId=device_id, enabled=payload.enabled, nextDueAt=next_due_at)
 
 
@@ -796,10 +808,12 @@ async def get_record(
 
 @app.post("/api/v1/me/questions", response_model=StudyRecordResponse)
 async def create_question(
+    payload: CreateQuestionRequest | None = None,
     principal: AuthenticatedPrincipal = Depends(require_study_detail_access),
 ) -> StudyRecordResponse:
     device_id = principal.device_id
-    schedule = database.get_schedule(device_id, user_id=principal.user_id)
+    requested_topic = payload.topic if payload is not None else None
+    schedule = database.get_schedule(device_id, user_id=principal.user_id, topic=requested_topic)
     if schedule is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study settings are not configured.")
 
@@ -829,7 +843,12 @@ async def create_question(
         user_id=principal.user_id,
         source="manual",
     )
-    database.defer_schedule(device_id, minutes=schedule["interval_minutes"], user_id=principal.user_id)
+    database.defer_schedule(
+        device_id,
+        minutes=schedule["interval_minutes"],
+        user_id=principal.user_id,
+        topic=schedule["topic"],
+    )
     return StudyRecordResponse.model_validate(record)
 
 

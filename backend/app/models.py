@@ -137,11 +137,28 @@ class ScheduleRequest(CamelModel):
     openai_model: str = Field(default=DEFAULT_OPENAI_MODEL, alias="openaiModel")
     max_history_count: int = Field(default=100, alias="maxHistoryCount", ge=10, le=10_000)
     is_question_public: bool = Field(default=False, alias="isQuestionPublic")
+    schedules: list["ScheduleItemRequest"] | None = None
 
     @field_validator("openai_model")
     @classmethod
     def normalize_openai_model(cls, value: str) -> str:
         return normalize_openai_model(value)
+
+
+class ScheduleItemRequest(CamelModel):
+    topic: str = Field(min_length=1, max_length=120)
+    difficulty_level: int = Field(alias="difficultyLevel", ge=1, le=10)
+    custom_prompt: str = Field(default="", alias="customPrompt", max_length=2000)
+    openai_model: str = Field(default=DEFAULT_OPENAI_MODEL, alias="openaiModel")
+
+    @field_validator("openai_model")
+    @classmethod
+    def normalize_openai_model(cls, value: str) -> str:
+        return normalize_openai_model(value)
+
+
+class CreateQuestionRequest(CamelModel):
+    topic: str | None = Field(default=None, max_length=120)
 
 
 class ScheduleResponse(CamelModel):

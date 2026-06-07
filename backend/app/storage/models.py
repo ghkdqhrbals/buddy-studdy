@@ -213,7 +213,8 @@ class QuestionComment(Base):
 
 Index("idx_schedules_due", Schedule.enabled, Schedule.next_due_at)
 Index("idx_schedules_due_device_user", Schedule.enabled, Schedule.next_due_at, Schedule.device_id, Schedule.user_id)
-Index("idx_schedules_device_user", Schedule.device_id, Schedule.user_id, unique=True)
+Index("idx_schedules_device_user", Schedule.device_id, Schedule.user_id)
+Index("idx_schedules_device_user_topic", Schedule.device_id, Schedule.user_id, Schedule.topic, unique=True)
 Index("idx_questions_device_created", Question.device_id, Question.created_at)
 Index("idx_questions_user_created", Question.user_id, Question.created_at)
 Index("idx_questions_device_status", Question.device_id, Question.status, Question.deleted_at)

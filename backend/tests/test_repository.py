@@ -104,6 +104,63 @@ def test_upsert_and_get_schedule(db: Database):
     )
     assert changed_due != first_due
 
+    original_schedule = db.get_schedule(device_id, user_id=user_id, topic="Swift Advanced")
+    second_schedule = db.get_schedule(device_id, user_id=user_id, topic="swift architectures")
+    assert original_schedule is not None
+    assert second_schedule is not None
+    assert original_schedule["topic"] == "Swift Advanced"
+    assert second_schedule["topic"] == "Swift Architectures"
+
+
+def test_topic_schedules_are_independently_deferred(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-topic-schedules",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    user_id = db.get_device_principal(device_id)["user_id"]
+
+    swift_due = db.upsert_schedule(
+        device_id=device_id,
+        user_id=user_id,
+        topic="Swift",
+        difficulty_level=5,
+        interval_minutes=15,
+        enabled=True,
+        openai_api_key_cipher="cipher",
+        notification_sound="default",
+        custom_prompt="swift",
+        app_language="en",
+        openai_model="gpt-5.4",
+        max_history_count=100,
+    )
+    python_due = db.upsert_schedule(
+        device_id=device_id,
+        user_id=user_id,
+        topic="Python",
+        difficulty_level=3,
+        interval_minutes=15,
+        enabled=True,
+        openai_api_key_cipher="cipher",
+        notification_sound="default",
+        custom_prompt="python",
+        app_language="en",
+        openai_model="gpt-5.4",
+        max_history_count=100,
+    )
+
+    db.defer_schedule(device_id, minutes=30, user_id=user_id, topic="Swift")
+
+    swift_schedule = db.get_schedule(device_id, user_id=user_id, topic="Swift")
+    python_schedule = db.get_schedule(device_id, user_id=user_id, topic="Python")
+    assert swift_schedule is not None
+    assert python_schedule is not None
+    assert swift_schedule["next_due_at"] != swift_due
+    assert db._response_timestamp(python_schedule["next_due_at"]) == python_due
+
 
 def test_active_user_switch_does_not_reassign_schedule_or_records(db: Database):
     device_id, client_secret = db.register_device(

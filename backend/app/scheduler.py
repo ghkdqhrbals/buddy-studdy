@@ -69,6 +69,7 @@ class QuestionScheduler:
                         minutes=5,
                         error=f"Pending question limit reached ({pending_count}).",
                         user_id=user_id,
+                        topic=row["topic"],
                     )
                     logger.info(
                         "skipped scheduled question device_id=%s pending=%s",
@@ -83,6 +84,7 @@ class QuestionScheduler:
                         minutes=5,
                         error="No APNs token configured for schedule.",
                         user_id=user_id,
+                        topic=row["topic"],
                     )
                     logger.info("skipped scheduled question without apns token device_id=%s", device_id)
                     continue
@@ -137,6 +139,7 @@ class QuestionScheduler:
                     record_id=record["id"],
                     interval_minutes=row["interval_minutes"],
                     user_id=user_id,
+                    topic=row["topic"],
                 )
                 sent_count += 1
                 logger.info("sent scheduled question device_id=%s", device_id)
@@ -148,9 +151,10 @@ class QuestionScheduler:
                         interval_minutes=row["interval_minutes"],
                         error=str(error),
                         user_id=user_id,
+                        topic=row["topic"],
                     )
                 else:
-                    self.database.mark_error(device_id=device_id, error=str(error), user_id=user_id)
+                    self.database.mark_error(device_id=device_id, error=str(error), user_id=user_id, topic=row["topic"])
                 logger.warning("scheduled question failed device_id=%s error=%s", device_id, error)
         return sent_count
 

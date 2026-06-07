@@ -2098,6 +2098,10 @@ final class AppState: ObservableObject {
             return
         }
 
+        if settings.selectedStudyCategoryID != targetCategory.id {
+            persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
+        }
+
         if let record = preferredPendingRecord(for: targetCategory) {
             notificationLandingMessage = nil
             currentQuestion = record.question
@@ -2550,7 +2554,10 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: manual ? "manual-question-before-create" : "scheduled-question-before-create"
             )
-            let record = try await remotePushBackendClient.createQuestion(registration: registration)
+            let record = try await remotePushBackendClient.createQuestion(
+                registration: registration,
+                topic: settings.activeCategory?.normalizedTitle ?? settings.effectiveTopic
+            )
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             studyRecords = settingsStore.loadStudyRecords()

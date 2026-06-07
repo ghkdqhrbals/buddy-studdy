@@ -3656,9 +3656,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
-    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
+    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
         createQuestionCallCount += 1
-        callEvents.append("createQuestion")
+        callEvents.append("createQuestion:\(topic ?? "")")
         if !createQuestionResults.isEmpty {
             return createQuestionResults.removeFirst()
         }
