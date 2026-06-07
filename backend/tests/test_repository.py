@@ -3,7 +3,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.storage.models import Device, QuestionStats, Schedule, UserDevice, UTC, as_utc_datetime
+from app.storage.models import (
+    AggregationCheckpoint,
+    Device,
+    QuestionComment,
+    QuestionLike,
+    QuestionReactionEvent,
+    QuestionStats,
+    Schedule,
+    UserDevice,
+    UTC,
+    as_utc_datetime,
+)
 from app.storage.repository import Database, transactional
 
 
@@ -1198,6 +1209,108 @@ def test_public_question_likes_and_comments_are_counted(db: Database):
     comment_rows, comment_total = comments
     assert comment_total == 1
     assert comment_rows[0]["author"]["displayName"] == "Viewer"
+
+
+def test_question_like_comment_events_sync_to_stats_by_checkpoint(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-social-sync",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-sync-author",
+        email="public-social-sync-author@example.com",
+        display_name="Author",
+    )
+    viewer = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-social-sync-viewer",
+        email="public-social-sync-viewer@example.com",
+        display_name="Viewer",
+    )
+    assert author is not None
+    assert viewer is not None
+    author_id = int(author["id"])
+    viewer_id = int(viewer["id"])
+    question = db.create_question(
+        device_id=device_id,
+        user_id=author_id,
+        topic="Swift",
+        difficulty_level=7,
+        question="How does structured concurrency cancel child tasks?",
+        expected_answer_hint="Cancellation propagates through task hierarchy.",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="Parent task cancellation propagates to child tasks.",
+        score=91,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=author_id,
+    )
+    question_id = int(question["id"])
+
+    db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=True)
+    db.create_public_question_comment(question["id"], user_id=viewer_id, body="Clear example")
+    db.set_public_question_like(question["id"], user_id=viewer_id, is_liked=False)
+
+    with db.connect() as session:
+        assert session.query(QuestionLike).filter(QuestionLike.question_id == question_id).count() == 0
+        assert session.query(QuestionComment).filter(QuestionComment.question_id == question_id).count() == 1
+        event_types = [
+            row.event_type
+            for row in session.query(QuestionReactionEvent)
+            .filter(QuestionReactionEvent.question_id == question_id)
+            .order_by(QuestionReactionEvent.id.asc())
+            .all()
+        ]
+        assert event_types == ["LIKE_CREATED", "COMMENT_CREATED", "LIKE_REMOVED"]
+        assert session.query(QuestionStats).filter(QuestionStats.question_id == question_id).first() is None
+
+    assert db.aggregate_question_reaction_events(batch_size=2) == 2
+    with db.connect() as session:
+        checkpoint = (
+            session.query(AggregationCheckpoint)
+            .filter(AggregationCheckpoint.name == "question_reactions")
+            .one()
+        )
+        stats = session.query(QuestionStats).filter(QuestionStats.question_id == question_id).one()
+        assert checkpoint.last_event_id == 2
+        assert stats.like_count == 1
+        assert stats.comment_count == 1
+
+    assert db.aggregate_question_reaction_events(batch_size=2) == 1
+    with db.connect() as session:
+        checkpoint = (
+            session.query(AggregationCheckpoint)
+            .filter(AggregationCheckpoint.name == "question_reactions")
+            .one()
+        )
+        stats = session.query(QuestionStats).filter(QuestionStats.question_id == question_id).one()
+        assert checkpoint.last_event_id == 3
+        assert stats.like_count == 0
+        assert stats.comment_count == 1
+
+    assert db.aggregate_question_reaction_events(batch_size=2) == 0
+    db._public_questions_cache.clear()
+    questions, total = db.list_public_questions(
+        exclude_device_id=None,
+        limit=20,
+        offset=0,
+        viewer_user_id=viewer_id,
+    )
+    assert total == 1
+    assert questions[0]["likeCount"] == 0
+    assert questions[0]["commentCount"] == 1
+    assert questions[0]["isLikedByMe"] is False
 
 
 def test_public_question_list_uses_cached_counts_but_merges_viewer_like_state(db: Database):
