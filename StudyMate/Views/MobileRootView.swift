@@ -1115,6 +1115,7 @@ private struct MobileProfileSettingsSheet: View {
     @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
+    @State private var wasSignedInWhenOpened = false
 
     private var strings: AppStrings {
         appState.strings
@@ -1343,12 +1344,28 @@ private struct MobileProfileSettingsSheet: View {
                 }
             }
             .onAppear {
+                wasSignedInWhenOpened = appState.isCommunitySignedIn
                 profileDisplayName = appState.communityProfile?.displayName ?? ""
                 allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
                 Task {
                     await appState.loadCommunityProfile()
                     profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
                     allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? allowPublicQuestionsAccess
+                }
+            }
+            .onChange(of: appState.communityProfile) { _, profile in
+                guard let profile else {
+                    profileDisplayName = ""
+                    allowPublicQuestionsAccess = true
+                    return
+                }
+
+                profileDisplayName = profile.displayName
+                allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
+            }
+            .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+                if isSignedIn, !wasSignedInWhenOpened {
+                    dismiss()
                 }
             }
             .confirmationDialog(
