@@ -2085,12 +2085,6 @@ private struct StudyCategoryEditorSheet: View {
 private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
 
-    private static let statusDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(question.question)
@@ -2098,40 +2092,6 @@ private struct MobileCommunityQuestionRow: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             CommunityQuestionStatsMeta(question: question)
-
-            HStack(spacing: 8) {
-                Text(question.topic.isEmpty ? "Swift" : question.topic)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text("Lv.\(question.difficultyLevel)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text(Self.statusDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                if let author = question.author {
-                    HStack(spacing: 4) {
-                        HomeProfileAvatar(
-                            symbolName: author.avatarSymbolName,
-                            displayName: author.displayName,
-                            colorSeed: author.avatarColorSeed,
-                            size: 16
-                        )
-
-                        Text(author.displayName)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-
-                Spacer(minLength: 2)
-            }
         }
         .padding(.vertical, 4)
     }

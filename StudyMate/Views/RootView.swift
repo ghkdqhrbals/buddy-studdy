@@ -241,12 +241,6 @@ private struct CommunityFeedSection: View {
 private struct CommunityQuestionRow: View {
     var question: CommunityQuestion
 
-    private static let statusDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(question.question)
@@ -254,23 +248,6 @@ private struct CommunityQuestionRow: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             CommunityQuestionStatsMeta(question: question)
-
-            HStack(spacing: 8) {
-                Text(question.topic.isEmpty ? "Swift" : question.topic)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Text("Lv.\(question.difficultyLevel)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text(Self.statusDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 4)
-            }
         }
         .padding(.vertical, 2)
     }

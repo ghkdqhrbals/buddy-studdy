@@ -33,6 +33,14 @@ class FakeRedis:
         self.values.pop(key, None)
 
 
+class FakePublisher:
+    def __init__(self):
+        self.messages: list[dict] = []
+
+    def publish(self, **kwargs) -> None:
+        self.messages.append(kwargs)
+
+
 def _settings(monkeypatch) -> Settings:
     _load_aws_secret_values.cache_clear()
     monkeypatch.setenv("ALLOW_SQLITE_FALLBACK", "true")
@@ -41,6 +49,7 @@ def _settings(monkeypatch) -> Settings:
         settings,
         view_counter_shard_count=3,
         view_counter_ttl_seconds=600,
+        view_dedupe_ttl_seconds=600,
     )
 
 
@@ -97,6 +106,23 @@ def test_view_events_increment_sharded_redis_counters_and_flush_delta(monkeypatc
     counter_keys = [key for key in fake_redis.values if key.startswith(f"viewcounter:{question_id}:12345:")]
     assert len(counter_keys) >= 1
     assert fake_redis.values[f"viewcounter-applied:{question_id}:12345"] == 2
+
+
+def test_logged_in_view_publish_is_deduped_per_user(monkeypatch, db: Database):
+    question_id = _public_question(db)
+    aggregator = QuestionReactionAggregator(settings=_settings(monkeypatch), database=db)
+    fake_redis = FakeRedis()
+    fake_publisher = FakePublisher()
+    aggregator._redis = fake_redis
+    aggregator._stream_publishers["view"] = fake_publisher
+
+    aggregator.publish_question_viewed(question_id=question_id, user_id=10)
+    aggregator.publish_question_viewed(question_id=question_id, user_id=10)
+    aggregator.publish_question_viewed(question_id=question_id, user_id=11)
+
+    assert len(fake_publisher.messages) == 2
+    assert fake_redis.values[f"viewdedupe:{question_id}:user:10"] == "1"
+    assert fake_redis.expirations[f"viewdedupe:{question_id}:user:10"] == 600
 
 
 def test_view_flush_skips_when_lock_is_held(monkeypatch, db: Database):

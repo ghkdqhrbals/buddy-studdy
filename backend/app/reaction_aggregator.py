@@ -98,6 +98,12 @@ class QuestionReactionAggregator:
         if publisher is None:
             self.database.increment_question_view_count(normalized_question_id, 1)
             return
+        if user_id is not None and self._redis is not None:
+            ttl = max(60, self.settings.view_dedupe_ttl_seconds)
+            dedupe_key = f"viewdedupe:{normalized_question_id}:user:{user_id}"
+            first_view = bool(self._redis.set(dedupe_key, "1", nx=True, ex=ttl))
+            if not first_view:
+                return
         event_id = str(uuid.uuid4())
         fields = {
             "questionId": normalized_question_id,

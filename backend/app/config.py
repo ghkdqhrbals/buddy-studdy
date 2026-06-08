@@ -109,6 +109,7 @@ class Settings:
     view_stream_concurrency: int
     view_counter_shard_count: int
     view_counter_ttl_seconds: int
+    view_dedupe_ttl_seconds: int
     action_stream_prefix: str
     action_stream_group_id: str
     action_stream_concurrency: int
@@ -269,6 +270,10 @@ class Settings:
             view_counter_ttl_seconds=max(
                 60,
                 _int_secret_env("VIEW_COUNTER_TTL_SECONDS", secret_values, "viewCounterTtlSeconds", 172800),
+            ),
+            view_dedupe_ttl_seconds=max(
+                60,
+                _int_secret_env("VIEW_DEDUPE_TTL_SECONDS", secret_values, "viewDedupeTtlSeconds", 86400),
             ),
             action_stream_prefix=_secret_env(
                 "ACTION_STREAM_PREFIX",

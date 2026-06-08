@@ -39,6 +39,7 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "viewStreamConcurrency": "5",
         "viewCounterShardCount": "9",
         "viewCounterTtlSeconds": "600",
+        "viewDedupeTtlSeconds": "300",
         "actionStreamPrefix": "test-action",
         "actionStreamGroupId": "test-action-workers",
         "actionStreamConcurrency": "4",
@@ -93,6 +94,7 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.view_stream_concurrency == 5
     assert settings.view_counter_shard_count == 9
     assert settings.view_counter_ttl_seconds == 600
+    assert settings.view_dedupe_ttl_seconds == 300
     assert settings.action_stream_prefix == "test-action"
     assert settings.action_stream_group_id == "test-action-workers"
     assert settings.action_stream_concurrency == 4
