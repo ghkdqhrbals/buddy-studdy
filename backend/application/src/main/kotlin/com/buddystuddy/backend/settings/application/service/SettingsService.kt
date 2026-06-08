@@ -9,9 +9,11 @@ import com.buddystuddy.backend.settings.application.model.toSettings
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
+import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import com.buddystuddy.study.domain.StudyRoomSettings
 import com.buddystuddy.study.domain.StudyRoomSettingsCommand
-import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
+import com.buddystuddy.study.domain.StudyRoomSettingsState
+import com.buddystuddy.study.domain.StudyRoomSettingsUpdate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -32,7 +34,7 @@ class SettingsService(
         items.forEach { item ->
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, item.topic)
                 ?: ScheduleEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
-            StudyRoomSettings.of(schedule).configure(
+            schedule.apply(StudyRoomSettings.of(schedule.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
                     difficultyLevel = item.difficultyLevel,
                     intervalMinutes = command.intervalMinutes,
@@ -47,7 +49,7 @@ class SettingsService(
                 encryptedOpenAIKey = encryptedKey,
                 anonymous = principal.anonymous,
                 now = now,
-            )
+            ))
             next = schedules.save(schedule).nextDueAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)
@@ -56,4 +58,24 @@ class SettingsService(
     @Transactional(readOnly = true)
     override fun settings(principal: Principal): BackendSettingsResponse =
         schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId).toSettings()
+
+    private fun ScheduleEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
+        openaiApiKeyCipher = openaiApiKeyCipher,
+        nextDueAt = nextDueAt,
+    )
+
+    private fun ScheduleEntity.apply(update: StudyRoomSettingsUpdate) {
+        difficultyLevel = update.difficultyLevel
+        intervalMinutes = update.intervalMinutes
+        enabled = update.enabled
+        openaiApiKeyCipher = update.openaiApiKeyCipher
+        notificationSound = update.notificationSound
+        customPrompt = update.customPrompt
+        appLanguage = update.appLanguage
+        openaiModel = update.openaiModel
+        maxHistoryCount = update.maxHistoryCount
+        questionPublic = update.questionPublic
+        nextDueAt = update.nextDueAt
+        updatedAt = update.updatedAt
+    }
 }

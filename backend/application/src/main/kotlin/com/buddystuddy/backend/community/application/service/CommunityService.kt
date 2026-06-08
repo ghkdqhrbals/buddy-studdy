@@ -22,6 +22,8 @@ import com.buddystuddy.backend.community.application.model.CommunityQuestionsRes
 import com.buddystuddy.backend.community.application.model.toCommunityQuestionResponse
 import com.buddystuddy.community.domain.PublicQuestion
 import com.buddystuddy.community.domain.PublicQuestionAuthorProjection
+import com.buddystuddy.community.domain.PublicQuestionState
+import com.buddystuddy.community.domain.PublicQuestionStats
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.profile.application.model.toProfile
@@ -122,7 +124,7 @@ class CommunityService(
         val author = q.userId?.let { users.findById(it).orElse(null)?.toAuthorProjection() }
         val stats = questionStats.findById(q.id).orElse(null)
         val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
-        return PublicQuestion.of(q, author, stats, liked).toProjection().toCommunityQuestionResponse()
+        return PublicQuestion.of(q.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked).toProjection().toCommunityQuestionResponse()
     }
 
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =
@@ -142,4 +144,26 @@ private fun com.buddystuddy.domain.UserEntity.toAuthorProjection() = PublicQuest
     avatarSymbolName = avatarSymbolName,
     avatarColorSeed = avatarColorSeed,
     publicQuestionsAllowed = allowPublicQuestions,
+)
+
+private fun QuestionEntity.toPublicQuestionState() = PublicQuestionState(
+    id = id,
+    question = question,
+    answer = answer,
+    score = score,
+    correct = correct,
+    feedback = feedback,
+    explanation = explanation,
+    topic = topic,
+    difficultyLevel = difficultyLevel,
+    status = status,
+    source = source,
+    createdAt = createdAt,
+    answeredAt = answeredAt,
+)
+
+private fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(
+    likeCount = likeCount,
+    commentCount = commentCount,
+    viewCount = viewCount,
 )

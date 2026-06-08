@@ -1,11 +1,9 @@
 package com.buddystuddy.study.domain
 
-import com.buddystuddy.domain.QuestionEntity
-import com.buddystuddy.domain.ScheduleEntity
 import java.time.Instant
 
 class StudyRoom private constructor(
-    val schedule: ScheduleEntity,
+    val schedule: StudyRoomSchedule,
     private val pendingCount: Long,
 ) {
     val topic: String get() = schedule.topic
@@ -25,7 +23,7 @@ class StudyRoom private constructor(
         hint: String?,
         source: String,
         now: Instant = Instant.now(),
-    ) = QuestionEntity(
+    ) = StudyRoomQuestionDraft(
         deviceId = schedule.deviceId,
         userId = schedule.userId,
         question = question,
@@ -42,8 +40,35 @@ class StudyRoom private constructor(
     )
 
     companion object {
-        fun of(schedule: ScheduleEntity, pendingCount: Long) = StudyRoom(schedule, pendingCount)
+        fun of(schedule: StudyRoomSchedule, pendingCount: Long) = StudyRoom(schedule, pendingCount)
     }
 }
 
 class StudyRoomPendingLimitExceeded(message: String) : RuntimeException(message)
+
+data class StudyRoomSchedule(
+    val deviceId: String,
+    val userId: Long?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val openaiModel: String,
+    val appLanguage: String,
+    val customPrompt: String,
+    val questionPublic: Boolean,
+)
+
+data class StudyRoomQuestionDraft(
+    val deviceId: String,
+    val userId: Long?,
+    val question: String,
+    val hint: String?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val scheduledFor: Instant,
+    val sentAt: Instant,
+    val status: String,
+    val source: String,
+    val publicQuestion: Boolean,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)

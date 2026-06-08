@@ -1,44 +1,42 @@
 package com.buddystuddy.study.domain
 
-import com.buddystuddy.domain.QuestionEntity
-import com.buddystuddy.domain.QuestionStatsEntity
 import java.time.Instant
 
 class StudyRecord private constructor(
-    val question: QuestionEntity,
-    private val stats: QuestionStatsEntity?,
+    val question: StudyRecordState,
+    private val stats: StudyRecordStats?,
 ) {
     val id: Long get() = question.id
     val topic: String get() = question.topic
     val difficultyLevel: Int get() = question.difficultyLevel
     val prompt: String get() = question.question
 
-    fun answer(answer: String, now: Instant = Instant.now()) {
-        question.answer = answer
-        question.answeredAt = now
-        question.updatedAt = now
-    }
+    fun answer(answer: String, now: Instant = Instant.now()) = StudyRecordAnswerUpdate(
+        answer = answer,
+        answeredAt = now,
+        updatedAt = now,
+    )
 
-    fun grade(score: Int, isCorrect: Boolean, feedback: String, explanation: String, now: Instant = Instant.now()) {
-        question.score = score
-        question.correct = isCorrect
-        question.feedback = feedback
-        question.explanation = explanation
-        question.gradedAt = now
-        question.status = "graded"
-        question.updatedAt = now
-    }
+    fun grade(score: Int, isCorrect: Boolean, feedback: String, explanation: String, now: Instant = Instant.now()) = StudyRecordGradeUpdate(
+        score = score,
+        correct = isCorrect,
+        feedback = feedback,
+        explanation = explanation,
+        gradedAt = now,
+        status = "graded",
+        updatedAt = now,
+    )
 
-    fun skip(now: Instant = Instant.now()) {
-        question.skippedAt = now
-        question.status = "skipped"
-        question.updatedAt = now
-    }
+    fun skip(now: Instant = Instant.now()) = StudyRecordSkipUpdate(
+        skippedAt = now,
+        status = "skipped",
+        updatedAt = now,
+    )
 
-    fun restrictPublicity(isPublic: Boolean, now: Instant = Instant.now()) {
-        question.publicQuestion = isPublic && question.score != null
-        question.updatedAt = now
-    }
+    fun restrictPublicity(isPublic: Boolean, now: Instant = Instant.now()) = StudyRecordPublicityUpdate(
+        publicQuestion = isPublic && question.score != null,
+        updatedAt = now,
+    )
 
     fun toProjection() = StudyRecordProjection(
         id = question.id.toString(),
@@ -60,9 +58,58 @@ class StudyRecord private constructor(
     )
 
     companion object {
-        fun of(question: QuestionEntity, stats: QuestionStatsEntity? = null) = StudyRecord(question, stats)
+        fun of(question: StudyRecordState, stats: StudyRecordStats? = null) = StudyRecord(question, stats)
     }
 }
+
+data class StudyRecordState(
+    val id: Long,
+    val question: String,
+    val hint: String?,
+    val createdAt: Instant,
+    val answer: String?,
+    val score: Int?,
+    val correct: Boolean?,
+    val feedback: String?,
+    val explanation: String?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val answeredAt: Instant?,
+    val publicQuestion: Boolean,
+)
+
+data class StudyRecordStats(
+    val likeCount: Int,
+    val commentCount: Int,
+    val viewCount: Int,
+)
+
+data class StudyRecordAnswerUpdate(
+    val answer: String,
+    val answeredAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class StudyRecordGradeUpdate(
+    val score: Int,
+    val correct: Boolean,
+    val feedback: String,
+    val explanation: String,
+    val gradedAt: Instant,
+    val status: String,
+    val updatedAt: Instant,
+)
+
+data class StudyRecordSkipUpdate(
+    val skippedAt: Instant,
+    val status: String,
+    val updatedAt: Instant,
+)
+
+data class StudyRecordPublicityUpdate(
+    val publicQuestion: Boolean,
+    val updatedAt: Instant,
+)
 
 data class StudyRecordProjection(
     val id: String,

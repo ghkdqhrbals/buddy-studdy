@@ -1,13 +1,11 @@
 package com.buddystuddy.community.domain
 
-import com.buddystuddy.domain.QuestionEntity
-import com.buddystuddy.domain.QuestionStatsEntity
 import java.time.Instant
 
 class PublicQuestion private constructor(
-    private val question: QuestionEntity,
+    private val question: PublicQuestionState,
     private val author: PublicQuestionAuthorProjection?,
-    private val stats: QuestionStatsEntity?,
+    private val stats: PublicQuestionStats?,
     private val likedByMe: Boolean,
 ) {
     fun toProjection() = PublicQuestionProjection(
@@ -33,13 +31,35 @@ class PublicQuestion private constructor(
 
     companion object {
         fun of(
-            question: QuestionEntity,
+            question: PublicQuestionState,
             author: PublicQuestionAuthorProjection?,
-            stats: QuestionStatsEntity?,
+            stats: PublicQuestionStats?,
             likedByMe: Boolean,
         ) = PublicQuestion(question, author, stats, likedByMe)
     }
 }
+
+data class PublicQuestionState(
+    val id: Long,
+    val question: String,
+    val answer: String?,
+    val score: Int?,
+    val correct: Boolean?,
+    val feedback: String?,
+    val explanation: String?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val status: String,
+    val source: String,
+    val createdAt: Instant,
+    val answeredAt: Instant?,
+)
+
+data class PublicQuestionStats(
+    val likeCount: Int,
+    val commentCount: Int,
+    val viewCount: Int,
+)
 
 data class PublicQuestionAuthorProjection(
     val id: Long,

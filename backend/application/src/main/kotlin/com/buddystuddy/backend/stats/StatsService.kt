@@ -8,6 +8,8 @@ import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRecordState
+import com.buddystuddy.study.domain.StudyRecordStats
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.domain.PageRequest
@@ -69,10 +71,29 @@ class StatsService(
                 upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
             ),
             latestAt = rows.maxOf { it.createdAt },
-            records = rows.take(20).map { StudyRecord.of(it, stats.findById(it.id).orElse(null)).toProjection().toRecordResponse() },
+            records = rows.take(20).map { it.toStudyRecord().toProjection().toRecordResponse() },
         )
     }
 
     private fun normalizedTopic(value: String): String =
         Normalizer.normalize(value.trim().lowercase(), Normalizer.Form.NFKC).replace(Regex("\\s+"), " ")
+
+    private fun QuestionEntity.toStudyRecord() = StudyRecord.of(
+        StudyRecordState(
+            id = id,
+            question = question,
+            hint = hint,
+            createdAt = createdAt,
+            answer = answer,
+            score = score,
+            correct = correct,
+            feedback = feedback,
+            explanation = explanation,
+            topic = topic,
+            difficultyLevel = difficultyLevel,
+            answeredAt = answeredAt,
+            publicQuestion = publicQuestion,
+        ),
+        stats.findById(id).orElse(null)?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
+    )
 }
