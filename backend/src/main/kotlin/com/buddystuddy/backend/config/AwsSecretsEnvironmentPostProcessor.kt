@@ -32,6 +32,8 @@ class AwsSecretsEnvironmentPostProcessor : EnvironmentPostProcessor {
             putIfPresent("spring.data.redis.password", "redisPassword", "REDIS_PASSWORD")
             putIfPresent("buddystuddy.streams.coordinator-password", "reactionStreamCoordinatorPassword", "REDIS_STREAM_COORDINATOR_PASSWORD")
             putIfPresent("buddystuddy.streams.coordinator-username", "reactionStreamCoordinatorUsername", "REDIS_STREAM_COORDINATOR_USERNAME")
+            putIfPresent("redis-stream-coordinator.password", "reactionStreamCoordinatorPassword", "REDIS_STREAM_COORDINATOR_PASSWORD")
+            putIfPresent("redis-stream-coordinator.username", "reactionStreamCoordinatorUsername", "REDIS_STREAM_COORDINATOR_USERNAME")
             putIfPresent("spring.mail.host", "smtpHost", "SMTP_HOST")
             putIfPresent("spring.mail.username", "smtpUsername", "SMTP_USERNAME")
             putIfPresent("spring.mail.password", "smtpPassword", "SMTP_PASSWORD")
