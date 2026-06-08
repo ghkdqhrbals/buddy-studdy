@@ -815,6 +815,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var difficulty: Difficulty
     var answeredAt: Date?
     var isPublic: Bool
+    var likeCount: Int
+    var commentCount: Int
+    var viewCount: Int
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -825,6 +828,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case difficulty
         case answeredAt
         case isPublic
+        case likeCount
+        case commentCount
+        case viewCount
     }
 
     init(
@@ -835,7 +841,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic: String,
         difficulty: Difficulty,
         answeredAt: Date? = nil,
-        isPublic: Bool = false
+        isPublic: Bool = false,
+        likeCount: Int = 0,
+        commentCount: Int = 0,
+        viewCount: Int = 0
     ) {
         self.id = id
         self.question = question
@@ -845,6 +854,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.difficulty = difficulty
         self.answeredAt = answeredAt
         self.isPublic = isPublic
+        self.likeCount = likeCount
+        self.commentCount = commentCount
+        self.viewCount = viewCount
     }
 
     init(from decoder: Decoder) throws {
@@ -857,6 +869,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
         isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
+        likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
+        commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
     }
 }
 

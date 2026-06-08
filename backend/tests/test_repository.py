@@ -1381,6 +1381,11 @@ def test_public_question_reactions_can_skip_db_event_log_for_stream_mode(db: Dat
     assert questions[0]["likeCount"] == 1
     assert questions[0]["commentCount"] == 1
 
+    record = db.get_record(device_id, question["id"], user_id=int(author["id"]))
+    assert record is not None
+    assert record["likeCount"] == 1
+    assert record["commentCount"] == 1
+
 
 def test_public_question_view_count_is_cached_in_question_stats(db: Database):
     device_id, client_secret = db.register_device(
@@ -1435,6 +1440,18 @@ def test_public_question_view_count_is_cached_in_question_stats(db: Database):
     with db.connect() as session:
         stats = session.query(QuestionStats).filter(QuestionStats.question_id == int(question["id"])).one()
         assert stats.view_count == 5
+
+    record = db.get_record(device_id, question["id"], user_id=int(author["id"]))
+    assert record is not None
+    assert record["viewCount"] == 5
+    assert record["commentCount"] == 0
+    assert record["likeCount"] == 0
+
+    records, records_total = db.list_records(device_id, limit=20, offset=0, user_id=int(author["id"]))
+    assert records_total == 1
+    assert records[0]["viewCount"] == 5
+    assert records[0]["commentCount"] == 0
+    assert records[0]["likeCount"] == 0
 
 
 def test_public_question_list_uses_cached_counts_but_merges_viewer_like_state(db: Database):

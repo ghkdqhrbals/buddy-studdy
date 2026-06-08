@@ -577,6 +577,8 @@ private struct HistoryRow: View {
                 Text(record.question.question)
                     .font(.body)
                     .lineLimit(2)
+
+                RecordStatsMeta(record: record)
             }
 
             Image(systemName: "chevron.right")
@@ -612,4 +614,19 @@ private struct HistoryRow: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct RecordStatsMeta: View {
+    var record: StudyRecord
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("\(record.viewCount)", systemImage: "eye")
+            Label("\(record.commentCount)", systemImage: "bubble.right")
+            Label("\(record.likeCount)", systemImage: "heart")
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
 }

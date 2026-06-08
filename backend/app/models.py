@@ -296,6 +296,9 @@ class StudyRecordResponse(CamelModel):
     answered_at: str | None = Field(alias="answeredAt")
     status: str
     is_public: bool = Field(alias="isPublic")
+    like_count: int = Field(default=0, alias="likeCount")
+    comment_count: int = Field(default=0, alias="commentCount")
+    view_count: int = Field(default=0, alias="viewCount")
 
 
 class RecordsPageResponse(CamelModel):

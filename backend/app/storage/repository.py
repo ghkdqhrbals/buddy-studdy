@@ -1340,12 +1340,27 @@ class Database:
                 query = query.filter(Question.score.isnot(None))
             total_row = query.count()
             rows = (
-                query.order_by(Question.created_at.desc())
+                query.outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
+                .with_entities(
+                    Question,
+                    func.coalesce(QuestionStats.like_count, 0),
+                    func.coalesce(QuestionStats.comment_count, 0),
+                    func.coalesce(QuestionStats.view_count, 0),
+                )
+                .order_by(Question.created_at.desc())
                 .limit(limit)
                 .offset(offset)
                 .all()
             )
-            return [self.study_record_response(row) for row in rows], int(total_row)
+            return [
+                self.study_record_response(
+                    row,
+                    like_count=int(like_count or 0),
+                    comment_count=int(comment_count or 0),
+                    view_count=int(view_count or 0),
+                )
+                for row, like_count, comment_count, view_count in rows
+            ], int(total_row)
 
     def list_public_questions(
         self,
@@ -1485,8 +1500,23 @@ class Database:
                 query = query.filter(func.coalesce(Question.answered_at, Question.created_at) < as_utc_datetime(end_at))
 
             records = [
-                self.study_record_response(row)
-                for row in query.order_by(func.coalesce(Question.answered_at, Question.created_at).asc()).all()
+                self.study_record_response(
+                    row,
+                    like_count=int(like_count or 0),
+                    comment_count=int(comment_count or 0),
+                    view_count=int(view_count or 0),
+                )
+                for row, like_count, comment_count, view_count in (
+                    query.outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
+                    .with_entities(
+                        Question,
+                        func.coalesce(QuestionStats.like_count, 0),
+                        func.coalesce(QuestionStats.comment_count, 0),
+                        func.coalesce(QuestionStats.view_count, 0),
+                    )
+                    .order_by(func.coalesce(Question.answered_at, Question.created_at).asc())
+                    .all()
+                )
             ]
 
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -1536,10 +1566,25 @@ class Database:
                 query = query.filter(Question.user_id == user_id)
             if not include_deleted:
                 query = query.filter(Question.deleted_at.is_(None))
-            row = query.first()
-            if row is None:
+            result = (
+                query.outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
+                .with_entities(
+                    Question,
+                    func.coalesce(QuestionStats.like_count, 0),
+                    func.coalesce(QuestionStats.comment_count, 0),
+                    func.coalesce(QuestionStats.view_count, 0),
+                )
+                .first()
+            )
+            if result is None:
                 return None
-            return self.study_record_response(row)
+            row, like_count, comment_count, view_count = result
+            return self.study_record_response(
+                row,
+                like_count=int(like_count or 0),
+                comment_count=int(comment_count or 0),
+                view_count=int(view_count or 0),
+            )
 
     def create_question(
         self,
@@ -1764,7 +1809,13 @@ class Database:
             row.last_error = error[:500] if error else None
             row.updated_at = now
 
-    def study_record_response(self, row: Question) -> dict[str, Any]:
+    def study_record_response(
+        self,
+        row: Question,
+        like_count: int = 0,
+        comment_count: int = 0,
+        view_count: int = 0,
+    ) -> dict[str, Any]:
         grading_result = None
         if row.score is not None:
             grading_result = {
@@ -1788,6 +1839,9 @@ class Database:
             "answeredAt": self._response_timestamp(row.answered_at),
             "status": row.status,
             "isPublic": bool(row.is_public),
+            "likeCount": int(like_count or 0),
+            "commentCount": int(comment_count or 0),
+            "viewCount": int(view_count or 0),
         }
 
     def due_schedules(self, limit: int = 25) -> list[dict[str, Any]]:

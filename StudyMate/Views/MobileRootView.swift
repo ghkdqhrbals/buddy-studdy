@@ -2106,6 +2106,10 @@ private struct MobileCommunityQuestionRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                Label("\(question.viewCount)", systemImage: "eye")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                 Text(question.topic.isEmpty ? "Swift" : question.topic)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -2262,6 +2266,10 @@ private struct CommunityQuestionDetailView: View {
             .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
 
             Label("\(commentsTotalCount)", systemImage: "bubble.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Label("\(displayQuestion.viewCount)", systemImage: "eye")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 

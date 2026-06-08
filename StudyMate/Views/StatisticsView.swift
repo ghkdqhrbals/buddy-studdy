@@ -600,6 +600,15 @@ private struct RecordDetailHeader: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+
+            HStack(spacing: 12) {
+                Label("\(record.viewCount)", systemImage: "eye")
+                Label("\(record.commentCount)", systemImage: "bubble.right")
+                Label("\(record.likeCount)", systemImage: "heart")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
