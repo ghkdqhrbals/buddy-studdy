@@ -4,7 +4,7 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import java.time.Instant
 
-class StudyQuestionAggregate private constructor(
+class StudyRecordAggregate private constructor(
     val question: QuestionEntity,
     private val stats: QuestionStatsEntity?,
 ) {
@@ -40,7 +40,7 @@ class StudyQuestionAggregate private constructor(
         question.updatedAt = now
     }
 
-    fun snapshot() = StudyRecordSnapshot(
+    fun toProjection() = StudyRecordProjection(
         id = question.id.toString(),
         question = question.question,
         expectedAnswerHint = question.hint,
@@ -60,11 +60,11 @@ class StudyQuestionAggregate private constructor(
     )
 
     companion object {
-        fun of(question: QuestionEntity, stats: QuestionStatsEntity? = null) = StudyQuestionAggregate(question, stats)
+        fun of(question: QuestionEntity, stats: QuestionStatsEntity? = null) = StudyRecordAggregate(question, stats)
     }
 }
 
-data class StudyRecordSnapshot(
+data class StudyRecordProjection(
     val id: String,
     val question: String,
     val expectedAnswerHint: String?,

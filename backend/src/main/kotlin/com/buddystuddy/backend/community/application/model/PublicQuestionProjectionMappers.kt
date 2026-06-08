@@ -1,11 +1,11 @@
 package com.buddystuddy.backend.community.application.model
 
-import com.buddystuddy.backend.community.domain.PublicQuestionSnapshot
+import com.buddystuddy.backend.community.domain.PublicQuestionProjection
 import com.buddystuddy.backend.profile.application.model.CommunityPageAccess
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.study.application.model.GradingResultResponse
 
-fun PublicQuestionSnapshot.toCommunityQuestionResponse() = CommunityQuestionResponse(
+fun PublicQuestionProjection.toCommunityQuestionResponse() = CommunityQuestionResponse(
     id = id,
     question = question,
     answer = answer,

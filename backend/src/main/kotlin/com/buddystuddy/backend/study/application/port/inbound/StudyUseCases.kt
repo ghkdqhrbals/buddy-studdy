@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.study.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
+import com.buddystuddy.backend.study.application.model.BackendSyncResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 
@@ -19,6 +19,6 @@ interface BrowseRecordsUseCase {
     fun record(principal: Principal, id: Long): StudyRecordResponse
 }
 
-interface SnapshotUseCase {
-    fun snapshot(principal: Principal, limit: Int, offset: Int): BackendSnapshotResponse
+interface StudySyncUseCase {
+    fun sync(principal: Principal, limit: Int, offset: Int): BackendSyncResponse
 }

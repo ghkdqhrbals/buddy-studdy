@@ -24,7 +24,7 @@ data class StudyRecordResponse(
 
 data class RecordsPageResponse(val records: List<StudyRecordResponse>, val totalCount: Long, val limit: Int, val offset: Int)
 
-data class BackendSnapshotResponse(
+data class BackendSyncResponse(
     val settings: BackendSettingsResponse,
     val api: APIStatusResponse?,
     val records: List<StudyRecordResponse>,

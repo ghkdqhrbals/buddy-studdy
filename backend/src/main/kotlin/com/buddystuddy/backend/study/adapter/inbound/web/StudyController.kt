@@ -6,7 +6,7 @@ import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionReque
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
-import com.buddystuddy.backend.study.application.port.inbound.SnapshotUseCase
+import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Component
@@ -29,8 +29,8 @@ class StudyController(
     private val study: StudyWebPort,
 ) {
     @GetMapping("/me/snapshot")
-    fun snapshot(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        study.snapshot(limit, offset, request)
+    fun sync(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
+        study.sync(limit, offset, request)
 
     @GetMapping("/me/records")
     fun records(@RequestParam(defaultValue = "100") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
@@ -70,7 +70,7 @@ class StudyController(
 }
 
 interface StudyWebPort {
-    fun snapshot(limit: Int, offset: Int, request: HttpServletRequest): Any
+    fun sync(limit: Int, offset: Int, request: HttpServletRequest): Any
     fun records(limit: Int, offset: Int, request: HttpServletRequest): Any
     fun clearRecords(request: HttpServletRequest): ResponseEntity<Unit>
     fun record(id: Long, request: HttpServletRequest): Any
@@ -88,11 +88,11 @@ class StudyWebAdapter(
     private val studyUseCase: StudyUseCase,
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
-    private val snapshotUseCase: SnapshotUseCase,
+    private val studySyncUseCase: StudySyncUseCase,
     private val principals: PrincipalResolver,
 ) : StudyWebPort {
-    override fun snapshot(limit: Int, offset: Int, request: HttpServletRequest) =
-        snapshotUseCase.snapshot(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
+    override fun sync(limit: Int, offset: Int, request: HttpServletRequest) =
+        studySyncUseCase.sync(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
 
     override fun records(limit: Int, offset: Int, request: HttpServletRequest) =
         recordsUseCase.records(principals.authenticate(request), safeLimit(limit, 500), max(0, offset))

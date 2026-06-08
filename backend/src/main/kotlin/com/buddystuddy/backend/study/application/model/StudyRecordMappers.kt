@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.study.application.model
 
-import com.buddystuddy.backend.study.domain.StudyRecordSnapshot
+import com.buddystuddy.backend.study.domain.StudyRecordProjection
 
-fun StudyRecordSnapshot.toRecordResponse() = StudyRecordResponse(
+fun StudyRecordProjection.toRecordResponse() = StudyRecordResponse(
     id = id,
     question = QuestionItemResponse(question = question, expectedAnswerHint = expectedAnswerHint, createdAt = createdAt),
     answer = answer,

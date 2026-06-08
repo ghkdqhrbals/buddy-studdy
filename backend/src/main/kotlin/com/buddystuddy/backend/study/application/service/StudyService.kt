@@ -8,7 +8,7 @@ import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
+import com.buddystuddy.backend.study.domain.StudyRecordAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
@@ -56,14 +56,14 @@ class StudyService(
         val now = Instant.now()
         val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now))
         questionStats.save(QuestionStatsEntity(questionId = question.id))
-        return StudyQuestionAggregate.of(question).snapshot().toRecordResponse()
+        return StudyRecordAggregate.of(question).toProjection().toRecordResponse()
     }
 
     @Transactional
     override fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(q.id).orElse(null))
+        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(q.id).orElse(null))
         aggregate.answer(answer)
         if (grade && q.score == null) {
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
@@ -79,34 +79,34 @@ class StudyService(
             )
             aggregate.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation)
         }
-        return aggregate.snapshot().toRecordResponse()
+        return aggregate.toProjection().toRecordResponse()
     }
 
     @Transactional(readOnly = true)
     override fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findVisibleByUser(principal.userId, includePending = false, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { StudyQuestionAggregate.of(it, questionStats.findById(it.id).orElse(null)).snapshot().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyRecordAggregate.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findPendingByUser(principal.userId, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { StudyQuestionAggregate.of(it, questionStats.findById(it.id).orElse(null)).snapshot().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyRecordAggregate.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun record(principal: Principal, id: Long): StudyRecordResponse =
         (questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found."))
-            .let { StudyQuestionAggregate.of(it, questionStats.findById(id).orElse(null)).snapshot().toRecordResponse() }
+            .let { StudyRecordAggregate.of(it, questionStats.findById(id).orElse(null)).toProjection().toRecordResponse() }
 
     @Transactional
     override fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(id).orElse(null))
+        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(id).orElse(null))
         aggregate.skip()
-        return aggregate.snapshot().toRecordResponse()
+        return aggregate.toProjection().toRecordResponse()
     }
 
     @Transactional
@@ -118,9 +118,9 @@ class StudyService(
     override fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(id).orElse(null))
+        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(id).orElse(null))
         aggregate.restrictPublicity(isPublic)
-        return aggregate.snapshot().toRecordResponse()
+        return aggregate.toProjection().toRecordResponse()
     }
 
 }

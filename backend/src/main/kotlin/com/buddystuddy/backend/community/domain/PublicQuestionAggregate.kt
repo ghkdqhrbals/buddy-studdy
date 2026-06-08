@@ -6,11 +6,11 @@ import java.time.Instant
 
 class PublicQuestionAggregate private constructor(
     private val question: QuestionEntity,
-    private val author: PublicQuestionAuthorSnapshot?,
+    private val author: PublicQuestionAuthorProjection?,
     private val stats: QuestionStatsEntity?,
     private val likedByMe: Boolean,
 ) {
-    fun snapshot() = PublicQuestionSnapshot(
+    fun toProjection() = PublicQuestionProjection(
         id = question.id.toString(),
         question = question.question,
         answer = question.answer,
@@ -34,14 +34,14 @@ class PublicQuestionAggregate private constructor(
     companion object {
         fun of(
             question: QuestionEntity,
-            author: PublicQuestionAuthorSnapshot?,
+            author: PublicQuestionAuthorProjection?,
             stats: QuestionStatsEntity?,
             likedByMe: Boolean,
         ) = PublicQuestionAggregate(question, author, stats, likedByMe)
     }
 }
 
-data class PublicQuestionAuthorSnapshot(
+data class PublicQuestionAuthorProjection(
     val id: Long,
     val displayName: String,
     val bio: String = "",
@@ -51,7 +51,7 @@ data class PublicQuestionAuthorSnapshot(
     val publicQuestionsAllowed: Boolean = true,
 )
 
-data class PublicQuestionSnapshot(
+data class PublicQuestionProjection(
     val id: String,
     val question: String,
     val answer: String?,
@@ -65,7 +65,7 @@ data class PublicQuestionSnapshot(
     val source: String,
     val createdAt: Instant,
     val answeredAt: Instant?,
-    val author: PublicQuestionAuthorSnapshot?,
+    val author: PublicQuestionAuthorProjection?,
     val likeCount: Int,
     val commentCount: Int,
     val viewCount: Int,

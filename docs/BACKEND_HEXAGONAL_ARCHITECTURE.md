@@ -264,13 +264,13 @@ study.domain.StudyRoomSettingsAggregate
   - Schedule settings mutation
   - interval/model/publicity/OpenAI-key related setting updates
 
-study.domain.StudyQuestionAggregate
+study.domain.StudyRecordAggregate
   - Question + QuestionStats read model
-  - answer, grade, skip, publicity restriction, domain snapshot projection
+  - answer, grade, skip, publicity restriction, response projection
 
 community.domain.PublicQuestionAggregate
   - Public answered Question + author + stats + viewer reaction
-  - public question domain snapshot projection
+  - public question response projection
 ```
 
 These aggregates intentionally wrap the current JPA entity bridge during migration. Application services should call aggregate behavior instead of mutating entity fields directly.
