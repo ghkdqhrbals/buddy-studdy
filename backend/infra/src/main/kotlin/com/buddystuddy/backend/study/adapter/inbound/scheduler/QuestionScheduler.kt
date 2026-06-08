@@ -56,7 +56,7 @@ class QuestionScheduler(
                     return@forEach
                 }
                 val recent = questions.findVisibleByUser(userId ?: -1, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
-                val generated = openAI.generateQuestion(apiKey, user?.openaiModel ?: schedule.openaiModel, schedule.topic, schedule.difficultyLevel, schedule.appLanguage, schedule.customPrompt, recent)
+                val generated = openAI.generateQuestion(apiKey, schedule.openaiModel, schedule.topic, schedule.difficultyLevel, schedule.appLanguage, schedule.customPrompt, recent)
                 val saved = questions.save(
                     QuestionEntity(
                         deviceId = schedule.deviceId,

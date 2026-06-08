@@ -46,8 +46,6 @@ class UserEntity(
     var allowPublicQuestions: Boolean = true,
     @Column(name = "openai_api_key_cipher", columnDefinition = "text")
     var openaiApiKeyCipher: String? = null,
-    @Column(name = "openai_model", nullable = false, length = 64, columnDefinition = "varchar(64) default 'gpt-5.4'")
-    var openaiModel: String = "gpt-5.4",
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)

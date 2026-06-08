@@ -151,11 +151,4 @@ If a running database was deployed before user-level OpenAI settings and Flyway 
 ```sql
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS openai_api_key_cipher text;
-
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS openai_model varchar(64) NOT NULL DEFAULT 'gpt-5.4';
-
-UPDATE users
-SET openai_model = 'gpt-5.4'
-WHERE openai_model IS NULL OR openai_model = '';
 ```

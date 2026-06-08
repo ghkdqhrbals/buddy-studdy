@@ -39,7 +39,7 @@ class UserOpenAISettingsTest {
     @Autowired lateinit var cipher: KeyCipher
 
     @Test
-    fun `openai key and model are stored on user and read independently from device id`() {
+    fun `openai key is stored on user while model is read from study schedule`() {
         val registered = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         val principal = login.authenticateDevice(registered.deviceId, registered.clientSecret)
         val otherDevicePrincipal = Principal(
@@ -65,11 +65,11 @@ class UserOpenAISettingsTest {
         val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, "SwiftUI")
 
         assertThat(cipher.decrypt(user.openaiApiKeyCipher)).isEqualTo("sk-test-user-key")
-        assertThat(user.openaiModel).isEqualTo("gpt-5.2")
         assertThat(schedule?.openaiApiKeyCipher).isNull()
+        assertThat(schedule?.openaiModel).isEqualTo("gpt-5.4")
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiKeyConfigured).isTrue()
-        assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.2")
+        assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
         assertThat(settings.settings(otherDevicePrincipal).openaiKeyConfigured).isTrue()
-        assertThat(settings.settings(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.2")
+        assertThat(settings.settings(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
     }
 }

@@ -12,14 +12,11 @@ fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
         notificationSound = it.notificationSound,
         customPrompt = it.customPrompt,
         appLanguage = it.appLanguage,
-        openaiModel = user?.openaiModel ?: it.openaiModel,
+        openaiModel = it.openaiModel,
         maxHistoryCount = it.maxHistoryCount,
         isQuestionPublic = it.questionPublic,
         openaiKeyConfigured = !(user?.openaiApiKeyCipher ?: it.openaiApiKeyCipher).isNullOrBlank(),
         nextDueAt = it.nextDueAt,
         lastError = it.lastError,
     )
-} ?: BackendSettingsResponse(
-    openaiModel = user?.openaiModel ?: BackendSettingsResponse().openaiModel,
-    openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
-)
+} ?: BackendSettingsResponse(openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank())

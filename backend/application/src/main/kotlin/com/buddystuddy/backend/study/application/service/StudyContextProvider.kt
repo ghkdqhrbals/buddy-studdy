@@ -29,10 +29,7 @@ class StudyContextProvider(
             ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
     }
 
-    fun openAIModelFor(principal: Principal, schedule: ScheduleEntity?): String {
-        val user = users.findById(principal.userId).orElse(null)
-        return user?.openaiModel ?: schedule?.openaiModel ?: properties.openai.model
-    }
+    fun openAIModelFor(schedule: ScheduleEntity?): String = schedule?.openaiModel ?: properties.openai.model
 
     fun scheduleFor(principal: Principal, topic: String?): ScheduleEntity =
         topic?.takeIf { it.isNotBlank() }?.let { schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, it) ?: schedules.findByUserIdAndTopic(principal.userId, it) }

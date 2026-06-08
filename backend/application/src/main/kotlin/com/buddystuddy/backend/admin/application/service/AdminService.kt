@@ -28,7 +28,7 @@ class AdminService(
         val user = users.findById(principal.userId).orElse(null)
         val fallbackSchedule = schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
         val keyCipher = user?.openaiApiKeyCipher ?: fallbackSchedule?.openaiApiKeyCipher
-        return APIStatusResponse(!keyCipher.isNullOrBlank(), user?.openaiModel ?: fallbackSchedule?.openaiModel ?: properties.openai.model)
+        return APIStatusResponse(!keyCipher.isNullOrBlank(), fallbackSchedule?.openaiModel ?: properties.openai.model)
     }
 
     @Transactional(readOnly = true)

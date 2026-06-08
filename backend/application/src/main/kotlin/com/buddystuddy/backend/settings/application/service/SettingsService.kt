@@ -36,7 +36,6 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
-            user.openaiModel = command.openaiModel.ifBlank { items.firstOrNull()?.openaiModel.orEmpty().ifBlank { user.openaiModel } }
             user.updatedAt = now
             users.save(user)
         }

@@ -34,11 +34,10 @@ class FlywaySchemaIntegrationTest {
                 email = "flyway@example.com",
                 status = "ACTIVE",
                 openaiApiKeyCipher = "cipher",
-                openaiModel = "gpt-5.2",
             )
         )
 
         assertThat(saved.id).isPositive()
-        assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiModel).isEqualTo("gpt-5.2")
+        assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiApiKeyCipher).isEqualTo("cipher")
     }
 }

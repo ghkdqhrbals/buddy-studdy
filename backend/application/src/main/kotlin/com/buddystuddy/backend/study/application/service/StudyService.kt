@@ -56,7 +56,7 @@ class StudyService(
         }
         val generated = openAI.generateQuestion(
             context.apiKeyFor(principal, schedule),
-            context.openAIModelFor(principal, schedule),
+            context.openAIModelFor(schedule),
             room.topic,
             room.difficultyLevel,
             room.appLanguage,
@@ -81,7 +81,7 @@ class StudyService(
                 ?: schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             val graded = openAI.grade(
                 context.apiKeyFor(principal, schedule),
-                context.openAIModelFor(principal, schedule),
+                context.openAIModelFor(schedule),
                 q.question,
                 answer,
                 q.topic,
