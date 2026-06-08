@@ -18,9 +18,11 @@ import com.buddystuddy.backend.community.application.model.CommunityCommentsResp
 import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystuddy.backend.community.application.model.toCommunityQuestionResponse
+import com.buddystuddy.backend.community.domain.PublicQuestionAuthorSnapshot
+import com.buddystuddy.backend.community.domain.PublicQuestionAggregate
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
-import com.buddystuddy.backend.community.application.model.toCommunity
 import com.buddystuddy.backend.profile.application.model.toProfile
 import com.buddystuddy.backend.community.application.model.toResponse
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -118,10 +120,10 @@ class CommunityService(
     }
 
     private fun community(q: QuestionEntity, principal: Principal?): CommunityQuestionResponse {
-        val author = q.userId?.let { users.findById(it).orElse(null)?.toProfile() }
+        val author = q.userId?.let { users.findById(it).orElse(null)?.toAuthorSnapshot() }
         val stats = questionStats.findById(q.id).orElse(null)
         val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
-        return q.toCommunity(author, stats, liked)
+        return PublicQuestionAggregate.of(q, author, stats, liked).snapshot().toCommunityQuestionResponse()
     }
 
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =
@@ -132,3 +134,13 @@ class CommunityService(
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
     }.toProfile()
 }
+
+private fun com.buddystuddy.backend.domain.UserEntity.toAuthorSnapshot() = PublicQuestionAuthorSnapshot(
+    id = id,
+    displayName = displayName,
+    bio = bio,
+    avatarUrl = avatarUrl,
+    avatarSymbolName = avatarSymbolName,
+    avatarColorSeed = avatarColorSeed,
+    publicQuestionsAllowed = allowPublicQuestions,
+)

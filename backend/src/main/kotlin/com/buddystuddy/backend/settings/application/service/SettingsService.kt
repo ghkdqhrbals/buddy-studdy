@@ -9,6 +9,8 @@ import com.buddystuddy.backend.settings.application.model.toSettings
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
+import com.buddystuddy.backend.study.domain.StudyRoomSettingsAggregate
+import com.buddystuddy.backend.study.domain.StudyRoomSettingsCommand
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -30,18 +32,22 @@ class SettingsService(
         items.forEach { item ->
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, item.topic)
                 ?: ScheduleEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
-            schedule.difficultyLevel = item.difficultyLevel
-            schedule.intervalMinutes = command.intervalMinutes
-            schedule.enabled = command.enabled
-            if (encryptedKey != null) schedule.openaiApiKeyCipher = encryptedKey
-            schedule.notificationSound = command.notificationSound
-            schedule.customPrompt = item.customPrompt
-            schedule.appLanguage = command.appLanguage
-            schedule.openaiModel = item.openaiModel.ifBlank { command.openaiModel }
-            schedule.maxHistoryCount = command.maxHistoryCount
-            schedule.questionPublic = command.isQuestionPublic && !principal.anonymous
-            schedule.nextDueAt = schedule.nextDueAt ?: now.plusSeconds(command.intervalMinutes.toLong() * 60)
-            schedule.updatedAt = now
+            StudyRoomSettingsAggregate.of(schedule).configure(
+                StudyRoomSettingsCommand(
+                    difficultyLevel = item.difficultyLevel,
+                    intervalMinutes = command.intervalMinutes,
+                    enabled = command.enabled,
+                    notificationSound = command.notificationSound,
+                    customPrompt = item.customPrompt,
+                    appLanguage = command.appLanguage,
+                    openaiModel = item.openaiModel.ifBlank { command.openaiModel },
+                    maxHistoryCount = command.maxHistoryCount,
+                    questionPublic = command.isQuestionPublic,
+                ),
+                encryptedOpenAIKey = encryptedKey,
+                anonymous = principal.anonymous,
+                now = now,
+            )
             next = schedules.save(schedule).nextDueAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)

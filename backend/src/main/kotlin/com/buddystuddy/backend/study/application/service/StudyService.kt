@@ -6,14 +6,16 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
-import com.buddystuddy.backend.study.application.model.toRecord
+import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystuddy.backend.stats.StatsService
+import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
+import com.buddystuddy.backend.study.domain.StudyRoomAggregate
+import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -40,46 +42,36 @@ class StudyService(
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
         val schedule = support.scheduleFor(principal, topic)
-        if (questions.countPendingForStudy(principal.deviceId, principal.userId, schedule.topic) >= properties.scheduler.maxPendingPerStudy) {
+        val room = StudyRoomAggregate.of(
+            schedule,
+            questions.countPendingForStudy(principal.deviceId, principal.userId, schedule.topic),
+        )
+        try {
+            room.assertCanCreateQuestion(properties.scheduler.maxPendingPerStudy)
+        } catch (error: StudyRoomPendingLimitExceeded) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
         val generated = openAI.generateQuestion(
-            support.apiKeyFor(schedule),
-            schedule.openaiModel,
-            schedule.topic,
-            schedule.difficultyLevel,
-            schedule.appLanguage,
-            schedule.customPrompt,
+            support.apiKeyFor(room.schedule),
+            room.openaiModel,
+            room.topic,
+            room.difficultyLevel,
+            room.appLanguage,
+            room.customPrompt,
             support.recentQuestions(principal),
         )
         val now = Instant.now()
-        val question = questions.save(
-            QuestionEntity(
-                deviceId = principal.deviceId,
-                userId = principal.userId,
-                question = generated.question,
-                hint = generated.hint,
-                topic = schedule.topic,
-                difficultyLevel = schedule.difficultyLevel,
-                scheduledFor = now,
-                sentAt = now,
-                status = "ungraded",
-                source = "manual",
-                publicQuestion = schedule.questionPublic,
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
+        val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now))
         questionStats.save(QuestionStatsEntity(questionId = question.id))
-        return question.toRecord()
+        return StudyQuestionAggregate.of(question).snapshot().toRecordResponse()
     }
 
     @Transactional
     override fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        q.answer = answer
-        q.answeredAt = Instant.now()
+        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(q.id).orElse(null))
+        aggregate.answer(answer)
         if (grade && q.score == null) {
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
                 ?: schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)
@@ -92,43 +84,36 @@ class StudyService(
                 q.difficultyLevel,
                 schedule?.appLanguage ?: "ko",
             )
-            q.score = graded.score
-            q.correct = graded.isCorrect
-            q.feedback = graded.feedback
-            q.explanation = graded.explanation
-            q.gradedAt = Instant.now()
-            q.status = "graded"
+            aggregate.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation)
         }
-        q.updatedAt = Instant.now()
-        return q.toRecord(questionStats.findById(q.id).orElse(null))
+        return aggregate.snapshot().toRecordResponse()
     }
 
     @Transactional(readOnly = true)
     override fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findVisibleByUser(principal.userId, includePending = false, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { it.toRecord(questionStats.findById(it.id).orElse(null)) }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyQuestionAggregate.of(it, questionStats.findById(it.id).orElse(null)).snapshot().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findPendingByUser(principal.userId, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { it.toRecord(questionStats.findById(it.id).orElse(null)) }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyQuestionAggregate.of(it, questionStats.findById(it.id).orElse(null)).snapshot().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun record(principal: Principal, id: Long): StudyRecordResponse =
         (questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found."))
-            .toRecord(questionStats.findById(id).orElse(null))
+            .let { StudyQuestionAggregate.of(it, questionStats.findById(id).orElse(null)).snapshot().toRecordResponse() }
 
     @Transactional
     override fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        q.skippedAt = Instant.now()
-        q.status = "skipped"
-        q.updatedAt = Instant.now()
-        return q.toRecord(questionStats.findById(id).orElse(null))
+        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(id).orElse(null))
+        aggregate.skip()
+        return aggregate.snapshot().toRecordResponse()
     }
 
     @Transactional
@@ -140,9 +125,9 @@ class StudyService(
     override fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        q.publicQuestion = isPublic && q.score != null
-        q.updatedAt = Instant.now()
-        return q.toRecord(questionStats.findById(id).orElse(null))
+        val aggregate = StudyQuestionAggregate.of(q, questionStats.findById(id).orElse(null))
+        aggregate.restrictPublicity(isPublic)
+        return aggregate.snapshot().toRecordResponse()
     }
 
     @Transactional(readOnly = true)

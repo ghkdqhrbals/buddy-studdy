@@ -3,6 +3,7 @@ package com.buddystuddy.backend.auth.application.service
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.TokenService
 import com.buddystuddy.backend.auth.sha256
+import com.buddystuddy.backend.auth.domain.AccountAggregate
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
@@ -99,9 +100,8 @@ class LoginService(
     @Transactional
     override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
         val device = support.device(principal.deviceId)
-        device.apnsToken = command.apnsToken
-        device.apnsEnvironment = command.apnsEnvironment
-        device.updatedAt = Instant.now()
+        val user = users.findById(principal.userId).orElseThrow()
+        AccountAggregate.of(user, device).updatePushToken(command.apnsToken, command.apnsEnvironment)
     }
 
     @Transactional
@@ -130,8 +130,7 @@ class LoginService(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
         val device = support.device(principal.deviceId)
-        device.userId = user.id
-        device.updatedAt = now
+        AccountAggregate.of(user, device).attachDevice(now)
         val session = support.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
@@ -164,8 +163,7 @@ class LoginService(
             )
         )
         val device = support.device(principal.deviceId)
-        device.userId = user.id
-        device.updatedAt = now
+        AccountAggregate.of(user, device).attachDevice(now)
         val session = support.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)

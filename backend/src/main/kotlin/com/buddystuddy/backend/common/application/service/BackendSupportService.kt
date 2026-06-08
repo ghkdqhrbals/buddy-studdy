@@ -6,6 +6,7 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.auth.domain.AccountAggregate
 import com.buddystuddy.backend.domain.ScheduleEntity
 import com.buddystuddy.backend.domain.UserDeviceEntity
 import com.buddystuddy.backend.domain.UserEntity
@@ -53,7 +54,7 @@ class BackendSupportService(
                 updatedAt = now,
             )
         )
-        device.userId = user.id
+        AccountAggregate.of(user, device).attachDevice(now)
         return user
     }
 
