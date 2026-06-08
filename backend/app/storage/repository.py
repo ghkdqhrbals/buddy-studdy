@@ -464,6 +464,7 @@ class Database:
                         )
                     )
 
+            QuestionStats.__table__.create(bind=self.engine, checkfirst=True)
             if "question_stats" in table_names:
                 stats_columns = {column["name"] for column in inspector.get_columns("question_stats")}
                 if "view_count" not in stats_columns:
