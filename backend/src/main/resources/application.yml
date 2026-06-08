@@ -72,8 +72,6 @@ buddystuddy:
     view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
     action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
-  cache:
-    public-question-ttl-seconds: ${PUBLIC_QUESTION_CACHE_TTL_SECONDS:60}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${SMTP_FROM:${SMTP_USERNAME:}}

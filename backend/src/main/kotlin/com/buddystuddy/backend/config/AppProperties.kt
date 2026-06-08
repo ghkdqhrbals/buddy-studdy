@@ -11,7 +11,6 @@ data class BuddyStuddyProperties(
     var openai: OpenAI = OpenAI(),
     var apns: Apns = Apns(),
     var streams: Streams = Streams(),
-    var cache: Cache = Cache(),
     var email: Email = Email(),
     var openapi: OpenApi = OpenApi(),
 ) {
@@ -35,7 +34,6 @@ data class BuddyStuddyProperties(
         var actionPrefix: String = "bs-question-action-v1",
         var maxLen: Long = 100_000,
     )
-    data class Cache(var publicQuestionTtlSeconds: Long = 60)
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
 }

@@ -9,9 +9,6 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, QuestionStatsPort {
-    @Query("select s from QuestionStatsEntity s where s.questionId = :questionId")
-    fun findEntityByQuestionId(@Param("questionId") questionId: Long): QuestionStatsEntity?
-
     @Modifying
     @Query(
         """
