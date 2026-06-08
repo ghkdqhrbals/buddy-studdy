@@ -6,6 +6,7 @@ import com.buddystuddy.backend.stream.QuestionStreamEventType
 import com.buddystuddy.backend.stream.QuestionViewedEvent
 import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
@@ -83,5 +84,24 @@ class RedisStreamEventsTest {
                 "createdAt" to "1970-01-01T00:04:00Z",
             )
         )
+    }
+
+    @Test
+    fun `action event rejects push and view event types`() {
+        assertThatThrownBy {
+            QuestionActionEvent(
+                questionId = 30,
+                eventType = QuestionStreamEventType.QUESTION_PUSH_REQUESTED,
+                userId = 40,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        assertThatThrownBy {
+            QuestionActionEvent(
+                questionId = 30,
+                eventType = QuestionStreamEventType.CONTENT_VIEWED,
+                userId = 40,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

@@ -42,11 +42,12 @@ class QuestionStatsStreamListenerTest {
 
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "202"))
         listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "202"))
+        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "202"))
         listener.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "202"))
 
         val updated = stats.findById(202).orElseThrow()
         assertThat(updated.likeCount).isEqualTo(0)
-        assertThat(updated.commentCount).isEqualTo(1)
+        assertThat(updated.commentCount).isEqualTo(0)
     }
 
     @Test
@@ -54,5 +55,28 @@ class QuestionStatsStreamListenerTest {
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "303"))
 
         assertThat(stats.findById(303).orElseThrow().likeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `view event accepts record id fallback`() {
+        stats.save(QuestionStatsEntity(questionId = 404))
+
+        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "recordId" to "404"))
+
+        assertThat(stats.findById(404).orElseThrow().viewCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `invalid ids and unknown action events are ignored`() {
+        stats.save(QuestionStatsEntity(questionId = 505, likeCount = 2, commentCount = 3, viewCount = 4))
+
+        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "not-a-number"))
+        listener.processActionEvent(mapOf("eventType" to "UNKNOWN", "questionId" to "505"))
+        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED"))
+
+        val updated = stats.findById(505).orElseThrow()
+        assertThat(updated.likeCount).isEqualTo(2)
+        assertThat(updated.commentCount).isEqualTo(3)
+        assertThat(updated.viewCount).isEqualTo(4)
     }
 }

@@ -4,6 +4,7 @@ plugins {
     kotlin("plugin.jpa") version "2.2.21"
     id("org.springframework.boot") version "4.0.6"
     id("io.spring.dependency-management") version "1.1.7"
+    jacoco
 }
 
 group = "com.buddystuddy"
@@ -43,4 +44,16 @@ kotlin {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
 }
