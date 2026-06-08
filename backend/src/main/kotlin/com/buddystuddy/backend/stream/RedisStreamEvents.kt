@@ -13,6 +13,21 @@ interface RedisStreamEvent {
 @Suppress("NOTHING_TO_INLINE")
 inline fun <T : RedisStreamEvent> T.toStreamMap(): Map<String, Any?> = toMap()
 
+abstract class BaseRedisStreamEvent(
+    override val eventType: QuestionStreamEventType,
+    override val eventId: String = UUID.randomUUID().toString(),
+) : RedisStreamEvent {
+    protected abstract val payload: Map<String, Any?>
+
+    final override fun toMap(): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "eventId" to eventId,
+            "eventType" to eventType.name,
+        ).apply {
+            putAll(payload)
+        }
+}
+
 enum class QuestionStreamEventType {
     QUESTION_PUSH_REQUESTED,
     CONTENT_VIEWED,
@@ -25,11 +40,8 @@ enum class QuestionStreamEventType {
 data class QuestionPushRequestedEvent(
     val fields: Map<String, Any?>,
     override val eventId: String = UUID.randomUUID().toString(),
-) : RedisStreamEvent {
-    override val eventType: QuestionStreamEventType = QuestionStreamEventType.QUESTION_PUSH_REQUESTED
-
-    override fun toMap(): Map<String, Any?> =
-        fields + eventFields()
+) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId) {
+    override val payload: Map<String, Any?> = fields
 }
 
 data class QuestionViewedEvent(
@@ -37,14 +49,12 @@ data class QuestionViewedEvent(
     val userId: Long?,
     val viewedAt: Instant = Instant.now(),
     override val eventId: String = UUID.randomUUID().toString(),
-) : RedisStreamEvent {
-    override val eventType: QuestionStreamEventType = QuestionStreamEventType.CONTENT_VIEWED
-
-    override fun toMap(): Map<String, Any?> = eventFields() + mapOf(
+) : BaseRedisStreamEvent(QuestionStreamEventType.CONTENT_VIEWED, eventId) {
+    override val payload: Map<String, Any?> = mapOf(
         "questionId" to questionId,
         "userId" to userId,
         "minuteBucket" to viewedAt.epochSecond / 60,
-        "createdAt" to viewedAt.toString(),
+        "createdAt" to viewedAt,
     )
 }
 
@@ -54,20 +64,15 @@ data class QuestionActionEvent(
     val userId: Long?,
     val createdAt: Instant = Instant.now(),
     override val eventId: String = UUID.randomUUID().toString(),
-) : RedisStreamEvent {
+) : BaseRedisStreamEvent(eventType, eventId) {
     init {
         require(eventType != QuestionStreamEventType.QUESTION_PUSH_REQUESTED)
         require(eventType != QuestionStreamEventType.CONTENT_VIEWED)
     }
 
-    override fun toMap(): Map<String, Any?> = eventFields() + mapOf(
+    override val payload: Map<String, Any?> = mapOf(
         "questionId" to questionId,
         "userId" to userId,
-        "createdAt" to createdAt.toString(),
+        "createdAt" to createdAt,
     )
 }
-
-private fun RedisStreamEvent.eventFields(): Map<String, Any?> = mapOf(
-    "eventId" to eventId,
-    "eventType" to eventType.name,
-)

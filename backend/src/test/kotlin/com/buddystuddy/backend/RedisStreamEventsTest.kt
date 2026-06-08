@@ -25,7 +25,7 @@ class RedisStreamEventsTest {
                 "questionId" to 10L,
                 "userId" to 20L,
                 "minuteBucket" to 3L,
-                "createdAt" to "1970-01-01T00:03:00Z",
+                "createdAt" to Instant.ofEpochSecond(180),
             )
         )
     }
@@ -46,7 +46,7 @@ class RedisStreamEventsTest {
                 "eventType" to "QUESTION_LIKED",
                 "questionId" to 30L,
                 "userId" to 40L,
-                "createdAt" to "1970-01-01T00:04:00Z",
+                "createdAt" to Instant.ofEpochSecond(240),
             )
         )
     }

@@ -62,20 +62,18 @@ class RedisStreamCoordinatorService(
     ): Boolean {
         if (!properties.streams.enabled) return false
         val publisher = publisher ?: return false
-        val normalized = event.toStreamMap()
-            .filterValues { it != null && it.toString().isNotBlank() }
-            .mapValues { it.value.toString() }
+        val fields = event.toRedisStreamFields()
         return try {
             val published = publisher.publish(
                 partitionKey ?: UUID.randomUUID().toString(),
-                normalized,
+                fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
             logger.info(
                 "redis_stream_published stream={} id={} fields={}",
                 published.streamKey,
                 published.recordId,
-                normalized.keys,
+                fields.keys,
             )
             true
         } catch (error: Exception) {
@@ -83,4 +81,9 @@ class RedisStreamCoordinatorService(
             false
         }
     }
+
+    private fun RedisStreamEvent.toRedisStreamFields(): Map<String, String> =
+        toStreamMap()
+            .filterValues { it != null && it.toString().isNotBlank() }
+            .mapValues { (_, value) -> value.toString() }
 }
