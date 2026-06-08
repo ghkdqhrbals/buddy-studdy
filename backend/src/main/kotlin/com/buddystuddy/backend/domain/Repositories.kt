@@ -53,11 +53,24 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long> {
           and q.deletedAt is null
           and q.score is not null
           and u.allowPublicQuestions = true
-          and (:topic is null or lower(q.topic) like lower(concat('%', :topic, '%')))
         order by q.createdAt desc
         """
     )
-    fun findPublicAnswered(@Param("topic") topic: String?, pageable: Pageable): Page<QuestionEntity>
+    fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
+
+    @Query(
+        """
+        select q from QuestionEntity q
+        join UserEntity u on u.id = q.userId
+        where q.publicQuestion = true
+          and q.deletedAt is null
+          and q.score is not null
+          and u.allowPublicQuestions = true
+          and lower(q.topic) like concat('%', lower(:topic), '%')
+        order by q.createdAt desc
+        """
+    )
+    fun findPublicAnsweredByTopic(@Param("topic") topic: String, pageable: Pageable): Page<QuestionEntity>
 
     @Query(
         """

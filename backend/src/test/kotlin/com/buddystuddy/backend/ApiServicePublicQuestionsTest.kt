@@ -72,6 +72,18 @@ class ApiServicePublicQuestionsTest {
     }
 
     @Test
+    fun `public questions without topic search return answered public records`() {
+        val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
+        val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
+        pendingPublicQuestion(author, "SwiftUI", createdAt = now)
+
+        val response = api.publicQuestions(null, null, limit = 10, offset = 0)
+
+        assertThat(response.totalCount).isEqualTo(2)
+        assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
+    }
+
+    @Test
     fun `public question detail includes stats author and viewer like state`() {
         val q = answeredPublicQuestion(author, "SwiftUI")
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 7, commentCount = 2, viewCount = 11))

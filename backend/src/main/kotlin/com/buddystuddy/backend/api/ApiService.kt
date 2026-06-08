@@ -324,7 +324,13 @@ class ApiService(
 
     @Transactional(readOnly = true)
     fun publicQuestions(principal: Principal?, topic: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
-        val page = questions.findPublicAnswered(topic?.takeIf { it.isNotBlank() }, PageRequest.of(offset / limit, limit))
+        val pageable = PageRequest.of(offset / limit, limit)
+        val normalizedTopic = topic?.takeIf { it.isNotBlank() }
+        val page = if (normalizedTopic == null) {
+            questions.findPublicAnswered(pageable)
+        } else {
+            questions.findPublicAnsweredByTopic(normalizedTopic, pageable)
+        }
         val rows = page.content.map { community(it, principal) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
