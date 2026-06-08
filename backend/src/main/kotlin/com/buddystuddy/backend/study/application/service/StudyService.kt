@@ -3,7 +3,6 @@ package com.buddystuddy.backend.study.application.service
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
-import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
@@ -31,11 +30,11 @@ class StudyService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
-    private val support: BackendSupportService,
+    private val context: StudyContextService,
 ) : StudyInputPort, BrowseRecordsInputPort {
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
-        val schedule = support.scheduleFor(principal, topic)
+        val schedule = context.scheduleFor(principal, topic)
         val room = StudyRoomAggregate.of(
             schedule,
             questions.countPendingForStudy(principal.deviceId, principal.userId, schedule.topic),
@@ -46,13 +45,13 @@ class StudyService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
         val generated = openAI.generateQuestion(
-            support.apiKeyFor(room.schedule),
+            context.apiKeyFor(room.schedule),
             room.openaiModel,
             room.topic,
             room.difficultyLevel,
             room.appLanguage,
             room.customPrompt,
-            support.recentQuestions(principal),
+            context.recentQuestions(principal),
         )
         val now = Instant.now()
         val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now))
@@ -70,7 +69,7 @@ class StudyService(
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
                 ?: schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)
             val graded = openAI.grade(
-                support.apiKeyFor(schedule),
+                context.apiKeyFor(schedule),
                 schedule?.openaiModel ?: properties.openai.model,
                 q.question,
                 answer,

@@ -16,7 +16,6 @@ import com.buddystuddy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.domain.DeviceEntity
 import com.buddystuddy.backend.domain.UserEntity
 import com.buddystuddy.backend.auth.application.model.AccessTokenResponse
@@ -36,14 +35,15 @@ class LoginService(
     private val users: UserPort,
     private val devices: DevicePort,
     private val tokenService: TokenService,
-    private val support: BackendSupportService,
+    private val sessions: AccountSessionService,
+    private val tokens: RandomTokenService,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
 
     @Transactional
     override fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
-        val deviceId = support.randomToken("dev")
-        val secret = support.randomToken("sec")
+        val deviceId = tokens.create("dev")
+        val secret = tokens.create("sec")
         val now = Instant.now()
         val user = users.save(
             UserEntity(
@@ -72,7 +72,7 @@ class LoginService(
                 lastSeenAt = now,
             )
         )
-        val session = support.saveSession(user.id, device.deviceId, now, null)
+        val session = sessions.saveSession(user.id, device.deviceId, now, null)
         val token = tokenService.create(user.id, device.deviceId, session.id, true)
         return DeviceRegisterResponse(device.deviceId, secret, token.first, token.second)
     }
@@ -86,20 +86,20 @@ class LoginService(
 
     @Transactional
     override fun authenticateDevice(deviceId: String, clientSecret: String): Principal {
-        val device = support.device(deviceId)
+        val device = sessions.device(deviceId)
         if (device.clientSecretHash != sha256(clientSecret)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid device credentials.")
         }
-        val userId = device.userId ?: support.ensureAnonymousUser(device).id
+        val userId = device.userId ?: sessions.ensureAnonymousUser(device).id
         val user = users.findById(userId).orElseThrow()
         val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
-        val session = support.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
+        val session = sessions.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
         return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS")
     }
 
     @Transactional
     override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
-        val device = support.device(principal.deviceId)
+        val device = sessions.device(principal.deviceId)
         val user = users.findById(principal.userId).orElseThrow()
         AccountAggregate.of(user, device).updatePushToken(command.apnsToken, command.apnsEnvironment)
     }
@@ -129,9 +129,9 @@ class LoginService(
         } else if (user.passwordHash != sha256(command.password)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
-        val device = support.device(principal.deviceId)
+        val device = sessions.device(principal.deviceId)
         AccountAggregate.of(user, device).attachDevice(now)
-        val session = support.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
+        val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
@@ -162,9 +162,9 @@ class LoginService(
                 updatedAt = now,
             )
         )
-        val device = support.device(principal.deviceId)
+        val device = sessions.device(principal.deviceId)
         AccountAggregate.of(user, device).attachDevice(now)
-        val session = support.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
+        val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
