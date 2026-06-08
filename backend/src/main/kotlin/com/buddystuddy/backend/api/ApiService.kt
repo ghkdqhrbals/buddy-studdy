@@ -9,6 +9,7 @@ import com.buddystuddy.backend.domain.*
 import com.buddystuddy.backend.dto.*
 import com.buddystuddy.backend.openai.OpenAIClient
 import com.buddystuddy.backend.stats.StatsService
+import com.buddystuddy.backend.stream.QuestionStreamEventType
 import com.buddystuddy.backend.stream.RedisStreamCoordinatorService
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
@@ -330,25 +331,25 @@ class ApiService(
 
     @Transactional
     fun publicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
-        val q = questions.findPublicAnsweredById(id)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        val q = publicAnsweredQuestion(id)
         streams.publishQuestionViewed(id, principal?.userId)
         return community(q, principal)
     }
 
     @Transactional
     fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
+        publicAnsweredQuestion(id)
         var delta = 0
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
                 delta = 1
-                streams.publishQuestionChanged(id, "QUESTION_LIKED", principal.userId)
+                streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_LIKED, principal.userId)
             }
         } else {
             if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
                 delta = -1
-                streams.publishQuestionChanged(id, "QUESTION_UNLIKED", principal.userId)
+                streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_UNLIKED, principal.userId)
             }
         }
         val stats = questionStats.findById(id).orElse(QuestionStatsEntity(questionId = id))
@@ -357,13 +358,15 @@ class ApiService(
 
     @Transactional
     fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
+        publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
-        streams.publishQuestionChanged(id, "QUESTION_COMMENTED", principal.userId)
+        streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_COMMENTED, principal.userId)
         return saved.toResponse(user(principal.userId).toProfile())
     }
 
     @Transactional(readOnly = true)
     fun comments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
+        publicAnsweredQuestion(id)
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(id, PageRequest.of(offset / limit, limit))
         val profiles = users.findAllById(page.content.map { it.userId }).associateBy { it.id }
         return CommunityCommentsResponse(
@@ -376,6 +379,7 @@ class ApiService(
 
     @Transactional
     fun report(principal: Principal, id: Long, payload: ReportQuestionRequest) {
+        publicAnsweredQuestion(id)
         reports.save(ReportEntity(questionId = id, reporterDeviceId = principal.deviceId, reporterUserId = principal.userId, reason = payload.reason, message = payload.message))
     }
 
@@ -385,6 +389,10 @@ class ApiService(
         val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
         return q.toCommunity(author, stats, liked)
     }
+
+    private fun publicAnsweredQuestion(id: Long): QuestionEntity =
+        questions.findPublicAnsweredById(id)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
 
     private fun apiKeyFor(schedule: ScheduleEntity?): String =
         cipher.decrypt(schedule?.openaiApiKeyCipher) ?: properties.openai.apiKey.takeIf { it.isNotBlank() }

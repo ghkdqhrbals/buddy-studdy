@@ -7,6 +7,7 @@ import com.redisstream.producer.RedisStreamPublisher
 import com.redisstream.producer.RedisStreamXAddConfiguration
 import com.redisstream.producer.StreamProducer
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.connection.RedisConnectionFactory
@@ -14,6 +15,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory
 @Configuration
 class RedisStreamStarterConfig {
     @Bean
+    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun producerRoutingProperties(properties: BuddyStuddyProperties): ProducerRoutingProperties =
         ProducerRoutingProperties().apply {
             streamPrefix = properties.streams.pushPrefix
@@ -25,6 +27,7 @@ class RedisStreamStarterConfig {
 
     @Bean("pushStreamPublisher")
     @ConditionalOnBean(CoordinatorClient::class, RedisConnectionFactory::class)
+    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun pushStreamPublisher(
         properties: BuddyStuddyProperties,
         client: CoordinatorClient,
@@ -34,6 +37,7 @@ class RedisStreamStarterConfig {
 
     @Bean("viewStreamPublisher")
     @ConditionalOnBean(CoordinatorClient::class, RedisConnectionFactory::class)
+    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun viewStreamPublisher(
         properties: BuddyStuddyProperties,
         client: CoordinatorClient,
@@ -43,6 +47,7 @@ class RedisStreamStarterConfig {
 
     @Bean("actionStreamPublisher")
     @ConditionalOnBean(CoordinatorClient::class, RedisConnectionFactory::class)
+    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun actionStreamPublisher(
         properties: BuddyStuddyProperties,
         client: CoordinatorClient,

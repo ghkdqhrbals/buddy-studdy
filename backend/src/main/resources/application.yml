@@ -72,14 +72,14 @@ buddystuddy:
     view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
     action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
-
-redis-stream-coordinator:
-  coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
-  username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
-  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${SMTP_FROM:${SMTP_USERNAME:}}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}
+
+redis-stream-coordinator:
+  coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
+  username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
+  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:}
