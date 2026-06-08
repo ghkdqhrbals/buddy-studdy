@@ -17,6 +17,7 @@ The performance dashboard combines Datadog/Sentry-style traffic summaries with g
 - Request summary: average requests per second in the selected range.
 - Traffic trends: `API Calls by Route`, `Responses by Status`, and `Error Responses by Route`.
 - Latency trend: `p99 Trend by Route`.
+- Slow request samples: `Slow API Requests` shows the slowest actual request paths in the selected range.
 - Endpoint comparison tables: `p50 API Latency`, `p95 API Latency`, and `p99 API Latency`.
 
 The p50, p95, and p99 panels remain separate table panels. Each percentile panel groups endpoints for that percentile together and calculates values over the selected dashboard time range.
@@ -67,19 +68,34 @@ API call frequency is shown as a route-level time series:
 
 ```logql
 sum by (method, route) (
-  count_over_time(
+  rate(
     <selected log query>
       |= `api_response`
       | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
-      | status=~".+" [$__interval]
+      | status=~".+" [$__rate_interval]
   )
-) / (${__interval_ms} / 1000)
+)
 ```
 
 Errors are derived from HTTP status codes in the response log:
 
 ```logql
 status=~"[45].."
+```
+
+The `Slow API Requests` table is not a percentile. It uses actual request paths and shows the maximum observed duration per `method`, raw `path`, route template, and status in the selected time range:
+
+```logql
+topk(
+  20,
+  max_over_time(
+    <selected log query>
+      |= `api_response`
+      | regexp `"method":"(?P<method>[^"]+)","path":"(?P<path>[^"]+)","route":"(?P<route>[^"]+)","status":(?P<status>[0-9]+),"durationMs":(?P<durationMs>[0-9.]+)`
+      | unwrap durationMs
+      | __error__="" [$__range]
+  ) by (method, path, route, status)
+)
 ```
 
 Each percentile is still a separate table panel:
