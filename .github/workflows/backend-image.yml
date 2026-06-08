@@ -71,9 +71,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: ${{ inputs.dispatch_deploy == true }}
+    outputs:
+      correlation_id: ${{ steps.dispatch.outputs.correlation_id }}
+      dispatched_at: ${{ steps.dispatch.outputs.dispatched_at }}
 
     steps:
       - name: Dispatch personal-deploy
+        id: dispatch
         env:
           DEPLOY_REPO_DISPATCH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
           IMAGE_REF: ${{ needs.build.outputs.image_ref }}
@@ -86,10 +90,17 @@ jobs:
             exit 1
           fi
 
+          correlation_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${IMAGE_TAG}"
+          dispatched_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
           payload="$(jq -n \
             --arg image "${IMAGE_REF}" \
             --arg sha "${GITHUB_SHA}" \
             --arg image_tag "${IMAGE_TAG}" \
+            --arg source_repo "${GITHUB_REPOSITORY}" \
+            --arg source_run_id "${GITHUB_RUN_ID}" \
+            --arg source_run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg correlation_id "${correlation_id}" \
             --argjson deploy_enabled true \
             '{
               event_type: "backend-image-published",
@@ -97,6 +108,10 @@ jobs:
                 image: $image,
                 sha: $sha,
                 image_tag: $image_tag,
+                source_repo: $source_repo,
+                source_run_id: $source_run_id,
+                source_run_attempt: $source_run_attempt,
+                correlation_id: $correlation_id,
                 deploy_enabled: $deploy_enabled
               }
             }')"
@@ -104,6 +119,8 @@ jobs:
           echo "Dispatch target: ${DEPLOY_REPO}"
           echo "Dispatch event: ${EVENT_TYPE}"
           echo "Dispatch image: ${IMAGE_REF}"
+          echo "Dispatch correlation id: ${correlation_id}"
+          echo "Dispatch timestamp: ${dispatched_at}"
           echo "Dispatch payload:"
           echo "${payload}" | jq .
 
@@ -132,6 +149,9 @@ jobs:
             exit 1
           fi
 
+          echo "correlation_id=${correlation_id}" >> "${GITHUB_OUTPUT}"
+          echo "dispatched_at=${dispatched_at}" >> "${GITHUB_OUTPUT}"
+
       - name: Summary
         run: |
           {
@@ -141,4 +161,95 @@ jobs:
             echo "- Event: \`backend-image-published\`"
             echo "- Image: \`${{ needs.build.outputs.image_ref }}\`"
             echo "- Source SHA: \`${GITHUB_SHA}\`"
+            echo "- Correlation ID: \`${{ steps.dispatch.outputs.correlation_id }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  watch:
+    name: Watch Deploy Result
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - notify
+    if: ${{ inputs.dispatch_deploy == true }}
+
+    steps:
+      - name: Wait for deploy workflow run
+        id: deploy_run
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          IMAGE_REF: ${{ needs.build.outputs.image_ref }}
+          DISPATCHED_AT: ${{ needs.notify.outputs.dispatched_at }}
+          CORRELATION_ID: ${{ needs.notify.outputs.correlation_id }}
+          DEPLOY_WORKFLOW_NAME: Deploy BuddyStudy Backend
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for deploy repo workflow..."
+          echo "Target repo: ${DEPLOY_REPO}"
+          echo "Workflow: ${DEPLOY_WORKFLOW_NAME}"
+          echo "Image: ${IMAGE_REF}"
+          echo "Correlation ID: ${CORRELATION_ID}"
+          echo "Dispatched at: ${DISPATCHED_AT}"
+
+          run_id=""
+          run_url=""
+          for attempt in $(seq 1 60); do
+            runs="$(
+              gh run list \
+                -R "${DEPLOY_REPO}" \
+                --workflow "${DEPLOY_WORKFLOW_NAME}" \
+                --event repository_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt,displayTitle,status,conclusion,url \
+            )"
+            match="$(
+              echo "${runs}" | jq -r \
+                --arg dispatched_at "${DISPATCHED_AT}" \
+                '[
+                  .[]
+                  | select(.createdAt >= $dispatched_at)
+                ]
+                | sort_by(.createdAt)
+                | reverse
+                | first // empty'
+            )"
+
+            if [ -n "${match}" ] && [ "${match}" != "null" ]; then
+              run_id="$(echo "${match}" | jq -r '.databaseId')"
+              run_url="$(echo "${match}" | jq -r '.url')"
+              echo "Found deploy run: ${run_id}"
+              echo "Deploy run URL: ${run_url}"
+              break
+            fi
+
+            echo "Deploy run not visible yet. attempt=${attempt}/60"
+            sleep 5
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "Could not find deploy repo workflow run after dispatch." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_url=${run_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Watch deploy workflow
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          DEPLOY_RUN_ID: ${{ steps.deploy_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run watch -R "${DEPLOY_REPO}" "${DEPLOY_RUN_ID}" --exit-status
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy Result"
+            echo ""
+            echo "- Target: \`${DEPLOY_REPO}\`"
+            echo "- Deploy run: ${{ steps.deploy_run.outputs.run_url || '<not found>' }}"
+            echo "- Image: \`${{ needs.build.outputs.image_ref }}\`"
+            echo "- Correlation ID: \`${{ needs.notify.outputs.correlation_id }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
