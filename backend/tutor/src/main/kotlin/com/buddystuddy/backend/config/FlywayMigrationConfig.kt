@@ -12,7 +12,7 @@ import javax.sql.DataSource
 
 @Configuration
 @ConditionalOnClass(Flyway::class)
-@ConditionalOnProperty(prefix = "spring.flyway", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "spring.flyway", name = ["enabled"], havingValue = "true")
 class FlywayMigrationConfig {
     @Bean
     fun flyway(dataSource: DataSource, environment: Environment): Flyway =

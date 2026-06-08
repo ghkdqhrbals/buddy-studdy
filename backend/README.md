@@ -20,7 +20,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
 - Uses Spring Data JPA ORM with repository/service transaction boundaries.
-- Uses Flyway for production schema migrations. Hibernate DDL auto-update is disabled.
+- Keeps Flyway disabled by default in runtime; Flyway is retained for schema validation tests. Hibernate DDL auto-update is disabled.
 - Generates due questions with OpenAI.
 - Publishes scheduled push jobs through redis-stream-coordinator and consumes them with `@StreamListener`.
 - Sends APNs remote notifications to iPhone from the stream consumer.
@@ -143,10 +143,10 @@ Client apps should not call OpenAI directly. They should register a backend devi
 
 ## Database Migrations
 
-Production uses Flyway with `spring.jpa.hibernate.ddl-auto=validate`. Schema changes must be added under
-`tutor/src/main/resources/db/migration`.
+Runtime starts with Flyway disabled by default and `spring.jpa.hibernate.ddl-auto=validate`. Flyway migration files are retained under
+`tutor/src/main/resources/db/migration` for tests and explicit manual migration runs.
 
-If a running database was deployed before user-level OpenAI settings and Flyway has not run yet, the equivalent patch is:
+If a running database was deployed before user-level OpenAI settings, apply the equivalent patch manually:
 
 ```sql
 ALTER TABLE users

@@ -19,7 +19,7 @@ spring:
         jdbc:
           time_zone: UTC
   flyway:
-    enabled: ${FLYWAY_ENABLED:true}
+    enabled: ${FLYWAY_ENABLED:false}
     baseline-on-migrate: true
     baseline-version: 0
     locations: classpath:db/migration
