@@ -22,6 +22,15 @@ Read these first:
 - On iOS 26 toolbars, avoid unintended shared capsule/glass backgrounds around custom toolbar controls. For custom search/profile toolbar items that already draw their own shape, apply `ToolbarItem.sharedBackgroundVisibility(.hidden)` with an iOS 26 availability guard instead of changing the inner view's `Capsule().stroke(...)`.
 - Do not connect to production servers directly with SSH. Backend deployment must go through GitHub Actions and the personal-deploy repository workflow unless the user explicitly re-allows direct SSH for a specific incident.
 
+## Backend Architecture Rules
+
+- Every application `*Service` must implement one or more inbound `*UseCase` contracts.
+- Only aggregate-root/composition services may depend on lower-level `*UseCase` contracts.
+- Lower-level aggregate services must depend on outbound `*Port` contracts, not other services.
+- Adapters must implement outbound or controller-facing `*Port` contracts and may depend on `*UseCase` contracts.
+- Controllers must depend on controller-facing `*Port` contracts, not direct `*UseCase` contracts.
+- Non-use-case helpers must not be named `*Service`; use names such as `*Provider`, `*Manager`, `*Adapter`, `*Publisher`, or `*Resolver`.
+
 ## Storage
 
 - Use `SettingsStore` for app settings, API keys, logs, draft state, and CloudKit metadata.

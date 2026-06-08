@@ -7,6 +7,7 @@ import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCom
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
+import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -16,15 +17,30 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 class SettingsController(
-    private val settings: SettingsUseCase,
-    private val principals: PrincipalResolver,
+    private val settings: SettingsWebPort,
 ) {
     @PutMapping("/me/schedule", "/me/settings")
     fun schedule(@Valid @RequestBody body: ScheduleRequest, request: HttpServletRequest) =
-        settings.upsertSchedule(principals.authenticate(request), body.toCommand())
+        settings.schedule(body, request)
 
     @GetMapping("/me/settings")
-    fun settings(request: HttpServletRequest) = settings.settings(principals.authenticate(request))
+    fun settings(request: HttpServletRequest) = settings.settings(request)
+}
+
+interface SettingsWebPort {
+    fun schedule(body: ScheduleRequest, request: HttpServletRequest): Any
+    fun settings(request: HttpServletRequest): Any
+}
+
+@Component
+class SettingsWebAdapter(
+    private val settings: SettingsUseCase,
+    private val principals: PrincipalResolver,
+) : SettingsWebPort {
+    override fun schedule(body: ScheduleRequest, request: HttpServletRequest) =
+        settings.upsertSchedule(principals.authenticate(request), body.toCommand())
+
+    override fun settings(request: HttpServletRequest) = settings.settings(principals.authenticate(request))
 }
 
 private fun ScheduleRequest.toCommand() = ScheduleCommand(

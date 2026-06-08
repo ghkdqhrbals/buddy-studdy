@@ -5,6 +5,7 @@ import com.buddystuddy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequ
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUseCase
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -14,14 +15,29 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 class ProfileController(
-    private val profiles: ProfileUseCase,
-    private val principals: PrincipalResolver,
+    private val profiles: ProfileWebPort,
 ) {
     @GetMapping("/me/profile")
-    fun profile(request: HttpServletRequest) = profiles.profile(principals.authenticate(request))
+    fun profile(request: HttpServletRequest) = profiles.profile(request)
 
     @PatchMapping("/me/profile")
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, request: HttpServletRequest) =
+        profiles.updateProfile(body, request)
+}
+
+interface ProfileWebPort {
+    fun profile(request: HttpServletRequest): Any
+    fun updateProfile(body: ProfileUpdateRequest, request: HttpServletRequest): Any
+}
+
+@Component
+class ProfileWebAdapter(
+    private val profiles: ProfileUseCase,
+    private val principals: PrincipalResolver,
+) : ProfileWebPort {
+    override fun profile(request: HttpServletRequest) = profiles.profile(principals.authenticate(request))
+
+    override fun updateProfile(body: ProfileUpdateRequest, request: HttpServletRequest) =
         profiles.updateProfile(principals.authenticate(request), body.toCommand())
 }
 
