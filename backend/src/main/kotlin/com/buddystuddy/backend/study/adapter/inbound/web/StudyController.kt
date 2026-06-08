@@ -1,9 +1,9 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.PrincipalService
-import com.buddystuddy.backend.dto.AnswerRequest
-import com.buddystuddy.backend.dto.CreateQuestionRequest
-import com.buddystuddy.backend.dto.RecordPublicityRequest
+import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
+import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
+import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity

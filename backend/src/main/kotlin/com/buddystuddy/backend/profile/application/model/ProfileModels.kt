@@ -1,12 +1,4 @@
-package com.buddystuddy.backend.dto
-
-data class ProfileUpdateRequest(
-    val displayName: String? = null,
-    val bio: String? = null,
-    val avatarSymbolName: String? = null,
-    val avatarColorSeed: String? = null,
-    val pageAccess: CommunityPageAccess? = null,
-)
+package com.buddystuddy.backend.profile.application.model
 
 data class CommunityPageAccess(
     val publicQuestions: Boolean = true,

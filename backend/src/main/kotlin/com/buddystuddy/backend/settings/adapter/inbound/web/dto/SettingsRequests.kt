@@ -1,10 +1,9 @@
-package com.buddystuddy.backend.dto
+package com.buddystuddy.backend.settings.adapter.inbound.web.dto
 
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
-import java.time.Instant
 
 data class ScheduleItemRequest(
     @field:NotBlank val topic: String,
@@ -26,22 +25,4 @@ data class ScheduleRequest(
     @field:Min(10) @field:Max(10_000) val maxHistoryCount: Int = 100,
     val isQuestionPublic: Boolean = false,
     @field:Valid val schedules: List<ScheduleItemRequest>? = null,
-)
-
-data class ScheduleResponse(val deviceId: String, val enabled: Boolean, val nextDueAt: Instant?)
-
-data class BackendSettingsResponse(
-    val topic: String = "",
-    val difficultyLevel: Int = 5,
-    val intervalMinutes: Int = 15,
-    val enabled: Boolean = false,
-    val notificationSound: String? = null,
-    val customPrompt: String = "",
-    val appLanguage: String = "ko",
-    val openaiModel: String = "gpt-5.4",
-    val maxHistoryCount: Int = 100,
-    val isQuestionPublic: Boolean = false,
-    val openaiKeyConfigured: Boolean = false,
-    val nextDueAt: Instant? = null,
-    val lastError: String? = null,
 )

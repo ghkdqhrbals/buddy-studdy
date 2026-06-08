@@ -1,4 +1,4 @@
-package com.buddystuddy.backend.dto
+package com.buddystuddy.backend.admin.application.model
 
 data class APIStatusResponse(
     val openaiKeyConfigured: Boolean,

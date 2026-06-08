@@ -342,14 +342,16 @@ data class CreateQuestionCommand(
 - Added outbound OpenAI and question engagement event ports.
 - Moved API exception types to `common.application.error`.
 - Verified that application packages no longer import `*.adapter.*`.
+- Moved HTTP request DTOs into domain-specific `adapter.inbound.web.dto` packages.
+- Moved use-case response models and entity-to-response mappers into domain-specific `application.model` packages.
+- Replaced application-layer web request dependencies with transport-neutral inbound command types.
 
 ## Remaining Hardening
 
-1. Move DTO files from the temporary shared `dto` package into domain-specific inbound web DTO and application result packages.
-2. Move JPA entity classes into outbound persistence packages after all mappers are introduced.
-3. Replace entity bridge returns with pure domain models.
-4. Reduce `BackendSupportService` by moving helper behavior into domain-specific services.
-5. Convert `StatsService` to a study application use case backed by aggregate persistence ports.
+1. Move JPA entity classes into outbound persistence packages after all mappers are introduced.
+2. Replace entity bridge returns with pure domain models.
+3. Reduce `BackendSupportService` by moving helper behavior into domain-specific services.
+4. Convert `StatsService` to a study application use case backed by aggregate persistence ports.
 
 ## Test Plan
 
@@ -378,7 +380,7 @@ data class CreateQuestionCommand(
 
 ## Risks and Open Questions
 
-- The old monolithic `dto/Dto.kt` has been split by responsibility, but DTO files still share the temporary `com.buddystuddy.backend.dto` package for API compatibility. The next step is moving them into domain-specific adapter/application packages.
+- API response models are currently treated as application result models for compatibility with existing controllers. If multiple external transports are added later, add adapter-specific response mappers at the edges.
 - `StatsService` currently calculates from loaded records. It should move behind a stats use case and later use aggregate queries.
 - `BackendSupportService` is useful during migration but should shrink as domain-specific ports mature.
 - Account withdrawal and clear-record behavior need explicit product policy before moving into final use cases.

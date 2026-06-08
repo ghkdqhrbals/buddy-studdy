@@ -1,10 +1,10 @@
 package com.buddystuddy.backend.study.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.dto.BackendSnapshotResponse
-import com.buddystuddy.backend.dto.RecordsPageResponse
-import com.buddystuddy.backend.dto.StatsResponse
-import com.buddystuddy.backend.dto.StudyRecordResponse
+import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
+import com.buddystuddy.backend.study.application.model.RecordsPageResponse
+import com.buddystuddy.backend.stats.application.model.StatsResponse
+import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 
 interface StudyUseCase {
     fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse

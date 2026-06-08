@@ -1,10 +1,10 @@
-package com.buddystuddy.backend.dto
+package com.buddystuddy.backend.community.application.model
 
+import com.buddystuddy.backend.profile.application.model.UserProfileResponse
+import com.buddystuddy.backend.study.application.model.GradingResultResponse
 import java.time.Instant
 
-data class ReportQuestionRequest(val reason: String, val message: String = "")
 data class ReportQuestionResponse(val ok: Boolean = true)
-data class CommunityCommentRequest(val body: String)
 
 data class CommunityQuestionResponse(
     val id: String,

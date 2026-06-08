@@ -2,9 +2,10 @@ package com.buddystuddy.backend.community.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.PrincipalService
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
-import com.buddystuddy.backend.dto.CommunityCommentRequest
-import com.buddystuddy.backend.dto.ReportQuestionRequest
-import com.buddystuddy.backend.dto.ReportQuestionResponse
+import com.buddystuddy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
+import com.buddystuddy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
+import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystuddy.backend.community.application.model.ReportQuestionResponse
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -51,9 +52,14 @@ class CommunityController(
 
     @PostMapping("/public/questions/{id}/report")
     fun report(@PathVariable id: Long, @RequestBody body: ReportQuestionRequest, request: HttpServletRequest): ReportQuestionResponse {
-        community.report(principals.authenticate(request), id, body)
+        community.report(principals.authenticate(request), id, body.toCommand())
         return ReportQuestionResponse()
     }
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }
+
+private fun ReportQuestionRequest.toCommand() = ReportQuestionCommand(
+    reason = reason,
+    message = message,
+)

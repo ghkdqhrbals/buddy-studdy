@@ -13,17 +13,16 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionLikeEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.domain.ReportEntity
-import com.buddystuddy.backend.dto.CommunityCommentRequest
-import com.buddystuddy.backend.dto.CommunityCommentResponse
-import com.buddystuddy.backend.dto.CommunityCommentsResponse
-import com.buddystuddy.backend.dto.CommunityLikeResponse
-import com.buddystuddy.backend.dto.CommunityQuestionResponse
-import com.buddystuddy.backend.dto.CommunityQuestionsResponse
-import com.buddystuddy.backend.dto.ReportQuestionRequest
-import com.buddystuddy.backend.dto.UserProfileResponse
-import com.buddystuddy.backend.dto.toCommunity
-import com.buddystuddy.backend.dto.toProfile
-import com.buddystuddy.backend.dto.toResponse
+import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
+import com.buddystuddy.backend.community.application.model.CommunityCommentsResponse
+import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
+import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
+import com.buddystuddy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystuddy.backend.profile.application.model.UserProfileResponse
+import com.buddystuddy.backend.community.application.model.toCommunity
+import com.buddystuddy.backend.profile.application.model.toProfile
+import com.buddystuddy.backend.community.application.model.toResponse
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEngagementEventPort
@@ -105,15 +104,15 @@ class CommunityService(
     }
 
     @Transactional
-    override fun report(principal: Principal, id: Long, payload: ReportQuestionRequest) {
+    override fun report(principal: Principal, id: Long, command: ReportQuestionCommand) {
         publicAnsweredQuestion(id)
         reports.save(
             ReportEntity(
                 questionId = id,
                 reporterDeviceId = principal.deviceId,
                 reporterUserId = principal.userId,
-                reason = payload.reason,
-                message = payload.message,
+                reason = command.reason,
+                message = command.message,
             )
         )
     }

@@ -1,10 +1,9 @@
-package com.buddystuddy.backend.dto
+package com.buddystuddy.backend.study.application.model
 
+import com.buddystuddy.backend.admin.application.model.APIStatusResponse
+import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
+import com.buddystuddy.backend.stats.application.model.StatsResponse
 import java.time.Instant
-
-data class CreateQuestionRequest(val topic: String? = null)
-data class AnswerRequest(val answer: String)
-data class RecordPublicityRequest(val isPublic: Boolean)
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)
 data class GradingResultResponse(val score: Int, val isCorrect: Boolean, val feedback: String, val explanation: String)

@@ -1,16 +1,13 @@
 package com.buddystuddy.backend.auth.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.dto.AccessTokenResponse
-import com.buddystuddy.backend.dto.DeviceRegisterRequest
-import com.buddystuddy.backend.dto.DeviceRegisterResponse
-import com.buddystuddy.backend.dto.EmailLoginRequest
-import com.buddystuddy.backend.dto.EmailVerificationCodeResponse
-import com.buddystuddy.backend.dto.GoogleLoginResponse
-import com.buddystuddy.backend.dto.PushTokenRequest
+import com.buddystuddy.backend.auth.application.model.AccessTokenResponse
+import com.buddystuddy.backend.auth.application.model.DeviceRegisterResponse
+import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
+import com.buddystuddy.backend.auth.application.model.GoogleLoginResponse
 
 interface RegisterDeviceUseCase {
-    fun register(payload: DeviceRegisterRequest): DeviceRegisterResponse
+    fun register(command: RegisterDeviceCommand): DeviceRegisterResponse
 }
 
 interface IssueDeviceTokenUseCase {
@@ -20,10 +17,10 @@ interface IssueDeviceTokenUseCase {
 
 interface LoginUseCase {
     fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse
-    fun emailLogin(principal: Principal, payload: EmailLoginRequest): GoogleLoginResponse
+    fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse
     fun emailCode(email: String): EmailVerificationCodeResponse
 }
 
 interface UpdatePushTokenUseCase {
-    fun updatePushToken(principal: Principal, payload: PushTokenRequest)
+    fun updatePushToken(principal: Principal, command: PushTokenCommand)
 }

@@ -1,11 +1,10 @@
 package com.buddystuddy.backend.settings.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.dto.BackendSettingsResponse
-import com.buddystuddy.backend.dto.ScheduleRequest
-import com.buddystuddy.backend.dto.ScheduleResponse
+import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
+import com.buddystuddy.backend.settings.application.model.ScheduleResponse
 
 interface SettingsUseCase {
-    fun upsertSchedule(principal: Principal, payload: ScheduleRequest): ScheduleResponse
+    fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse
     fun settings(principal: Principal): BackendSettingsResponse
 }

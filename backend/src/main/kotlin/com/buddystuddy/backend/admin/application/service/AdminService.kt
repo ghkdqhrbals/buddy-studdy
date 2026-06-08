@@ -3,9 +3,9 @@ package com.buddystuddy.backend.admin.application.service
 import com.buddystuddy.backend.admin.application.port.inbound.AdminUseCase
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.dto.APIStatusResponse
-import com.buddystuddy.backend.dto.APIValidationResponse
-import com.buddystuddy.backend.dto.OpenAIModelOptionResponse
+import com.buddystuddy.backend.admin.application.model.APIStatusResponse
+import com.buddystuddy.backend.admin.application.model.APIValidationResponse
+import com.buddystuddy.backend.admin.application.model.OpenAIModelOptionResponse
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

@@ -2,9 +2,9 @@ package com.buddystuddy.backend.profile.application.service
 
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.common.application.service.BackendSupportService
-import com.buddystuddy.backend.dto.ProfileUpdateRequest
-import com.buddystuddy.backend.dto.UserProfileResponse
-import com.buddystuddy.backend.dto.toProfile
+import com.buddystuddy.backend.profile.application.model.UserProfileResponse
+import com.buddystuddy.backend.profile.application.model.toProfile
+import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUseCase
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -18,13 +18,13 @@ class ProfileService(
     override fun profile(principal: Principal): UserProfileResponse = support.user(principal.userId).toProfile()
 
     @Transactional
-    override fun updateProfile(principal: Principal, payload: ProfileUpdateRequest): UserProfileResponse {
+    override fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse {
         val user = support.user(principal.userId)
-        payload.displayName?.trim()?.takeIf { it.isNotEmpty() }?.let { user.displayName = it.take(120) }
-        payload.bio?.let { user.bio = it.take(500) }
-        payload.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
-        payload.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
-        payload.pageAccess?.let { user.allowPublicQuestions = it.publicQuestions }
+        command.displayName?.trim()?.takeIf { it.isNotEmpty() }?.let { user.displayName = it.take(120) }
+        command.bio?.let { user.bio = it.take(500) }
+        command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
+        command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
+        command.pageAccess?.let { user.allowPublicQuestions = it.publicQuestions }
         user.updatedAt = Instant.now()
         return user.toProfile()
     }

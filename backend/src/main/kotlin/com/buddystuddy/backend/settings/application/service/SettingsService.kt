@@ -3,11 +3,11 @@ package com.buddystuddy.backend.settings.application.service
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.domain.ScheduleEntity
-import com.buddystuddy.backend.dto.BackendSettingsResponse
-import com.buddystuddy.backend.dto.ScheduleItemRequest
-import com.buddystuddy.backend.dto.ScheduleRequest
-import com.buddystuddy.backend.dto.ScheduleResponse
-import com.buddystuddy.backend.dto.toSettings
+import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
+import com.buddystuddy.backend.settings.application.model.ScheduleResponse
+import com.buddystuddy.backend.settings.application.model.toSettings
+import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
+import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
@@ -20,31 +20,31 @@ class SettingsService(
     private val cipher: KeyCipher,
 ) : SettingsUseCase {
     @Transactional
-    override fun upsertSchedule(principal: Principal, payload: ScheduleRequest): ScheduleResponse {
+    override fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
-        val encryptedKey = cipher.encrypt(payload.openaiApiKey)
-        val items = payload.schedules?.takeIf { it.isNotEmpty() } ?: listOf(
-            ScheduleItemRequest(payload.topic.ifBlank { "SwiftUI" }, payload.difficultyLevel, payload.customPrompt, payload.openaiModel)
+        val encryptedKey = cipher.encrypt(command.openaiApiKey)
+        val items = command.schedules?.takeIf { it.isNotEmpty() } ?: listOf(
+            ScheduleItemCommand(command.topic.ifBlank { "SwiftUI" }, command.difficultyLevel, command.customPrompt, command.openaiModel)
         )
         var next: Instant? = null
         items.forEach { item ->
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, item.topic)
                 ?: ScheduleEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
             schedule.difficultyLevel = item.difficultyLevel
-            schedule.intervalMinutes = payload.intervalMinutes
-            schedule.enabled = payload.enabled
+            schedule.intervalMinutes = command.intervalMinutes
+            schedule.enabled = command.enabled
             if (encryptedKey != null) schedule.openaiApiKeyCipher = encryptedKey
-            schedule.notificationSound = payload.notificationSound
+            schedule.notificationSound = command.notificationSound
             schedule.customPrompt = item.customPrompt
-            schedule.appLanguage = payload.appLanguage
-            schedule.openaiModel = item.openaiModel.ifBlank { payload.openaiModel }
-            schedule.maxHistoryCount = payload.maxHistoryCount
-            schedule.questionPublic = payload.isQuestionPublic && !principal.anonymous
-            schedule.nextDueAt = schedule.nextDueAt ?: now.plusSeconds(payload.intervalMinutes.toLong() * 60)
+            schedule.appLanguage = command.appLanguage
+            schedule.openaiModel = item.openaiModel.ifBlank { command.openaiModel }
+            schedule.maxHistoryCount = command.maxHistoryCount
+            schedule.questionPublic = command.isQuestionPublic && !principal.anonymous
+            schedule.nextDueAt = schedule.nextDueAt ?: now.plusSeconds(command.intervalMinutes.toLong() * 60)
             schedule.updatedAt = now
             next = schedules.save(schedule).nextDueAt
         }
-        return ScheduleResponse(principal.deviceId, payload.enabled, next)
+        return ScheduleResponse(principal.deviceId, command.enabled, next)
     }
 
     @Transactional(readOnly = true)

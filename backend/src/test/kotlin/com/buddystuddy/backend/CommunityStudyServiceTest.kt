@@ -7,9 +7,9 @@ import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
 import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepository
+import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
 import com.buddystuddy.backend.domain.*
-import com.buddystuddy.backend.dto.ReportQuestionRequest
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.service.StudyService
@@ -173,8 +173,8 @@ class CommunityStudyServiceTest {
         val publicQuestion = answeredPublicQuestion(author, "SwiftUI")
         val privateQuestion = answeredPublicQuestion(author, "Private", publicQuestion = false)
 
-        community.report(principal, publicQuestion.id, ReportQuestionRequest(reason = "spam", message = "bad"))
-        assertRecordNotFound { community.report(principal, privateQuestion.id, ReportQuestionRequest(reason = "spam")) }
+        community.report(principal, publicQuestion.id, ReportQuestionCommand(reason = "spam", message = "bad"))
+        assertRecordNotFound { community.report(principal, privateQuestion.id, ReportQuestionCommand(reason = "spam")) }
 
         val result = reports.findAll().single()
         assertThat(result.questionId).isEqualTo(publicQuestion.id)

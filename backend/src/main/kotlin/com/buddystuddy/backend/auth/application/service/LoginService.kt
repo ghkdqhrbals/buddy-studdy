@@ -9,20 +9,20 @@ import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUse
 import com.buddystuddy.backend.auth.application.port.inbound.LoginUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.UpdatePushTokenUseCase
+import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
+import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceCommand
+import com.buddystuddy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.domain.DeviceEntity
 import com.buddystuddy.backend.domain.UserEntity
-import com.buddystuddy.backend.dto.AccessTokenResponse
-import com.buddystuddy.backend.dto.DeviceRegisterRequest
-import com.buddystuddy.backend.dto.DeviceRegisterResponse
-import com.buddystuddy.backend.dto.EmailLoginRequest
-import com.buddystuddy.backend.dto.EmailVerificationCodeResponse
-import com.buddystuddy.backend.dto.GoogleLoginResponse
-import com.buddystuddy.backend.dto.PushTokenRequest
-import com.buddystuddy.backend.dto.toProfile
+import com.buddystuddy.backend.auth.application.model.AccessTokenResponse
+import com.buddystuddy.backend.auth.application.model.DeviceRegisterResponse
+import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
+import com.buddystuddy.backend.auth.application.model.GoogleLoginResponse
+import com.buddystuddy.backend.profile.application.model.toProfile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -40,7 +40,7 @@ class LoginService(
     private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
 
     @Transactional
-    override fun register(payload: DeviceRegisterRequest): DeviceRegisterResponse {
+    override fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
         val deviceId = support.randomToken("dev")
         val secret = support.randomToken("sec")
         val now = Instant.now()
@@ -61,11 +61,11 @@ class LoginService(
                 deviceId = deviceId,
                 clientSecretHash = sha256(secret),
                 userId = user.id,
-                apnsToken = payload.apnsToken,
-                platform = payload.platform,
-                apnsEnvironment = payload.apnsEnvironment,
-                language = payload.language,
-                timezone = payload.timezone,
+                apnsToken = command.apnsToken,
+                platform = command.platform,
+                apnsEnvironment = command.apnsEnvironment,
+                language = command.language,
+                timezone = command.timezone,
                 createdAt = now,
                 updatedAt = now,
                 lastSeenAt = now,
@@ -97,20 +97,20 @@ class LoginService(
     }
 
     @Transactional
-    override fun updatePushToken(principal: Principal, payload: PushTokenRequest) {
+    override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
         val device = support.device(principal.deviceId)
-        device.apnsToken = payload.apnsToken
-        device.apnsEnvironment = payload.apnsEnvironment
+        device.apnsToken = command.apnsToken
+        device.apnsEnvironment = command.apnsEnvironment
         device.updatedAt = Instant.now()
     }
 
     @Transactional
-    override fun emailLogin(principal: Principal, payload: EmailLoginRequest): GoogleLoginResponse {
+    override fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse {
         val now = Instant.now()
-        val normalized = payload.email.trim().lowercase()
+        val normalized = command.email.trim().lowercase()
         var user = users.findByEmailAndProvider(normalized, "EMAIL")
         if (user == null) {
-            if (payload.verificationCode.isNullOrBlank()) {
+            if (command.verificationCode.isNullOrBlank()) {
                 throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_GOOGLE_REQUIRED, "Email verification code is required.")
             }
             user = users.save(
@@ -118,7 +118,7 @@ class LoginService(
                     provider = "EMAIL",
                     providerId = normalized,
                     email = normalized,
-                    passwordHash = sha256(payload.password),
+                    passwordHash = sha256(command.password),
                     status = "ACTIVE",
                     displayName = normalized.substringBefore("@"),
                     avatarColorSeed = "avatar-color-mint",
@@ -126,7 +126,7 @@ class LoginService(
                     updatedAt = now,
                 )
             )
-        } else if (user.passwordHash != sha256(payload.password)) {
+        } else if (user.passwordHash != sha256(command.password)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
         val device = support.device(principal.deviceId)

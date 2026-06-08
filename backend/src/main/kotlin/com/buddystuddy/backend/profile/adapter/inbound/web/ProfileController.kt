@@ -1,7 +1,8 @@
 package com.buddystuddy.backend.profile.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.PrincipalService
-import com.buddystuddy.backend.dto.ProfileUpdateRequest
+import com.buddystuddy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest
+import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUseCase
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.GetMapping
@@ -21,5 +22,13 @@ class ProfileController(
 
     @PatchMapping("/me/profile")
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, request: HttpServletRequest) =
-        profiles.updateProfile(principals.authenticate(request), body)
+        profiles.updateProfile(principals.authenticate(request), body.toCommand())
 }
+
+private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
+    displayName = displayName,
+    bio = bio,
+    avatarSymbolName = avatarSymbolName,
+    avatarColorSeed = avatarColorSeed,
+    pageAccess = pageAccess,
+)

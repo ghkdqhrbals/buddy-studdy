@@ -1,5 +1,6 @@
-package com.buddystuddy.backend.dto
+package com.buddystuddy.backend.stats.application.model
 
+import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import java.time.Instant
 
 data class TopicLevelRangeResponse(

@@ -1,9 +1,9 @@
 package com.buddystuddy.backend.admin.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.dto.APIStatusResponse
-import com.buddystuddy.backend.dto.APIValidationResponse
-import com.buddystuddy.backend.dto.OpenAIModelOptionResponse
+import com.buddystuddy.backend.admin.application.model.APIStatusResponse
+import com.buddystuddy.backend.admin.application.model.APIValidationResponse
+import com.buddystuddy.backend.admin.application.model.OpenAIModelOptionResponse
 
 interface AdminUseCase {
     fun models(): List<OpenAIModelOptionResponse>

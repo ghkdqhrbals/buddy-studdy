@@ -3,16 +3,19 @@ package com.buddystuddy.backend.auth.adapter.inbound.web
 import com.buddystuddy.backend.auth.PrincipalService
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
+import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystuddy.backend.auth.application.port.inbound.LoginUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceUseCase
+import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceCommand
+import com.buddystuddy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystuddy.backend.auth.application.port.inbound.UpdatePushTokenUseCase
 import com.buddystuddy.backend.common.application.error.ApiException
-import com.buddystuddy.backend.dto.DeviceRegisterRequest
-import com.buddystuddy.backend.dto.EmailLoginRequest
-import com.buddystuddy.backend.dto.EmailVerificationCodeRequest
-import com.buddystuddy.backend.dto.EmailVerificationCodeResponse
-import com.buddystuddy.backend.dto.GoogleLoginRequest
-import com.buddystuddy.backend.dto.PushTokenRequest
+import com.buddystuddy.backend.auth.adapter.inbound.web.dto.DeviceRegisterRequest
+import com.buddystuddy.backend.auth.adapter.inbound.web.dto.EmailLoginRequest
+import com.buddystuddy.backend.auth.adapter.inbound.web.dto.EmailVerificationCodeRequest
+import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
+import com.buddystuddy.backend.auth.adapter.inbound.web.dto.GoogleLoginRequest
+import com.buddystuddy.backend.auth.adapter.inbound.web.dto.PushTokenRequest
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
@@ -33,7 +36,7 @@ class AuthController(
     private val principals: PrincipalService,
 ) {
     @PostMapping("/devices/register")
-    fun register(@Valid @RequestBody body: DeviceRegisterRequest) = registerDevice.register(body)
+    fun register(@Valid @RequestBody body: DeviceRegisterRequest) = registerDevice.register(body.toCommand())
 
     @PostMapping("/auth/token")
     fun token(
@@ -66,11 +69,11 @@ class AuthController(
         request: HttpServletRequest,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
-    ) = login.emailLogin(loginPrincipal(request, deviceId, clientSecret), body)
+    ) = login.emailLogin(loginPrincipal(request, deviceId, clientSecret), body.toCommand())
 
     @PutMapping("/me/push-token")
     fun pushToken(@RequestBody body: PushTokenRequest, request: HttpServletRequest): ResponseEntity<Unit> {
-        updatePushToken.updatePushToken(principals.authenticate(request), body)
+        updatePushToken.updatePushToken(principals.authenticate(request), body.toCommand())
         return ResponseEntity.noContent().build()
     }
 
@@ -82,3 +85,22 @@ class AuthController(
             issueDeviceToken.authenticateDevice(deviceId, clientSecret)
         }
 }
+
+private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(
+    apnsToken = apnsToken,
+    platform = platform,
+    apnsEnvironment = apnsEnvironment,
+    language = language,
+    timezone = timezone,
+)
+
+private fun EmailLoginRequest.toCommand() = EmailLoginCommand(
+    email = email,
+    password = password,
+    verificationCode = verificationCode,
+)
+
+private fun PushTokenRequest.toCommand() = PushTokenCommand(
+    apnsToken = apnsToken,
+    apnsEnvironment = apnsEnvironment,
+)

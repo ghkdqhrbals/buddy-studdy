@@ -8,10 +8,10 @@ import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.dto.BackendSnapshotResponse
-import com.buddystuddy.backend.dto.RecordsPageResponse
-import com.buddystuddy.backend.dto.StudyRecordResponse
-import com.buddystuddy.backend.dto.toRecord
+import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
+import com.buddystuddy.backend.study.application.model.RecordsPageResponse
+import com.buddystuddy.backend.study.application.model.StudyRecordResponse
+import com.buddystuddy.backend.study.application.model.toRecord
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystuddy.backend.stats.StatsService
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
