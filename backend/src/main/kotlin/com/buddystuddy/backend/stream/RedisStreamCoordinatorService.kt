@@ -63,7 +63,7 @@ class RedisStreamCoordinatorService(
     ): Boolean {
         if (!properties.streams.enabled) return false
         val publisher = publisher ?: return false
-        val fields = event.toStreamMap().toStringMapWithoutNull()
+        val fields = event.toRedisStreamFields()
         return try {
             val published = publisher.publish(
                 partitionKey ?: UUID.randomUUID().toString(),
@@ -82,4 +82,13 @@ class RedisStreamCoordinatorService(
             false
         }
     }
+
+    private fun RedisStreamEvent.toRedisStreamFields(): Map<String, String> =
+        when (this) {
+            is QuestionPushRequestedEvent -> fields
+                .plus("eventId" to eventId)
+                .plus("eventType" to eventType)
+                .toStringMapWithoutNull()
+            else -> toStringMapWithoutNull()
+        }
 }

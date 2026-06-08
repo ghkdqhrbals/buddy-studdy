@@ -3,7 +3,7 @@ package com.buddystuddy.backend
 import com.buddystuddy.backend.stream.QuestionActionEvent
 import com.buddystuddy.backend.stream.QuestionStreamEventType
 import com.buddystuddy.backend.stream.QuestionViewedEvent
-import com.buddystuddy.backend.stream.toStreamMap
+import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -14,18 +14,18 @@ class RedisStreamEventsTest {
         val event = QuestionViewedEvent(
             questionId = 10,
             userId = 20,
-            viewedAt = Instant.ofEpochSecond(180),
+            createdAt = Instant.ofEpochSecond(180),
             eventId = "event-1",
         )
 
-        assertThat(event.toStreamMap()).containsExactlyInAnyOrderEntriesOf(
+        assertThat(event.toStringMapWithoutNull()).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 "eventId" to "event-1",
                 "eventType" to "CONTENT_VIEWED",
-                "questionId" to 10L,
-                "userId" to 20L,
-                "minuteBucket" to 3L,
-                "createdAt" to Instant.ofEpochSecond(180),
+                "questionId" to "10",
+                "userId" to "20",
+                "minuteBucket" to "3",
+                "createdAt" to "1970-01-01T00:03:00Z",
             )
         )
     }
@@ -40,13 +40,13 @@ class RedisStreamEventsTest {
             eventId = "event-2",
         )
 
-        assertThat(event.toStreamMap()).containsExactlyInAnyOrderEntriesOf(
+        assertThat(event.toStringMapWithoutNull()).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 "eventId" to "event-2",
                 "eventType" to "QUESTION_LIKED",
-                "questionId" to 30L,
-                "userId" to 40L,
-                "createdAt" to Instant.ofEpochSecond(240),
+                "questionId" to "30",
+                "userId" to "40",
+                "createdAt" to "1970-01-01T00:04:00Z",
             )
         )
     }
