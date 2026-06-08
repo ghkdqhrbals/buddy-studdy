@@ -20,8 +20,8 @@ import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionsResponse
 import com.buddystuddy.backend.community.application.model.toCommunityQuestionResponse
+import com.buddystuddy.backend.community.domain.PublicQuestion
 import com.buddystuddy.backend.community.domain.PublicQuestionAuthorProjection
-import com.buddystuddy.backend.community.domain.PublicQuestionAggregate
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.profile.application.model.toProfile
@@ -122,7 +122,7 @@ class CommunityService(
         val author = q.userId?.let { users.findById(it).orElse(null)?.toAuthorProjection() }
         val stats = questionStats.findById(q.id).orElse(null)
         val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
-        return PublicQuestionAggregate.of(q, author, stats, liked).toProjection().toCommunityQuestionResponse()
+        return PublicQuestion.of(q, author, stats, liked).toProjection().toCommunityQuestionResponse()
     }
 
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =

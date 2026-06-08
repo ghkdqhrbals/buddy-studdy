@@ -8,8 +8,8 @@ import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.study.domain.StudyRecordAggregate
-import com.buddystuddy.backend.study.domain.StudyRoomAggregate
+import com.buddystuddy.backend.study.domain.StudyRecord
+import com.buddystuddy.backend.study.domain.StudyRoom
 import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
@@ -35,7 +35,7 @@ class StudyService(
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
         val schedule = context.scheduleFor(principal, topic)
-        val room = StudyRoomAggregate.of(
+        val room = StudyRoom.of(
             schedule,
             questions.countPendingForStudy(principal.deviceId, principal.userId, schedule.topic),
         )
@@ -56,15 +56,15 @@ class StudyService(
         val now = Instant.now()
         val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now))
         questionStats.save(QuestionStatsEntity(questionId = question.id))
-        return StudyRecordAggregate.of(question).toProjection().toRecordResponse()
+        return StudyRecord.of(question).toProjection().toRecordResponse()
     }
 
     @Transactional
     override fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(q.id).orElse(null))
-        aggregate.answer(answer)
+        val record = StudyRecord.of(q, questionStats.findById(q.id).orElse(null))
+        record.answer(answer)
         if (grade && q.score == null) {
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
                 ?: schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)
@@ -77,36 +77,36 @@ class StudyService(
                 q.difficultyLevel,
                 schedule?.appLanguage ?: "ko",
             )
-            aggregate.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation)
+            record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation)
         }
-        return aggregate.toProjection().toRecordResponse()
+        return record.toProjection().toRecordResponse()
     }
 
     @Transactional(readOnly = true)
     override fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findVisibleByUser(principal.userId, includePending = false, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { StudyRecordAggregate.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyRecord.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findPendingByUser(principal.userId, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { StudyRecordAggregate.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.map { StudyRecord.of(it, questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun record(principal: Principal, id: Long): StudyRecordResponse =
         (questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found."))
-            .let { StudyRecordAggregate.of(it, questionStats.findById(id).orElse(null)).toProjection().toRecordResponse() }
+            .let { StudyRecord.of(it, questionStats.findById(id).orElse(null)).toProjection().toRecordResponse() }
 
     @Transactional
     override fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(id).orElse(null))
-        aggregate.skip()
-        return aggregate.toProjection().toRecordResponse()
+        val record = StudyRecord.of(q, questionStats.findById(id).orElse(null))
+        record.skip()
+        return record.toProjection().toRecordResponse()
     }
 
     @Transactional
@@ -118,9 +118,8 @@ class StudyService(
     override fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val aggregate = StudyRecordAggregate.of(q, questionStats.findById(id).orElse(null))
-        aggregate.restrictPublicity(isPublic)
-        return aggregate.toProjection().toRecordResponse()
+        val record = StudyRecord.of(q, questionStats.findById(id).orElse(null))
+        record.restrictPublicity(isPublic)
+        return record.toProjection().toRecordResponse()
     }
-
 }

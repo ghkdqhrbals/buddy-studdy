@@ -46,7 +46,7 @@ class QuestionStatsStreamListenerTest {
     }
 
     @Test
-    fun `like and comment action events update aggregate counts`() {
+    fun `like and comment action events update stats counts`() {
         stats.save(QuestionStatsEntity(questionId = 202))
 
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "202"))
@@ -60,7 +60,7 @@ class QuestionStatsStreamListenerTest {
     }
 
     @Test
-    fun `decrement action events never move aggregate counters below zero`() {
+    fun `decrement action events never move stats counters below zero`() {
         stats.save(QuestionStatsEntity(questionId = 203))
 
         listener.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "203"))
@@ -95,7 +95,7 @@ class QuestionStatsStreamListenerTest {
     }
 
     @Test
-    fun `mixed aggregate events create missing row and converge to expected counts`() {
+    fun `mixed stats events create missing row and converge to expected counts`() {
         listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "707"))
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
@@ -111,7 +111,7 @@ class QuestionStatsStreamListenerTest {
     }
 
     @Test
-    fun `stream event creates stats row when aggregate row is missing`() {
+    fun `stream event creates stats row when stats row is missing`() {
         listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "303"))
 
         assertThat(stats.findById(303).orElseThrow().likeCount).isEqualTo(1)

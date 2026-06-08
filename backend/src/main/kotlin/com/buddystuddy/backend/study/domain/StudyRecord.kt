@@ -4,7 +4,7 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import java.time.Instant
 
-class StudyRecordAggregate private constructor(
+class StudyRecord private constructor(
     val question: QuestionEntity,
     private val stats: QuestionStatsEntity?,
 ) {
@@ -60,7 +60,7 @@ class StudyRecordAggregate private constructor(
     )
 
     companion object {
-        fun of(question: QuestionEntity, stats: QuestionStatsEntity? = null) = StudyRecordAggregate(question, stats)
+        fun of(question: QuestionEntity, stats: QuestionStatsEntity? = null) = StudyRecord(question, stats)
     }
 }
 

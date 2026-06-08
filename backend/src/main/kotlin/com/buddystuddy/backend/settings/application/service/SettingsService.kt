@@ -9,7 +9,7 @@ import com.buddystuddy.backend.settings.application.model.toSettings
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
-import com.buddystuddy.backend.study.domain.StudyRoomSettingsAggregate
+import com.buddystuddy.backend.study.domain.StudyRoomSettings
 import com.buddystuddy.backend.study.domain.StudyRoomSettingsCommand
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
@@ -32,7 +32,7 @@ class SettingsService(
         items.forEach { item ->
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, item.topic)
                 ?: ScheduleEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
-            StudyRoomSettingsAggregate.of(schedule).configure(
+            StudyRoomSettings.of(schedule).configure(
                 StudyRoomSettingsCommand(
                     difficultyLevel = item.difficultyLevel,
                     intervalMinutes = command.intervalMinutes,

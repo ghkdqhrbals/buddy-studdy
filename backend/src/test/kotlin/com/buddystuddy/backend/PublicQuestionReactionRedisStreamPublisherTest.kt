@@ -52,7 +52,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `reaction publishers emit distinct aggregate action event types`() {
+    fun `reaction publishers emit distinct stats action event types`() {
         val actionPublisher = RecordingPublisher()
         val service = service(enabled = true, actionPublisher = actionPublisher)
 

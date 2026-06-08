@@ -25,8 +25,8 @@ Read these first:
 ## Backend Architecture Rules
 
 - Every application `*Service` must implement one or more inbound `*UseCase` contracts.
-- Only aggregate-root/composition services may depend on lower-level `*UseCase` contracts.
-- Lower-level aggregate services must depend on outbound `*Port` contracts, not other services.
+- Only composition services may depend on lower-level `*UseCase` contracts.
+- Lower-level domain services must depend on outbound `*Port` contracts, not other services.
 - Adapters must implement outbound or controller-facing `*Port` contracts and may depend on `*UseCase` contracts.
 - Controllers must depend on controller-facing `*Port` contracts, not direct `*UseCase` contracts.
 - Non-use-case helpers must not be named `*Service`; use names such as `*Provider`, `*Manager`, `*Adapter`, `*Publisher`, or `*Resolver`.

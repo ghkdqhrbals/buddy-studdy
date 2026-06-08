@@ -3,7 +3,7 @@ package com.buddystuddy.backend.auth.application.service
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
-import com.buddystuddy.backend.auth.domain.AccountAggregate
+import com.buddystuddy.backend.auth.domain.Account
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.domain.DeviceEntity
@@ -35,7 +35,7 @@ class AccountSessionManager(
                 updatedAt = now,
             )
         )
-        AccountAggregate.of(user, device).attachDevice(now)
+        Account.of(user, device).attachDevice(now)
         return user
     }
 

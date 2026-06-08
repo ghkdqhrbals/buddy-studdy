@@ -7,7 +7,7 @@ import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.study.domain.StudyRecordAggregate
+import com.buddystuddy.backend.study.domain.StudyRecord
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.domain.PageRequest
@@ -69,7 +69,7 @@ class StatsService(
                 upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
             ),
             latestAt = rows.maxOf { it.createdAt },
-            records = rows.take(20).map { StudyRecordAggregate.of(it, stats.findById(it.id).orElse(null)).toProjection().toRecordResponse() },
+            records = rows.take(20).map { StudyRecord.of(it, stats.findById(it.id).orElse(null)).toProjection().toRecordResponse() },
         )
     }
 

@@ -51,13 +51,13 @@ sum(count_over_time(<selected log query>[$timelineBucket]))
 
 The timeline query must stay aligned with `Search Results`: `${labelSelector:raw} ${logqlSearch:raw}`. Do not add display-only regexp extraction here, or the graph can disagree with the log list.
 
-The timeline query uses a hidden Grafana interval variable, `timelineBucket`, with `auto_count=60` and `auto_min=10s`. This keeps the graph aggregated into roughly 60 time buckets for the selected range instead of rendering one-second spikes across the whole panel.
+The timeline query uses a hidden Grafana interval variable, `timelineBucket`, with `auto_count=60` and `auto_min=10s`. This keeps the graph grouped into roughly 60 time buckets for the selected range instead of rendering one-second spikes across the whole panel.
 
 The time series uses full-width bars (`barWidthFactor=1`) so each bucket visually fills its interval instead of rendering as a thin spike.
 
 ## API Performance Dashboard
 
-The `BuddyStuddy API Performance` dashboard calculates traffic, error, and latency metrics from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables aggregate correctly:
+The `BuddyStuddy API Performance` dashboard calculates traffic, error, and latency metrics from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables are grouped correctly:
 
 ```text
 path=/api/v1/me/records/71

@@ -4,7 +4,7 @@ import com.buddystuddy.backend.domain.DeviceEntity
 import com.buddystuddy.backend.domain.UserEntity
 import java.time.Instant
 
-class AccountAggregate private constructor(
+class Account private constructor(
     val user: UserEntity,
     val device: DeviceEntity,
 ) {
@@ -20,6 +20,6 @@ class AccountAggregate private constructor(
     }
 
     companion object {
-        fun of(user: UserEntity, device: DeviceEntity) = AccountAggregate(user, device)
+        fun of(user: UserEntity, device: DeviceEntity) = Account(user, device)
     }
 }

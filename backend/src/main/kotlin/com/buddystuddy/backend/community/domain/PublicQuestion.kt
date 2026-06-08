@@ -4,7 +4,7 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
 import java.time.Instant
 
-class PublicQuestionAggregate private constructor(
+class PublicQuestion private constructor(
     private val question: QuestionEntity,
     private val author: PublicQuestionAuthorProjection?,
     private val stats: QuestionStatsEntity?,
@@ -37,7 +37,7 @@ class PublicQuestionAggregate private constructor(
             author: PublicQuestionAuthorProjection?,
             stats: QuestionStatsEntity?,
             likedByMe: Boolean,
-        ) = PublicQuestionAggregate(question, author, stats, likedByMe)
+        ) = PublicQuestion(question, author, stats, likedByMe)
     }
 }
 

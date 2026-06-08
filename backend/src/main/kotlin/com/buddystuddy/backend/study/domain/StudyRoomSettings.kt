@@ -3,7 +3,7 @@ package com.buddystuddy.backend.study.domain
 import com.buddystuddy.backend.domain.ScheduleEntity
 import java.time.Instant
 
-class StudyRoomSettingsAggregate private constructor(
+class StudyRoomSettings private constructor(
     val schedule: ScheduleEntity,
 ) {
     fun configure(command: StudyRoomSettingsCommand, encryptedOpenAIKey: String?, anonymous: Boolean, now: Instant = Instant.now()) {
@@ -22,7 +22,7 @@ class StudyRoomSettingsAggregate private constructor(
     }
 
     companion object {
-        fun of(schedule: ScheduleEntity) = StudyRoomSettingsAggregate(schedule)
+        fun of(schedule: ScheduleEntity) = StudyRoomSettings(schedule)
     }
 }
 

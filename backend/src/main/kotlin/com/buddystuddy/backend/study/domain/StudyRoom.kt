@@ -4,7 +4,7 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.ScheduleEntity
 import java.time.Instant
 
-class StudyRoomAggregate private constructor(
+class StudyRoom private constructor(
     val schedule: ScheduleEntity,
     private val pendingCount: Long,
 ) {
@@ -42,7 +42,7 @@ class StudyRoomAggregate private constructor(
     )
 
     companion object {
-        fun of(schedule: ScheduleEntity, pendingCount: Long) = StudyRoomAggregate(schedule, pendingCount)
+        fun of(schedule: ScheduleEntity, pendingCount: Long) = StudyRoom(schedule, pendingCount)
     }
 }
 

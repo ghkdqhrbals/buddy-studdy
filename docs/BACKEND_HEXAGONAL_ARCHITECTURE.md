@@ -249,31 +249,31 @@ auth
 
 JPA entities are currently centralized under `domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in outbound persistence adapters implement those ports.
 
-DDD aggregate models are now used as the application-facing consistency boundary before the JPA entity bridge is fully removed:
+Domain root models are now used as the application-facing consistency boundary before the JPA entity bridge is fully removed:
 
 ```text
-auth.domain.AccountAggregate
+auth.domain.Account
   - User + active Device relationship
   - device attachment and push token mutation
 
-study.domain.StudyRoomAggregate
+study.domain.StudyRoom
   - Schedule + pending question count
   - pending cap invariant and question creation
 
-study.domain.StudyRoomSettingsAggregate
+study.domain.StudyRoomSettings
   - Schedule settings mutation
   - interval/model/publicity/OpenAI-key related setting updates
 
-study.domain.StudyRecordAggregate
+study.domain.StudyRecord
   - Question + QuestionStats read model
   - answer, grade, skip, publicity restriction, response projection
 
-community.domain.PublicQuestionAggregate
+community.domain.PublicQuestion
   - Public answered Question + author + stats + viewer reaction
   - public question response projection
 ```
 
-These aggregates intentionally wrap the current JPA entity bridge during migration. Application services should call aggregate behavior instead of mutating entity fields directly.
+These domain roots intentionally wrap the current JPA entity bridge during migration. Application services should call domain behavior instead of mutating entity fields directly.
 
 Long-term, JPA entities should move to persistence adapters as database records, not domain models:
 
@@ -344,7 +344,7 @@ data class CreateQuestionCommand(
 
 - Pending question cap queries need indexes on `device_id`, `user_id`, `topic`, `deleted_at`, `skipped_at`, `score`.
 - Public question browse uses answered public rows only and should remain paginated.
-- Topic stats should not load unbounded records. Current 10,000 cap is acceptable short term, but should become a repository-level aggregate query when records grow.
+- Topic stats should not load unbounded records. Current 10,000 cap is acceptable short term, but should become a repository-level grouped query when records grow.
 - Reaction aggregation should consume by stream partition key `questionId`.
 
 ## Observability
@@ -373,15 +373,15 @@ data class CreateQuestionCommand(
 - Moved HTTP request DTOs into domain-specific `adapter.inbound.web.dto` packages.
 - Moved use-case response models and entity-to-response mappers into domain-specific `application.model` packages.
 - Replaced application-layer web request dependencies with transport-neutral inbound command types.
-- Introduced aggregate models for auth account/device ownership, study room settings, study question lifecycle, and public question projection.
-- Moved question lifecycle mutations such as answer, grade, skip, and publicity restriction behind aggregate methods.
+- Introduced domain root models for auth account/device ownership, study room settings, study question lifecycle, and public question projection.
+- Moved question lifecycle mutations such as answer, grade, skip, and publicity restriction behind domain methods.
 
 ## Remaining Hardening
 
 1. Move JPA entity classes into outbound persistence packages after all mappers are introduced.
 2. Replace entity bridge returns with pure domain models.
 3. Reduce `BackendSupportService` by moving helper behavior into domain-specific services.
-4. Convert `StatsService` to a study application use case backed by aggregate persistence ports.
+4. Convert `StatsService` to a study application use case backed by stats-specific persistence ports.
 5. Continue moving response mapping out of application services as more transports or API versions are introduced.
 
 ## Test Plan
@@ -411,8 +411,8 @@ data class CreateQuestionCommand(
 
 ## Risks and Open Questions
 
-- API response models are currently treated as application result models for compatibility with existing controllers. Aggregates expose domain snapshots, and application mappers convert those snapshots into response models.
-- Aggregates still wrap JPA entities as a migration bridge. This keeps behavior safe but is not the final pure DDD model.
-- `StatsService` currently calculates from loaded records. It should move behind a stats use case and later use aggregate queries.
+- API response models are currently treated as application result models for compatibility with existing controllers. Domain roots expose projections, and application mappers convert those projections into response models.
+- Domain roots still wrap JPA entities as a migration bridge. This keeps behavior safe but is not the final pure DDD model.
+- `StatsService` currently calculates from loaded records. It should move behind a stats use case and later use grouped repository queries.
 - `BackendSupportService` is useful during migration but should shrink as domain-specific ports mature.
 - Account withdrawal and clear-record behavior need explicit product policy before moving into final use cases.
