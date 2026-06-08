@@ -52,6 +52,28 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
+    fun `reaction publishers emit distinct aggregate action event types`() {
+        val actionPublisher = RecordingPublisher()
+        val service = service(enabled = true, actionPublisher = actionPublisher)
+
+        assertThat(service.publishLiked(41, 100)).isTrue()
+        assertThat(service.publishUnliked(41, 100)).isTrue()
+        assertThat(service.publishCommented(41, 100)).isTrue()
+
+        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41", "41")
+        assertThat(actionPublisher.requests.map { it.fields["eventType"] })
+            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED", "QUESTION_COMMENTED")
+        assertThat(actionPublisher.requests)
+            .allSatisfy { request ->
+                assertThat(request.fields).containsEntry("questionId", "41")
+                assertThat(request.fields).containsEntry("userId", "100")
+                assertThat(request.fields).containsKeys("createdAt", "eventId")
+                assertThat(request.options.maxLen).isEqualTo(100_000)
+                assertThat(request.options.approximateTrimming).isTrue()
+            }
+    }
+
+    @Test
     fun `publish methods return false when publisher throws`() {
         val failing = RecordingPublisher(fail = true)
         val service = service(enabled = true, viewPublisher = failing, actionPublisher = failing)
