@@ -1,10 +1,10 @@
 package com.buddystuddy.backend.profile.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalResolver
+import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUseCase
-import jakarta.servlet.http.HttpServletRequest
+import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
@@ -18,27 +18,26 @@ class ProfileController(
     private val profiles: ProfileWebPort,
 ) {
     @GetMapping("/me/profile")
-    fun profile(request: HttpServletRequest) = profiles.profile(request)
+    fun profile(authentication: Authentication) = profiles.profile(authentication)
 
     @PatchMapping("/me/profile")
-    fun updateProfile(@RequestBody body: ProfileUpdateRequest, request: HttpServletRequest) =
-        profiles.updateProfile(body, request)
+    fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
+        profiles.updateProfile(body, authentication)
 }
 
 interface ProfileWebPort {
-    fun profile(request: HttpServletRequest): Any
-    fun updateProfile(body: ProfileUpdateRequest, request: HttpServletRequest): Any
+    fun profile(authentication: Authentication): Any
+    fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
 }
 
 @Component
 class ProfileWebAdapter(
     private val profiles: ProfileUseCase,
-    private val principals: PrincipalResolver,
 ) : ProfileWebPort {
-    override fun profile(request: HttpServletRequest) = profiles.profile(principals.authenticate(request))
+    override fun profile(authentication: Authentication) = profiles.profile(authentication.principalOrThrow())
 
-    override fun updateProfile(body: ProfileUpdateRequest, request: HttpServletRequest) =
-        profiles.updateProfile(principals.authenticate(request), body.toCommand())
+    override fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
+        profiles.updateProfile(authentication.principalOrThrow(), body.toCommand())
 }
 
 private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(

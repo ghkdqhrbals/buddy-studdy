@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.admin.adapter.inbound.web
 
 import com.buddystuddy.backend.admin.application.port.inbound.AdminUseCase
-import com.buddystuddy.backend.auth.PrincipalResolver
-import jakarta.servlet.http.HttpServletRequest
+import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
+import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -18,26 +18,25 @@ class AdminController(
     fun models() = admin.models()
 
     @GetMapping("/me/api")
-    fun api(request: HttpServletRequest) = admin.api(request)
+    fun api(authentication: Authentication) = admin.api(authentication)
 
     @PostMapping("/me/api/validate")
-    fun validateApi(request: HttpServletRequest) = admin.validateApi(request)
+    fun validateApi(authentication: Authentication) = admin.validateApi(authentication)
 }
 
 interface AdminWebPort {
     fun models(): Any
-    fun api(request: HttpServletRequest): Any
-    fun validateApi(request: HttpServletRequest): Any
+    fun api(authentication: Authentication): Any
+    fun validateApi(authentication: Authentication): Any
 }
 
 @Component
 class AdminWebAdapter(
     private val admin: AdminUseCase,
-    private val principals: PrincipalResolver,
 ) : AdminWebPort {
     override fun models() = admin.models()
 
-    override fun api(request: HttpServletRequest) = admin.apiStatus(principals.authenticate(request))
+    override fun api(authentication: Authentication) = admin.apiStatus(authentication.principalOrThrow())
 
-    override fun validateApi(request: HttpServletRequest) = admin.validateApi(principals.authenticate(request))
+    override fun validateApi(authentication: Authentication) = admin.validateApi(authentication.principalOrThrow())
 }

@@ -1,6 +1,5 @@
 package com.buddystuddy.backend.auth.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
@@ -16,10 +15,14 @@ import com.buddystuddy.backend.auth.adapter.inbound.web.dto.EmailVerificationCod
 import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
 import com.buddystuddy.backend.auth.adapter.inbound.web.dto.GoogleLoginRequest
 import com.buddystuddy.backend.auth.adapter.inbound.web.dto.PushTokenRequest
-import jakarta.servlet.http.HttpServletRequest
+import com.buddystuddy.backend.common.adapter.inbound.web.optionalPrincipal
+import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
+import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import jakarta.validation.Valid
 import org.springframework.stereotype.Component
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -44,39 +47,39 @@ class AuthController(
     @PostMapping("/auth/google")
     fun google(
         @RequestBody body: GoogleLoginRequest,
-        request: HttpServletRequest,
+        authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
-    ) = auth.google(body, request, deviceId, clientSecret)
+    ) = auth.google(body, authentication, deviceId, clientSecret)
 
     @PostMapping("/auth/email/code")
     fun emailCode(
         @Valid @RequestBody body: EmailVerificationCodeRequest,
-        request: HttpServletRequest,
+        authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
-    ): EmailVerificationCodeResponse = auth.emailCode(body, request, deviceId, clientSecret)
+    ): EmailVerificationCodeResponse = auth.emailCode(body, authentication, deviceId, clientSecret)
 
     @PostMapping("/auth/email")
     fun email(
         @Valid @RequestBody body: EmailLoginRequest,
-        request: HttpServletRequest,
+        authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
-    ) = auth.email(body, request, deviceId, clientSecret)
+    ) = auth.email(body, authentication, deviceId, clientSecret)
 
     @PutMapping("/me/push-token")
-    fun pushToken(@RequestBody body: PushTokenRequest, request: HttpServletRequest): ResponseEntity<Unit> =
-        auth.pushToken(body, request)
+    fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
+        auth.pushToken(body, authentication)
 }
 
 interface AuthWebPort {
     fun register(body: DeviceRegisterRequest): Any
     fun token(deviceId: String, clientSecret: String): Any
-    fun google(body: GoogleLoginRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?): Any
-    fun emailCode(body: EmailVerificationCodeRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
-    fun email(body: EmailLoginRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?): Any
-    fun pushToken(body: PushTokenRequest, request: HttpServletRequest): ResponseEntity<Unit>
+    fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
+    fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
+    fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
+    fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit>
 }
 
 @Component
@@ -85,35 +88,39 @@ class AuthWebAdapter(
     private val issueDeviceToken: IssueDeviceTokenUseCase,
     private val login: LoginUseCase,
     private val updatePushToken: UpdatePushTokenUseCase,
-    private val principals: PrincipalResolver,
 ) : AuthWebPort {
     override fun register(body: DeviceRegisterRequest) = registerDevice.register(body.toCommand())
 
     override fun token(deviceId: String, clientSecret: String) = issueDeviceToken.token(deviceId, clientSecret)
 
-    override fun google(body: GoogleLoginRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?) =
-        login.googleLogin(loginPrincipal(request, deviceId, clientSecret), body.idToken)
+    override fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
+        login.googleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
 
-    override fun emailCode(body: EmailVerificationCodeRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
-        loginPrincipal(request, deviceId, clientSecret)
+    override fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
+        loginPrincipal(authentication, deviceId, clientSecret)
         return login.emailCode(body.email)
     }
 
-    override fun email(body: EmailLoginRequest, request: HttpServletRequest, deviceId: String?, clientSecret: String?) =
-        login.emailLogin(loginPrincipal(request, deviceId, clientSecret), body.toCommand())
+    override fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
+        login.emailLogin(loginPrincipal(authentication, deviceId, clientSecret), body.toCommand())
 
-    override fun pushToken(body: PushTokenRequest, request: HttpServletRequest): ResponseEntity<Unit> {
-        updatePushToken.updatePushToken(principals.authenticate(request), body.toCommand())
+    override fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> {
+        updatePushToken.updatePushToken(authentication.principalOrThrow(), body.toCommand())
         return ResponseEntity.noContent().build()
     }
 
-    private fun loginPrincipal(request: HttpServletRequest, deviceId: String?, clientSecret: String?): Principal =
-        try {
-            principals.authenticate(request)
-        } catch (error: ApiException) {
-            if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) throw error
-            issueDeviceToken.authenticateDevice(deviceId, clientSecret)
-        }
+    private fun loginPrincipal(authentication: Authentication?, deviceId: String?, clientSecret: String?): Principal =
+        authentication.optionalPrincipal()
+            ?: run {
+                if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) {
+                    throw ApiException(
+                        HttpStatus.UNAUTHORIZED,
+                        ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
+                        "Access token is required.",
+                    )
+                }
+                issueDeviceToken.authenticateDevice(deviceId, clientSecret)
+            }
 }
 
 private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(

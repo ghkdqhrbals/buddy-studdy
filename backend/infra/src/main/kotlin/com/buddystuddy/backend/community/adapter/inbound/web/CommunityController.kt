@@ -1,12 +1,13 @@
 package com.buddystuddy.backend.community.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalResolver
+import com.buddystuddy.backend.common.adapter.inbound.web.optionalPrincipal
+import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystuddy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
 import com.buddystuddy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.model.ReportQuestionResponse
-import jakarta.servlet.http.HttpServletRequest
+import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -30,63 +31,62 @@ class CommunityController(
         @RequestParam(required = false) topic: String?,
         @RequestParam(defaultValue = "20") limit: Int,
         @RequestParam(defaultValue = "0") offset: Int,
-        request: HttpServletRequest,
-    ) = community.publicQuestions(topic, limit, offset, request)
+        authentication: Authentication?,
+    ) = community.publicQuestions(topic, limit, offset, authentication)
 
     @GetMapping("/public/questions/{id}")
-    fun publicQuestion(@PathVariable id: Long, request: HttpServletRequest) = community.publicQuestion(id, request)
+    fun publicQuestion(@PathVariable id: Long, authentication: Authentication?) = community.publicQuestion(id, authentication)
 
     @PutMapping("/public/questions/{id}/like")
-    fun like(@PathVariable id: Long, request: HttpServletRequest) = community.like(id, request)
+    fun like(@PathVariable id: Long, authentication: Authentication) = community.like(id, authentication)
 
     @DeleteMapping("/public/questions/{id}/like")
-    fun unlike(@PathVariable id: Long, request: HttpServletRequest) = community.unlike(id, request)
+    fun unlike(@PathVariable id: Long, authentication: Authentication) = community.unlike(id, authentication)
 
     @GetMapping("/public/questions/{id}/comments")
     fun comments(@PathVariable id: Long, @RequestParam(defaultValue = "30") limit: Int, @RequestParam(defaultValue = "0") offset: Int) =
         community.comments(id, limit, offset)
 
     @PostMapping("/public/questions/{id}/comments")
-    fun comment(@PathVariable id: Long, @RequestBody body: CommunityCommentRequest, request: HttpServletRequest) =
-        community.comment(id, body, request)
+    fun comment(@PathVariable id: Long, @RequestBody body: CommunityCommentRequest, authentication: Authentication) =
+        community.comment(id, body, authentication)
 
     @PostMapping("/public/questions/{id}/report")
-    fun report(@PathVariable id: Long, @RequestBody body: ReportQuestionRequest, request: HttpServletRequest): ReportQuestionResponse =
-        community.report(id, body, request)
+    fun report(@PathVariable id: Long, @RequestBody body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse =
+        community.report(id, body, authentication)
 }
 
 interface CommunityWebPort {
-    fun publicQuestions(topic: String?, limit: Int, offset: Int, request: HttpServletRequest): Any
-    fun publicQuestion(id: Long, request: HttpServletRequest): Any
-    fun like(id: Long, request: HttpServletRequest): Any
-    fun unlike(id: Long, request: HttpServletRequest): Any
+    fun publicQuestions(topic: String?, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun publicQuestion(id: Long, authentication: Authentication?): Any
+    fun like(id: Long, authentication: Authentication): Any
+    fun unlike(id: Long, authentication: Authentication): Any
     fun comments(id: Long, limit: Int, offset: Int): Any
-    fun comment(id: Long, body: CommunityCommentRequest, request: HttpServletRequest): Any
-    fun report(id: Long, body: ReportQuestionRequest, request: HttpServletRequest): ReportQuestionResponse
+    fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
+    fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
 }
 
 @Component
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
-    private val principals: PrincipalResolver,
 ) : CommunityWebPort {
-    override fun publicQuestions(topic: String?, limit: Int, offset: Int, request: HttpServletRequest) =
-        community.publicQuestions(principals.optional(request), topic, safeLimit(limit, 100), max(0, offset))
+    override fun publicQuestions(topic: String?, limit: Int, offset: Int, authentication: Authentication?) =
+        community.publicQuestions(authentication.optionalPrincipal(), topic, safeLimit(limit, 100), max(0, offset))
 
-    override fun publicQuestion(id: Long, request: HttpServletRequest) = community.publicQuestion(principals.optional(request), id)
+    override fun publicQuestion(id: Long, authentication: Authentication?) = community.publicQuestion(authentication.optionalPrincipal(), id)
 
-    override fun like(id: Long, request: HttpServletRequest) = community.setLike(principals.authenticate(request), id, true)
+    override fun like(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 
-    override fun unlike(id: Long, request: HttpServletRequest) = community.setLike(principals.authenticate(request), id, false)
+    override fun unlike(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
 
     override fun comments(id: Long, limit: Int, offset: Int) =
         community.comments(id, safeLimit(limit, 100), max(0, offset))
 
-    override fun comment(id: Long, body: CommunityCommentRequest, request: HttpServletRequest) =
-        community.comment(principals.authenticate(request), id, body.body)
+    override fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
+        community.comment(authentication.principalOrThrow(), id, body.body)
 
-    override fun report(id: Long, body: ReportQuestionRequest, request: HttpServletRequest): ReportQuestionResponse {
-        community.report(principals.authenticate(request), id, body.toCommand())
+    override fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
+        community.report(authentication.principalOrThrow(), id, body.toCommand())
         return ReportQuestionResponse()
     }
 

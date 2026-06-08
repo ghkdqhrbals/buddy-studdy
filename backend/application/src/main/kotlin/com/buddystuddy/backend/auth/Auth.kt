@@ -3,11 +3,8 @@ package com.buddystuddy.backend.auth
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
-import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
-import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.nio.charset.StandardCharsets
@@ -52,34 +49,6 @@ class TokenProvider(private val properties: BuddyStuddyProperties) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }
     }
-}
-
-@Component
-class PrincipalResolver(
-    private val tokenService: TokenProvider,
-    private val devices: DevicePort,
-    private val userDevices: UserDevicePort,
-) {
-    fun authenticate(request: HttpServletRequest): Principal {
-        val authorization = request.getHeader("Authorization")
-        if (authorization.isNullOrBlank() || !authorization.startsWith("Bearer ")) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Access token is required.")
-        }
-        val principal = tokenService.parse(authorization.removePrefix("Bearer ").trim())
-        val session = userDevices.findByIdAndUserId(principal.sessionId, principal.userId)
-            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Access token principal is no longer valid.")
-        if (session.deviceId != principal.deviceId) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_DEVICE_MISMATCH, "Access token device is no longer valid.")
-        }
-        return principal.copy(anonymous = devices.findByDeviceId(principal.deviceId)?.userId == null || principal.anonymous)
-    }
-
-    fun optional(request: HttpServletRequest): Principal? =
-        try {
-            authenticate(request)
-        } catch (_: ApiException) {
-            null
-        }
 }
 
 fun sha256(value: String): String =
