@@ -2,8 +2,11 @@ FROM gradle:8.14.2-jdk24-alpine AS build
 
 WORKDIR /workspace
 COPY settings.gradle.kts build.gradle.kts ./
-COPY src ./src
-RUN gradle --no-daemon clean bootJar
+COPY domain ./domain
+COPY application ./application
+COPY infra ./infra
+COPY tutor ./tutor
+RUN gradle --no-daemon clean :tutor:bootJar
 
 FROM eclipse-temurin:24-jre-alpine
 
@@ -11,7 +14,7 @@ ENV APP_PORT=8080
 WORKDIR /app
 
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=build /workspace/build/libs/*.jar /app/buddystuddy-backend.jar
+COPY --from=build /workspace/tutor/build/libs/*.jar /app/buddystuddy-backend.jar
 RUN chown -R app:app /app
 
 USER app

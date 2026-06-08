@@ -13,3 +13,8 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "buddystuddy-backend"
+
+include("domain")
+include("application")
+include("infra")
+include("tutor")

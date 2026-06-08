@@ -4,7 +4,7 @@
 
 BuddyStuddy backend is a Spring Boot Kotlin service that owns device registration, authentication, study settings, question generation, grading, records, public questions, reports, statistics, APNs push, OpenAI calls, PostgreSQL persistence, and Redis stream coordination.
 
-The backend is now grouped by domain packages such as `auth`, `study`, `community`, and `settings`, with web/scheduler/stream handlers as inbound adapters, JPA/OpenAI/APNs/Redis integrations as outbound adapters, and use cases behind application ports.
+The backend is split into Gradle modules: `domain`, `application`, `infra`, and `tutor`. Each module is still grouped by feature packages such as `auth`, `study`, `community`, and `settings`.
 
 ## Goals
 
@@ -23,52 +23,30 @@ The backend is now grouped by domain packages such as `auth`, `study`, `communit
 
 ## Current Architecture
 
-Use package-by-feature hexagonal architecture:
+Use module-first, package-by-feature hexagonal architecture:
 
 ```text
-com.buddystuddy.backend
-  common
-    adapter
-      inbound.web
-    application
-      error
-      service
-  auth
-    adapter
-      inbound.web
-      outbound.persistence
-    application
-      port.inbound
-      port.outbound
-      service
-  study
-    adapter
-      inbound.web
-      inbound.scheduler
-      inbound.stream
-      outbound.persistence
-      outbound.openai
-      outbound.apns
-      outbound.stream
-    application
-      port.inbound
-      port.outbound
-      service
-community
-  adapter
-    inbound.web
-    inbound.stream
-    outbound.persistence
-  application
-    port.inbound
-    port.outbound
-    service
+backend/domain
+  com.buddystuddy.backend.{auth,study,community}.domain
+  com.buddystuddy.backend.domain
+
+backend/application
+  com.buddystuddy.backend.{auth,study,community,settings,profile,admin}.application
+  com.buddystuddy.backend.stats
+
+backend/infra
+  com.buddystuddy.backend.{auth,study,community,settings,profile,admin}.adapter
+  com.buddystuddy.backend.common.adapter
+
+backend/tutor
+  com.buddystuddy.backend.BuddyStuddyBackendApplication
+  runtime configuration and bootstrap resources
 ```
 
 Dependency rule:
 
 ```text
-adapter -> application -> domain
+tutor -> infra -> application -> domain
 ```
 
 Adapters may depend on Spring, JPA, APNs, Redis, OpenAI, HTTP DTOs, and external SDKs. Application services depend on inbound ports, outbound ports, common application errors, DTO/result models, and domain/JPA entity bridge types. Application services must not import `*.adapter.*`.
@@ -247,7 +225,7 @@ auth
 
 ## Data Model
 
-JPA entities are currently centralized under `domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in outbound persistence adapters implement those ports.
+JPA entities are currently centralized under `backend/domain/src/main/kotlin/com/buddystuddy/backend/domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in `infra` outbound persistence adapters implement those ports.
 
 Domain root models are now used as the application-facing consistency boundary before the JPA entity bridge is fully removed:
 

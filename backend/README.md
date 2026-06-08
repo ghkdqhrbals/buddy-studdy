@@ -4,6 +4,13 @@ Spring Boot Kotlin backend for BuddyStuddy study settings, records, grading, sta
 
 This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this PostgreSQL-backed service.
 
+## Module Structure
+
+- `domain`: JPA entity bridge, domain root objects, common event/domain DTOs.
+- `application`: inbound use cases, outbound ports, application services, application response models.
+- `infra`: web/scheduler/stream adapters, JPA repositories, OpenAI/APNs/Redis integrations.
+- `tutor`: executable Spring Boot root module, bootstrap resources, AWS Secrets environment post processor, integration tests.
+
 ## What It Does
 
 - Stores APNs device tokens.
@@ -69,7 +76,7 @@ docker compose up --build
 
 ```sh
 cd backend
-docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gradle --no-daemon test
+docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gradle --no-daemon test :tutor:bootJar
 ```
 
 The tests cover Spring context startup and core service behavior with H2 in PostgreSQL mode.
