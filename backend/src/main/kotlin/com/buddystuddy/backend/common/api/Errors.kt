@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.common.api
 
 import jakarta.servlet.http.HttpServletRequest
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -34,9 +35,22 @@ data class ApiError(val code: String, val message: String, val requestId: String
 
 @RestControllerAdvice
 class ErrorHandler {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     @ExceptionHandler(ApiException::class)
-    fun api(error: ApiException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        ResponseEntity.status(error.status).body(envelope(error.code, error.message, error.status, request))
+    fun api(error: ApiException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
+        val body = envelope(error.code, error.message, error.status, request)
+        log.warn(
+            "api_error requestId={} method={} path={} status={} code={} message={}",
+            body.error.requestId,
+            request.method,
+            request.requestURI,
+            error.status.value(),
+            error.code.name,
+            error.message,
+        )
+        return ResponseEntity.status(error.status).body(body)
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =

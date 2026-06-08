@@ -1,7 +1,9 @@
 package com.buddystuddy.backend.auth.api
 
 import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.service.LoginService
+import com.buddystuddy.backend.common.api.ApiException
 import com.buddystuddy.backend.dto.DeviceRegisterRequest
 import com.buddystuddy.backend.dto.EmailLoginRequest
 import com.buddystuddy.backend.dto.EmailVerificationCodeRequest
@@ -34,22 +36,43 @@ class AuthController(
     ) = login.token(deviceId, clientSecret)
 
     @PostMapping("/auth/google")
-    fun google(@RequestBody body: GoogleLoginRequest, request: HttpServletRequest) =
-        login.googleLogin(principals.authenticate(request), body.idToken)
+    fun google(
+        @RequestBody body: GoogleLoginRequest,
+        request: HttpServletRequest,
+        @RequestHeader("X-Device-Id", required = false) deviceId: String?,
+        @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
+    ) = login.googleLogin(loginPrincipal(request, deviceId, clientSecret), body.idToken)
 
     @PostMapping("/auth/email/code")
-    fun emailCode(@Valid @RequestBody body: EmailVerificationCodeRequest, request: HttpServletRequest): EmailVerificationCodeResponse {
-        principals.authenticate(request)
+    fun emailCode(
+        @Valid @RequestBody body: EmailVerificationCodeRequest,
+        request: HttpServletRequest,
+        @RequestHeader("X-Device-Id", required = false) deviceId: String?,
+        @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
+    ): EmailVerificationCodeResponse {
+        loginPrincipal(request, deviceId, clientSecret)
         return login.emailCode(body.email)
     }
 
     @PostMapping("/auth/email")
-    fun email(@Valid @RequestBody body: EmailLoginRequest, request: HttpServletRequest) =
-        login.emailLogin(principals.authenticate(request), body)
+    fun email(
+        @Valid @RequestBody body: EmailLoginRequest,
+        request: HttpServletRequest,
+        @RequestHeader("X-Device-Id", required = false) deviceId: String?,
+        @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
+    ) = login.emailLogin(loginPrincipal(request, deviceId, clientSecret), body)
 
     @PutMapping("/me/push-token")
     fun pushToken(@RequestBody body: PushTokenRequest, request: HttpServletRequest): ResponseEntity<Unit> {
         login.updatePushToken(principals.authenticate(request), body)
         return ResponseEntity.noContent().build()
     }
+
+    private fun loginPrincipal(request: HttpServletRequest, deviceId: String?, clientSecret: String?): Principal =
+        try {
+            principals.authenticate(request)
+        } catch (error: ApiException) {
+            if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) throw error
+            login.authenticateDevice(deviceId, clientSecret)
+        }
 }

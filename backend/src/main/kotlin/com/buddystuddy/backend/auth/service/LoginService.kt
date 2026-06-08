@@ -74,6 +74,13 @@ class LoginService(
 
     @Transactional
     fun token(deviceId: String, clientSecret: String): AccessTokenResponse {
+        val principal = authenticateDevice(deviceId, clientSecret)
+        val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous)
+        return AccessTokenResponse(token.first, token.second)
+    }
+
+    @Transactional
+    fun authenticateDevice(deviceId: String, clientSecret: String): Principal {
         val device = support.device(deviceId)
         if (device.clientSecretHash != sha256(clientSecret)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid device credentials.")
@@ -82,8 +89,7 @@ class LoginService(
         val user = users.findById(userId).orElseThrow()
         val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
         val session = support.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
-        val token = tokenService.create(user.id, device.deviceId, session.id, user.status == "ANONYMOUS")
-        return AccessTokenResponse(token.first, token.second)
+        return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS")
     }
 
     @Transactional
