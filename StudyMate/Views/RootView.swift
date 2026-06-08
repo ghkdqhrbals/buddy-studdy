@@ -243,6 +243,8 @@ private struct CommunityQuestionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            CommunityQuestionTopMeta(question: question)
+
             Text(question.question)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)

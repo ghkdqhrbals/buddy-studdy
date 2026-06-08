@@ -2086,7 +2086,9 @@ private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
+            CommunityQuestionTopMeta(question: question)
+
             Text(question.question)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2159,19 +2161,6 @@ private struct CommunityQuestionDetailView: View {
                 Divider()
 
                 commentsSection
-
-                Button(role: .destructive) {
-                    Task {
-                        await appState.reportCommunityQuestion(
-                            displayQuestion,
-                            reason: strings.reportReasonInappropriate
-                        )
-                    }
-                } label: {
-                    Label(strings.report, systemImage: "exclamationmark.bubble")
-                }
-                .buttonStyle(.borderless)
-                .padding(.top, 8)
             }
             .padding(16)
         }

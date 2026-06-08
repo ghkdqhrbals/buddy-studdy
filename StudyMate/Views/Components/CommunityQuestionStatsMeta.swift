@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct CommunityQuestionStatsMeta: View {
+struct CommunityQuestionTopMeta: View {
     var question: CommunityQuestion
 
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
@@ -10,47 +10,51 @@ struct CommunityQuestionStatsMeta: View {
     }()
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 9) {
-                metric(systemImage: question.isLikedByMe ? "heart.fill" : "heart", value: question.likeCount)
-                    .foregroundStyle(question.isLikedByMe ? .red : .secondary)
-                metric(systemImage: "bubble.right", value: question.commentCount)
-                metric(systemImage: "eye", value: question.viewCount)
-            }
-            .fixedSize(horizontal: true, vertical: false)
+        HStack(spacing: 6) {
+            Text(question.topic.isEmpty ? "Swift" : question.topic)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
-            Spacer(minLength: 8)
+            Text("Lv.\(question.difficultyLevel)")
+                .fixedSize(horizontal: true, vertical: false)
 
-            HStack(spacing: 6) {
-                Text(question.topic.isEmpty ? "Swift" : question.topic)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let author = question.author, !author.displayName.isEmpty {
+                HStack(spacing: 4) {
+                    PixelAvatarGlyph(
+                        avatarName: ProfileAvatarOption.glyphName(for: author.avatarSymbolName),
+                        colorSeed: author.avatarColorSeed
+                    )
+                    .frame(width: 14, height: 14)
 
-                Text("Lv.\(question.difficultyLevel)")
-                    .fixedSize(horizontal: true, vertical: false)
-
-                Text(Self.relativeDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
-                    .fixedSize(horizontal: true, vertical: false)
-
-                if let author = question.author, !author.displayName.isEmpty {
-                    HStack(spacing: 4) {
-                        PixelAvatarGlyph(
-                            avatarName: ProfileAvatarOption.glyphName(for: author.avatarSymbolName),
-                            colorSeed: author.avatarColorSeed
-                        )
-                        .frame(width: 14, height: 14)
-
-                        Text(author.displayName)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityElement(children: .combine)
+                    Text(author.displayName)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+                .accessibilityElement(children: .combine)
             }
-            .multilineTextAlignment(.trailing)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .layoutPriority(1)
+
+            Text(Self.relativeDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
+                .fixedSize(horizontal: true, vertical: false)
+
+            Spacer(minLength: 0)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+}
+
+struct CommunityQuestionStatsMeta: View {
+    var question: CommunityQuestion
+
+    var body: some View {
+        HStack(spacing: 8) {
+            metric(systemImage: question.isLikedByMe ? "heart.fill" : "heart", value: question.likeCount)
+                .foregroundStyle(question.isLikedByMe ? .red : .secondary)
+            metric(systemImage: "bubble.right", value: question.commentCount)
+            metric(systemImage: "eye", value: question.viewCount)
+
+            Spacer(minLength: 0)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -58,9 +62,12 @@ struct CommunityQuestionStatsMeta: View {
     }
 
     private func metric(systemImage: String, value: Int) -> some View {
-        Label(Self.abbreviatedCount(value), systemImage: systemImage)
-            .labelStyle(.titleAndIcon)
-            .fixedSize(horizontal: true, vertical: false)
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(Self.abbreviatedCount(value))
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private static func abbreviatedCount(_ value: Int) -> String {
