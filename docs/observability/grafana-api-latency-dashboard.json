@@ -89,7 +89,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum(rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__rate_interval]))",
+          "expr": "sum(rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
           "legendFormat": "",
           "queryType": "instant",
           "refId": "10"
@@ -183,7 +183,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (method, route) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__rate_interval]))",
+          "expr": "sum by (method, route) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
           "legendFormat": "{{method}} {{route}}",
           "queryType": "range",
           "refId": "20"
@@ -277,7 +277,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [$__rate_interval]))",
+          "expr": "sum by (status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
           "legendFormat": "{{status}}",
           "queryType": "range",
           "refId": "21"
@@ -371,7 +371,7 @@
             "uid": "buddystuddy-loki"
           },
           "editorMode": "code",
-          "expr": "sum by (method, route, status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [$__rate_interval]))",
+          "expr": "sum by (method, route, status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [${qpsWindow}]))",
           "legendFormat": "{{status}} {{method}} {{route}}",
           "queryType": "range",
           "refId": "22"
@@ -939,6 +939,24 @@
         "query": "",
         "skipUrlSync": false,
         "type": "textbox"
+      },
+      {
+        "auto": true,
+        "auto_count": 60,
+        "auto_min": "1m",
+        "current": {
+          "selected": false,
+          "text": "auto",
+          "value": "$__auto_interval_qpsWindow"
+        },
+        "hide": 2,
+        "label": "QPS Window",
+        "name": "qpsWindow",
+        "options": [],
+        "query": "1m,2m,5m,10m,30m",
+        "refresh": 2,
+        "skipUrlSync": false,
+        "type": "interval"
       }
     ]
   },
@@ -950,5 +968,5 @@
   "timezone": "browser",
   "title": "BuddyStuddy API Performance",
   "uid": "buddystuddy-api-latency",
-  "version": 5
+  "version": 6
 }
