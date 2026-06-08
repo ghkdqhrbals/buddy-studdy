@@ -345,7 +345,7 @@ data class CreateQuestionCommand(
 
 ## Remaining Hardening
 
-1. Split `dto/Dto.kt` into inbound web DTOs and application result models.
+1. Move DTO files from the temporary shared `dto` package into domain-specific inbound web DTO and application result packages.
 2. Move JPA entity classes into outbound persistence packages after all mappers are introduced.
 3. Replace entity bridge returns with pure domain models.
 4. Reduce `BackendSupportService` by moving helper behavior into domain-specific services.
@@ -378,7 +378,7 @@ data class CreateQuestionCommand(
 
 ## Risks and Open Questions
 
-- Existing `dto/Dto.kt` is a large shared DTO file. It should eventually split into web DTOs and application result models.
+- The old monolithic `dto/Dto.kt` has been split by responsibility, but DTO files still share the temporary `com.buddystuddy.backend.dto` package for API compatibility. The next step is moving them into domain-specific adapter/application packages.
 - `StatsService` currently calculates from loaded records. It should move behind a stats use case and later use aggregate queries.
 - `BackendSupportService` is useful during migration but should shrink as domain-specific ports mature.
 - Account withdrawal and clear-record behavior need explicit product policy before moving into final use cases.
