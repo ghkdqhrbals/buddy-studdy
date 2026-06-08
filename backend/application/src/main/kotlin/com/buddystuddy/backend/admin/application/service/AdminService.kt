@@ -6,6 +6,7 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.admin.application.model.APIStatusResponse
 import com.buddystuddy.backend.admin.application.model.APIValidationResponse
 import com.buddystuddy.backend.admin.application.model.OpenAIModelOptionResponse
+import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 class AdminService(
     private val properties: BuddyStuddyProperties,
+    private val users: UserPort,
     private val schedules: SchedulePort,
 ) : AdminUseCase {
     override fun models() = listOf(
@@ -23,8 +25,10 @@ class AdminService(
 
     @Transactional(readOnly = true)
     override fun apiStatus(principal: Principal): APIStatusResponse {
-        val schedule = schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)
-        return APIStatusResponse(!schedule?.openaiApiKeyCipher.isNullOrBlank(), schedule?.openaiModel ?: properties.openai.model)
+        val user = users.findById(principal.userId).orElse(null)
+        val fallbackSchedule = schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
+        val keyCipher = user?.openaiApiKeyCipher ?: fallbackSchedule?.openaiApiKeyCipher
+        return APIStatusResponse(!keyCipher.isNullOrBlank(), user?.openaiModel ?: fallbackSchedule?.openaiModel ?: properties.openai.model)
     }
 
     @Transactional(readOnly = true)

@@ -55,8 +55,8 @@ class StudyService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
         val generated = openAI.generateQuestion(
-            context.apiKeyFor(schedule),
-            room.openaiModel,
+            context.apiKeyFor(principal, schedule),
+            context.openAIModelFor(principal, schedule),
             room.topic,
             room.difficultyLevel,
             room.appLanguage,
@@ -77,10 +77,11 @@ class StudyService(
         q.apply(record.answer(answer))
         if (grade && q.score == null) {
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
-                ?: schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)
+                ?: schedules.findByUserIdAndTopic(principal.userId, q.topic)
+                ?: schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             val graded = openAI.grade(
-                context.apiKeyFor(schedule),
-                schedule?.openaiModel ?: properties.openai.model,
+                context.apiKeyFor(principal, schedule),
+                context.openAIModelFor(principal, schedule),
                 q.question,
                 answer,
                 q.topic,

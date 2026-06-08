@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.settings.application.service
 
 import com.buddystuddy.backend.auth.Principal
+import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.domain.ScheduleEntity
 import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
@@ -21,6 +22,7 @@ import java.time.Instant
 @Service
 class SettingsService(
     private val schedules: SchedulePort,
+    private val users: UserPort,
     private val cipher: KeyCipher,
 ) : SettingsUseCase {
     @Transactional
@@ -30,6 +32,14 @@ class SettingsService(
         val items = command.schedules?.takeIf { it.isNotEmpty() } ?: listOf(
             ScheduleItemCommand(command.topic.ifBlank { "SwiftUI" }, command.difficultyLevel, command.customPrompt, command.openaiModel)
         )
+        users.findById(principal.userId).orElse(null)?.let { user ->
+            if (encryptedKey != null) {
+                user.openaiApiKeyCipher = encryptedKey
+            }
+            user.openaiModel = command.openaiModel.ifBlank { items.firstOrNull()?.openaiModel.orEmpty().ifBlank { user.openaiModel } }
+            user.updatedAt = now
+            users.save(user)
+        }
         var next: Instant? = null
         items.forEach { item ->
             val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, item.topic)
@@ -46,7 +56,7 @@ class SettingsService(
                     maxHistoryCount = command.maxHistoryCount,
                     questionPublic = command.isQuestionPublic,
                 ),
-                encryptedOpenAIKey = encryptedKey,
+                encryptedOpenAIKey = null,
                 anonymous = principal.anonymous,
                 now = now,
             ))
@@ -56,8 +66,10 @@ class SettingsService(
     }
 
     @Transactional(readOnly = true)
-    override fun settings(principal: Principal): BackendSettingsResponse =
-        schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId).toSettings()
+    override fun settings(principal: Principal): BackendSettingsResponse {
+        val user = users.findById(principal.userId).orElse(null)
+        return schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId).toSettings(user)
+    }
 
     private fun ScheduleEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
         openaiApiKeyCipher = openaiApiKeyCipher,

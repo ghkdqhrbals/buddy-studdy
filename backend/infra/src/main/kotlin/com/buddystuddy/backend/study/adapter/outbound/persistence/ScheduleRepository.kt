@@ -10,7 +10,9 @@ import java.time.Instant
 
 interface ScheduleRepository : JpaRepository<ScheduleEntity, Long>, SchedulePort {
     override fun findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(deviceId: String, userId: Long?): ScheduleEntity?
+    override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long?): ScheduleEntity?
     override fun findByDeviceIdAndUserIdAndTopic(deviceId: String, userId: Long?, topic: String): ScheduleEntity?
+    override fun findByUserIdAndTopic(userId: Long?, topic: String): ScheduleEntity?
 
     @Query("select s from ScheduleEntity s where s.enabled = true and s.nextDueAt is not null and s.nextDueAt <= :now order by s.nextDueAt asc")
     override fun findDue(@Param("now") now: Instant, pageable: Pageable): List<ScheduleEntity>
