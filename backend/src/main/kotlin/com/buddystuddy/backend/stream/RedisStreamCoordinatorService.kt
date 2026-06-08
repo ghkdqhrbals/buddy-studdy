@@ -22,15 +22,13 @@ class RedisStreamCoordinatorService(
     private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
     private val actionPublisher: RedisStreamPublisher? = actionPublisherProvider.ifAvailable
 
-    fun publishPush(fields: Map<String, Any?>): Boolean {
-        val event = QuestionPushRequestedEvent(fields)
-        return publishWithStarter(
+    fun publishPush(event: QuestionPushRequestedEvent): Boolean =
+        publishWithStarter(
             publisher = pushPublisher,
             prefix = properties.streams.pushPrefix,
-            partitionKey = fields["topic"]?.toString() ?: fields["recordId"]?.toString(),
+            partitionKey = event.topic.ifBlank { event.recordId.toString() },
             event = event,
         )
-    }
 
     fun publishQuestionViewed(questionId: Long, userId: Long?): Boolean =
         publishWithStarter(
@@ -63,7 +61,7 @@ class RedisStreamCoordinatorService(
     ): Boolean {
         if (!properties.streams.enabled) return false
         val publisher = publisher ?: return false
-        val fields = event.toRedisStreamFields()
+        val fields = event.toStringMapWithoutNull()
         return try {
             val published = publisher.publish(
                 partitionKey ?: UUID.randomUUID().toString(),
@@ -82,13 +80,4 @@ class RedisStreamCoordinatorService(
             false
         }
     }
-
-    private fun RedisStreamEvent.toRedisStreamFields(): Map<String, String> =
-        when (this) {
-            is QuestionPushRequestedEvent -> fields
-                .plus("eventId" to eventId)
-                .plus("eventType" to eventType)
-                .toStringMapWithoutNull()
-            else -> toStringMapWithoutNull()
-        }
 }

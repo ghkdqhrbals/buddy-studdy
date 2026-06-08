@@ -8,6 +8,7 @@ import com.buddystuddy.backend.domain.QuestionStatsEntity
 import com.buddystuddy.backend.domain.QuestionStatsRepository
 import com.buddystuddy.backend.domain.ScheduleRepository
 import com.buddystuddy.backend.openai.OpenAIClient
+import com.buddystuddy.backend.stream.QuestionPushRequestedEvent
 import com.buddystuddy.backend.stream.RedisStreamCoordinatorService
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
@@ -72,18 +73,18 @@ class QuestionScheduler(
                 )
                 questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
                 val published = streams.publishPush(
-                    mapOf(
-                        "recordId" to saved.id,
-                        "createdAt" to now.toString(),
-                        "deviceId" to schedule.deviceId,
-                        "userId" to userId,
-                        "question" to generated.question,
-                        "expectedAnswerHint" to generated.hint,
-                        "topic" to schedule.topic,
-                        "difficultyLevel" to schedule.difficultyLevel,
-                        "language" to schedule.appLanguage,
-                        "sound" to schedule.notificationSound,
-                        "intervalMinutes" to schedule.intervalMinutes,
+                    QuestionPushRequestedEvent(
+                        recordId = saved.id,
+                        createdAt = now,
+                        deviceId = schedule.deviceId,
+                        userId = userId,
+                        question = generated.question,
+                        expectedAnswerHint = generated.hint,
+                        topic = schedule.topic,
+                        difficultyLevel = schedule.difficultyLevel,
+                        language = schedule.appLanguage,
+                        sound = schedule.notificationSound,
+                        intervalMinutes = schedule.intervalMinutes,
                     )
                 )
                 schedule.lastSentAt = now
