@@ -1,7 +1,7 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.config.PropertiesConfig
-import com.buddystuddy.backend.stream.RedisStreamStarterConfig
+import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamStarterConfig
 import com.redisstream.producer.ProducerRoutingProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test

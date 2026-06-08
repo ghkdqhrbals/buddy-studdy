@@ -1,9 +1,9 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.stream.QuestionStreamEventType
-import com.buddystuddy.backend.stream.RedisStreamCoordinatorService
+import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
+import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamCoordinatorService
 import com.redisstream.consumer.ProducerRoutingShard
 import com.redisstream.producer.ProducerRoute
 import com.redisstream.producer.PublishedRedisStreamMessage

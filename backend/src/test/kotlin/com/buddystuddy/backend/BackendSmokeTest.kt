@@ -1,6 +1,6 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.auth.service.LoginService
+import com.buddystuddy.backend.auth.application.service.LoginService
 import com.buddystuddy.backend.dto.DeviceRegisterRequest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test

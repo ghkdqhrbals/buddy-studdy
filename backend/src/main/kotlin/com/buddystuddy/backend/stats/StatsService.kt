@@ -5,8 +5,8 @@ import com.buddystuddy.backend.dto.StatsResponse
 import com.buddystuddy.backend.dto.TopicLevelRangeResponse
 import com.buddystuddy.backend.dto.TopicStatsResponse
 import com.buddystuddy.backend.dto.toRecord
-import com.buddystuddy.backend.study.repository.QuestionRepository
-import com.buddystuddy.backend.study.repository.QuestionStatsRepository
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import java.text.Normalizer
@@ -16,8 +16,8 @@ import kotlin.math.min
 
 @Service
 class StatsService(
-    private val questions: QuestionRepository,
-    private val stats: QuestionStatsRepository,
+    private val questions: QuestionPort,
+    private val stats: QuestionStatsPort,
 ) {
     fun stats(userId: Long, limit: Int, offset: Int): StatsResponse {
         val page = questions.findGradedByUser(userId, PageRequest.of(0, 10_000))

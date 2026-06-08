@@ -1,9 +1,9 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.stream.QuestionActionEvent
-import com.buddystuddy.backend.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.stream.QuestionStreamEventType
-import com.buddystuddy.backend.stream.QuestionViewedEvent
+import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionActionEvent
+import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
+import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionViewedEvent
 import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

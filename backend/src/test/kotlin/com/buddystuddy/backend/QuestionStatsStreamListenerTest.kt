@@ -1,8 +1,8 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.study.repository.QuestionStatsRepository
-import com.buddystuddy.backend.stream.QuestionStatsStreamListener
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionStatsStreamListener
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,7 +24,7 @@ import org.springframework.test.context.TestPropertySource
 )
 class QuestionStatsStreamListenerTest {
     @Autowired lateinit var listener: QuestionStatsStreamListener
-    @Autowired lateinit var stats: QuestionStatsRepository
+    @Autowired lateinit var stats: QuestionStatsPort
 
     @Test
     fun `view events increment question view count`() {

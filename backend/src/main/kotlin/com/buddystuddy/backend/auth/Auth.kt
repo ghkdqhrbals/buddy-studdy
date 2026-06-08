@@ -1,10 +1,10 @@
 package com.buddystuddy.backend.auth
 
-import com.buddystuddy.backend.common.api.ApiErrorCode
-import com.buddystuddy.backend.common.api.ApiException
+import com.buddystuddy.backend.common.application.error.ApiErrorCode
+import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.auth.repository.DeviceRepository
-import com.buddystuddy.backend.auth.repository.UserDeviceRepository
+import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import jakarta.servlet.http.HttpServletRequest
@@ -57,8 +57,8 @@ class TokenService(private val properties: BuddyStuddyProperties) {
 @Service
 class PrincipalService(
     private val tokenService: TokenService,
-    private val devices: DeviceRepository,
-    private val userDevices: UserDeviceRepository,
+    private val devices: DevicePort,
+    private val userDevices: UserDevicePort,
 ) {
     fun authenticate(request: HttpServletRequest): Principal {
         val authorization = request.getHeader("Authorization")

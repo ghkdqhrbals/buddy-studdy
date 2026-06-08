@@ -1,18 +1,18 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.auth.repository.UserRepository
-import com.buddystuddy.backend.common.api.ApiErrorCode
-import com.buddystuddy.backend.common.api.ApiException
-import com.buddystuddy.backend.community.repository.QuestionCommentRepository
-import com.buddystuddy.backend.community.repository.QuestionLikeRepository
-import com.buddystuddy.backend.community.repository.ReportRepository
-import com.buddystuddy.backend.community.service.CommunityService
+import com.buddystuddy.backend.auth.adapter.outbound.persistence.UserRepository
+import com.buddystuddy.backend.common.application.error.ApiErrorCode
+import com.buddystuddy.backend.common.application.error.ApiException
+import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
+import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
+import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepository
+import com.buddystuddy.backend.community.application.service.CommunityService
 import com.buddystuddy.backend.domain.*
 import com.buddystuddy.backend.dto.ReportQuestionRequest
-import com.buddystuddy.backend.study.repository.QuestionRepository
-import com.buddystuddy.backend.study.repository.QuestionStatsRepository
-import com.buddystuddy.backend.study.service.StudyService
+import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.service.StudyService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -42,7 +42,7 @@ class CommunityStudyServiceTest {
     @Autowired lateinit var study: StudyService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var questions: QuestionRepository
-    @Autowired lateinit var stats: QuestionStatsRepository
+    @Autowired lateinit var stats: QuestionStatsPort
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository

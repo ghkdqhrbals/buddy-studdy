@@ -1,0 +1,10 @@
+package com.buddystuddy.backend.study.application.port.outbound
+
+data class GeneratedQuestion(val question: String, val hint: String?)
+data class GradedAnswer(val score: Int, val isCorrect: Boolean, val feedback: String, val explanation: String)
+
+interface OpenAIPort {
+    fun validate(apiKey: String)
+    fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion
+    fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer
+}
