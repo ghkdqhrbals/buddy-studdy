@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.stream
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
@@ -62,7 +63,7 @@ class RedisStreamCoordinatorService(
     ): Boolean {
         if (!properties.streams.enabled) return false
         val publisher = publisher ?: return false
-        val fields = event.toRedisStreamFields()
+        val fields = event.toStreamMap().toStringMapWithoutNull()
         return try {
             val published = publisher.publish(
                 partitionKey ?: UUID.randomUUID().toString(),
@@ -81,9 +82,4 @@ class RedisStreamCoordinatorService(
             false
         }
     }
-
-    private fun RedisStreamEvent.toRedisStreamFields(): Map<String, String> =
-        toStreamMap()
-            .filterValues { it != null && it.toString().isNotBlank() }
-            .mapValues { (_, value) -> value.toString() }
 }
