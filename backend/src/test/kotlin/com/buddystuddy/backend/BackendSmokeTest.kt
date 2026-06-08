@@ -1,6 +1,6 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.api.ApiService
+import com.buddystuddy.backend.auth.service.LoginService
 import com.buddystuddy.backend.dto.DeviceRegisterRequest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -22,11 +22,11 @@ import org.springframework.test.context.TestPropertySource
     ]
 )
 class BackendSmokeTest {
-    @Autowired lateinit var api: ApiService
+    @Autowired lateinit var login: LoginService
 
     @Test
     fun `register creates anonymous user and access token with device id`() {
-        val response = api.register(DeviceRegisterRequest(apnsToken = "", language = "ko"))
+        val response = login.register(DeviceRegisterRequest(apnsToken = "", language = "ko"))
 
         assertThat(response.deviceId).startsWith("dev-")
         assertThat(response.clientSecret).startsWith("sec-")

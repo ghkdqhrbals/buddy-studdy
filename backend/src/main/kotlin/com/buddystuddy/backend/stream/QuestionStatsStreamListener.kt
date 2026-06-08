@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.stream
 
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.domain.QuestionStatsRepository
+import com.buddystuddy.backend.study.repository.QuestionStatsRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamListener

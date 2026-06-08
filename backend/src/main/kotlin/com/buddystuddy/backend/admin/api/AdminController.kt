@@ -1,0 +1,25 @@
+package com.buddystuddy.backend.admin.api
+
+import com.buddystuddy.backend.admin.service.AdminService
+import com.buddystuddy.backend.auth.PrincipalService
+import jakarta.servlet.http.HttpServletRequest
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/api/v1")
+class AdminController(
+    private val admin: AdminService,
+    private val principals: PrincipalService,
+) {
+    @GetMapping("/openai/models")
+    fun models() = admin.models()
+
+    @GetMapping("/me/api")
+    fun api(request: HttpServletRequest) = admin.apiStatus(principals.authenticate(request))
+
+    @PostMapping("/me/api/validate")
+    fun validateApi(request: HttpServletRequest) = admin.validateApi(principals.authenticate(request))
+}

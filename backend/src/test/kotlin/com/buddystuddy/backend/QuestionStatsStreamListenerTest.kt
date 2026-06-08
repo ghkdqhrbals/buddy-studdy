@@ -1,7 +1,7 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.domain.QuestionStatsRepository
+import com.buddystuddy.backend.study.repository.QuestionStatsRepository
 import com.buddystuddy.backend.stream.QuestionStatsStreamListener
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test

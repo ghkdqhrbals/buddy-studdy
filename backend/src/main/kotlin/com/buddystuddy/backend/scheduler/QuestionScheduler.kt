@@ -3,13 +3,13 @@ package com.buddystuddy.backend.scheduler
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionRepository
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.domain.QuestionStatsRepository
-import com.buddystuddy.backend.domain.ScheduleRepository
 import com.buddystuddy.backend.openai.OpenAIClient
 import com.buddystuddy.backend.stream.QuestionPushRequestedEvent
 import com.buddystuddy.backend.stream.RedisStreamCoordinatorService
+import com.buddystuddy.backend.study.repository.QuestionRepository
+import com.buddystuddy.backend.study.repository.QuestionStatsRepository
+import com.buddystuddy.backend.study.repository.ScheduleRepository
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled

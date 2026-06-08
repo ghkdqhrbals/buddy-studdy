@@ -1,12 +1,12 @@
 package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionRepository
-import com.buddystuddy.backend.domain.QuestionStatsRepository
 import com.buddystuddy.backend.dto.StatsResponse
 import com.buddystuddy.backend.dto.TopicLevelRangeResponse
 import com.buddystuddy.backend.dto.TopicStatsResponse
 import com.buddystuddy.backend.dto.toRecord
+import com.buddystuddy.backend.study.repository.QuestionRepository
+import com.buddystuddy.backend.study.repository.QuestionStatsRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import java.text.Normalizer

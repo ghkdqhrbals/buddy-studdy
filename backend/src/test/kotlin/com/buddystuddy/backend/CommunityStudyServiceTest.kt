@@ -1,11 +1,18 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.api.ApiErrorCode
-import com.buddystuddy.backend.api.ApiException
-import com.buddystuddy.backend.api.ApiService
 import com.buddystuddy.backend.auth.Principal
+import com.buddystuddy.backend.auth.repository.UserRepository
+import com.buddystuddy.backend.common.api.ApiErrorCode
+import com.buddystuddy.backend.common.api.ApiException
+import com.buddystuddy.backend.community.repository.QuestionCommentRepository
+import com.buddystuddy.backend.community.repository.QuestionLikeRepository
+import com.buddystuddy.backend.community.repository.ReportRepository
+import com.buddystuddy.backend.community.service.CommunityService
 import com.buddystuddy.backend.domain.*
 import com.buddystuddy.backend.dto.ReportQuestionRequest
+import com.buddystuddy.backend.study.repository.QuestionRepository
+import com.buddystuddy.backend.study.repository.QuestionStatsRepository
+import com.buddystuddy.backend.study.service.StudyService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -30,8 +37,9 @@ import java.time.Instant
     ]
 )
 @Transactional
-class ApiServicePublicQuestionsTest {
-    @Autowired lateinit var api: ApiService
+class CommunityStudyServiceTest {
+    @Autowired lateinit var community: CommunityService
+    @Autowired lateinit var study: StudyService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var stats: QuestionStatsRepository
@@ -61,7 +69,7 @@ class ApiServicePublicQuestionsTest {
         answeredPublicQuestion(hiddenAuthor, "SwiftUI", createdAt = now.plusSeconds(1))
         answeredPublicQuestion(author, "SwiftUI", createdAt = now, deletedAt = now.plusSeconds(10))
 
-        val response = api.publicQuestions(null, "swift", limit = 10, offset = 0)
+        val response = community.publicQuestions(null, "swift", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(1)
         val result = response.questions.single()
@@ -77,7 +85,7 @@ class ApiServicePublicQuestionsTest {
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
 
-        val response = api.publicQuestions(null, null, limit = 10, offset = 0)
+        val response = community.publicQuestions(null, null, limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
@@ -89,7 +97,7 @@ class ApiServicePublicQuestionsTest {
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 7, commentCount = 2, viewCount = 11))
         likes.save(QuestionLikeEntity(questionId = q.id, userId = viewer.id))
 
-        val response = api.publicQuestion(principal, q.id)
+        val response = community.publicQuestion(principal, q.id)
 
         assertThat(response.id).isEqualTo(q.id.toString())
         assertThat(response.author?.displayName).isEqualTo("Author")
@@ -107,7 +115,7 @@ class ApiServicePublicQuestionsTest {
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden")
 
         listOf(privateQuestion, pending, deleted, hidden).forEach {
-            assertRecordNotFound { api.publicQuestion(principal, it.id) }
+            assertRecordNotFound { community.publicQuestion(principal, it.id) }
         }
     }
 
@@ -116,10 +124,10 @@ class ApiServicePublicQuestionsTest {
         val q = answeredPublicQuestion(author, "SwiftUI")
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 3))
 
-        val liked = api.setLike(principal, q.id, liked = true)
-        val likedAgain = api.setLike(principal, q.id, liked = true)
-        val unliked = api.setLike(principal, q.id, liked = false)
-        val unlikedAgain = api.setLike(principal, q.id, liked = false)
+        val liked = community.setLike(principal, q.id, liked = true)
+        val likedAgain = community.setLike(principal, q.id, liked = true)
+        val unliked = community.setLike(principal, q.id, liked = false)
+        val unlikedAgain = community.setLike(principal, q.id, liked = false)
 
         assertThat(liked.likeCount).isEqualTo(4)
         assertThat(likedAgain.likeCount).isEqualTo(3)
@@ -132,7 +140,7 @@ class ApiServicePublicQuestionsTest {
     fun `like rejects records that are not public answered questions`() {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
-        assertRecordNotFound { api.setLike(principal, q.id, liked = true) }
+        assertRecordNotFound { community.setLike(principal, q.id, liked = true) }
         assertThat(likes.findAll()).isEmpty()
     }
 
@@ -141,8 +149,8 @@ class ApiServicePublicQuestionsTest {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val longBody = "x".repeat(1_050)
 
-        val saved = api.comment(principal, q.id, longBody)
-        val page = api.comments(q.id, limit = 20, offset = 0)
+        val saved = community.comment(principal, q.id, longBody)
+        val page = community.comments(q.id, limit = 20, offset = 0)
 
         assertThat(saved.body).hasSize(1_000)
         assertThat(saved.author.displayName).isEqualTo("Viewer")
@@ -156,8 +164,8 @@ class ApiServicePublicQuestionsTest {
     fun `comment and comments reject non public answered records`() {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
-        assertRecordNotFound { api.comment(principal, q.id, "body") }
-        assertRecordNotFound { api.comments(q.id, limit = 10, offset = 0) }
+        assertRecordNotFound { community.comment(principal, q.id, "body") }
+        assertRecordNotFound { community.comments(q.id, limit = 10, offset = 0) }
     }
 
     @Test
@@ -165,8 +173,8 @@ class ApiServicePublicQuestionsTest {
         val publicQuestion = answeredPublicQuestion(author, "SwiftUI")
         val privateQuestion = answeredPublicQuestion(author, "Private", publicQuestion = false)
 
-        api.report(principal, publicQuestion.id, ReportQuestionRequest(reason = "spam", message = "bad"))
-        assertRecordNotFound { api.report(principal, privateQuestion.id, ReportQuestionRequest(reason = "spam")) }
+        community.report(principal, publicQuestion.id, ReportQuestionRequest(reason = "spam", message = "bad"))
+        assertRecordNotFound { community.report(principal, privateQuestion.id, ReportQuestionRequest(reason = "spam")) }
 
         val result = reports.findAll().single()
         assertThat(result.questionId).isEqualTo(publicQuestion.id)
@@ -180,8 +188,8 @@ class ApiServicePublicQuestionsTest {
         val graded = answeredPublicQuestion(viewer, "SwiftUI")
         val pending = pendingPublicQuestion(viewer, "Kotlin")
 
-        val records = api.records(principal, limit = 10, offset = 0)
-        val pendingRecords = api.pending(principal, limit = 10, offset = 0)
+        val records = study.records(principal, limit = 10, offset = 0)
+        val pendingRecords = study.pending(principal, limit = 10, offset = 0)
 
         assertThat(records.records.map { it.id }).containsExactly(graded.id.toString())
         assertThat(pendingRecords.records.map { it.id }).containsExactly(pending.id.toString())
@@ -192,8 +200,8 @@ class ApiServicePublicQuestionsTest {
         val graded = answeredPublicQuestion(viewer, "SwiftUI", publicQuestion = false)
         val pending = pendingPublicQuestion(viewer, "Kotlin")
 
-        val published = api.publicity(principal, graded.id, isPublic = true)
-        val pendingPublish = api.publicity(principal, pending.id, isPublic = true)
+        val published = study.publicity(principal, graded.id, isPublic = true)
+        val pendingPublish = study.publicity(principal, pending.id, isPublic = true)
 
         assertThat(published.isPublic).isTrue()
         assertThat(pendingPublish.isPublic).isFalse()

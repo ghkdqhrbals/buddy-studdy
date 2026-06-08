@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.stream
 
 import com.buddystuddy.backend.apns.ApnsPushService
-import com.buddystuddy.backend.domain.DeviceRepository
+import com.buddystuddy.backend.auth.repository.DeviceRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamListener

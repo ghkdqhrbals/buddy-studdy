@@ -1,4 +1,4 @@
-package com.buddystuddy.backend.api
+package com.buddystuddy.backend.common.api
 
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest

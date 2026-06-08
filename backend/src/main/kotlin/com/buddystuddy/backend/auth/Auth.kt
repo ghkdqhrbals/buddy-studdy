@@ -1,10 +1,10 @@
 package com.buddystuddy.backend.auth
 
-import com.buddystuddy.backend.api.ApiErrorCode
-import com.buddystuddy.backend.api.ApiException
+import com.buddystuddy.backend.common.api.ApiErrorCode
+import com.buddystuddy.backend.common.api.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.domain.DeviceRepository
-import com.buddystuddy.backend.domain.UserDeviceRepository
+import com.buddystuddy.backend.auth.repository.DeviceRepository
+import com.buddystuddy.backend.auth.repository.UserDeviceRepository
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import jakarta.servlet.http.HttpServletRequest

@@ -1,5 +1,6 @@
-package com.buddystuddy.backend.domain
+package com.buddystuddy.backend.study.repository
 
+import com.buddystuddy.backend.domain.QuestionEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -7,28 +8,6 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.Instant
-
-interface UserRepository : JpaRepository<UserEntity, Long> {
-    fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity?
-    fun findByEmailAndProvider(email: String, provider: String): UserEntity?
-}
-
-interface DeviceRepository : JpaRepository<DeviceEntity, Long> {
-    fun findByDeviceId(deviceId: String): DeviceEntity?
-}
-
-interface UserDeviceRepository : JpaRepository<UserDeviceEntity, Long> {
-    fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity?
-    fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
-}
-
-interface ScheduleRepository : JpaRepository<ScheduleEntity, Long> {
-    fun findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(deviceId: String, userId: Long?): ScheduleEntity?
-    fun findByDeviceIdAndUserIdAndTopic(deviceId: String, userId: Long?, topic: String): ScheduleEntity?
-
-    @Query("select s from ScheduleEntity s where s.enabled = true and s.nextDueAt is not null and s.nextDueAt <= :now order by s.nextDueAt asc")
-    fun findDue(@Param("now") now: Instant, pageable: Pageable): List<ScheduleEntity>
-}
 
 interface QuestionRepository : JpaRepository<QuestionEntity, Long> {
     fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
@@ -85,50 +64,3 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long> {
     @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")
     fun softDelete(@Param("id") id: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
 }
-
-interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long> {
-    @Modifying
-    @Query(
-        """
-        update QuestionStatsEntity s
-           set s.viewCount = case when s.viewCount + :delta < 0 then 0 else s.viewCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
-        """
-    )
-    fun incrementView(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
-
-    @Modifying
-    @Query(
-        """
-        update QuestionStatsEntity s
-           set s.likeCount = case when s.likeCount + :delta < 0 then 0 else s.likeCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
-        """
-    )
-    fun incrementLike(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
-
-    @Modifying
-    @Query(
-        """
-        update QuestionStatsEntity s
-           set s.commentCount = case when s.commentCount + :delta < 0 then 0 else s.commentCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
-        """
-    )
-    fun incrementComment(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
-}
-
-interface QuestionLikeRepository : JpaRepository<QuestionLikeEntity, Long> {
-    fun findByQuestionIdAndUserId(questionId: Long, userId: Long): QuestionLikeEntity?
-    fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
-    fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
-}
-
-interface QuestionCommentRepository : JpaRepository<QuestionCommentEntity, Long> {
-    fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity>
-}
-
-interface ReportRepository : JpaRepository<ReportEntity, Long>
