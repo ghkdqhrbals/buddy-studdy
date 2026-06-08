@@ -1,7 +1,7 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
-import com.buddystuddy.domain.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionStatsStreamListener
 import com.buddystuddy.backend.config.BuddyStuddyProperties

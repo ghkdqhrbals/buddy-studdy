@@ -3,7 +3,7 @@ package com.buddystuddy.backend.settings.application.service
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.domain.ScheduleEntity
+import com.buddystuddy.study.domain.entity.ScheduleEntity
 import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
 import com.buddystuddy.backend.settings.application.model.ScheduleResponse
 import com.buddystuddy.backend.settings.application.model.toSettings

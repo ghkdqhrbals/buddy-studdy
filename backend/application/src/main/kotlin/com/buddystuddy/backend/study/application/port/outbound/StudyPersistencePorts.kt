@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.study.application.port.outbound
 
-import com.buddystuddy.domain.QuestionEntity
-import com.buddystuddy.domain.QuestionStatsEntity
-import com.buddystuddy.domain.ScheduleEntity
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.ScheduleEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant

@@ -9,9 +9,9 @@ import com.buddystuddy.auth.domain.AccountUser
 import com.buddystuddy.auth.domain.DeviceAttachment
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
-import com.buddystuddy.domain.DeviceEntity
-import com.buddystuddy.domain.UserDeviceEntity
-import com.buddystuddy.domain.UserEntity
+import com.buddystuddy.auth.domain.entity.DeviceEntity
+import com.buddystuddy.auth.domain.entity.UserDeviceEntity
+import com.buddystuddy.account.domain.entity.UserEntity
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.time.Instant

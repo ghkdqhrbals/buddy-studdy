@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.persistence
 
-import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable

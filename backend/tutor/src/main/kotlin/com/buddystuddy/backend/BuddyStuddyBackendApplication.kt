@@ -6,7 +6,7 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.scheduling.annotation.EnableScheduling
 
 @EnableScheduling
-@EntityScan("com.buddystuddy.domain")
+@EntityScan("com.buddystuddy")
 @SpringBootApplication(scanBasePackages = ["com.buddystuddy"])
 class BuddyStuddyBackendApplication
 

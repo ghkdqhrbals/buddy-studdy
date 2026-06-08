@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.auth.adapter.outbound.persistence
 
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
-import com.buddystuddy.domain.UserDeviceEntity
+import com.buddystuddy.auth.domain.entity.UserDeviceEntity
 import org.springframework.data.jpa.repository.JpaRepository
 
 interface UserDeviceRepository : JpaRepository<UserDeviceEntity, Long>, UserDevicePort {

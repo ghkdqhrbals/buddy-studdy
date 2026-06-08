@@ -9,11 +9,11 @@ import com.buddystuddy.backend.community.application.port.outbound.QuestionComme
 import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystuddy.backend.community.application.port.outbound.ReportPort
-import com.buddystuddy.domain.QuestionCommentEntity
-import com.buddystuddy.domain.QuestionEntity
-import com.buddystuddy.domain.QuestionLikeEntity
-import com.buddystuddy.domain.QuestionStatsEntity
-import com.buddystuddy.domain.ReportEntity
+import com.buddystuddy.community.domain.entity.QuestionCommentEntity
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.community.domain.entity.QuestionLikeEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.community.domain.entity.ReportEntity
 import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
 import com.buddystuddy.backend.community.application.model.CommunityCommentsResponse
 import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
@@ -30,6 +30,7 @@ import com.buddystuddy.backend.profile.application.model.toProfile
 import com.buddystuddy.backend.community.application.model.toResponse
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.account.domain.entity.UserEntity
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -136,7 +137,7 @@ class CommunityService(
     }.toProfile()
 }
 
-private fun com.buddystuddy.domain.UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
+private fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
     id = id,
     displayName = displayName,
     bio = bio,

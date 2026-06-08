@@ -9,10 +9,13 @@ import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLi
 import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepository
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
-import com.buddystuddy.domain.*
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.service.StudyService
+import com.buddystuddy.account.domain.entity.UserEntity
+import com.buddystuddy.community.domain.entity.QuestionLikeEntity
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach

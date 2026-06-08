@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.community.adapter.inbound.stream
 
-import com.buddystuddy.domain.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode

@@ -1,7 +1,7 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.auth.adapter.outbound.persistence.UserRepository
-import com.buddystuddy.domain.UserEntity
+import com.buddystuddy.account.domain.entity.UserEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

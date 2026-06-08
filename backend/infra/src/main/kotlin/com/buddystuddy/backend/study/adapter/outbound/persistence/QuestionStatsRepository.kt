@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.persistence
 
-import com.buddystuddy.domain.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying

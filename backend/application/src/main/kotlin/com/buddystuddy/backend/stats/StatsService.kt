@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse

@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.settings.application.model
 
-import com.buddystuddy.domain.ScheduleEntity
-import com.buddystuddy.domain.UserEntity
+import com.buddystuddy.study.domain.entity.ScheduleEntity
+import com.buddystuddy.account.domain.entity.UserEntity
 
 fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
     BackendSettingsResponse(
