@@ -253,6 +253,8 @@ private struct CommunityQuestionRow: View {
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
 
+            CommunityQuestionStatsMeta(question: question)
+
             HStack(spacing: 8) {
                 Text(question.topic.isEmpty ? "Swift" : question.topic)
                     .font(.caption2)

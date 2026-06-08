@@ -2097,19 +2097,9 @@ private struct MobileCommunityQuestionRow: View {
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
 
+            CommunityQuestionStatsMeta(question: question)
+
             HStack(spacing: 8) {
-                Label("\(question.likeCount)", systemImage: question.isLikedByMe ? "heart.fill" : "heart")
-                    .font(.caption2)
-                    .foregroundStyle(question.isLikedByMe ? .red : .secondary)
-
-                Label("\(question.commentCount)", systemImage: "bubble.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Label("\(question.viewCount)", systemImage: "eye")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
                 Text(question.topic.isEmpty ? "Swift" : question.topic)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
