@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.study.adapter.inbound.stream
 
-import com.buddystuddy.backend.study.adapter.outbound.apns.ApnsPushService
-import com.buddystuddy.backend.auth.adapter.outbound.persistence.DeviceRepository
+import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamListener
@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component
 
 @Component
 class PushStreamListener(
-    private val apns: ApnsPushService,
-    private val devices: DeviceRepository,
+    private val pushNotifications: PushNotificationPort,
+    private val devices: DevicePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -31,7 +31,7 @@ class PushStreamListener(
                 "apnsToken" to (message.fields["apnsToken"] ?: device?.apnsToken ?: ""),
                 "apnsEnvironment" to (message.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production"),
             )
-            apns.sendQuestion(fields)
+            pushNotifications.sendQuestion(fields)
             message.ack()
         } catch (error: Exception) {
             logger.warn(

@@ -4,12 +4,12 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.study.adapter.outbound.openai.OpenAIClient
-import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamCoordinatorService
-import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
-import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
-import com.buddystuddy.backend.study.adapter.outbound.persistence.ScheduleRepository
+import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
@@ -20,12 +20,12 @@ import java.time.Instant
 @Component
 class QuestionScheduler(
     private val properties: BuddyStuddyProperties,
-    private val schedules: ScheduleRepository,
-    private val questions: QuestionRepository,
-    private val questionStats: QuestionStatsRepository,
+    private val schedules: SchedulePort,
+    private val questions: QuestionPort,
+    private val questionStats: QuestionStatsPort,
     private val cipher: KeyCipher,
-    private val openAI: OpenAIClient,
-    private val streams: RedisStreamCoordinatorService,
+    private val openAI: OpenAIPort,
+    private val streams: QuestionPushPublishPort,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -73,7 +73,7 @@ class QuestionScheduler(
                 )
                 questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
                 val published = streams.publishPush(
-                    QuestionPushRequestedEvent(
+                    QuestionPushRequest(
                         recordId = saved.id,
                         createdAt = now,
                         deviceId = schedule.deviceId,

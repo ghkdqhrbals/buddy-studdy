@@ -1,8 +1,8 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
 import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamCoordinatorService
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.redisstream.consumer.ProducerRoutingShard
 import com.redisstream.producer.ProducerRoute
 import com.redisstream.producer.PublishedRedisStreamMessage
@@ -75,7 +75,7 @@ class RedisStreamCoordinatorServiceTest {
         )
     }
 
-    private fun pushEvent(topic: String = "SwiftUI") = QuestionPushRequestedEvent(
+    private fun pushEvent(topic: String = "SwiftUI") = QuestionPushRequest(
         recordId = 10,
         deviceId = "device-1",
         userId = 11,
@@ -87,7 +87,6 @@ class RedisStreamCoordinatorServiceTest {
         sound = "default",
         intervalMinutes = 15,
         createdAt = Instant.parse("2026-06-08T00:00:00Z"),
-        eventId = "event-10",
     )
 
     private fun provider(publisher: RedisStreamPublisher?): ObjectProvider<RedisStreamPublisher> =

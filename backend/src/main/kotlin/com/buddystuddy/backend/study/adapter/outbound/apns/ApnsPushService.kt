@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.study.adapter.outbound.apns
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import io.jsonwebtoken.Jwts
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -18,14 +19,14 @@ import java.util.Date
 @Service
 class ApnsPushService(
     private val properties: BuddyStuddyProperties,
-) {
+) : PushNotificationPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
-    fun sendQuestion(fields: Map<String, String>) {
+    override fun sendQuestion(fields: Map<String, String>) {
         val token = fields["apnsToken"]?.takeIf { it.isNotBlank() }
         if (token == null) {
             logger.warn("apns_push_skipped_missing_token recordId={}", fields["recordId"])
