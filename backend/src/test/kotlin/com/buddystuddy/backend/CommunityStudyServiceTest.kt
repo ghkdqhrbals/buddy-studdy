@@ -205,8 +205,8 @@ class CommunityStudyServiceTest {
 
         assertThat(published.isPublic).isTrue()
         assertThat(pendingPublish.isPublic).isFalse()
-        assertThat(questions.findById(graded.id).orElseThrow().publicQuestion).isTrue()
-        assertThat(questions.findById(pending.id).orElseThrow().publicQuestion).isFalse()
+        assertThat(questions.findEntityById(graded.id)?.publicQuestion).isTrue()
+        assertThat(questions.findEntityById(pending.id)?.publicQuestion).isFalse()
     }
 
     private fun user(providerId: String, name: String, allowPublic: Boolean): UserEntity =

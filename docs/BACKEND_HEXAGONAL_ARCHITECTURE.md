@@ -275,6 +275,18 @@ community.domain.PublicQuestionAggregate
 
 These aggregates intentionally wrap the current JPA entity bridge during migration. Application services should call aggregate behavior instead of mutating entity fields directly.
 
+Public question aggregate lookup follows the cacheable output-port pattern:
+
+```text
+CommunityService
+  -> PublicQuestionAggregateQueryPort
+    -> PublicQuestionAggregatePrimaryAdapter
+      -> PublicQuestionAggregateRedisAdapter
+      -> PublicQuestionAggregateRdbAdapter
+```
+
+The primary adapter reads Redis first, falls back to RDB on a cache miss, and writes the loaded aggregate snapshot back to Redis. User-specific values such as `isLikedByMe` are not part of the shared cache key and are calculated per request.
+
 Long-term, JPA entities should move to persistence adapters as database records, not domain models:
 
 ```text
@@ -329,6 +341,7 @@ data class CreateQuestionCommand(
 - Like/comment/view counters are eventually consistent through Redis stream aggregation.
 - Source-of-truth tables remain `questions`, `question_likes`, and `question_comments`.
 - `question_stats` remains a derived read model.
+- Public question aggregate Redis cache is a derived read-through cache. It may be stale until TTL expiry or explicit eviction after like/comment writes.
 
 ## Failure Handling
 
@@ -344,6 +357,7 @@ data class CreateQuestionCommand(
 - Public question browse uses answered public rows only and should remain paginated.
 - Topic stats should not load unbounded records. Current 10,000 cap is acceptable short term, but should become a repository-level aggregate query when records grow.
 - Reaction aggregation should consume by stream partition key `questionId`.
+- Public question aggregate cache keys are per question id, not per viewer, to avoid user-specific key explosion.
 
 ## Observability
 

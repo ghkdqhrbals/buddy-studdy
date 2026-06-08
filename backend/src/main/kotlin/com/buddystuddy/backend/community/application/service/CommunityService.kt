@@ -7,6 +7,8 @@ import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystuddy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
+import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionAggregateCommandPort
+import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionAggregateQueryPort
 import com.buddystuddy.backend.community.application.port.outbound.ReportPort
 import com.buddystuddy.backend.domain.QuestionCommentEntity
 import com.buddystuddy.backend.domain.QuestionEntity
@@ -29,6 +31,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEngagementEventPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -41,6 +44,9 @@ class CommunityService(
     private val questionStats: QuestionStatsPort,
     private val likes: QuestionLikePort,
     private val comments: QuestionCommentPort,
+    private val publicQuestionAggregates: PublicQuestionAggregateQueryPort,
+    @param:Qualifier("publicQuestionAggregateRedisAdapter")
+    private val publicQuestionAggregateCache: PublicQuestionAggregateCommandPort,
     private val reports: ReportPort,
     private val streams: QuestionEngagementEventPort,
 ) : CommunityUseCase {
@@ -59,9 +65,11 @@ class CommunityService(
 
     @Transactional
     override fun publicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
-        val q = publicAnsweredQuestion(id)
+        val snapshot = publicQuestionAggregates.findByQuestionId(id)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         streams.publishQuestionViewed(id, principal?.userId)
-        return community(q, principal)
+        val liked = principal?.let { likes.existsByQuestionIdAndUserId(id, it.userId) } ?: false
+        return snapshot.copy(isLikedByMe = liked).toCommunityQuestionResponse()
     }
 
     @Transactional
@@ -72,11 +80,13 @@ class CommunityService(
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
                 delta = 1
+                publicQuestionAggregateCache.evict(id)
                 streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_LIKED, principal.userId)
             }
         } else {
             if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
                 delta = -1
+                publicQuestionAggregateCache.evict(id)
                 streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_UNLIKED, principal.userId)
             }
         }
@@ -88,6 +98,7 @@ class CommunityService(
     override fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
         publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
+        publicQuestionAggregateCache.evict(id)
         streams.publishQuestionChanged(id, QuestionStreamEventType.QUESTION_COMMENTED, principal.userId)
         return saved.toResponse(userProfile(principal.userId))
     }
