@@ -1,6 +1,6 @@
 # BuddyStuddy Deploy
 
-Deployment repository for the BuddyStuddy Python push backend.
+Deployment repository for the BuddyStuddy Spring Boot Kotlin push backend.
 
 This repo is triggered by `repository_dispatch` from the app repository after a backend Docker image is published to GHCR.
 
@@ -26,14 +26,14 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 ## Runtime Layout
 
 - `buddystuddy-nginx`: public HTTPS proxy on host port `443`.
-- `buddystuddy-backend-a`: blue slot for FastAPI app on Docker network port `8080`.
-- `buddystuddy-backend-b`: green slot for FastAPI app on Docker network port `8080`.
+- `buddystuddy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
+- `buddystuddy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
 - `buddystuddy-db`: private PostgreSQL container on Docker network port `5432`.
 - `buddystuddy-postgres-data`: persistent Docker volume for PostgreSQL data.
-- `buddystuddy-backend-data`: legacy SQLite volume, kept for migration safety and not deleted.
+- `buddystuddy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `backups/`: local host directory (`/opt/buddystuddy-backend/backups`) where `pg_dump` files are written before each deploy.
 - `buddystuddy-postgres-data` retains live DB data across restarts and redeploys.
-- Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStuddy FastAPI app.
+- Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStuddy Spring Boot app.
 - If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
 - If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStuddy backend logs.
 - Other paths return 404 at Nginx.

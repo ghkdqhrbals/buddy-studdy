@@ -1,2 +1,0 @@
-"""BuddyStuddy push backend."""
-

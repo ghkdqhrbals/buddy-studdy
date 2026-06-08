@@ -9,7 +9,7 @@ The iOS app cannot reliably create new questions while force-quit or suspended. 
 ```mermaid
 sequenceDiagram
     participant App as iPhone App
-    participant API as Python Backend
+    participant API as Spring Boot Backend
     participant OpenAI as OpenAI API
     participant APNs as Apple APNs
     participant Phone as iPhone Lock Screen
@@ -21,6 +21,8 @@ sequenceDiagram
         API->>API: Find due schedules
         API->>OpenAI: Generate question
         OpenAI-->>API: Question JSON
+        API->>API: Publish Redis stream push job
+        API->>API: @StreamListener consumes push job
         API->>APNs: Push alert
         APNs-->>Phone: Notification
     end
@@ -47,7 +49,7 @@ Deploy repository:
 - `GHCR_TOKEN`: GitHub token with `read:packages`.
 - `BACKEND_MASTER_KEY`: random base64 key for encrypting stored OpenAI keys.
 - `BACKEND_API_TOKEN`: optional token required by registration/admin endpoints.
-- `APNS_AUTH_KEY_BASE64`: base64 encoded Apple APNs `.p8` key.
+- `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: `io.github.ghkdqhrbals.StudyMate`.
@@ -95,7 +97,7 @@ The password is managed through AWS Secrets Manager at `buddystuddy/prod/postgre
 
 - PostgreSQL data is stored in the `buddystuddy-postgres-data` Docker volume.
 - The previous SQLite volume `buddystuddy-backend-data` is never deleted by the workflow.
-- During deployment, the backend image runs `python -m app.migrate_sqlite_to_postgres /legacy/buddystuddy.db` once against the old SQLite volume. Inserts are idempotent, so retrying the workflow does not duplicate rows.
+- The current backend image is Spring Boot Kotlin. The old Python SQLite migration path is no longer executed during rollout.
 - Containers use `--restart unless-stopped` so backend, Nginx, and PostgreSQL restart after daemon or instance reboot.
 
 Smoke-test the current EC2 deployment with:

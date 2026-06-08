@@ -1,10 +1,6 @@
 # BuddyStuddy Backend API
 
-The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, and grading results. It is a FastAPI service, so the generated OpenAPI documents are also available at runtime:
-
-- `GET /docs`
-- `GET /redoc`
-- `GET /openapi.json`
+The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, and grading results. It is a Spring Boot Kotlin service backed by PostgreSQL and Spring Data JPA.
 
 ## Base URL
 

@@ -10,3 +10,7 @@ __pycache__/
 *.py[cod]
 .venv/
 *.profraw
+.gradle/
+.idea/
+backend/.gradle/
+backend/.idea/

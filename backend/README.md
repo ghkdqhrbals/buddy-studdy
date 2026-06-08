@@ -1,6 +1,6 @@
 # BuddyStuddy Backend
 
-Python/FastAPI backend for BuddyStuddy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
+Spring Boot Kotlin backend for BuddyStuddy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
 
 This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this PostgreSQL-backed service.
 
@@ -12,9 +12,10 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
-- Uses SQLAlchemy ORM with repository methods; JPA 감각의 `save`/`insert`/`delete`도 래퍼로 제공됩니다.
+- Uses Spring Data JPA ORM with repository/service transaction boundaries.
 - Generates due questions with OpenAI.
-- Sends APNs remote notifications to iPhone.
+- Publishes scheduled push jobs through redis-stream-coordinator and consumes them with `@StreamListener`.
+- Sends APNs remote notifications to iPhone from the stream consumer.
 - Runs in Docker with PostgreSQL stored on a mounted volume.
 
 ## Runtime Secrets
@@ -22,22 +23,22 @@ This backend is the operational source of truth for the iOS app. The app may cac
 Set these on the deployment host or deploy workflow. Do not commit them.
 
 - `BACKEND_MASTER_KEY`: base64/random master key used to encrypt stored OpenAI API keys.
-- `APNS_AUTH_KEY_BASE64`: base64 encoded Apple APNs `.p8` key.
+- `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: Apple APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: fallback APNs environment. Scheduled delivery uses each registered device's `apnsEnvironment`, so one backend can serve both debug `sandbox` tokens and TestFlight/App Store `production` tokens.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
-- `DATABASE_URL`: required PostgreSQL connection string.
-- `ALLOW_SQLITE_FALLBACK`: optional. Set to `true` only for isolated local tests. Production must not use SQLite.
+- `DATABASE_URL`: required PostgreSQL JDBC connection string, for example `jdbc:postgresql://db:5432/buddystuddy`.
+- `DATABASE_USERNAME`, `DATABASE_PASSWORD`: PostgreSQL credentials.
 - `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`, `REDIS_SSL`, `REDIS_CLUSTER`: Redis settings for email signup verification-code sessions. Set `REDIS_CLUSTER=true` for Redis Cluster endpoints.
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by the stream starter and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
-- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager source. The backend reads secret keys such as `redisHost`, `redisPort`, `redisPassword`, `smtpHost`, `smtpUsername`, and `smtpPassword`.
+- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager source. The backend reads secret keys such as `redisHost`, `redisPort`, `redisPassword`, `REDIS_STREAM_COORDINATOR_PASSWORD`, `smtpHost`, `smtpUsername`, and `smtpPassword`.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -45,13 +46,10 @@ The schedule API may store the user's OpenAI API key encrypted at rest. This cha
 
 ```sh
 cd backend
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+docker compose up --build
 ```
 
-Local runs also need a PostgreSQL `DATABASE_URL`, or explicit `ALLOW_SQLITE_FALLBACK=true` for throwaway tests.
+Local runs use PostgreSQL from `docker-compose.yml`.
 
 ## Docker
 
@@ -71,34 +69,10 @@ docker compose up --build
 
 ```sh
 cd backend
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-pytest
+docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gradle --no-daemon test
 ```
 
-The tests cover repository behavior and topic-statistic business rules in isolation,
-using ephemeral SQLite databases and real ORM models.
-
-`@transactional` decorator is also available for service-style methods. If the wrapped
-method accepts a `session` parameter, it gets a SQLAlchemy session injected:
-
-```python
-from app.storage import transactional
-
-
-class RecordService:
-    def __init__(self, db: Database):
-        self.db = db
-
-    @transactional
-    def record_and_answer(self, question_id: str, session):
-        session.query(... )...
-```
-
-`Database.connect()` is a transaction boundary using an SQLAlchemy session
-(commit on normal exit, rollback on exception). For readability in JPA-style code,
-you can use `Database.transactional()` as an explicit block.
+The tests cover Spring context startup and core service behavior with H2 in PostgreSQL mode.
 
 ## API
 
@@ -129,7 +103,7 @@ Protected endpoints require:
 
 Device credentials are used only to register a device and bootstrap or refresh `/api/v1/auth/token`.
 
-FastAPI also serves generated API docs at `/docs`, `/redoc`, and `/openapi.json`.
+Spring Boot Actuator serves health checks at `/health` and `/api/v1/health`.
 
 ### DB Backups
 

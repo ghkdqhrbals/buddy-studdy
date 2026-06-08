@@ -1,0 +1,85 @@
+server:
+  port: ${APP_PORT:8080}
+
+spring:
+  application:
+    name: buddystuddy-backend
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystuddy}
+    username: ${DATABASE_USERNAME:}
+    password: ${DATABASE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  jackson:
+    property-naming-strategy: LOWER_CAMEL_CASE
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+buddystuddy:
+  auth:
+    jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystuddy-secret-must-be-overridden}}
+    access-token-days: ${ACCESS_TOKEN_DAYS:90}
+  crypto:
+    master-key: ${BACKEND_MASTER_KEY:dev-buddystuddy-master-key}
+  scheduler:
+    enabled: ${SCHEDULER_ENABLED:true}
+    poll-ms: ${SCHEDULER_POLL_MS:30000}
+    max-pending-per-study: ${MAX_PENDING_PER_STUDY:1}
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:gpt-5.4}
+  apns:
+    team-id: ${APNS_TEAM_ID:}
+    key-id: ${APNS_KEY_ID:}
+    auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:}}
+    bundle-id: ${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}
+  streams:
+    enabled: ${REACTION_STREAM_ENABLED:true}
+    coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
+    coordinator-username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
+    coordinator-password: ${REACTION_STREAM_COORDINATOR_PASSWORD:}
+    push-prefix: ${PUSH_STREAM_PREFIX:bs-push-v1}
+    view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
+    action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
+    max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
+
+redis-stream-coordinator:
+  coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
+  username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
+  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:}
+  email:
+    verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
+    from: ${SMTP_FROM:${SMTP_USERNAME:}}
+  openapi:
+    enabled: ${ENABLE_OPENAPI_DOCS:false}
+    access-token: ${OPENAPI_ACCESS_TOKEN:}
