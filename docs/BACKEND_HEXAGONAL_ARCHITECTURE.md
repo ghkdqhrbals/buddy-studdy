@@ -54,15 +54,15 @@ com.buddystuddy.backend
       port.inbound
       port.outbound
       service
-  community
-    adapter
-      inbound.web
-      inbound.stream
-      outbound.persistence
-    application
-      port.inbound
-      port.outbound
-      service
+community
+  adapter
+    inbound.web
+    inbound.stream
+    outbound.persistence
+  application
+    port.inbound
+    port.outbound
+    service
 ```
 
 Dependency rule:
@@ -152,7 +152,7 @@ interface SaveQuestionPort
 interface GenerateQuestionPort
 interface GradeAnswerPort
 interface PublishPushRequestPort
-interface PublishQuestionReactionPort
+interface PublicQuestionReactionPublishPort
 interface SendReportEmailPort
 ```
 
@@ -329,6 +329,8 @@ data class CreateQuestionCommand(
 - Like/comment/view counters are eventually consistent through Redis stream aggregation.
 - Source-of-truth tables remain `questions`, `question_likes`, and `question_comments`.
 - `question_stats` remains a derived read model.
+- Public question reactions publish through `community.application.port.outbound.PublicQuestionReactionPublishPort`.
+- The Redis stream adapter implements the reaction publish port, so community use cases do not depend on stream implementation details or study ports.
 
 ## Failure Handling
 

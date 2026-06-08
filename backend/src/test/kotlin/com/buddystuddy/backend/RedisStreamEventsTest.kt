@@ -1,9 +1,9 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionActionEvent
+import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionActionEvent
+import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
 import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
-import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionViewedEvent
+import com.buddystuddy.backend.common.application.model.QuestionStreamEventType
 import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -46,7 +46,7 @@ class RedisStreamEventsTest {
 
     @Test
     fun `view event exposes consistent stream field map`() {
-        val event = QuestionViewedEvent(
+        val event = PublicQuestionViewedEvent(
             questionId = 10,
             userId = 20,
             createdAt = Instant.ofEpochSecond(180),
@@ -67,7 +67,7 @@ class RedisStreamEventsTest {
 
     @Test
     fun `action event exposes consistent stream field map`() {
-        val event = QuestionActionEvent(
+        val event = PublicQuestionActionEvent(
             questionId = 30,
             eventType = QuestionStreamEventType.QUESTION_LIKED,
             userId = 40,
@@ -89,7 +89,7 @@ class RedisStreamEventsTest {
     @Test
     fun `action event rejects push and view event types`() {
         assertThatThrownBy {
-            QuestionActionEvent(
+            PublicQuestionActionEvent(
                 questionId = 30,
                 eventType = QuestionStreamEventType.QUESTION_PUSH_REQUESTED,
                 userId = 40,
@@ -97,7 +97,7 @@ class RedisStreamEventsTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
 
         assertThatThrownBy {
-            QuestionActionEvent(
+            PublicQuestionActionEvent(
                 questionId = 30,
                 eventType = QuestionStreamEventType.CONTENT_VIEWED,
                 userId = 40,

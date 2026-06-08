@@ -1,8 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.stream
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.study.application.port.outbound.QuestionEngagementEventPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
 import com.buddystuddy.backend.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
@@ -15,13 +13,9 @@ import org.springframework.stereotype.Service
 class RedisStreamCoordinatorService(
     private val properties: BuddyStuddyProperties,
     @Qualifier("pushStreamPublisher") pushPublisherProvider: ObjectProvider<RedisStreamPublisher>,
-    @Qualifier("viewStreamPublisher") viewPublisherProvider: ObjectProvider<RedisStreamPublisher>,
-    @Qualifier("actionStreamPublisher") actionPublisherProvider: ObjectProvider<RedisStreamPublisher>,
-) : QuestionEngagementEventPort {
+) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val pushPublisher: RedisStreamPublisher? = pushPublisherProvider.ifAvailable
-    private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
-    private val actionPublisher: RedisStreamPublisher? = actionPublisherProvider.ifAvailable
 
     fun publishPush(event: QuestionPushRequestedEvent): Boolean {
         if (!properties.streams.enabled) return false
@@ -41,46 +35,4 @@ class RedisStreamCoordinatorService(
         }
     }
 
-    override fun publishQuestionViewed(questionId: Long, userId: Long?): Boolean {
-        if (!properties.streams.enabled) return false
-        val publisher = viewPublisher ?: return false
-        val fields = QuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
-        return try {
-            val published = publisher.publish(
-                questionId.toString(),
-                fields,
-                RedisStreamPublishOptions(properties.streams.maxLen, true),
-            )
-            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
-            true
-        } catch (error: Exception) {
-            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.viewPrefix, error.message)
-            false
-        }
-    }
-
-    fun publishQuestionChanged(questionId: Long, eventType: String, userId: Long?): Boolean =
-        publishQuestionChanged(questionId, QuestionStreamEventType.valueOf(eventType), userId)
-
-    override fun publishQuestionChanged(questionId: Long, eventType: QuestionStreamEventType, userId: Long?): Boolean {
-        if (!properties.streams.enabled) return false
-        val publisher = actionPublisher ?: return false
-        val fields = QuestionActionEvent(
-            questionId = questionId,
-            eventType = eventType,
-            userId = userId,
-        ).toStringMapWithoutNull()
-        return try {
-            val published = publisher.publish(
-                questionId.toString(),
-                fields,
-                RedisStreamPublishOptions(properties.streams.maxLen, true),
-            )
-            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
-            true
-        } catch (error: Exception) {
-            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.actionPrefix, error.message)
-            false
-        }
-    }
 }

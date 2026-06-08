@@ -2,7 +2,6 @@ package com.buddystuddy.backend
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
 import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamCoordinatorService
 import com.redisstream.consumer.ProducerRoutingShard
 import com.redisstream.producer.ProducerRoute
@@ -10,7 +9,6 @@ import com.redisstream.producer.PublishedRedisStreamMessage
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.ObjectProvider
 import java.time.Instant
@@ -22,8 +20,6 @@ class RedisStreamCoordinatorServiceTest {
         val service = service(enabled = false, pushPublisher = RecordingPublisher())
 
         assertThat(service.publishPush(pushEvent())).isFalse()
-        assertThat(service.publishQuestionViewed(1, 2)).isFalse()
-        assertThat(service.publishQuestionChanged(1, QuestionStreamEventType.QUESTION_LIKED, 2)).isFalse()
     }
 
     @Test
@@ -31,8 +27,6 @@ class RedisStreamCoordinatorServiceTest {
         val service = service(enabled = true)
 
         assertThat(service.publishPush(pushEvent())).isFalse()
-        assertThat(service.publishQuestionViewed(1, 2)).isFalse()
-        assertThat(service.publishQuestionChanged(1, QuestionStreamEventType.QUESTION_LIKED, 2)).isFalse()
     }
 
     @Test
@@ -61,49 +55,16 @@ class RedisStreamCoordinatorServiceTest {
     }
 
     @Test
-    fun `view and action events publish typed field maps`() {
-        val viewPublisher = RecordingPublisher()
-        val actionPublisher = RecordingPublisher()
-        val service = service(enabled = true, viewPublisher = viewPublisher, actionPublisher = actionPublisher)
-
-        assertThat(service.publishQuestionViewed(20, null)).isTrue()
-        assertThat(service.publishQuestionChanged(30, QuestionStreamEventType.QUESTION_COMMENTED, 40)).isTrue()
-        assertThat(service.publishQuestionChanged(31, "QUESTION_UNLIKED", 41)).isTrue()
-
-        val viewRequest = viewPublisher.requests.single()
-        assertThat(viewRequest.key).isEqualTo("20")
-        assertThat(viewRequest.fields).containsEntry("eventType", "CONTENT_VIEWED")
-        assertThat(viewRequest.fields).containsEntry("questionId", "20")
-        assertThat(viewRequest.fields).doesNotContainKey("userId")
-        assertThat(actionPublisher.requests).hasSize(2)
-        assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_COMMENTED")
-        assertThat(actionPublisher.requests[0].fields).containsEntry("userId", "40")
-        assertThat(actionPublisher.requests[1].fields).containsEntry("eventType", "QUESTION_UNLIKED")
-    }
-
-    @Test
     fun `publish methods return false when publisher throws`() {
         val failing = RecordingPublisher(fail = true)
-        val service = service(enabled = true, pushPublisher = failing, viewPublisher = failing, actionPublisher = failing)
+        val service = service(enabled = true, pushPublisher = failing)
 
         assertThat(service.publishPush(pushEvent())).isFalse()
-        assertThat(service.publishQuestionViewed(1, 2)).isFalse()
-        assertThat(service.publishQuestionChanged(1, QuestionStreamEventType.QUESTION_LIKED, 2)).isFalse()
-    }
-
-    @Test
-    fun `string action publisher rejects unknown event type`() {
-        val service = service(enabled = true, actionPublisher = RecordingPublisher())
-
-        assertThatThrownBy { service.publishQuestionChanged(1, "UNKNOWN", 2) }
-            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private fun service(
         enabled: Boolean,
         pushPublisher: RedisStreamPublisher? = null,
-        viewPublisher: RedisStreamPublisher? = null,
-        actionPublisher: RedisStreamPublisher? = null,
     ): RedisStreamCoordinatorService {
         val properties = BuddyStuddyProperties().apply {
             streams.enabled = enabled
@@ -111,8 +72,6 @@ class RedisStreamCoordinatorServiceTest {
         return RedisStreamCoordinatorService(
             properties,
             provider(pushPublisher),
-            provider(viewPublisher),
-            provider(actionPublisher),
         )
     }
 

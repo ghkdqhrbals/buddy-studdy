@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.stream
 
-import com.buddystuddy.backend.study.application.port.outbound.QuestionStreamEventType
+import com.buddystuddy.backend.common.application.model.QuestionStreamEventType
 import java.time.Instant
 import java.util.UUID
 
@@ -28,25 +28,3 @@ data class QuestionPushRequestedEvent(
     val createdAt: Instant = Instant.now(),
     override val eventId: String = UUID.randomUUID().toString(),
 ) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId)
-
-data class QuestionViewedEvent(
-    val questionId: Long,
-    val userId: Long?,
-    val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
-) : BaseRedisStreamEvent(QuestionStreamEventType.CONTENT_VIEWED, eventId) {
-    val minuteBucket: Long = createdAt.epochSecond / 60
-}
-
-data class QuestionActionEvent(
-    val questionId: Long,
-    override val eventType: QuestionStreamEventType,
-    val userId: Long?,
-    val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
-) : BaseRedisStreamEvent(eventType, eventId) {
-    init {
-        require(eventType != QuestionStreamEventType.QUESTION_PUSH_REQUESTED)
-        require(eventType != QuestionStreamEventType.CONTENT_VIEWED)
-    }
-}
