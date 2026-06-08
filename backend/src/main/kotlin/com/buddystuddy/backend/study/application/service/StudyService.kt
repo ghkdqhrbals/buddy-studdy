@@ -1,21 +1,18 @@
 package com.buddystuddy.backend.study.application.service
 
-import com.buddystuddy.backend.admin.application.port.inbound.AdminUseCase
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.common.application.service.BackendSupportService
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
-import com.buddystuddy.backend.stats.StatsService
 import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
+import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -34,11 +31,8 @@ class StudyService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
-    private val statsService: StatsService,
-    private val settingsService: SettingsUseCase,
-    private val adminService: AdminUseCase,
     private val support: BackendSupportService,
-) : StudyUseCase {
+) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
         val schedule = support.scheduleFor(principal, topic)
@@ -130,19 +124,4 @@ class StudyService(
         return aggregate.snapshot().toRecordResponse()
     }
 
-    @Transactional(readOnly = true)
-    override fun stats(principal: Principal, limit: Int, offset: Int) = statsService.stats(principal.userId, limit, offset)
-
-    @Transactional(readOnly = true)
-    override fun snapshot(principal: Principal, limit: Int, offset: Int): BackendSnapshotResponse {
-        val records = records(principal, limit, offset)
-        return BackendSnapshotResponse(
-            settingsService.settings(principal),
-            adminService.apiStatus(principal),
-            records.records,
-            stats(principal, 8, 0),
-            records.totalCount,
-            Instant.now(),
-        )
-    }
 }

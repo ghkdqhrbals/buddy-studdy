@@ -4,6 +4,9 @@ import com.buddystuddy.backend.auth.PrincipalService
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
+import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.SnapshotUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
@@ -23,21 +26,24 @@ import kotlin.math.min
 @RequestMapping("/api/v1")
 class StudyController(
     private val study: StudyUseCase,
+    private val recordBrowser: BrowseRecordsUseCase,
+    private val studyStats: GetStudyStatsUseCase,
+    private val snapshotUseCase: SnapshotUseCase,
     private val principals: PrincipalService,
 ) {
     @GetMapping("/me/snapshot")
     fun snapshot(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        study.snapshot(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
+        snapshotUseCase.snapshot(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
 
     @GetMapping("/me/records")
     fun records(@RequestParam(defaultValue = "100") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        study.records(principals.authenticate(request), safeLimit(limit, 500), max(0, offset))
+        recordBrowser.records(principals.authenticate(request), safeLimit(limit, 500), max(0, offset))
 
     @DeleteMapping("/me/records")
     fun clearRecords(request: HttpServletRequest): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
     @GetMapping("/me/records/{id}")
-    fun record(@PathVariable id: Long, request: HttpServletRequest) = study.record(principals.authenticate(request), id)
+    fun record(@PathVariable id: Long, request: HttpServletRequest) = recordBrowser.record(principals.authenticate(request), id)
 
     @PatchMapping("/me/records/{id}/answer")
     fun saveAnswer(@PathVariable id: Long, @RequestBody body: AnswerRequest, request: HttpServletRequest) =
@@ -62,7 +68,7 @@ class StudyController(
 
     @GetMapping("/me/stats")
     fun stats(@RequestParam(defaultValue = "8") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        study.stats(principals.authenticate(request), safeLimit(limit, 100), max(0, offset))
+        studyStats.stats(principals.authenticate(request), safeLimit(limit, 100), max(0, offset))
 
     @PostMapping("/me/questions")
     fun createQuestion(@RequestBody body: CreateQuestionRequest, request: HttpServletRequest) =

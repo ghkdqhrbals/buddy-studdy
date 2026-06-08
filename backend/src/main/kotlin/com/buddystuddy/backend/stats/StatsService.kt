@@ -1,9 +1,11 @@
 package com.buddystuddy.backend.stats
 
+import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
+import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -19,8 +21,11 @@ import kotlin.math.min
 class StatsService(
     private val questions: QuestionPort,
     private val stats: QuestionStatsPort,
-) {
-    fun stats(userId: Long, limit: Int, offset: Int): StatsResponse {
+) : GetStudyStatsUseCase {
+    override fun stats(principal: Principal, limit: Int, offset: Int): StatsResponse =
+        stats(principal.userId, limit, offset)
+
+    private fun stats(userId: Long, limit: Int, offset: Int): StatsResponse {
         val page = questions.findGradedByUser(userId, PageRequest.of(0, 10_000))
         val grouped = page.content.groupBy { normalizedTopic(it.topic) }
         val topics = grouped.values
