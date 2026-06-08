@@ -20,6 +20,7 @@ Read these first:
 - Do not add or verify macOS app/release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
 - After completing feature work, always create a git commit that includes the completed implementation and verification updates unless the user explicitly says not to commit.
 - On iOS 26 toolbars, avoid unintended shared capsule/glass backgrounds around custom toolbar controls. For custom search/profile toolbar items that already draw their own shape, apply `ToolbarItem.sharedBackgroundVisibility(.hidden)` with an iOS 26 availability guard instead of changing the inner view's `Capsule().stroke(...)`.
+- Do not connect to production servers directly with SSH. Backend deployment must go through GitHub Actions and the personal-deploy repository workflow unless the user explicitly re-allows direct SSH for a specific incident.
 
 ## Storage
 
