@@ -167,6 +167,7 @@ jobs:
   watch:
     name: Watch Deploy Result
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - build
       - notify
