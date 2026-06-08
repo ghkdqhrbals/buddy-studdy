@@ -2224,6 +2224,7 @@ private struct CommunityQuestionDetailView: View {
         .navigationTitle(strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: displayQuestion.id) {
+            await loadQuestionDetail()
             await loadComments()
         }
     }
@@ -2333,6 +2334,13 @@ private struct CommunityQuestionDetailView: View {
         comments = response.comments
         commentsTotalCount = response.totalCount
         displayQuestion.commentCount = response.totalCount
+    }
+
+    private func loadQuestionDetail() async {
+        guard let question = await appState.loadCommunityQuestionDetail(questionID: displayQuestion.id) else {
+            return
+        }
+        displayQuestion = question
     }
 
     private func sendComment() {

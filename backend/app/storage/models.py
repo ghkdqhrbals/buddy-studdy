@@ -217,6 +217,7 @@ class QuestionStats(Base):
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), primary_key=True)
     like_count: Mapped[int] = mapped_column(nullable=False, default=0)
     comment_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    view_count: Mapped[int] = mapped_column(nullable=False, default=0)
     verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 

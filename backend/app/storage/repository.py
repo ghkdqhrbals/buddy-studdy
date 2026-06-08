@@ -464,6 +464,11 @@ class Database:
                         )
                     )
 
+            if "question_stats" in table_names:
+                stats_columns = {column["name"] for column in inspector.get_columns("question_stats")}
+                if "view_count" not in stats_columns:
+                    session.execute(text("ALTER TABLE question_stats ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0"))
+
     def _get_device(self, session: Session, device_id: str) -> Device | None:
         return session.query(Device).filter(Device.device_id == device_id).first()
 
@@ -1372,6 +1377,7 @@ class Database:
                     User,
                     func.coalesce(QuestionStats.like_count, 0),
                     func.coalesce(QuestionStats.comment_count, 0),
+                    func.coalesce(QuestionStats.view_count, 0),
                 )
                 .join(User, Question.user_id == User.id)
                 .outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
@@ -1406,9 +1412,10 @@ class Database:
                     author=author,
                     like_count=int(like_count or 0),
                     comment_count=int(comment_count or 0),
+                    view_count=int(view_count or 0),
                     is_liked_by_me=False,
                 )
-                for question, author, like_count, comment_count in rows
+            for question, author, like_count, comment_count, view_count in rows
             ]
 
         self._public_questions_cache[cache_key] = (
@@ -1990,6 +1997,74 @@ class Database:
             )
         )
 
+    def get_public_question(
+        self,
+        question_id: str,
+        viewer_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        with self.connect() as session:
+            query = self._public_question_query(session, question_id)
+            if query is None:
+                return None
+            row = (
+                session.query(
+                    Question,
+                    User,
+                    func.coalesce(QuestionStats.like_count, 0),
+                    func.coalesce(QuestionStats.comment_count, 0),
+                    func.coalesce(QuestionStats.view_count, 0),
+                )
+                .join(User, Question.user_id == User.id)
+                .outerjoin(QuestionStats, QuestionStats.question_id == Question.id)
+                .filter(Question.id == self._record_id_value(question_id))
+                .filter(
+                    Question.deleted_at.is_(None),
+                    Question.is_public.is_(True),
+                    Question.status == "graded",
+                    Question.score.isnot(None),
+                    User.status == USER_STATUS_ACTIVE,
+                    User.allow_public_questions.is_(True),
+                )
+                .first()
+            )
+            if row is None:
+                return None
+            question, author, like_count, comment_count, view_count = row
+            response = self.community_question_response(
+                question,
+                author=author,
+                like_count=int(like_count or 0),
+                comment_count=int(comment_count or 0),
+                view_count=int(view_count or 0),
+                is_liked_by_me=False,
+            )
+        merged, _ = self._merge_public_question_viewer_likes([response], 1, viewer_user_id)
+        return merged[0]
+
+    def increment_question_view_count(self, question_id: str | int, delta: int) -> None:
+        if delta <= 0:
+            return
+        row_id = self._record_id_value(question_id)
+        if row_id is None:
+            return
+        with self.connect() as session:
+            now = self._utc_now()
+            stats = session.query(QuestionStats).filter(QuestionStats.question_id == row_id).first()
+            if stats is None:
+                stats = QuestionStats(
+                    question_id=row_id,
+                    like_count=0,
+                    comment_count=0,
+                    view_count=0,
+                    verified_at=None,
+                    updated_at=now,
+                )
+                session.add(stats)
+                session.flush()
+            stats.view_count = max(0, int(stats.view_count or 0) + int(delta))
+            stats.updated_at = now
+            self._public_questions_cache.clear()
+
     def set_public_question_like(
         self,
         question_id: str,
@@ -2151,6 +2226,7 @@ class Database:
                         question_id=question_id,
                         like_count=0,
                         comment_count=0,
+                        view_count=0,
                         verified_at=None,
                         updated_at=now,
                     )
@@ -2191,7 +2267,13 @@ class Database:
                 )
                 stats = session.query(QuestionStats).filter(QuestionStats.question_id == question_id).first()
                 if stats is None:
-                    stats = QuestionStats(question_id=question_id, like_count=0, comment_count=0, updated_at=now)
+                    stats = QuestionStats(
+                        question_id=question_id,
+                        like_count=0,
+                        comment_count=0,
+                        view_count=0,
+                        updated_at=now,
+                    )
                     session.add(stats)
                     session.flush()
                 stats.like_count = int(real_like_count)
@@ -2226,6 +2308,7 @@ class Database:
                         question_id=question_id,
                         like_count=int(real_like_count),
                         comment_count=int(real_comment_count),
+                        view_count=0,
                         verified_at=now,
                         updated_at=now,
                     )
@@ -2247,6 +2330,7 @@ class Database:
         author: User | None = None,
         like_count: int = 0,
         comment_count: int = 0,
+        view_count: int = 0,
         is_liked_by_me: bool = False,
     ) -> dict[str, Any]:
         if author is None and row.user_id is not None:
@@ -2276,6 +2360,7 @@ class Database:
             "author": self.user_profile_response(author) if author is not None else None,
             "likeCount": int(like_count),
             "commentCount": int(comment_count),
+            "viewCount": int(view_count),
             "isLikedByMe": bool(is_liked_by_me),
         }
 

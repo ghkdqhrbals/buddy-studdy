@@ -1382,6 +1382,61 @@ def test_public_question_reactions_can_skip_db_event_log_for_stream_mode(db: Dat
     assert questions[0]["commentCount"] == 1
 
 
+def test_public_question_view_count_is_cached_in_question_stats(db: Database):
+    device_id, client_secret = db.register_device(
+        apns_token="token-public-view-count",
+        platform="ios",
+        apns_environment="production",
+        language="en",
+        timezone="UTC",
+    )
+    assert db.authenticate_device(device_id, client_secret)
+    author = db.link_google_user_to_device(
+        device_id=device_id,
+        google_sub="public-view-count-author",
+        email="public-view-count-author@example.com",
+        display_name="Author",
+    )
+    assert author is not None
+    question = db.create_question(
+        device_id=device_id,
+        user_id=int(author["id"]),
+        topic="Swift",
+        difficulty_level=7,
+        question="What is actor reentrancy?",
+        expected_answer_hint="Actors may suspend and later process another message.",
+        is_public=True,
+    )
+    db.grade_record(
+        device_id=device_id,
+        record_id=question["id"],
+        answer="An actor can process another message while awaiting.",
+        score=90,
+        is_correct=True,
+        feedback="ok",
+        explanation="ok",
+        user_id=int(author["id"]),
+    )
+
+    detail = db.get_public_question(question["id"])
+    assert detail is not None
+    assert detail["viewCount"] == 0
+
+    db.increment_question_view_count(question["id"], 3)
+    db.increment_question_view_count(question["id"], 2)
+
+    detail = db.get_public_question(question["id"])
+    assert detail is not None
+    assert detail["viewCount"] == 5
+    questions, total = db.list_public_questions(exclude_device_id=None, limit=20, offset=0)
+    assert total == 1
+    assert questions[0]["viewCount"] == 5
+
+    with db.connect() as session:
+        stats = session.query(QuestionStats).filter(QuestionStats.question_id == int(question["id"])).one()
+        assert stats.view_count == 5
+
+
 def test_public_question_list_uses_cached_counts_but_merges_viewer_like_state(db: Database):
     device_id, client_secret = db.register_device(
         apns_token="token-public-social-cache",

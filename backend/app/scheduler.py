@@ -18,12 +18,13 @@ logger = logging.getLogger(__name__)
 class QuestionScheduler:
     max_pending_questions = 1
 
-    def __init__(self, settings: Settings, database: Database):
+    def __init__(self, settings: Settings, database: Database, event_streams=None):
         self.settings = settings
         self.database = database
         self.cipher = KeyCipher(settings.backend_master_key)
         self._openai_clients: dict[str, OpenAIQuestionClient] = {}
         self.apns = APNsClient(settings)
+        self.event_streams = event_streams
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
 
@@ -120,27 +121,47 @@ class QuestionScheduler:
                     created_at=created_at,
                 )
                 created_record_id = record["id"]
-                await self.apns.send_question(
-                    APNsQuestion(
-                        record_id=record["id"],
-                        created_at=to_iso(created_at),
-                        device_token=row["apns_token"],
-                        environment=row["apns_environment"],
-                        question=generated.question,
-                        expected_answer_hint=generated.expected_answer_hint,
-                        topic=row["topic"],
-                        difficulty_level=row["difficulty_level"],
-                        language=row["app_language"] or row["language"],
-                        sound=row["notification_sound"],
+                push_event_published = False
+                if self.event_streams is not None and self.event_streams.uses_stream:
+                    push_event_published = self.event_streams.publish_push_question(
+                        {
+                            "recordId": record["id"],
+                            "createdAt": to_iso(created_at),
+                            "deviceId": device_id,
+                            "userId": user_id,
+                            "deviceToken": row["apns_token"],
+                            "environment": row["apns_environment"],
+                            "question": generated.question,
+                            "expectedAnswerHint": generated.expected_answer_hint,
+                            "topic": row["topic"],
+                            "difficultyLevel": row["difficulty_level"],
+                            "language": row["app_language"] or row["language"],
+                            "sound": row["notification_sound"],
+                            "intervalMinutes": row["interval_minutes"],
+                        }
                     )
-                )
-                self.database.mark_scheduled_delivery(
-                    device_id=device_id,
-                    record_id=record["id"],
-                    interval_minutes=row["interval_minutes"],
-                    user_id=user_id,
-                    topic=row["topic"],
-                )
+                if not push_event_published:
+                    await self.apns.send_question(
+                        APNsQuestion(
+                            record_id=record["id"],
+                            created_at=to_iso(created_at),
+                            device_token=row["apns_token"],
+                            environment=row["apns_environment"],
+                            question=generated.question,
+                            expected_answer_hint=generated.expected_answer_hint,
+                            topic=row["topic"],
+                            difficulty_level=row["difficulty_level"],
+                            language=row["app_language"] or row["language"],
+                            sound=row["notification_sound"],
+                        )
+                    )
+                    self.database.mark_scheduled_delivery(
+                        device_id=device_id,
+                        record_id=record["id"],
+                        interval_minutes=row["interval_minutes"],
+                        user_id=user_id,
+                        topic=row["topic"],
+                    )
                 sent_count += 1
                 logger.info("sent scheduled question device_id=%s", device_id)
             except Exception as error:

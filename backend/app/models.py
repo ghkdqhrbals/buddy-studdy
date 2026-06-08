@@ -202,6 +202,7 @@ class CommunityQuestionResponse(CamelModel):
     author: UserProfileResponse | None = None
     like_count: int = Field(default=0, alias="likeCount")
     comment_count: int = Field(default=0, alias="commentCount")
+    view_count: int = Field(default=0, alias="viewCount")
     is_liked_by_me: bool = Field(default=False, alias="isLikedByMe")
 
 

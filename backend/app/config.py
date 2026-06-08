@@ -101,6 +101,17 @@ class Settings:
     reaction_stream_prefix: str
     reaction_stream_group_id: str
     reaction_stream_concurrency: int
+    push_stream_prefix: str
+    push_stream_group_id: str
+    push_stream_concurrency: int
+    view_stream_prefix: str
+    view_stream_group_id: str
+    view_stream_concurrency: int
+    view_counter_shard_count: int
+    view_counter_ttl_seconds: int
+    action_stream_prefix: str
+    action_stream_group_id: str
+    action_stream_concurrency: int
     reaction_stream_xadd_max_len: int
     openai_model: str
     openai_api_key: str | None
@@ -214,6 +225,68 @@ class Settings:
             reaction_stream_concurrency=max(
                 1,
                 _int_secret_env("REACTION_STREAM_CONCURRENCY", secret_values, "reactionStreamConcurrency", 1),
+            ),
+            push_stream_prefix=_secret_env(
+                "PUSH_STREAM_PREFIX",
+                secret_values,
+                "pushStreamPrefix",
+                "bs-push-v1",
+            )
+            or "bs-push-v1",
+            push_stream_group_id=_secret_env(
+                "PUSH_STREAM_GROUP_ID",
+                secret_values,
+                "pushStreamGroupId",
+                "bs-push-workers",
+            )
+            or "bs-push-workers",
+            push_stream_concurrency=max(
+                1,
+                _int_secret_env("PUSH_STREAM_CONCURRENCY", secret_values, "pushStreamConcurrency", 4),
+            ),
+            view_stream_prefix=_secret_env(
+                "VIEW_STREAM_PREFIX",
+                secret_values,
+                "viewStreamPrefix",
+                "bs-view-content-v1",
+            )
+            or "bs-view-content-v1",
+            view_stream_group_id=_secret_env(
+                "VIEW_STREAM_GROUP_ID",
+                secret_values,
+                "viewStreamGroupId",
+                "bs-view-content-workers",
+            )
+            or "bs-view-content-workers",
+            view_stream_concurrency=max(
+                1,
+                _int_secret_env("VIEW_STREAM_CONCURRENCY", secret_values, "viewStreamConcurrency", 5),
+            ),
+            view_counter_shard_count=max(
+                1,
+                _int_secret_env("VIEW_COUNTER_SHARD_COUNT", secret_values, "viewCounterShardCount", 5),
+            ),
+            view_counter_ttl_seconds=max(
+                60,
+                _int_secret_env("VIEW_COUNTER_TTL_SECONDS", secret_values, "viewCounterTtlSeconds", 172800),
+            ),
+            action_stream_prefix=_secret_env(
+                "ACTION_STREAM_PREFIX",
+                secret_values,
+                "actionStreamPrefix",
+                "bs-content-action-v1",
+            )
+            or "bs-content-action-v1",
+            action_stream_group_id=_secret_env(
+                "ACTION_STREAM_GROUP_ID",
+                secret_values,
+                "actionStreamGroupId",
+                "bs-content-action-workers",
+            )
+            or "bs-content-action-workers",
+            action_stream_concurrency=max(
+                1,
+                _int_secret_env("ACTION_STREAM_CONCURRENCY", secret_values, "actionStreamConcurrency", 4),
             ),
             reaction_stream_xadd_max_len=max(
                 100,

@@ -29,6 +29,7 @@ from .models import (
     CommunityCommentResponse,
     CommunityCommentsResponse,
     CommunityLikeResponse,
+    CommunityQuestionResponse,
     CommunityQuestionsResponse,
     AccessTokenResponse,
     BackendSnapshotResponse,
@@ -120,16 +121,27 @@ def _publish_reaction_changed(question_id: str | int, event_type: str, user_id: 
             logger.exception("failed to reconcile question stats after stream publish failure question_id=%s", question_id)
 
 
+def _publish_question_viewed(question_id: str | int, user_id: int | None) -> None:
+    if reaction_aggregator is None:
+        database.increment_question_view_count(question_id, 1)
+        return
+    try:
+        reaction_aggregator.publish_question_viewed(question_id, user_id=user_id)
+    except Exception:
+        logger.exception("failed to publish question view event question_id=%s", question_id)
+        database.increment_question_view_count(question_id, 1)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global scheduler, reaction_aggregator
     database.init()
-    if settings.scheduler_enabled:
-        scheduler = QuestionScheduler(settings=settings, database=database)
-        scheduler.start()
     if settings.reaction_aggregation_enabled:
         reaction_aggregator = QuestionReactionAggregator(settings=settings, database=database)
         reaction_aggregator.start()
+    if settings.scheduler_enabled:
+        scheduler = QuestionScheduler(settings=settings, database=database, event_streams=reaction_aggregator)
+        scheduler.start()
     try:
         yield
     finally:
@@ -993,6 +1005,21 @@ async def list_public_questions(
     return CommunityQuestionsResponse(questions=questions, totalCount=total, limit=limit, offset=offset)
 
 
+@app.get("/api/v1/public/questions/{question_id}", response_model=CommunityQuestionResponse)
+async def get_public_question(
+    question_id: str,
+    principal: AuthenticatedPrincipal | None = Depends(authenticate_optional_principal),
+) -> CommunityQuestionResponse:
+    question = database.get_public_question(
+        question_id,
+        viewer_user_id=principal.user_id if principal is not None else None,
+    )
+    if question is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
+    _publish_question_viewed(question_id, principal.user_id if principal is not None else None)
+    return CommunityQuestionResponse.model_validate(question)
+
+
 @app.put("/api/v1/public/questions/{question_id}/like", response_model=CommunityLikeResponse)
 async def like_public_question(
     question_id: str,
@@ -1006,7 +1033,7 @@ async def like_public_question(
     )
     if like is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
-    _publish_reaction_changed(question_id, "LIKE_CHANGED", principal.user_id)
+    _publish_reaction_changed(question_id, "LIKE_CREATED", principal.user_id)
     return CommunityLikeResponse.model_validate(like)
 
 
@@ -1023,7 +1050,7 @@ async def unlike_public_question(
     )
     if like is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
-    _publish_reaction_changed(question_id, "LIKE_CHANGED", principal.user_id)
+    _publish_reaction_changed(question_id, "LIKE_REMOVED", principal.user_id)
     return CommunityLikeResponse.model_validate(like)
 
 
@@ -1054,7 +1081,7 @@ async def create_public_question_comment(
     )
     if comment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found.")
-    _publish_reaction_changed(question_id, "COMMENT_CHANGED", principal.user_id)
+    _publish_reaction_changed(question_id, "COMMENT_CREATED", principal.user_id)
     return CommunityCommentResponse.model_validate(comment)
 
 

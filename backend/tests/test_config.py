@@ -31,6 +31,17 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
         "reactionStreamPrefix": "test-question-reactions",
         "reactionStreamGroupId": "test-question-reaction-workers",
         "reactionStreamConcurrency": "2",
+        "pushStreamPrefix": "test-push",
+        "pushStreamGroupId": "test-push-workers",
+        "pushStreamConcurrency": "4",
+        "viewStreamPrefix": "test-view",
+        "viewStreamGroupId": "test-view-workers",
+        "viewStreamConcurrency": "5",
+        "viewCounterShardCount": "9",
+        "viewCounterTtlSeconds": "600",
+        "actionStreamPrefix": "test-action",
+        "actionStreamGroupId": "test-action-workers",
+        "actionStreamConcurrency": "4",
         "reactionStreamXaddMaxLen": "5000",
         "smtpHost": "smtp.gmail.com",
         "smtpPort": "587",
@@ -74,6 +85,17 @@ def test_settings_loads_backend_master_key_from_aws_secret(monkeypatch):
     assert settings.reaction_stream_prefix == "test-question-reactions"
     assert settings.reaction_stream_group_id == "test-question-reaction-workers"
     assert settings.reaction_stream_concurrency == 2
+    assert settings.push_stream_prefix == "test-push"
+    assert settings.push_stream_group_id == "test-push-workers"
+    assert settings.push_stream_concurrency == 4
+    assert settings.view_stream_prefix == "test-view"
+    assert settings.view_stream_group_id == "test-view-workers"
+    assert settings.view_stream_concurrency == 5
+    assert settings.view_counter_shard_count == 9
+    assert settings.view_counter_ttl_seconds == 600
+    assert settings.action_stream_prefix == "test-action"
+    assert settings.action_stream_group_id == "test-action-workers"
+    assert settings.action_stream_concurrency == 4
     assert settings.reaction_stream_xadd_max_len == 5000
     assert settings.smtp_host == "smtp.gmail.com"
     assert settings.smtp_port == 587

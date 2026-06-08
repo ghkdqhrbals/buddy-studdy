@@ -1440,6 +1440,28 @@ final class AppState: ObservableObject {
         }
     }
 
+    func loadCommunityQuestionDetail(questionID: String) async -> CommunityQuestion? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-question-detail") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            let question = try await remotePushBackendClient.fetchPublicQuestion(
+                registration: registration,
+                questionID: questionID
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index] = question
+            }
+            return question
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
             communityErrorMessage = strings.communityRequestFailed

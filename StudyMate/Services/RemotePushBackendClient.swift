@@ -128,6 +128,11 @@ protocol RemotePushBackendClientProtocol {
         excludeDeviceID: String?
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchPublicQuestion(
+        registration: RemotePushRegistration,
+        questionID: String
+    ) async throws -> CommunityQuestion
+
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
@@ -503,6 +508,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionsResponse.self, from: data)
+    }
+
+    func fetchPublicQuestion(
+        registration: RemotePushRegistration,
+        questionID: String
+    ) async throws -> CommunityQuestion {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID)
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityQuestion.self, from: data)
     }
 
     func loginWithGoogle(
@@ -1203,6 +1221,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var author: CommunityUserProfile?
     var likeCount: Int
     var commentCount: Int
+    var viewCount: Int
     var isLikedByMe: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -1219,6 +1238,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case author
         case likeCount
         case commentCount
+        case viewCount
         case isLikedByMe
     }
 
@@ -1236,6 +1256,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         author: CommunityUserProfile?,
         likeCount: Int = 0,
         commentCount: Int = 0,
+        viewCount: Int = 0,
         isLikedByMe: Bool = false
     ) {
         self.id = id
@@ -1251,6 +1272,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.author = author
         self.likeCount = likeCount
         self.commentCount = commentCount
+        self.viewCount = viewCount
         self.isLikedByMe = isLikedByMe
     }
 
@@ -1269,6 +1291,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         author = try container.decodeIfPresent(CommunityUserProfile.self, forKey: .author)
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
         isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe) ?? false
     }
 }
