@@ -5,7 +5,7 @@ import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 
-interface StudyInputPort {
+interface StudyUseCase {
     fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse
     fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
     fun skip(principal: Principal, id: Long): StudyRecordResponse
@@ -13,12 +13,12 @@ interface StudyInputPort {
     fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
 }
 
-interface BrowseRecordsInputPort {
+interface BrowseRecordsUseCase {
     fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
     fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
     fun record(principal: Principal, id: Long): StudyRecordResponse
 }
 
-interface SnapshotInputPort {
+interface SnapshotUseCase {
     fun snapshot(principal: Principal, limit: Int, offset: Int): BackendSnapshotResponse
 }

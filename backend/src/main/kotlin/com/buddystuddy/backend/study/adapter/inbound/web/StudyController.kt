@@ -4,10 +4,10 @@ import com.buddystuddy.backend.auth.PrincipalService
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
-import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsInputPort
-import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsInputPort
-import com.buddystuddy.backend.study.application.port.inbound.SnapshotInputPort
-import com.buddystuddy.backend.study.application.port.inbound.StudyInputPort
+import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.SnapshotUseCase
+import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -25,54 +25,54 @@ import kotlin.math.min
 @RestController
 @RequestMapping("/api/v1")
 class StudyController(
-    private val studyInputPort: StudyInputPort,
-    private val recordsInputPort: BrowseRecordsInputPort,
-    private val statsInputPort: GetStudyStatsInputPort,
-    private val snapshotInputPort: SnapshotInputPort,
+    private val studyUseCase: StudyUseCase,
+    private val recordsUseCase: BrowseRecordsUseCase,
+    private val statsUseCase: GetStudyStatsUseCase,
+    private val snapshotUseCase: SnapshotUseCase,
     private val principals: PrincipalService,
 ) {
     @GetMapping("/me/snapshot")
     fun snapshot(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        snapshotInputPort.snapshot(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
+        snapshotUseCase.snapshot(principals.authenticate(request), safeLimit(limit, 1000), max(0, offset))
 
     @GetMapping("/me/records")
     fun records(@RequestParam(defaultValue = "100") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        recordsInputPort.records(principals.authenticate(request), safeLimit(limit, 500), max(0, offset))
+        recordsUseCase.records(principals.authenticate(request), safeLimit(limit, 500), max(0, offset))
 
     @DeleteMapping("/me/records")
     fun clearRecords(request: HttpServletRequest): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
     @GetMapping("/me/records/{id}")
-    fun record(@PathVariable id: Long, request: HttpServletRequest) = recordsInputPort.record(principals.authenticate(request), id)
+    fun record(@PathVariable id: Long, request: HttpServletRequest) = recordsUseCase.record(principals.authenticate(request), id)
 
     @PatchMapping("/me/records/{id}/answer")
     fun saveAnswer(@PathVariable id: Long, @RequestBody body: AnswerRequest, request: HttpServletRequest) =
-        studyInputPort.answer(principals.authenticate(request), id, body.answer, grade = false)
+        studyUseCase.answer(principals.authenticate(request), id, body.answer, grade = false)
 
     @PostMapping("/me/records/{id}/answer")
     fun grade(@PathVariable id: Long, @RequestBody body: AnswerRequest, request: HttpServletRequest) =
-        studyInputPort.answer(principals.authenticate(request), id, body.answer, grade = true)
+        studyUseCase.answer(principals.authenticate(request), id, body.answer, grade = true)
 
     @PostMapping("/me/records/{id}/skip")
-    fun skip(@PathVariable id: Long, request: HttpServletRequest) = studyInputPort.skip(principals.authenticate(request), id)
+    fun skip(@PathVariable id: Long, request: HttpServletRequest) = studyUseCase.skip(principals.authenticate(request), id)
 
     @DeleteMapping("/me/records/{id}")
     fun delete(@PathVariable id: Long, request: HttpServletRequest): ResponseEntity<Unit> {
-        studyInputPort.delete(principals.authenticate(request), id)
+        studyUseCase.delete(principals.authenticate(request), id)
         return ResponseEntity.noContent().build()
     }
 
     @PatchMapping("/me/records/{id}/publicity")
     fun publicity(@PathVariable id: Long, @RequestBody body: RecordPublicityRequest, request: HttpServletRequest) =
-        studyInputPort.publicity(principals.authenticate(request), id, body.isPublic)
+        studyUseCase.publicity(principals.authenticate(request), id, body.isPublic)
 
     @GetMapping("/me/stats")
     fun stats(@RequestParam(defaultValue = "8") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =
-        statsInputPort.stats(principals.authenticate(request), safeLimit(limit, 100), max(0, offset))
+        statsUseCase.stats(principals.authenticate(request), safeLimit(limit, 100), max(0, offset))
 
     @PostMapping("/me/questions")
     fun createQuestion(@RequestBody body: CreateQuestionRequest, request: HttpServletRequest) =
-        studyInputPort.createQuestion(principals.authenticate(request), body.topic)
+        studyUseCase.createQuestion(principals.authenticate(request), body.topic)
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

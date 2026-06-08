@@ -5,7 +5,7 @@ import com.buddystuddy.backend.domain.QuestionEntity
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
-import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsInputPort
+import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -21,7 +21,7 @@ import kotlin.math.min
 class StatsService(
     private val questions: QuestionPort,
     private val stats: QuestionStatsPort,
-) : GetStudyStatsInputPort {
+) : GetStudyStatsUseCase {
     override fun stats(principal: Principal, limit: Int, offset: Int): StatsResponse =
         stats(principal.userId, limit, offset)
 

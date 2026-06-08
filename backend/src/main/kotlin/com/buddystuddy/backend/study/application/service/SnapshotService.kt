@@ -9,7 +9,7 @@ import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.study.application.model.BackendSnapshotResponse
-import com.buddystuddy.backend.study.application.port.inbound.SnapshotInputPort
+import com.buddystuddy.backend.study.application.port.inbound.SnapshotUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -28,7 +28,7 @@ class SnapshotService(
     private val schedules: SchedulePort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
-) : SnapshotInputPort {
+) : SnapshotUseCase {
     @Transactional(readOnly = true)
     override fun snapshot(principal: Principal, limit: Int, offset: Int): BackendSnapshotResponse {
         val schedule = schedules.findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(principal.deviceId, principal.userId)

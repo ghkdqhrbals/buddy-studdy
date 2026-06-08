@@ -11,8 +11,8 @@ import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.study.domain.StudyQuestionAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomAggregate
 import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
-import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsInputPort
-import com.buddystuddy.backend.study.application.port.inbound.StudyInputPort
+import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -31,7 +31,7 @@ class StudyService(
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
     private val context: StudyContextService,
-) : StudyInputPort, BrowseRecordsInputPort {
+) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
         val schedule = context.scheduleFor(principal, topic)
