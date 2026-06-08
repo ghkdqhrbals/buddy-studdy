@@ -32,10 +32,20 @@ struct CommunityQuestionStatsMeta: View {
                 Text(Self.relativeDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
                     .fixedSize(horizontal: true, vertical: false)
 
-                if let authorName = question.author?.displayName, !authorName.isEmpty {
-                    Text(authorName)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                if let author = question.author, !author.displayName.isEmpty {
+                    HStack(spacing: 4) {
+                        PixelAvatarGlyph(
+                            avatarName: ProfileAvatarOption.glyphName(for: author.avatarSymbolName),
+                            colorSeed: author.avatarColorSeed
+                        )
+                        .frame(width: 14, height: 14)
+
+                        Text(author.displayName)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
                 }
             }
             .multilineTextAlignment(.trailing)

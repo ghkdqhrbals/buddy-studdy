@@ -776,7 +776,7 @@ private struct HomeProfileAvatar: View {
     #endif
 }
 
-private struct PixelAvatarGlyph: View {
+struct PixelAvatarGlyph: View {
     var avatarName: String
     var colorSeed: String
     var usesNeutralColor: Bool = false
@@ -809,7 +809,7 @@ private struct PixelAvatarGlyph: View {
     }
 }
 
-private struct PixelAvatarCell: Identifiable {
+struct PixelAvatarCell: Identifiable {
     enum Tone {
         case outline
         case shade
@@ -825,7 +825,7 @@ private struct PixelAvatarCell: Identifiable {
     var tone: Tone
 }
 
-private struct PixelAvatarPalette {
+struct PixelAvatarPalette {
     var seed: String
     var usesNeutralColor: Bool
 
@@ -874,7 +874,7 @@ private struct PixelAvatarPalette {
     }
 }
 
-private enum PixelAvatarPattern {
+enum PixelAvatarPattern {
     static func cells(for avatarName: String) -> [PixelAvatarCell] {
         switch avatarName {
         case "pixel-scholar":
@@ -1101,7 +1101,7 @@ private enum PixelAvatarPattern {
     }
 }
 
-private extension Color {
+extension Color {
     func lighter() -> Color {
         self.opacity(0.82)
     }
@@ -1657,7 +1657,7 @@ private struct EmailSignInSheet: View {
     }
 }
 
-private enum ProfileAvatarOption {
+enum ProfileAvatarOption {
     static let defaultSymbolName = "pixel-buddy"
 
     static let all = [
