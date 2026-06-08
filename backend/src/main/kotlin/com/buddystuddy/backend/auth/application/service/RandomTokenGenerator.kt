@@ -1,11 +1,11 @@
 package com.buddystuddy.backend.auth.application.service
 
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import java.security.SecureRandom
 import java.util.Base64
 
-@Service
-class RandomTokenService {
+@Component
+class RandomTokenGenerator {
     private val random = SecureRandom()
 
     fun create(prefix: String): String {

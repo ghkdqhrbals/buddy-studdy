@@ -9,9 +9,9 @@ import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 
-@Service
+@Component
 class PublicQuestionReactionRedisStreamPublisher(
     private val properties: BuddyStuddyProperties,
     @Qualifier("viewStreamPublisher") viewPublisherProvider: ObjectProvider<RedisStreamPublisher>,

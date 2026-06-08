@@ -9,10 +9,10 @@ import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 
-@Service
-class RedisStreamCoordinatorService(
+@Component
+class RedisStreamPushPublisher(
     private val properties: BuddyStuddyProperties,
     @Qualifier("pushStreamPublisher") pushPublisherProvider: ObjectProvider<RedisStreamPublisher>,
 ) : QuestionPushPublishPort {

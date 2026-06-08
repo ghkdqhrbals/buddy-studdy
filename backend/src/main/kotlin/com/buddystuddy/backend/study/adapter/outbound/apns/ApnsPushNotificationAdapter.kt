@@ -4,7 +4,7 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import io.jsonwebtoken.Jwts
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -16,8 +16,8 @@ import java.time.Duration
 import java.util.Base64
 import java.util.Date
 
-@Service
-class ApnsPushService(
+@Component
+class ApnsPushNotificationAdapter(
     private val properties: BuddyStuddyProperties,
 ) : PushNotificationPort {
     private val logger = LoggerFactory.getLogger(javaClass)

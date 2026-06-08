@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.profile.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUseCase
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1")
 class ProfileController(
     private val profiles: ProfileUseCase,
-    private val principals: PrincipalService,
+    private val principals: PrincipalResolver,
 ) {
     @GetMapping("/me/profile")
     fun profile(request: HttpServletRequest) = profiles.profile(principals.authenticate(request))

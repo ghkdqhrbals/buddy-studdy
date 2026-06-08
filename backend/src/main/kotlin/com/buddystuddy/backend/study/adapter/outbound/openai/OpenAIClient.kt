@@ -6,10 +6,10 @@ import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 
-@Service
+@Component
 class OpenAIClient : OpenAIPort {
     private val rest = RestClient.builder().baseUrl("https://api.openai.com").build()
     private val mapper = jacksonObjectMapper()

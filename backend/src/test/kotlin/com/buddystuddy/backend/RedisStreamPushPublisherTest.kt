@@ -1,7 +1,7 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamCoordinatorService
+import com.buddystuddy.backend.study.adapter.outbound.stream.RedisStreamPushPublisher
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.redisstream.consumer.ProducerRoutingShard
 import com.redisstream.producer.ProducerRoute
@@ -14,7 +14,7 @@ import org.springframework.beans.factory.ObjectProvider
 import java.time.Instant
 import java.util.stream.Stream
 
-class RedisStreamCoordinatorServiceTest {
+class RedisStreamPushPublisherTest {
     @Test
     fun `publish methods return false when streams are disabled`() {
         val service = service(enabled = false, pushPublisher = RecordingPublisher())
@@ -65,11 +65,11 @@ class RedisStreamCoordinatorServiceTest {
     private fun service(
         enabled: Boolean,
         pushPublisher: RedisStreamPublisher? = null,
-    ): RedisStreamCoordinatorService {
+    ): RedisStreamPushPublisher {
         val properties = BuddyStuddyProperties().apply {
             streams.enabled = enabled
         }
-        return RedisStreamCoordinatorService(
+        return RedisStreamPushPublisher(
             properties,
             provider(pushPublisher),
         )

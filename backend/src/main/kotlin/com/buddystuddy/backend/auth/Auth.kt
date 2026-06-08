@@ -9,7 +9,7 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
@@ -17,8 +17,8 @@ import java.util.Date
 
 data class Principal(val userId: Long, val deviceId: String, val sessionId: Long, val anonymous: Boolean)
 
-@Service
-class TokenService(private val properties: BuddyStuddyProperties) {
+@Component
+class TokenProvider(private val properties: BuddyStuddyProperties) {
     private val key by lazy {
         val seed = properties.auth.jwtSecret.ifBlank { properties.crypto.masterKey.ifBlank { "dev-buddystuddy-secret" } }
         Keys.hmacShaKeyFor(MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8)))
@@ -54,9 +54,9 @@ class TokenService(private val properties: BuddyStuddyProperties) {
     }
 }
 
-@Service
-class PrincipalService(
-    private val tokenService: TokenService,
+@Component
+class PrincipalResolver(
+    private val tokenService: TokenProvider,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
 ) {

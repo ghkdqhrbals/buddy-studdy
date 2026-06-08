@@ -10,10 +10,10 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 
-@Service
-class StudyContextService(
+@Component
+class StudyContextProvider(
     private val properties: BuddyStuddyProperties,
     private val schedules: SchedulePort,
     private val questions: QuestionPort,

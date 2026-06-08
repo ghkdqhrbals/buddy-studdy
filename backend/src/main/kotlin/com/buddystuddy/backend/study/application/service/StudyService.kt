@@ -30,7 +30,7 @@ class StudyService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
-    private val context: StudyContextService,
+    private val context: StudyContextProvider,
 ) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {

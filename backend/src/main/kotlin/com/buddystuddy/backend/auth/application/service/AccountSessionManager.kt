@@ -10,11 +10,11 @@ import com.buddystuddy.backend.domain.DeviceEntity
 import com.buddystuddy.backend.domain.UserDeviceEntity
 import com.buddystuddy.backend.domain.UserEntity
 import org.springframework.http.HttpStatus
-import org.springframework.stereotype.Service
+import org.springframework.stereotype.Component
 import java.time.Instant
 
-@Service
-class AccountSessionService(
+@Component
+class AccountSessionManager(
     private val users: UserPort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,

@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
@@ -29,7 +29,7 @@ class StudyController(
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
     private val snapshotUseCase: SnapshotUseCase,
-    private val principals: PrincipalService,
+    private val principals: PrincipalResolver,
 ) {
     @GetMapping("/me/snapshot")
     fun snapshot(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, request: HttpServletRequest) =

@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.auth.application.service
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.auth.TokenService
+import com.buddystuddy.backend.auth.TokenProvider
 import com.buddystuddy.backend.auth.sha256
 import com.buddystuddy.backend.auth.domain.AccountAggregate
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
@@ -34,9 +34,9 @@ class LoginService(
     private val properties: BuddyStuddyProperties,
     private val users: UserPort,
     private val devices: DevicePort,
-    private val tokenService: TokenService,
-    private val sessions: AccountSessionService,
-    private val tokens: RandomTokenService,
+    private val tokenService: TokenProvider,
+    private val sessions: AccountSessionManager,
+    private val tokens: RandomTokenGenerator,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
 

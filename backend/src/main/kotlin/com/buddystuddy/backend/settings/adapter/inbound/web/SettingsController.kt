@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.settings.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1")
 class SettingsController(
     private val settings: SettingsUseCase,
-    private val principals: PrincipalService,
+    private val principals: PrincipalResolver,
 ) {
     @PutMapping("/me/schedule", "/me/settings")
     fun schedule(@Valid @RequestBody body: ScheduleRequest, request: HttpServletRequest) =

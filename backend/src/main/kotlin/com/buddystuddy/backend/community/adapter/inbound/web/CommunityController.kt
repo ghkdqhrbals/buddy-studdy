@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.community.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystuddy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
 import com.buddystuddy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
@@ -23,7 +23,7 @@ import kotlin.math.min
 @RequestMapping("/api/v1")
 class CommunityController(
     private val community: CommunityUseCase,
-    private val principals: PrincipalService,
+    private val principals: PrincipalResolver,
 ) {
     @GetMapping("/public/questions")
     fun publicQuestions(

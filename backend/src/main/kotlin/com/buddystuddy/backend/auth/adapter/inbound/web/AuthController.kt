@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.auth.adapter.inbound.web
 
-import com.buddystuddy.backend.auth.PrincipalService
+import com.buddystuddy.backend.auth.PrincipalResolver
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
@@ -33,7 +33,7 @@ class AuthController(
     private val issueDeviceToken: IssueDeviceTokenUseCase,
     private val login: LoginUseCase,
     private val updatePushToken: UpdatePushTokenUseCase,
-    private val principals: PrincipalService,
+    private val principals: PrincipalResolver,
 ) {
     @PostMapping("/devices/register")
     fun register(@Valid @RequestBody body: DeviceRegisterRequest) = registerDevice.register(body.toCommand())
