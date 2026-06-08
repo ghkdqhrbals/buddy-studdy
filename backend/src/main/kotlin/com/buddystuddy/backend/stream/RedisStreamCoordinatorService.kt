@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
-import java.util.UUID
 
 @Service
 class RedisStreamCoordinatorService(
@@ -22,61 +21,63 @@ class RedisStreamCoordinatorService(
     private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
     private val actionPublisher: RedisStreamPublisher? = actionPublisherProvider.ifAvailable
 
-    fun publishPush(event: QuestionPushRequestedEvent): Boolean =
-        publishWithStarter(
-            publisher = pushPublisher,
-            prefix = properties.streams.pushPrefix,
-            partitionKey = event.topic.ifBlank { event.recordId.toString() },
-            event = event,
-        )
+    fun publishPush(event: QuestionPushRequestedEvent): Boolean {
+        if (!properties.streams.enabled) return false
+        val publisher = pushPublisher ?: return false
+        val fields = event.toStringMapWithoutNull()
+        return try {
+            val published = publisher.publish(
+                event.topic.ifBlank { event.recordId.toString() },
+                fields,
+                RedisStreamPublishOptions(properties.streams.maxLen, true),
+            )
+            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
+            true
+        } catch (error: Exception) {
+            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.pushPrefix, error.message)
+            false
+        }
+    }
 
-    fun publishQuestionViewed(questionId: Long, userId: Long?): Boolean =
-        publishWithStarter(
-            publisher = viewPublisher,
-            prefix = properties.streams.viewPrefix,
-            partitionKey = questionId.toString(),
-            event = QuestionViewedEvent(questionId = questionId, userId = userId),
-        )
+    fun publishQuestionViewed(questionId: Long, userId: Long?): Boolean {
+        if (!properties.streams.enabled) return false
+        val publisher = viewPublisher ?: return false
+        val fields = QuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
+        return try {
+            val published = publisher.publish(
+                questionId.toString(),
+                fields,
+                RedisStreamPublishOptions(properties.streams.maxLen, true),
+            )
+            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
+            true
+        } catch (error: Exception) {
+            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.viewPrefix, error.message)
+            false
+        }
+    }
 
     fun publishQuestionChanged(questionId: Long, eventType: String, userId: Long?): Boolean =
         publishQuestionChanged(questionId, QuestionStreamEventType.valueOf(eventType), userId)
 
-    fun publishQuestionChanged(questionId: Long, eventType: QuestionStreamEventType, userId: Long?): Boolean =
-        publishWithStarter(
-            publisher = actionPublisher,
-            prefix = properties.streams.actionPrefix,
-            partitionKey = questionId.toString(),
-            event = QuestionActionEvent(
-                questionId = questionId,
-                eventType = eventType,
-                userId = userId,
-            ),
-        )
-
-    private fun publishWithStarter(
-        publisher: RedisStreamPublisher?,
-        prefix: String,
-        partitionKey: String?,
-        event: RedisStreamEvent,
-    ): Boolean {
+    fun publishQuestionChanged(questionId: Long, eventType: QuestionStreamEventType, userId: Long?): Boolean {
         if (!properties.streams.enabled) return false
-        val publisher = publisher ?: return false
-        val fields = event.toStringMapWithoutNull()
+        val publisher = actionPublisher ?: return false
+        val fields = QuestionActionEvent(
+            questionId = questionId,
+            eventType = eventType,
+            userId = userId,
+        ).toStringMapWithoutNull()
         return try {
             val published = publisher.publish(
-                partitionKey ?: UUID.randomUUID().toString(),
+                questionId.toString(),
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
-            logger.info(
-                "redis_stream_published stream={} id={} fields={}",
-                published.streamKey,
-                published.recordId,
-                fields.keys,
-            )
+            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
             true
         } catch (error: Exception) {
-            logger.warn("redis_stream_publish_failed prefix={} error={}", prefix, error.message)
+            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.actionPrefix, error.message)
             false
         }
     }
