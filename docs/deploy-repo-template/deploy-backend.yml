@@ -83,6 +83,7 @@ jobs:
           DATABASE_URL="jdbc:postgresql://buddystuddy-db:5432/${POSTGRES_DB}"
 
           cat > .env <<ENV
+          SPRING_PROFILES_ACTIVE=prod
           DATABASE_URL=${DATABASE_URL}
           DATABASE_USERNAME=${POSTGRES_USER}
           DATABASE_PASSWORD=${POSTGRES_PASSWORD}

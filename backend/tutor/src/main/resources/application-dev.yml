@@ -1,0 +1,19 @@
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystuddy_dev}
+    username: ${DATABASE_USERNAME:buddystuddy}
+    password: ${DATABASE_PASSWORD:dev-password}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:false}
+
+buddystuddy:
+  scheduler:
+    enabled: ${SCHEDULER_ENABLED:true}
+  streams:
+    enabled: ${REACTION_STREAM_ENABLED:true}
+  openapi:
+    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    access-token: ${OPENAPI_ACCESS_TOKEN:dev-openapi}

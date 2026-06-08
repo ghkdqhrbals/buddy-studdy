@@ -30,6 +30,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 
 Set these on the deployment host or deploy workflow. Do not commit them.
 
+- `SPRING_PROFILES_ACTIVE`: runtime profile. Use `local`, `dev`, or `prod`; the default is `local`.
 - `BACKEND_MASTER_KEY`: base64/random master key used to encrypt stored OpenAI API keys.
 - `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: Apple APNs key ID.
@@ -57,7 +58,13 @@ cd backend
 docker compose up --build
 ```
 
-Local runs use PostgreSQL from `docker-compose.yml`.
+Local runs use PostgreSQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=local`.
+
+## Runtime Profiles
+
+- `local`: local PostgreSQL defaults, scheduler/stream disabled by default, API docs enabled.
+- `dev`: development/staging defaults, scheduler/stream enabled, API docs enabled.
+- `prod`: production deployment defaults, scheduler/stream enabled, API docs disabled unless explicitly enabled.
 
 ## Docker
 

@@ -25,6 +25,7 @@ services:
     env_file:
       - .env
     environment:
+      SPRING_PROFILES_ACTIVE: local
       DATABASE_URL: jdbc:postgresql://db:5432/buddystuddy
       DATABASE_USERNAME: buddystuddy
       DATABASE_PASSWORD: local-password
