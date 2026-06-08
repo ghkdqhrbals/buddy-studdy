@@ -111,3 +111,24 @@ def test_view_flush_skips_when_lock_is_held(monkeypatch, db: Database):
     detail = db.get_public_question(question_id)
     assert detail is not None
     assert detail["viewCount"] == 0
+
+
+def test_cluster_reader_patch_reads_one_stream_key_per_xreadgroup():
+    from redisstream.redis_stream import RedisStreamReader
+
+    class FakeCommands:
+        def __init__(self):
+            self.calls = []
+
+        def xreadgroup(self, stream_keys, consumer_group, consumer_name, *, count, block_ms):
+            self.calls.append(list(stream_keys))
+            return []
+
+    QuestionReactionAggregator._patch_redisstream_cluster_reader()
+    commands = FakeCommands()
+    reader = RedisStreamReader(commands, "group", "consumer")
+
+    reader.poll_round_robin(["stream:0", "stream:1", "stream:2"], count=10, timeout_ms=1000)
+    reader.poll_round_robin(["stream:0", "stream:1", "stream:2"], count=10, timeout_ms=1000)
+
+    assert commands.calls == [["stream:0"], ["stream:1"]]

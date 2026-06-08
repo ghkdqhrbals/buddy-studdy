@@ -163,6 +163,9 @@ class QuestionReactionAggregator:
             from redisstream import RedisStreamCoordinator
             from redisstream.client import CoordinatorClient
 
+            if self.settings.redis_cluster:
+                self._patch_redisstream_cluster_reader()
+
             coordinator_client = CoordinatorClient(
                 self.settings.reaction_stream_coordinator_base_url,
                 bearer_token=self.settings.reaction_stream_coordinator_token,
@@ -374,3 +377,30 @@ class QuestionReactionAggregator:
 
         kwargs["db"] = self.settings.redis_db
         return redis.Redis(**kwargs)
+
+    @staticmethod
+    def _patch_redisstream_cluster_reader() -> None:
+        from redisstream.redis_stream import RedisStreamReader
+
+        if getattr(RedisStreamReader, "_buddystuddy_cluster_safe", False):
+            return
+
+        original = RedisStreamReader.poll_round_robin
+
+        def poll_single_hash_slot(self, stream_keys: list[str], *, count: int, timeout_ms: int):
+            if not stream_keys:
+                return []
+            cursor = self._cursor % len(stream_keys)
+            stream_key = stream_keys[cursor]
+            self._cursor = (cursor + 1) % len(stream_keys)
+            return self.commands.xreadgroup(
+                [stream_key],
+                self.consumer_group,
+                self.consumer_name,
+                count=count,
+                block_ms=timeout_ms,
+            )
+
+        RedisStreamReader._buddystuddy_original_poll_round_robin = original
+        RedisStreamReader.poll_round_robin = poll_single_hash_slot
+        RedisStreamReader._buddystuddy_cluster_safe = True
