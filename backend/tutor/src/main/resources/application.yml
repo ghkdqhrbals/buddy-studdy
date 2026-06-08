@@ -12,12 +12,17 @@ spring:
       maximum-pool-size: ${DB_POOL_MAX:10}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
     properties:
       hibernate:
         jdbc:
           time_zone: UTC
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
   jackson:
     property-naming-strategy: LOWER_CAMEL_CASE
   data:

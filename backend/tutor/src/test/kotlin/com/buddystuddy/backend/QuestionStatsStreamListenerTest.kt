@@ -24,6 +24,7 @@ import java.util.stream.Stream
         "spring.datasource.url=jdbc:h2:mem:buddystuddy-streams;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.flyway.enabled=false",
         "buddystuddy.scheduler.enabled=false",
         "buddystuddy.streams.enabled=false",
         "buddystuddy.crypto.master-key=test-master-key",
