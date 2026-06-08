@@ -4,6 +4,9 @@ import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.auth.domain.Account
+import com.buddystuddy.auth.domain.AccountDevice
+import com.buddystuddy.auth.domain.AccountUser
+import com.buddystuddy.auth.domain.DeviceAttachment
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.domain.DeviceEntity
@@ -35,7 +38,7 @@ class AccountSessionManager(
                 updatedAt = now,
             )
         )
-        Account.of(user, device).attachDevice(now)
+        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         return user
     }
 
@@ -47,5 +50,14 @@ class AccountSessionManager(
         session.updatedAt = now
         session.sessionExpiresAt = expiresAt
         return userDevices.save(session)
+    }
+
+    private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+
+    private fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
+
+    private fun DeviceEntity.apply(attachment: DeviceAttachment) {
+        userId = attachment.userId
+        updatedAt = attachment.updatedAt
     }
 }

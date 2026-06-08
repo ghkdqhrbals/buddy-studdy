@@ -1,25 +1,44 @@
 package com.buddystuddy.auth.domain
 
-import com.buddystuddy.domain.DeviceEntity
-import com.buddystuddy.domain.UserEntity
 import java.time.Instant
 
 class Account private constructor(
-    val user: UserEntity,
-    val device: DeviceEntity,
+    val user: AccountUser,
+    val device: AccountDevice,
 ) {
-    fun attachDevice(now: Instant = Instant.now()) {
-        device.userId = user.id
-        device.updatedAt = now
-    }
+    fun attachDevice(now: Instant = Instant.now()) = DeviceAttachment(
+        userId = user.id,
+        updatedAt = now,
+    )
 
-    fun updatePushToken(apnsToken: String, apnsEnvironment: String, now: Instant = Instant.now()) {
-        device.apnsToken = apnsToken
-        device.apnsEnvironment = apnsEnvironment
-        device.updatedAt = now
-    }
+    fun updatePushToken(apnsToken: String, apnsEnvironment: String, now: Instant = Instant.now()) = PushTokenUpdate(
+        apnsToken = apnsToken,
+        apnsEnvironment = apnsEnvironment,
+        updatedAt = now,
+    )
 
     companion object {
-        fun of(user: UserEntity, device: DeviceEntity) = Account(user, device)
+        fun of(user: AccountUser, device: AccountDevice) = Account(user, device)
     }
 }
+
+data class AccountUser(
+    val id: Long,
+    val status: String,
+)
+
+data class AccountDevice(
+    val deviceId: String,
+    val userId: Long?,
+)
+
+data class DeviceAttachment(
+    val userId: Long,
+    val updatedAt: Instant,
+)
+
+data class PushTokenUpdate(
+    val apnsToken: String,
+    val apnsEnvironment: String,
+    val updatedAt: Instant,
+)

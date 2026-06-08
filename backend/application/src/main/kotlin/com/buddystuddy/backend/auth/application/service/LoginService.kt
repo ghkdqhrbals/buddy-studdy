@@ -4,6 +4,10 @@ import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.TokenProvider
 import com.buddystuddy.backend.auth.sha256
 import com.buddystuddy.auth.domain.Account
+import com.buddystuddy.auth.domain.AccountDevice
+import com.buddystuddy.auth.domain.AccountUser
+import com.buddystuddy.auth.domain.DeviceAttachment
+import com.buddystuddy.auth.domain.PushTokenUpdate
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
@@ -101,7 +105,7 @@ class LoginService(
     override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
         val device = sessions.device(principal.deviceId)
         val user = users.findById(principal.userId).orElseThrow()
-        Account.of(user, device).updatePushToken(command.apnsToken, command.apnsEnvironment)
+        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).updatePushToken(command.apnsToken, command.apnsEnvironment))
     }
 
     @Transactional
@@ -130,7 +134,7 @@ class LoginService(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
         val device = sessions.device(principal.deviceId)
-        Account.of(user, device).attachDevice(now)
+        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
@@ -163,9 +167,24 @@ class LoginService(
             )
         )
         val device = sessions.device(principal.deviceId)
-        Account.of(user, device).attachDevice(now)
+        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
+    }
+
+    private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+
+    private fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
+
+    private fun DeviceEntity.apply(update: PushTokenUpdate) {
+        apnsToken = update.apnsToken
+        apnsEnvironment = update.apnsEnvironment
+        updatedAt = update.updatedAt
+    }
+
+    private fun DeviceEntity.apply(attachment: DeviceAttachment) {
+        userId = attachment.userId
+        updatedAt = attachment.updatedAt
     }
 }
