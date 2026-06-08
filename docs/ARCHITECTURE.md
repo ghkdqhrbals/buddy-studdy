@@ -2,7 +2,7 @@
 
 ## Overview
 
-BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app keeps lightweight local state for settings, drafts, and recoverability, but production question generation, answer grading, API-key validation, scheduled delivery, settings, records, and statistics are owned by the Python backend. Study records are not persisted in a local SQLite database; they are held as an in-memory view cache and refetched from the backend. The app never calls OpenAI directly; OpenAI requests are made only from the backend using the user's stored API key. iCloud/CloudKit snapshot sync is no longer exposed or enabled; backend persistence is the active source of truth. Internal target names, bundle identifiers, background task identifiers, and legacy CloudKit record types retain `StudyMate` to avoid breaking existing installs.
+BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The app keeps lightweight local state for settings, drafts, and recoverability, but production question generation, answer grading, API-key validation, scheduled delivery, settings, records, and statistics are owned by the Spring Boot Kotlin backend. Study records are not persisted in a local SQLite database; they are held as an in-memory view cache and refetched from the backend. The app never calls OpenAI directly; OpenAI requests are made only from the backend using the user's stored API key. iCloud/CloudKit snapshot sync is no longer exposed or enabled; backend persistence is the active source of truth. Internal target names, bundle identifiers, background task identifiers, and legacy CloudKit record types retain `StudyMate` to avoid breaking existing installs.
 
 ## Targets
 
@@ -40,15 +40,16 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
   - Handles local notifications, notification actions, iOS remote notification bridge, and macOS study window foregrounding.
 
 - `backend/`
-  - FastAPI APNs push backend.
-  - Storage is implemented with SQLAlchemy ORM models in `backend/app/storage/models.py` and repository layers in `backend/app/storage/repository.py`.
-  - Topic-level statistics calculation is separated into `backend/app/services/stats_service.py` for clearer service boundaries.
+  - Spring Boot Kotlin APNs push backend.
+  - Storage is implemented with Spring Data JPA entities and repositories under `backend/src/main/kotlin/com/buddystuddy/backend/domain`.
+  - Topic-level statistics calculation is separated into `backend/src/main/kotlin/com/buddystuddy/backend/stats/StatsService.kt` for clearer service boundaries.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.
   - Uses a private Dockerized PostgreSQL container with a persistent named volume.
   - Calls OpenAI for API-key validation, question generation, and answer grading.
   - Stores generated questions in PostgreSQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
+  - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through redis-stream-coordinator.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
 
 - `Views`
@@ -64,7 +65,7 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
 Manual action / pull-to-refresh / backend scheduled interval
 -> AppState.generateQuestion
 -> RemotePushBackendClient.createQuestion
--> backend POST /api/v1/devices/{deviceId}/questions
+-> backend POST /api/v1/me/questions
 -> backend calls OpenAI and stores an ungraded StudyRecord in PostgreSQL
 -> SettingsStore caches the returned StudyRecord
 -> current question updates only when it is safe to activate
@@ -95,14 +96,16 @@ User answer
 
 - iPhone registers for remote notifications through `UIApplication`.
 - iPhone app timers only run while the app process is active. For locked/background delivery, the app opportunistically pre-generates at most one pending question notification when entering background and schedules it for the configured interval. If a question notification is already pending, it does not create another. `BGAppRefresh` is also requested at the next due date, but iOS does not guarantee exact wake-up timing.
-- The Python backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, and sends APNs alerts on the configured interval.
+- The Spring Boot Kotlin backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, publishes push jobs through redis-stream-coordinator, and sends APNs alerts from an `@StreamListener` consumer.
 - Scheduled delivery requires an APNs token. If a backend device exists without a token, the scheduler defers the due item instead of generating an undeliverable push.
 
 ## Community Identity
 
-- Device credentials remain the base authentication mechanism for app/backend API calls.
+- Device credentials are used to register a backend device and bootstrap or refresh an access token.
+- Access tokens carry both `user_id` and `device_id`; protected API calls resolve the current principal from those claims and the stored user-device mapping.
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
-- Public question rows can expose only the author's public profile fields: display name, bio, and avatar URL.
+- User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion immediately removes the active profile, sign-in mappings, public questions, and related study records, then reconnects the current device to an anonymous user.
+- Public question rows can expose only the author's public profile fields: display name and bio. Profile photo changes are not exposed in the current iOS app.
 - Question publicity defaults to private unless the signed-in user enables public sharing.
 - Reports are stored in PostgreSQL and can optionally be emailed to the operator Gmail through SMTP settings.
 

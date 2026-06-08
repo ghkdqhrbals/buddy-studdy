@@ -441,19 +441,15 @@ private struct SecretsSettingsSection: View {
                     Button {
                         showsAPIKey.toggle()
                     } label: {
-                        Label(showsAPIKey ? strings.hide : strings.show, systemImage: showsAPIKey ? "eye.slash" : "eye")
+                        Image(systemName: showsAPIKey ? "eye.slash" : "eye")
+                            .frame(width: 28, height: 28)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showsAPIKey ? strings.hide : strings.show)
 
                     Button(strings.paste) {
                         appState.applyClipboardOpenAIAPIKey()
                     }
-                }
-
-                if let statusMessage = appState.statusMessage {
-                    Text(statusMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let validationMessage = appState.apiKeyValidationMessage {
@@ -462,15 +458,7 @@ private struct SecretsSettingsSection: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Text(strings.openAIAPIKeyHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-
-            Text(appState.hasUnsavedSettingsChanges ? strings.unsavedAPIKeyHelp : strings.apiKeyStorageHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
             Divider()
 
@@ -487,9 +475,6 @@ private struct SecretsSettingsSection: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
 
-                Text(strings.openAIModelHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Divider()
@@ -498,11 +483,6 @@ private struct SecretsSettingsSection: View {
                 Text(strings.openAIBilling)
                     .font(.subheadline)
                     .fontWeight(.semibold)
-
-                Text(strings.openAIBillingHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 12) {
                     Button {
@@ -590,9 +570,6 @@ private struct StudySettingsSection: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-                Text(strings.difficultyScaleHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Stepper(
@@ -612,9 +589,6 @@ private struct StudySettingsSection: View {
                     )
                 )
 
-                Text(strings.questionVisibilityHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Menu {

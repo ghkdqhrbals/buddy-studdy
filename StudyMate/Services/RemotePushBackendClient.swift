@@ -4,12 +4,71 @@ struct RemotePushRegistration: Codable, Equatable {
     var deviceID: String
     var clientSecret: String
     var apnsToken: String
+    var accessToken: String? = nil
+    var accessTokenExpiresAt: Date? = nil
 
     enum CodingKeys: String, CodingKey {
         case deviceID = "deviceId"
         case clientSecret
         case apnsToken
+        case accessToken
+        case accessTokenExpiresAt
     }
+
+    var hasAccessToken: Bool {
+        guard let accessToken,
+              !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+
+        guard accessTokenDeviceID == deviceID else {
+            return false
+        }
+
+        if let accessTokenExpiresAt {
+            return accessTokenExpiresAt > Date().addingTimeInterval(60)
+        }
+
+        return true
+    }
+
+    private var accessTokenDeviceID: String? {
+        guard let accessToken else {
+            return nil
+        }
+
+        let segments = accessToken.split(separator: ".")
+        guard segments.count >= 2,
+              let payloadData = Self.base64URLDecodedData(String(segments[1])),
+              let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let deviceID = object["device_id"] as? String,
+              !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        return deviceID
+    }
+
+    private static func base64URLDecodedData(_ value: String) -> Data? {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let paddingLength = (4 - base64.count % 4) % 4
+        if paddingLength > 0 {
+            base64.append(String(repeating: "=", count: paddingLength))
+        }
+        return Data(base64Encoded: base64)
+    }
+}
+
+struct CommunityLoginResult: Equatable {
+    var profile: CommunityUserProfile
+    var registration: RemotePushRegistration
+}
+
+struct EmailVerificationCodeResult: Equatable {
+    var email: String
+    var expiresInSeconds: Int
 }
 
 @MainActor
@@ -26,6 +85,8 @@ protocol RemotePushBackendClientProtocol {
         apnsToken: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration
+
+    func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
     func updateSchedule(
         registration: RemotePushRegistration,
@@ -67,18 +128,40 @@ protocol RemotePushBackendClientProtocol {
         excludeDeviceID: String?
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchPublicQuestion(
+        registration: RemotePushRegistration,
+        questionID: String
+    ) async throws -> CommunityQuestion
+
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
-    ) async throws -> CommunityUserProfile
+    ) async throws -> CommunityLoginResult
+
+    func requestEmailVerificationCode(
+        registration: RemotePushRegistration,
+        email: String
+    ) async throws -> EmailVerificationCodeResult
+
+    func loginWithEmail(
+        registration: RemotePushRegistration,
+        email: String,
+        password: String,
+        verificationCode: String?
+    ) async throws -> CommunityLoginResult
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
 
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
-        bio: String?
+        bio: String?,
+        avatarSymbolName: String?,
+        avatarColorSeed: String?,
+        pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile
+
+    func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
     func reportCommunityQuestion(
         registration: RemotePushRegistration,
@@ -87,7 +170,26 @@ protocol RemotePushBackendClientProtocol {
         message: String
     ) async throws
 
-    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord
+    func setCommunityQuestionLike(
+        registration: RemotePushRegistration,
+        questionID: String,
+        isLiked: Bool
+    ) async throws -> CommunityLikeState
+
+    func fetchCommunityQuestionComments(
+        registration: RemotePushRegistration,
+        questionID: String,
+        limit: Int,
+        offset: Int
+    ) async throws -> CommunityCommentsResponse
+
+    func createCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        body: String
+    ) async throws -> CommunityQuestionComment
+
+    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord
 
     func gradeRecord(
         registration: RemotePushRegistration,
@@ -110,6 +212,12 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         recordID: String
     ) async throws
+
+    func updateRecordPublicity(
+        registration: RemotePushRegistration,
+        recordID: String,
+        isPublic: Bool
+    ) async throws -> StudyRecord
 
     func clearRecords(registration: RemotePushRegistration) async throws
 
@@ -166,7 +274,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return RemotePushRegistration(
             deviceID: response.deviceID,
             clientSecret: response.clientSecret,
-            apnsToken: apnsToken ?? ""
+            apnsToken: apnsToken ?? "",
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
         )
     }
 
@@ -181,7 +291,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "push-token")
+            url: endpoint("api", "v1", "me", "push-token")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -191,7 +301,26 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
-            apnsToken: apnsToken
+            apnsToken: apnsToken,
+            accessToken: registration.accessToken,
+            accessTokenExpiresAt: registration.accessTokenExpiresAt
+        )
+    }
+
+    func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        var request = URLRequest(url: endpoint("api", "v1", "auth", "token"))
+        request.httpMethod = "POST"
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+
+        let data = try await perform(request)
+        let response = try decoder.decode(AccessTokenResponse.self, from: data)
+        return RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
         )
     }
 
@@ -201,8 +330,25 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         apiKey: String?,
         enabled: Bool
     ) async throws {
+        let scheduleItems = settings.studyCategories.isEmpty
+            ? [
+                ScheduleItemRequest(
+                    topic: settings.effectiveTopic,
+                    difficultyLevel: settings.difficulty.level,
+                    customPrompt: settings.customPrompt,
+                    openAIModel: settings.sanitizedOpenAIModel
+                )
+            ]
+            : settings.studyCategories.map { category in
+                ScheduleItemRequest(
+                    topic: category.normalizedTitle,
+                    difficultyLevel: category.difficulty.level,
+                    customPrompt: category.normalizedCustomPrompt,
+                    openAIModel: category.sanitizedOpenAIModel
+                )
+            }
         let requestBody = ScheduleRequest(
-            topic: settings.topic,
+            topic: settings.effectiveTopic,
             difficultyLevel: settings.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
@@ -212,11 +358,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: settings.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            isQuestionPublic: settings.isQuestionPublic
+            isQuestionPublic: settings.isQuestionPublic,
+            schedules: scheduleItems
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "schedule")
+            url: endpoint("api", "v1", "me", "schedule")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -231,7 +378,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendSnapshot {
         var components = URLComponents(
-            url: endpoint("api", "v1", "devices", registration.deviceID, "snapshot"),
+            url: endpoint("api", "v1", "me", "snapshot"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -251,7 +398,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "settings")
+            url: endpoint("api", "v1", "me", "settings")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -261,7 +408,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "api")
+            url: endpoint("api", "v1", "me", "api")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -285,7 +432,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func validateAPIKey(registration: RemotePushRegistration) async throws -> BackendAPIValidation {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "api", "validate")
+            url: endpoint("api", "v1", "me", "api", "validate")
         )
         request.httpMethod = "POST"
         let data = try await perform(request)
@@ -303,7 +450,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendStats {
         var components = URLComponents(
-            url: endpoint("api", "v1", "devices", registration.deviceID, "stats"),
+            url: endpoint("api", "v1", "me", "stats"),
             resolvingAgainstBaseURL: false
         )
         var queryItems = [
@@ -363,25 +510,93 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(CommunityQuestionsResponse.self, from: data)
     }
 
+    func fetchPublicQuestion(
+        registration: RemotePushRegistration,
+        questionID: String
+    ) async throws -> CommunityQuestion {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID)
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityQuestion.self, from: data)
+    }
+
     func loginWithGoogle(
         registration: RemotePushRegistration,
         idToken: String
-    ) async throws -> CommunityUserProfile {
-        var request = authenticatedRequest(
+    ) async throws -> CommunityLoginResult {
+        var request = loginRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "auth", "google")
+            url: endpoint("api", "v1", "auth", "google")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(GoogleLoginRequest(idToken: idToken))
         let data = try await perform(request)
-        return try decoder.decode(CommunityUserProfile.self, from: data)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+    }
+
+    func requestEmailVerificationCode(
+        registration: RemotePushRegistration,
+        email: String
+    ) async throws -> EmailVerificationCodeResult {
+        var request = loginRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "email", "code")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(EmailVerificationCodeRequest(email: email))
+        let data = try await perform(request)
+        let response = try decoder.decode(EmailVerificationCodeResponse.self, from: data)
+        return EmailVerificationCodeResult(email: response.email, expiresInSeconds: response.expiresInSeconds)
+    }
+
+    func loginWithEmail(
+        registration: RemotePushRegistration,
+        email: String,
+        password: String,
+        verificationCode: String?
+    ) async throws -> CommunityLoginResult {
+        var request = loginRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "email")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            EmailLoginRequest(
+                email: email,
+                password: password,
+                verificationCode: verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        )
+        let data = try await perform(request)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "profile")
+            url: endpoint("api", "v1", "me", "profile")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -391,17 +606,45 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
-        bio: String?
+        bio: String?,
+        avatarSymbolName: String? = nil,
+        avatarColorSeed: String? = nil,
+        pageAccess: CommunityPageAccess? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "profile")
+            url: endpoint("api", "v1", "me", "profile")
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(ProfileUpdateRequest(displayName: displayName, bio: bio))
+        request.httpBody = try encoder.encode(
+            ProfileUpdateRequest(
+                displayName: displayName,
+                bio: bio,
+                avatarSymbolName: avatarSymbolName,
+                avatarColorSeed: avatarColorSeed,
+                pageAccess: pageAccess
+            )
+        )
         let data = try await perform(request)
         return try decoder.decode(CommunityUserProfile.self, from: data)
+    }
+
+    func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "profile")
+        )
+        request.httpMethod = "DELETE"
+        let data = try await perform(request)
+        let response = try decoder.decode(AccessTokenResponse.self, from: data)
+        return RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
     }
 
     func reportCommunityQuestion(
@@ -412,7 +655,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "public", "questions", questionID, "report")
+            url: endpoint("api", "v1", "public", "questions", questionID, "report")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -420,12 +663,68 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
-    func createQuestion(registration: RemotePushRegistration) async throws -> StudyRecord {
+    func setCommunityQuestionLike(
+        registration: RemotePushRegistration,
+        questionID: String,
+        isLiked: Bool
+    ) async throws -> CommunityLikeState {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "questions")
+            url: endpoint("api", "v1", "public", "questions", questionID, "like")
+        )
+        request.httpMethod = isLiked ? "PUT" : "DELETE"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityLikeState.self, from: data)
+    }
+
+    func fetchCommunityQuestionComments(
+        registration: RemotePushRegistration,
+        questionID: String,
+        limit: Int = 30,
+        offset: Int = 0
+    ) async throws -> CommunityCommentsResponse {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "public", "questions", questionID, "comments"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
+            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityCommentsResponse.self, from: data)
+    }
+
+    func createCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        body: String
+    ) async throws -> CommunityQuestionComment {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID, "comments")
         )
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CommunityCommentRequest(body: body))
+        let data = try await perform(request)
+        return try decoder.decode(CommunityQuestionComment.self, from: data)
+    }
+
+    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "questions")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(CreateQuestionRequest(topic: topic))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -437,7 +736,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID, "answer")
+            url: endpoint("api", "v1", "me", "records", recordID, "answer")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -453,7 +752,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID, "answer")
+            url: endpoint("api", "v1", "me", "records", recordID, "answer")
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -468,7 +767,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID, "skip")
+            url: endpoint("api", "v1", "me", "records", recordID, "skip")
         )
         request.httpMethod = "POST"
         let data = try await perform(request)
@@ -481,16 +780,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID)
+            url: endpoint("api", "v1", "me", "records", recordID)
         )
         request.httpMethod = "DELETE"
         _ = try await perform(request)
     }
 
+    func updateRecordPublicity(
+        registration: RemotePushRegistration,
+        recordID: String,
+        isPublic: Bool
+    ) async throws -> StudyRecord {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "records", recordID, "publicity")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(RecordPublicityRequest(isPublic: isPublic))
+        let data = try await perform(request)
+        return try decoder.decode(StudyRecord.self, from: data)
+    }
+
     func clearRecords(registration: RemotePushRegistration) async throws {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records")
+            url: endpoint("api", "v1", "me", "records")
         )
         request.httpMethod = "DELETE"
         _ = try await perform(request)
@@ -502,7 +817,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "devices", registration.deviceID, "records", recordID)
+            url: endpoint("api", "v1", "me", "records", recordID)
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -547,6 +862,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             let responseBodyText = String(data: data, encoding: .utf8) ?? ""
 
             if !(200..<300).contains(statusCode) {
+                let backendError = Self.decodeBackendAPIError(from: data)
                 let entry = APITrafficLogEntry(
                     id: requestLog.id,
                     method: requestLog.method,
@@ -556,7 +872,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     requestHeaders: requestLog.requestHeaders,
                     requestBody: requestLog.requestBody,
                     responseBody: Self.safeResponseBody(responseBodyText),
-                    error: "HTTP \(statusCode)",
+                    error: backendError?.message ?? "HTTP \(statusCode)",
                     isError: true
                 )
                 NotificationCenter.default.post(
@@ -564,7 +880,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     object: self,
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
-                throw RemotePushBackendError.httpStatus(statusCode, responseBodyText)
+                throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 
             let entry = APITrafficLogEntry(
@@ -626,6 +942,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             .joined(separator: "\n")
     }
 
+    private static func decodeBackendAPIError(from data: Data) -> BackendAPIError? {
+        guard !data.isEmpty else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(BackendAPIErrorResponse.self, from: data).error
+    }
+
     private static func safeBodyLog(data: Data?) -> String {
         guard let data,
               !data.isEmpty,
@@ -636,6 +960,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let sanitized = body
             .replacingOccurrences(
                 of: #"("openaiApiKey"\s*:\s*)\"[^\"]+\""#,
+                with: #"$1\"[REDACTED]\""#,
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"("verificationCode"\s*:\s*)\"[^\"]+\""#,
                 with: #"$1\"[REDACTED]\""#,
                 options: .regularExpression
             )
@@ -661,8 +990,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func authenticatedRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
         var request = URLRequest(url: url)
-        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
-        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        if registration.hasAccessToken,
+           let accessToken = registration.accessToken,
+           !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private func loginRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
+        var request = authenticatedRequest(registration: registration, url: url)
+        if request.value(forHTTPHeaderField: "Authorization") == nil {
+            request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+            request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        }
         return request
     }
 
@@ -684,11 +1025,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct RegisterDeviceResponse: Decodable {
         var deviceID: String
         var clientSecret: String
+        var accessToken: String
+        var accessTokenExpiresAt: Date
 
         enum CodingKeys: String, CodingKey {
             case deviceID = "deviceId"
             case clientSecret
+            case accessToken
+            case accessTokenExpiresAt
         }
+    }
+
+    private struct AccessTokenResponse: Decodable {
+        var accessToken: String
+        var accessTokenExpiresAt: Date
     }
 
     private struct ScheduleRequest: Encodable {
@@ -703,6 +1053,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var openAIModel: String
         var maxHistoryCount: Int
         var isQuestionPublic: Bool
+        var schedules: [ScheduleItemRequest]
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -716,7 +1067,26 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case openAIModel = "openaiModel"
             case maxHistoryCount
             case isQuestionPublic = "isQuestionPublic"
+            case schedules
         }
+    }
+
+    private struct ScheduleItemRequest: Encodable {
+        var topic: String
+        var difficultyLevel: Int
+        var customPrompt: String
+        var openAIModel: String
+
+        enum CodingKeys: String, CodingKey {
+            case topic
+            case difficultyLevel
+            case customPrompt
+            case openAIModel = "openaiModel"
+        }
+    }
+
+    private struct CreateQuestionRequest: Encodable {
+        var topic: String?
     }
 
     private struct AnswerRequest: Encodable {
@@ -727,14 +1097,46 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var idToken: String
     }
 
+    private struct EmailVerificationCodeRequest: Encodable {
+        var email: String
+    }
+
+    private struct EmailVerificationCodeResponse: Decodable {
+        var email: String
+        var expiresInSeconds: Int
+    }
+
+    private struct EmailLoginRequest: Encodable {
+        var email: String
+        var password: String
+        var verificationCode: String?
+    }
+
     private struct ProfileUpdateRequest: Encodable {
         var displayName: String?
         var bio: String?
+        var avatarSymbolName: String?
+        var avatarColorSeed: String?
+        var pageAccess: CommunityPageAccess?
+    }
+
+    private struct CommunityLoginResponse: Decodable {
+        var profile: CommunityUserProfile
+        var accessToken: String
+        var accessTokenExpiresAt: Date
+    }
+
+    private struct RecordPublicityRequest: Encodable {
+        var isPublic: Bool
     }
 
     private struct ReportQuestionRequest: Encodable {
         var reason: String
         var message: String
+    }
+
+    private struct CommunityCommentRequest: Encodable {
+        var body: String
     }
 
     private struct OpenAIModelDescriptor: Decodable {
@@ -808,12 +1210,118 @@ struct BackendStats: Decodable, Equatable {
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var id: String
     var question: String
+    var answer: String?
+    var gradingResult: GradingResult?
     var topic: String
     var difficultyLevel: Int
     var status: String
     var source: String
     var createdAt: Date
+    var answeredAt: Date?
     var author: CommunityUserProfile?
+    var likeCount: Int
+    var commentCount: Int
+    var viewCount: Int
+    var isLikedByMe: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case question
+        case answer
+        case gradingResult
+        case topic
+        case difficultyLevel
+        case status
+        case source
+        case createdAt
+        case answeredAt
+        case author
+        case likeCount
+        case commentCount
+        case viewCount
+        case isLikedByMe
+    }
+
+    init(
+        id: String,
+        question: String,
+        answer: String?,
+        gradingResult: GradingResult?,
+        topic: String,
+        difficultyLevel: Int,
+        status: String,
+        source: String,
+        createdAt: Date,
+        answeredAt: Date?,
+        author: CommunityUserProfile?,
+        likeCount: Int = 0,
+        commentCount: Int = 0,
+        viewCount: Int = 0,
+        isLikedByMe: Bool = false
+    ) {
+        self.id = id
+        self.question = question
+        self.answer = answer
+        self.gradingResult = gradingResult
+        self.topic = topic
+        self.difficultyLevel = difficultyLevel
+        self.status = status
+        self.source = source
+        self.createdAt = createdAt
+        self.answeredAt = answeredAt
+        self.author = author
+        self.likeCount = likeCount
+        self.commentCount = commentCount
+        self.viewCount = viewCount
+        self.isLikedByMe = isLikedByMe
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        question = try container.decode(String.self, forKey: .question)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
+        topic = try container.decode(String.self, forKey: .topic)
+        difficultyLevel = try container.decode(Int.self, forKey: .difficultyLevel)
+        status = try container.decode(String.self, forKey: .status)
+        source = try container.decode(String.self, forKey: .source)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        author = try container.decodeIfPresent(CommunityUserProfile.self, forKey: .author)
+        likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
+        commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
+        isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe) ?? false
+    }
+}
+
+struct CommunityLikeState: Decodable, Equatable {
+    var questionID: String
+    var likeCount: Int
+    var isLikedByMe: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case questionID = "questionId"
+        case likeCount
+        case isLikedByMe
+    }
+}
+
+struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
+    var id: String
+    var questionID: String
+    var body: String
+    var createdAt: Date
+    var author: CommunityUserProfile
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case questionID = "questionId"
+        case body
+        case createdAt
+        case author
+    }
 }
 
 struct CommunityUserProfile: Codable, Equatable, Identifiable {
@@ -821,17 +1329,80 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var displayName: String
     var bio: String
     var avatarURL: URL?
+    var avatarSymbolName: String
+    var avatarColorSeed: String
+    var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName
         case bio
         case avatarURL = "avatarUrl"
+        case avatarSymbolName
+        case avatarColorSeed
+        case pageAccess
+    }
+
+    init(
+        id: Int,
+        displayName: String,
+        bio: String,
+        avatarURL: URL?,
+        avatarSymbolName: String = "pixel-buddy",
+        avatarColorSeed: String = "avatar-color-mint",
+        pageAccess: CommunityPageAccess = .restricted
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.bio = bio
+        self.avatarURL = avatarURL
+        self.avatarSymbolName = avatarSymbolName
+        self.avatarColorSeed = avatarColorSeed
+        self.pageAccess = pageAccess
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
+        avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
+        avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-buddy"
+        avatarColorSeed = try container.decodeIfPresent(String.self, forKey: .avatarColorSeed) ?? "avatar-color-mint"
+        pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
+    }
+}
+
+struct CommunityPageAccess: Codable, Equatable {
+    var publicQuestions: Bool
+    var statistics: Bool
+    var studyDetail: Bool
+    var records: Bool
+
+    static let restricted = CommunityPageAccess(
+        publicQuestions: true,
+        statistics: false,
+        studyDetail: false,
+        records: false
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case publicQuestions
+        case statistics
+        case studyDetail
+        case records
     }
 }
 
 struct CommunityQuestionsResponse: Decodable, Equatable {
     var questions: [CommunityQuestion]
+    var totalCount: Int
+    var limit: Int
+    var offset: Int
+}
+
+struct CommunityCommentsResponse: Decodable, Equatable {
+    var comments: [CommunityQuestionComment]
     var totalCount: Int
     var limit: Int
     var offset: Int
@@ -958,17 +1529,96 @@ private extension RemotePushBackendClient {
     }
 }
 
+struct BackendAPIErrorResponse: Decodable {
+    var error: BackendAPIError
+}
+
+struct BackendAPIError: Decodable, Equatable {
+    var code: String
+    var message: String
+    var requestID: String?
+    var status: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case requestID = "requestId"
+        case status
+    }
+}
+
 enum RemotePushBackendError: LocalizedError {
     case invalidResponse
-    case httpStatus(Int, String)
+    case httpStatus(Int, String, BackendAPIError?)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
             return "Invalid backend response."
-        case .httpStatus(let statusCode, let body):
-            return "Backend request failed: HTTP \(statusCode) \(body)"
+        case .httpStatus(let statusCode, let body, let apiError):
+            if let apiError {
+                if let requestID = apiError.requestID, !requestID.isEmpty {
+                    return "\(apiError.message) (\(apiError.code), \(requestID))"
+                }
+                return "\(apiError.message) (\(apiError.code))"
+            }
+
+            if let legacyMessage = Self.legacyMessage(from: body) {
+                return legacyMessage
+            }
+
+            return "Backend request failed: HTTP \(statusCode)"
         }
+    }
+
+    var backendCode: String? {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.code
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    var backendMessage: String? {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.message
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    var isPageAccessDenied: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.code == "PAGE_ACCESS_DENIED" || apiError?.code == "AUTH_GOOGLE_REQUIRED"
+        case .invalidResponse:
+            return false
+        }
+    }
+
+    var responseBody: String? {
+        switch self {
+        case .httpStatus(_, let body, _):
+            return body
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    private static func legacyMessage(from body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = object["detail"] else {
+            return nil
+        }
+
+        if let message = detail as? String, !message.isEmpty {
+            return message
+        }
+
+        return nil
     }
 }
 

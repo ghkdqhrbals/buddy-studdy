@@ -814,6 +814,24 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var topic: String
     var difficulty: Difficulty
     var answeredAt: Date?
+    var isPublic: Bool
+    var likeCount: Int
+    var commentCount: Int
+    var viewCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case question
+        case answer
+        case gradingResult
+        case topic
+        case difficulty
+        case answeredAt
+        case isPublic
+        case likeCount
+        case commentCount
+        case viewCount
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -822,7 +840,11 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingResult: GradingResult? = nil,
         topic: String,
         difficulty: Difficulty,
-        answeredAt: Date? = nil
+        answeredAt: Date? = nil,
+        isPublic: Bool = false,
+        likeCount: Int = 0,
+        commentCount: Int = 0,
+        viewCount: Int = 0
     ) {
         self.id = id
         self.question = question
@@ -831,6 +853,25 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.topic = topic
         self.difficulty = difficulty
         self.answeredAt = answeredAt
+        self.isPublic = isPublic
+        self.likeCount = likeCount
+        self.commentCount = commentCount
+        self.viewCount = viewCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        question = try container.decode(QuestionItem.self, forKey: .question)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
+        topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
+        difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
+        answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
+        likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
+        commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
+        viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
     }
 }
 
@@ -1449,6 +1490,12 @@ struct AppStrings {
     var studyCategories: String { text("내 학습", "My Studies") }
     var homeScopeMy: String { text("내 학습", "My Studies") }
     var homeScopeAll: String { text("모든 학습들", "All Studies") }
+    var myStudyLoginHelp: String {
+        text(
+            "내 학습을 만들고 답변하려면 먼저 로그인하세요.",
+            "Sign in first to create and answer your own studies."
+        )
+    }
     var editCategories: String { text("학습 편집", "Edit Studies") }
     var studyCategory: String { text("학습", "Study") }
     var newStudyCategory: String { text("학습 추가", "Add Study") }
@@ -1463,6 +1510,8 @@ struct AppStrings {
     }
     var editInHome: String { text("홈에서 관리", "Manage in Home") }
     var questionVisibility: String { text("질문 공개", "Question Visibility") }
+    var makeQuestionPublic: String { text("질문 공개", "Make Question Public") }
+    var makeQuestionPrivate: String { text("질문 비공개", "Make Question Private") }
     var questionVisibilityHelp: String {
         text(
             "로그인한 사용자에게만 공개됩니다. OFF로 설정하면 내가 생성한 질문이 커뮤니티에 노출되지 않습니다.",
@@ -1516,11 +1565,11 @@ struct AppStrings {
     var continueOldestPending: String { text("오래된 질문 이어하기", "Continue Oldest") }
     var pendingQuestions: String { text("미제출 질문", "Pending Questions") }
     func pendingQuestionCount(_ count: Int) -> String { text("\(count)개 대기 중", "\(count) pending") }
-    var pendingQuestionLimitTitle: String { text("미채점 질문이 3개입니다.", "There are 3 ungraded questions.") }
+    var pendingQuestionLimitTitle: String { text("답변 대기 중인 질문이 있습니다.", "A question is waiting for your answer.") }
     var pendingQuestionLimitMessage: String {
         text(
-            "미채점 질문을 답변하거나 기록 탭에서 삭제한 뒤 다시 새 질문 생성을 실행하세요.",
-            "Answer an ungraded question or delete one from Records, then run New Question again."
+            "현재 학습룸의 질문에 먼저 답변한 뒤 새 질문을 생성하세요.",
+            "Answer the current study room question before creating a new one."
         )
     }
     var current: String { text("현재", "Current") }
@@ -1595,8 +1644,31 @@ struct AppStrings {
     var topicBrowser: String { text("주제 탐색", "Topic Browser") }
     var communityFeed: String { text("다른 사용자 질문", "Community Questions") }
     var communityQuestion: String { text("공개 질문", "Community Question") }
+    var comments: String { text("댓글", "Comments") }
+    var noComments: String { text("아직 댓글이 없습니다.", "No comments yet.") }
+    var writeComment: String { text("댓글 쓰기", "Write a comment") }
     var communityLogin: String { text("로그인", "Sign In") }
-    var signInWithGoogle: String { text("Google로 로그인", "Sign in with Google") }
+    var signInWithGoogle: String { "Sign in with Google" }
+    var signInWithEmail: String { "Sign in with Email" }
+    var email: String { text("이메일", "Email") }
+    var password: String { text("비밀번호", "Password") }
+    var emailLoginHelp: String {
+        text(
+            "처음 가입하는 이메일은 인증코드를 요청한 뒤 180초 안에 입력해야 합니다.",
+            "New email accounts require a verification code within 180 seconds."
+        )
+    }
+    var emailVerificationCode: String { text("인증코드", "Verification Code") }
+    var sendVerificationCode: String { text("인증코드 보내기", "Send Code") }
+    var resendVerificationCode: String { text("다시 보내기", "Resend") }
+    var emailVerificationSent: String { text("인증코드를 보냈습니다.", "Verification code sent.") }
+    var emailVerificationRequired: String {
+        text(
+            "처음 사용하는 이메일입니다. 인증코드를 보낸 뒤 입력해 로그인하세요.",
+            "This email is new. Send a verification code, then enter it to sign in."
+        )
+    }
+    var signInRequiredTitle: String { text("로그인이 필요합니다", "Sign In Required") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
     var communitySignedOut: String { text("다른 사용자 질문 기능을 껐습니다.", "Community questions are disabled.") }
@@ -1614,12 +1686,57 @@ struct AppStrings {
     var profile: String { text("프로필", "Profile") }
     var profileDisplayName: String { text("이름", "Name") }
     var profileAvatar: String { text("프로필 사진", "Profile Picture") }
+    var profileCharacter: String { text("프로필 캐릭터", "Profile Character") }
+    var profileColor: String { text("프로필 색상", "Profile Color") }
+    var customProfileColor: String { text("직접 설정", "Custom Color") }
+    var red: String { text("빨강", "Red") }
+    var green: String { text("초록", "Green") }
+    var blue: String { text("파랑", "Blue") }
     var chooseProfilePhoto: String { text("사진 선택", "Choose Photo") }
     var removeProfilePhoto: String { text("사진 제거", "Remove Photo") }
     var profilePhotoScale: String { text("사진 크기", "Photo Size") }
     var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }
     var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
+    var deleteAccount: String { text("앱 탈퇴", "Delete Account") }
+    var deleteAccountNotice: String {
+        text(
+            "탈퇴하면 프로필, 로그인 정보, 공개 질문과 관련 기록이 즉시 삭제됩니다.",
+            "Deleting your account immediately removes your profile, sign-in data, public questions, and related records."
+        )
+    }
+    var deleteAccountConfirmMessage: String {
+        text(
+            "탈퇴 후에는 이 계정의 프로필과 관련 기록을 복구할 수 없습니다.",
+            "After deletion, this account's profile and related records cannot be recovered."
+        )
+    }
+    var accountDeleted: String { text("탈퇴 처리되었습니다.", "Account deleted.") }
+    var pageAccess: String { text("페이지 접근 허용", "Page Access") }
+    var publicQuestionsPage: String { text("공개 질문", "Public Questions") }
+    var publicQuestionsPageHelp: String {
+        text(
+            "켜두면 개별 기록에서 공개로 설정한 채점 완료 질문만 다른 사용자에게 표시됩니다.",
+            "When enabled, only graded questions that you individually mark public are shown to other users."
+        )
+    }
+    var statisticsPage: String { text("통계", "Statistics") }
+    var studyDetailPage: String { text("내 학습 내부", "My Study Detail") }
+    var recordsPage: String { text("기록", "Records") }
+    var accessUnavailable: String { text("허용 불가", "Not allowed") }
+    var accessAllowed: String { text("허용됨", "Allowed") }
+    var pageAccessRequiresLogin: String {
+        text(
+            "이 페이지는 로그인 후 사용할 수 있습니다.",
+            "Sign in to use this page."
+        )
+    }
+    func pageAccessDenied(_ page: String) -> String {
+        text(
+            "\(page)은 로그인 후 사용할 수 있습니다.",
+            "\(page) is available after sign-in."
+        )
+    }
     var report: String { text("신고", "Report") }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }
@@ -1674,6 +1791,7 @@ struct AppStrings {
     var problem: String { text("문제", "Question") }
     var hint: String { text("힌트", "Hint") }
     var feedback: String { text("피드백", "Feedback") }
+    var feedbackLink: String { text("피드백 보내기", "Send feedback") }
     var explanation: String { text("해설", "Explanation") }
     var statsByTopic: String { text("주제별 통계", "Stats by Topic") }
     func currentTopicLevel(_ level: String) -> String {

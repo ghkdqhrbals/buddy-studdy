@@ -28,10 +28,7 @@ struct StudyMateiOSApp: App {
                     StudyRemoteNotificationBridge.shared.processPendingNotificationsIfActive()
                 }
             case .background:
-                StudyMateBackgroundRefreshBridge.shared.schedule()
-                Task {
-                    await appState.prepareBackgroundQuestionNotifications()
-                }
+                appState.logRemoteNotificationEvent("iOS background 진입: 서버/APNs 스케줄러가 예약 질문을 담당하므로 앱 내부 background 작업은 시작하지 않습니다.")
             case .inactive:
                 break
             @unknown default:
@@ -175,28 +172,7 @@ final class StudyMateBackgroundRefreshBridge: @unchecked Sendable {
 
     @MainActor
     func schedule() {
-        guard isRegistered else {
-            appState?.logRemoteNotificationEvent(
-                "iPhone background refresh 등록 전이라 예약을 건너뛰었습니다.",
-                isWarning: true
-            )
-            return
-        }
-
-        let request = BGAppRefreshTaskRequest(identifier: Self.identifier)
-        let minimumWakeUpDate = Date(timeIntervalSinceNow: 60)
-        let requestedWakeUpDate = appState?.backgroundRefreshEarliestBeginDate() ?? Date(timeIntervalSinceNow: 15 * 60)
-        request.earliestBeginDate = max(minimumWakeUpDate, requestedWakeUpDate)
-
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            appState?.logRemoteNotificationEvent("iPhone background refresh를 예약했습니다: \(request.earliestBeginDate?.description ?? "-")")
-        } catch {
-            appState?.logRemoteNotificationEvent(
-                "iPhone background refresh 예약 실패: \(error.localizedDescription)",
-                isWarning: true
-            )
-        }
+        appState?.logRemoteNotificationEvent("iPhone background refresh는 비활성화되어 있습니다. 예약 질문은 백엔드 스케줄러와 APNs만 담당합니다.")
     }
 
     private var isRegistered: Bool {
@@ -222,17 +198,7 @@ final class StudyMateBackgroundRefreshBridge: @unchecked Sendable {
     @MainActor
     private func handle(taskBox: RefreshTaskBox) async {
         let task = taskBox.task
-        schedule()
-
-        let worker = Task { @MainActor in
-            await appState?.handleBackgroundRefresh() ?? false
-        }
-
-        task.expirationHandler = {
-            worker.cancel()
-        }
-
-        let didUpdate = await worker.value
-        task.setTaskCompleted(success: didUpdate)
+        appState?.logRemoteNotificationEvent("iPhone background refresh 실행을 무시했습니다. 서버/APNs 스케줄러가 예약 질문을 담당합니다.")
+        task.setTaskCompleted(success: true)
     }
 }

@@ -15,16 +15,9 @@ struct StudyView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Spacer()
-
-                    newQuestionButton(strings: strings)
-                }
-
                 StudySettingsSummarySection(
                     topic: studyTopicLabel(strings: strings),
                     level: selectedDifficulty.displayName(language: appState.settings.appLanguage),
-                    interval: strings.minuteLabel(appState.settings.sanitizedIntervalMinutes),
                     strings: strings
                 )
 
@@ -33,22 +26,6 @@ struct StudyView: View {
                 if selectedCurrentQuestion != nil,
                    let notificationLandingMessage = appState.notificationLandingMessage {
                     notificationLandingInlineView(message: notificationLandingMessage, strings: strings)
-                }
-
-                if !visiblePendingRecords.isEmpty {
-                    PendingQuestionsSection(
-                        records: visiblePendingRecords,
-                        currentQuestion: selectedCurrentQuestion,
-                        strings: strings
-                    ) { record in
-                        appState.selectStudyRecord(record)
-                    } onSkip: { record in
-                        withAnimation(.easeOut(duration: 0.22)) {
-                            appState.skipPendingQuestion(record)
-                        }
-                    }
-
-                    Divider()
                 }
 
                 Group {
@@ -79,10 +56,16 @@ struct StudyView: View {
         }
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
-        .keyboardDoneToolbar(strings.done)
         #endif
         .refreshable {
             await appState.refreshVisibleData()
+        }
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .topBarTrailing) {
+                toolbarNewQuestionButton(strings: strings)
+            }
+            #endif
         }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
             Button(strings.done, role: .cancel) {}
@@ -142,6 +125,14 @@ struct StudyView: View {
         return appState.settings.difficulty
     }
 
+    private var selectedCategory: StudyCategory? {
+        guard let preferredCategoryID else {
+            return appState.settings.category(for: appState.settings.selectedStudyCategoryID)
+        }
+
+        return appState.settings.category(for: preferredCategoryID)
+    }
+
     private func studyTopicLabel(strings: AppStrings) -> String {
         let topic = selectedTopic.trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? strings.studyFallback : topic
@@ -155,17 +146,6 @@ struct StudyView: View {
 
         let topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
         return topic.isEmpty ? appState.strings.studyFallback : topic
-    }
-
-    private var visiblePendingRecords: [StudyRecord] {
-        guard preferredCategoryID != nil else {
-            return appState.pendingStudyRecords
-        }
-
-        let normalizedSelectedTopic = normalizedTopicKey(selectedTopic)
-        return appState.pendingStudyRecords.filter {
-            normalizedTopicKey($0.topic) == normalizedSelectedTopic
-        }
     }
 
     private func normalizedTopicKey(_ topic: String) -> String {
@@ -197,10 +177,7 @@ struct StudyView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                HStack(spacing: 10) {
-                    newQuestionButton(strings: strings, prominent: true)
-                }
-                .font(.caption)
+                EmptyView()
             }
             .frame(maxWidth: .infinity)
         } else {
@@ -222,8 +199,8 @@ struct StudyView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(appState.isGeneratingQuestion)
-            .opacity(appState.hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(appState.hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
         } else {
             Button {
                 requestNewQuestion()
@@ -232,9 +209,27 @@ struct StudyView: View {
             }
             .buttonStyle(.bordered)
             .disabled(appState.isGeneratingQuestion)
-            .opacity(appState.hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(appState.hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
         }
+    }
+
+    private func toolbarNewQuestionButton(strings: AppStrings) -> some View {
+        Button {
+            requestNewQuestion()
+        } label: {
+            if appState.isGeneratingQuestion {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+            }
+        }
+        .disabled(appState.isGeneratingQuestion)
+        .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
+        .accessibilityLabel(strings.newQuestion)
+        .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
     }
 
     @ViewBuilder
@@ -252,7 +247,7 @@ struct StudyView: View {
             return
         }
 
-        if appState.hasReachedPendingQuestionLimit {
+        if hasReachedPendingQuestionLimit {
             showsPendingLimitHelp = true
             return
         }
@@ -260,6 +255,10 @@ struct StudyView: View {
         Task {
             await appState.generateQuestion()
         }
+    }
+
+    private var hasReachedPendingQuestionLimit: Bool {
+        appState.hasReachedPendingQuestionLimit(for: selectedCategory)
     }
 
     private func notificationLandingInlineView(message: String, strings: AppStrings) -> some View {
@@ -343,14 +342,28 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            StudyChatBubble(role: .learnerInput) {
-                MessageAnswerInput(
-                    strings: strings,
-                    isGradingAnswer: isGradingAnswer,
-                    canSubmitAnswer: canSubmitAnswer,
-                    answerEditor: answerEditor,
-                    onSubmit: onSubmit
-                )
+            if gradingResult == nil {
+                StudyChatBubble(role: .learnerInput) {
+                    MessageAnswerInput(
+                        strings: strings,
+                        isGradingAnswer: isGradingAnswer,
+                        canSubmitAnswer: canSubmitAnswer,
+                        answerEditor: answerEditor,
+                        onSubmit: onSubmit
+                    )
+                }
+            } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                StudyChatBubble(role: .learnerAnswer) {
+                    Text(draftAnswer)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 13)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
 
             if let gradingResult {
@@ -407,13 +420,14 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
 private enum StudyChatBubbleRole: Equatable {
     case tutor
     case learnerInput
+    case learnerAnswer
     case feedback
 
     var frameAlignment: Alignment {
         switch self {
         case .tutor, .feedback:
             .leading
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             .trailing
         }
     }
@@ -422,7 +436,7 @@ private enum StudyChatBubbleRole: Equatable {
         switch self {
         case .tutor:
             Color.green.opacity(0.92)
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
             Color.secondary.opacity(0.06)
@@ -433,7 +447,7 @@ private enum StudyChatBubbleRole: Equatable {
         switch self {
         case .tutor:
             Color.green.opacity(0.0)
-        case .learnerInput:
+        case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
             Color.secondary.opacity(0.12)
@@ -447,13 +461,16 @@ private struct StudyChatBubble<Content: View>: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            if role == .learnerInput {
+            if role == .learnerInput || role == .learnerAnswer {
                 Spacer(minLength: 34)
             }
 
             if role == .learnerInput {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if role == .learnerAnswer {
+                content()
+                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
             } else {
                 content()
                     .padding(.vertical, 11)
@@ -467,7 +484,7 @@ private struct StudyChatBubble<Content: View>: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
-            if role != .learnerInput {
+            if role != .learnerInput && role != .learnerAnswer {
                 Spacer(minLength: 34)
             }
         }
@@ -530,7 +547,6 @@ private struct MessageAnswerInput<AnswerEditorContent: View>: View {
 private struct StudySettingsSummarySection: View {
     var topic: String
     var level: String
-    var interval: String
     var strings: AppStrings
 
     var body: some View {
@@ -545,7 +561,6 @@ private struct StudySettingsSummarySection: View {
             HStack(spacing: 8) {
                 StudySummaryMetric(title: strings.studyTopicShort, value: topic)
                 StudySummaryMetric(title: strings.studyLevelShort, value: level)
-                StudySummaryMetric(title: strings.studyIntervalShort, value: interval)
             }
         }
     }
@@ -600,142 +615,6 @@ private struct AnswerEditor: View {
         #endif
     }
 
-}
-
-private struct PendingQuestionsSection: View {
-    var records: [StudyRecord]
-    var currentQuestion: QuestionItem?
-    var strings: AppStrings
-    var onSelect: (StudyRecord) -> Void
-    var onSkip: (StudyRecord) -> Void
-    @State private var openSwipeRecordID: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(spacing: 4) {
-                ForEach(records) { record in
-                    let isSelected = isCurrent(record)
-
-                    SwipeRevealRow(
-                        isOpen: swipeBinding(for: record.id),
-                        actionWidth: 82,
-                        onTap: {
-                            if openSwipeRecordID != nil,
-                               openSwipeRecordID != record.id {
-                                closeOpenSwipe()
-                                return
-                            }
-                            onSelect(record)
-                        },
-                        onFullSwipe: {
-                            skip(record)
-                        },
-                        content: {
-                            PendingQuestionRow(record: record, strings: strings, isSelected: isSelected)
-                        },
-                        action: {
-                            Button {
-                                skip(record)
-                            } label: {
-                                SwipeActionButton(
-                                    title: strings.skipQuestion,
-                                    systemImage: "forward.end.fill",
-                                    tint: .orange,
-                                    width: 82
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    )
-                    .frame(height: 52)
-                    .onDisappear {
-                        if openSwipeRecordID == record.id {
-                            openSwipeRecordID = nil
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func isCurrent(_ record: StudyRecord) -> Bool {
-        guard let currentQuestion else {
-            return false
-        }
-
-        return record.question.createdAt == currentQuestion.createdAt ||
-            SettingsStore.normalizedQuestionText(record.question.question) ==
-            SettingsStore.normalizedQuestionText(currentQuestion.question)
-    }
-
-    private func swipeBinding(for recordID: String) -> Binding<Bool> {
-        Binding(
-            get: { openSwipeRecordID == recordID },
-            set: { isOpen in
-                withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-                    openSwipeRecordID = isOpen ? recordID : nil
-                }
-            }
-        )
-    }
-
-    private func closeOpenSwipe() {
-        withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
-            openSwipeRecordID = nil
-        }
-    }
-
-    private func skip(_ record: StudyRecord) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            onSkip(record)
-            if openSwipeRecordID == record.id {
-                openSwipeRecordID = nil
-            }
-        }
-    }
-
-}
-
-private struct PendingQuestionRow: View {
-    var record: StudyRecord
-    var strings: AppStrings
-    var isSelected: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(isSelected ? Color.green : Color.clear)
-                .frame(width: 4, height: 34)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.question.question)
-                    .font(.callout)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .lineLimit(1)
-
-                HStack(spacing: 5) {
-                    Text(record.topic.isEmpty ? strings.studyFallback : record.topic)
-                    Text("·")
-                    Text(record.difficulty.displayName(language: strings.language))
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.secondary.opacity(0.1) : Color.secondary.opacity(0.04))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.secondary.opacity(0.2) : Color.secondary.opacity(0.1), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .contentShape(Rectangle())
-    }
 }
 
 extension GradingResult {

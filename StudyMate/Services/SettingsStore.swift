@@ -25,6 +25,8 @@ final class SettingsStore {
         static let profileAvatarSymbolName = "profileAvatarSymbolName"
         static let profileAvatarImageData = "profileAvatarImageData"
         static let profileAvatarColorSeed = "profileAvatarColorSeed"
+        static let communityProfileDisplayName = "communityProfileDisplayName"
+        static let communityProfileID = "communityProfileID"
         static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
@@ -183,6 +185,11 @@ final class SettingsStore {
             recordStore.append(record)
         }
 
+        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
+    }
+
+    func saveStudyRecord(_ record: StudyRecord) {
+        recordStore.save(record)
         recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
@@ -448,7 +455,7 @@ final class SettingsStore {
     }
 
     func loadProfileAvatarSymbolName() -> String {
-        defaults.string(forKey: Keys.profileAvatarSymbolName) ?? "person.fill"
+        defaults.string(forKey: Keys.profileAvatarSymbolName) ?? "pixel-buddy"
     }
 
     func saveProfileAvatarSymbolName(_ symbolName: String) {
@@ -473,6 +480,34 @@ final class SettingsStore {
 
     func saveProfileAvatarColorSeed(_ seed: String) {
         defaults.set(seed, forKey: Keys.profileAvatarColorSeed)
+    }
+
+    func loadCommunityProfileDisplayName() -> String? {
+        defaults.string(forKey: Keys.communityProfileDisplayName)
+    }
+
+    func saveCommunityProfileDisplayName(_ displayName: String) {
+        let normalizedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedName.isEmpty {
+            defaults.removeObject(forKey: Keys.communityProfileDisplayName)
+        } else {
+            defaults.set(normalizedName, forKey: Keys.communityProfileDisplayName)
+        }
+    }
+
+    func loadCommunityProfileID() -> Int? {
+        guard defaults.object(forKey: Keys.communityProfileID) != nil else {
+            return nil
+        }
+        return defaults.integer(forKey: Keys.communityProfileID)
+    }
+
+    func saveCommunityProfileID(_ id: Int?) {
+        if let id {
+            defaults.set(id, forKey: Keys.communityProfileID)
+        } else {
+            defaults.removeObject(forKey: Keys.communityProfileID)
+        }
     }
 
     func loadCloudSyncSnapshotUpdatedAt() -> Date? {

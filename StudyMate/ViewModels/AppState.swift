@@ -12,6 +12,35 @@ private enum QuestionGenerationSkip: Error {
     case duplicateQuestion
 }
 
+private enum ProtectedAppPage {
+    case records
+    case statistics
+    case studyDetail
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.tabRecords
+        case .statistics:
+            return strings.tabStatistics
+        case .studyDetail:
+            return strings.tabStudy
+        }
+    }
+}
+
+struct PageAccessPrompt: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+    var message: String
+}
+
+enum EmailCommunitySignInResult: Equatable {
+    case signedIn
+    case verificationRequired
+    case failed
+}
+
 #if os(iOS)
 private final class BackgroundTaskExpiration: @unchecked Sendable {
     private let lock = NSLock()
@@ -37,7 +66,7 @@ private final class BackgroundTaskExpiration: @unchecked Sendable {
 @MainActor
 final class AppState: ObservableObject {
     static let developerLogPageSize = 50
-    static let maxPendingQuestionCount = 3
+    static let maxPendingQuestionCount = 1
     static let communityQuestionPageSize = 20
     static let maxAPITrafficLogs = 120
     private static let clipboardQuickReadAttempts = 10
@@ -104,6 +133,8 @@ final class AppState: ObservableObject {
     @Published var communityErrorMessage: String?
     @Published var communityProfile: CommunityUserProfile?
     @Published var isUpdatingCommunityProfile = false
+    @Published var isWithdrawingCommunityAccount = false
+    @Published var pageAccessPrompt: PageAccessPrompt?
     @Published var profileAvatarSymbolName: String
     @Published var profileAvatarImageData: Data?
     @Published var profileAvatarColorSeed: String
@@ -143,8 +174,15 @@ final class AppState: ObservableObject {
     }
 
     var hasUnsavedSettingsChanges: Bool {
-        normalizedSettings(activeSettingsForEditing) != savedSettings ||
-            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey
+        var comparableActiveSettings = normalizedSettings(activeSettingsForEditing)
+        var comparableSavedSettings = normalizedSettings(savedSettings)
+        if !isCommunitySignedIn {
+            comparableActiveSettings = comparableActiveSettings.withQuestionPrivacy(false)
+            comparableSavedSettings = comparableSavedSettings.withQuestionPrivacy(false)
+        }
+
+        return comparableActiveSettings != comparableSavedSettings ||
+            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var mobileVisibleTab: AppTab {
@@ -168,10 +206,84 @@ final class AppState: ObservableObject {
             cancelSettingsEditing()
         }
 
+        if let protectedPage = protectedPage(for: nextTab),
+           !canAccess(protectedPage) {
+            redirectToPageAccessGuide(for: protectedPage)
+            return
+        }
+
         selectedTab = nextTab
         if nextTab == .home {
             homeStudyRoute = nil
         }
+    }
+
+    private func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
+        switch tab {
+        case .records:
+            return .records
+        case .statistics:
+            return .statistics
+        case .study:
+            return .studyDetail
+        case .home, .settings:
+            return nil
+        }
+    }
+
+    private func canAccess(_ page: ProtectedAppPage) -> Bool {
+        guard isCommunitySignedIn else {
+            return false
+        }
+
+        guard let access = communityProfile?.pageAccess else {
+            return true
+        }
+
+        switch page {
+        case .records:
+            return access.records
+        case .statistics:
+            return access.statistics
+        case .studyDetail:
+            return access.studyDetail
+        }
+    }
+
+    @discardableResult
+    private func requirePageAccess(_ page: ProtectedAppPage) -> Bool {
+        guard canAccess(page) else {
+            redirectToPageAccessGuide(for: page)
+            return false
+        }
+
+        return true
+    }
+
+    private func redirectToPageAccessGuide(for page: ProtectedAppPage) {
+        selectedTab = .home
+        homeStudyRoute = nil
+        focusedRecordRequest = nil
+        let message = strings.pageAccessDenied(page.title(strings: strings))
+        pageAccessPrompt = PageAccessPrompt(
+            title: strings.signInRequiredTitle,
+            message: message
+        )
+    }
+
+    func dismissPageAccessPrompt() {
+        pageAccessPrompt = nil
+    }
+
+    @discardableResult
+    private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
+        guard let backendError = error as? RemotePushBackendError,
+              backendError.isPageAccessDenied else {
+            return false
+        }
+
+        redirectToPageAccessGuide(for: page)
+        return true
     }
 
     var apiKeyValidationMessage: String? {
@@ -201,6 +313,21 @@ final class AppState: ObservableObject {
 
     var hasReachedPendingQuestionLimit: Bool {
         pendingQuestionCount >= Self.maxPendingQuestionCount
+    }
+
+    func pendingQuestionCount(for category: StudyCategory) -> Int {
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        return pendingRecordsIncludingCurrent.filter {
+            Self.normalizedCategoryText(for: $0.topic) == categoryKey
+        }.count
+    }
+
+    func hasReachedPendingQuestionLimit(for category: StudyCategory?) -> Bool {
+        guard let category else {
+            return hasReachedPendingQuestionLimit
+        }
+
+        return pendingQuestionCount(for: category) >= Self.maxPendingQuestionCount
     }
 
     var pendingStudyRecords: [StudyRecord] {
@@ -409,7 +536,11 @@ final class AppState: ObservableObject {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
         }
+        #if os(macOS)
         await generateDueQuestionIfNeeded(reason: "foreground")
+        #else
+        log(.info, "iOS foreground 진입은 조용한 동기화만 수행합니다. 예약 질문은 서버/APNs와 타이머 경로가 담당합니다.")
+        #endif
     }
 
     @discardableResult
@@ -541,8 +672,12 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func refreshBackendSnapshotIfPossible(updateVisibleQuestion: Bool = true) async -> Bool {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+    private func refreshBackendSnapshotIfPossible(
+        updateVisibleQuestion: Bool = true,
+        preserveLocalSettings: Bool = true
+    ) async -> Bool {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "snapshot") else {
             return false
         }
 
@@ -552,7 +687,11 @@ final class AppState: ObservableObject {
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
             )
-            applyBackendSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
+            applyBackendSnapshot(
+                snapshot,
+                updateVisibleQuestion: updateVisibleQuestion,
+                preserveLocalSettings: preserveLocalSettings
+            )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
             log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(snapshot.records.count)")
             return true
@@ -618,23 +757,17 @@ final class AppState: ObservableObject {
                 return
             }
 
-            backendStatsErrorMessage = "통계 조회 실패: \(error.localizedDescription)"
+            if handlePageAccessError(error, page: .statistics) {
+                backendStatsErrorMessage = strings.pageAccessDenied(strings.tabStatistics)
+                return
+            }
+
+            backendStatsErrorMessage = backendErrorDisplayMessage(error, fallback: "통계 조회 실패")
             log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
         }
     }
 
     func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
-        guard isCommunitySignedIn else {
-            if reset {
-                communityQuestions = []
-                communityOffset = 0
-                communityTotalCount = 0
-            }
-            communityErrorMessage = nil
-            isLoadingCommunityQuestions = false
-            return
-        }
-
         let requestID = UUID()
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
@@ -666,7 +799,7 @@ final class AppState: ObservableObject {
                 topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
                 offset: normalizedOffset,
-                excludeDeviceID: registration.deviceID
+                excludeDeviceID: nil
             )
 
             guard communityQuestionLoadRequestID == requestID else {
@@ -736,7 +869,11 @@ final class AppState: ObservableObject {
         return currentCount < communityTotalCount
     }
 
-    private func applyBackendSnapshot(_ snapshot: BackendSnapshot, updateVisibleQuestion: Bool) {
+    private func applyBackendSnapshot(
+        _ snapshot: BackendSnapshot,
+        updateVisibleQuestion: Bool,
+        preserveLocalSettings: Bool = true
+    ) {
         guard !isEditingSettings else {
             didReceiveBackendSnapshotWhileEditing = true
             if let currentPending = pendingBackendSnapshotWhileEditing,
@@ -754,7 +891,7 @@ final class AppState: ObservableObject {
             for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
             includeResolvedTopicCategory: true
         )
-        let shouldPreserveLocal = shouldPreserveLocalSettings(
+        let shouldPreserveLocal = preserveLocalSettings && shouldPreserveLocalSettings(
             local: localSettings,
             remote: remoteSanitizedSettings,
             remoteUpdatedAt: snapshot.serverTime
@@ -980,8 +1117,12 @@ final class AppState: ObservableObject {
         Task {
             #if os(iOS)
             do {
+                communityErrorMessage = nil
                 let idToken = try await GoogleOAuthService().signIn()
                 await signInToCommunity(idToken: idToken)
+            } catch GoogleOAuthError.cancelled {
+                communityErrorMessage = nil
+                log(.info, "Google Login이 사용자에 의해 취소되었습니다.")
             } catch GoogleOAuthError.notConfigured {
                 statusMessage = strings.googleLoginSetupRequired
                 log(.warning, "Google Login 설정이 없습니다.")
@@ -1002,18 +1143,81 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.loginWithGoogle(
+            let result = try await remotePushBackendClient.loginWithGoogle(
                 registration: registration,
                 idToken: idToken
             )
+            applyCommunityProfile(result.profile)
+            settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            statusMessage = strings.communitySignedIn
-            await syncRemotePushScheduleIfPossible(reason: "google-login")
+            await refreshBackendSnapshotIfPossible(
+                updateVisibleQuestion: true,
+                preserveLocalSettings: false
+            )
             await loadCommunityQuestions(reset: true, userInitiated: true)
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func requestEmailVerificationCode(email: String) async -> Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-code") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return false
+        }
+
+        do {
+            communityErrorMessage = nil
+            _ = try await remotePushBackendClient.requestEmailVerificationCode(
+                registration: registration,
+                email: normalizedEmail
+            )
+            return true
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return .failed
+        }
+
+        do {
+            communityErrorMessage = nil
+            let result = try await remotePushBackendClient.loginWithEmail(
+                registration: registration,
+                email: normalizedEmail,
+                password: password,
+                verificationCode: verificationCode
+            )
+            applyCommunityProfile(result.profile)
+            settingsStore.saveRemotePushRegistration(result.registration)
+            isCommunitySignedIn = true
+            settingsStore.saveIsCommunitySignedIn(true)
+            await refreshBackendSnapshotIfPossible(
+                updateVisibleQuestion: true,
+                preserveLocalSettings: false
+            )
+            await loadCommunityQuestions(reset: true, userInitiated: true)
+            return .signedIn
+        } catch {
+            if let backendError = error as? RemotePushBackendError,
+               backendError.backendCode == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
+                communityErrorMessage = strings.emailVerificationRequired
+                log(.info, "Email 로그인에 인증코드가 필요합니다.")
+                return .verificationRequired
+            }
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
+            return .failed
         }
     }
 
@@ -1042,9 +1246,38 @@ final class AppState: ObservableObject {
         settingsStore.saveProfileAvatarSymbolName(symbolName)
     }
 
+    func updateProfileAvatarColorSeed(_ seed: String) {
+        profileAvatarColorSeed = seed
+        settingsStore.saveProfileAvatarColorSeed(seed)
+    }
+
     func updateProfileAvatarImageData(_ data: Data?) {
         profileAvatarImageData = data
         settingsStore.saveProfileAvatarImageData(data)
+    }
+
+    func updateCommunityProfileAvatar(symbolName: String? = nil, colorSeed: String? = nil) {
+        if let symbolName {
+            updateProfileAvatarSymbolName(symbolName)
+        }
+        if let colorSeed {
+            updateProfileAvatarColorSeed(colorSeed)
+        }
+        guard isCommunitySignedIn else {
+            return
+        }
+
+        let nextSymbolName = symbolName ?? profileAvatarSymbolName
+        let nextColorSeed = colorSeed ?? profileAvatarColorSeed
+        Task {
+            await updateCommunityProfile(
+                displayName: communityProfile?.displayName ?? "",
+                bio: communityProfile?.bio ?? "",
+                avatarSymbolName: nextSymbolName,
+                avatarColorSeed: nextColorSeed,
+                pageAccess: communityProfile?.pageAccess
+            )
+        }
     }
 
     func loadCommunityProfile() async {
@@ -1054,13 +1287,20 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+            let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+            applyCommunityProfile(profile)
         } catch {
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
         }
     }
 
-    func updateCommunityProfile(displayName: String, bio: String = "") async {
+    func updateCommunityProfile(
+        displayName: String,
+        bio: String = "",
+        avatarSymbolName: String? = nil,
+        avatarColorSeed: String? = nil,
+        pageAccess: CommunityPageAccess? = nil
+    ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
         }
@@ -1070,15 +1310,68 @@ final class AppState: ObservableObject {
         }
 
         do {
-            communityProfile = try await remotePushBackendClient.updateMyProfile(
+            let profile = try await remotePushBackendClient.updateMyProfile(
                 registration: registration,
                 displayName: displayName,
-                bio: bio
+                bio: bio,
+                avatarSymbolName: avatarSymbolName,
+                avatarColorSeed: avatarColorSeed,
+                pageAccess: pageAccess
             )
-            statusMessage = strings.profileSaved
+            settingsStore.saveCommunityProfileDisplayName(displayName)
+            applyCommunityProfile(profile)
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyCommunityProfile(_ profile: CommunityUserProfile) {
+        let cachedDisplayName = settingsStore.loadCommunityProfileDisplayName()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let incomingDisplayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cachedProfileID = settingsStore.loadCommunityProfileID()
+        let shouldPreserveCachedName = cachedProfileID == profile.id
+            && !cachedDisplayName.isEmpty
+            && cachedDisplayName != incomingDisplayName
+        let resolvedProfile = shouldPreserveCachedName
+            ? CommunityUserProfile(
+                id: profile.id,
+                displayName: cachedDisplayName,
+                bio: profile.bio,
+                avatarURL: profile.avatarURL,
+                avatarSymbolName: profile.avatarSymbolName,
+                avatarColorSeed: profile.avatarColorSeed,
+                pageAccess: profile.pageAccess
+            )
+            : profile
+        communityProfile = resolvedProfile
+        settingsStore.saveCommunityProfileID(resolvedProfile.id)
+        settingsStore.saveCommunityProfileDisplayName(resolvedProfile.displayName)
+        updateProfileAvatarSymbolName(profile.avatarSymbolName)
+        updateProfileAvatarColorSeed(profile.avatarColorSeed)
+    }
+
+    func withdrawCommunityAccount() async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-withdraw") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        isWithdrawingCommunityAccount = true
+        defer {
+            isWithdrawingCommunityAccount = false
+        }
+
+        do {
+            let updatedRegistration = try await remotePushBackendClient.withdrawMyProfile(registration: registration)
+            settingsStore.saveRemotePushRegistration(updatedRegistration)
+            signOutFromCommunity()
+            settingsStore.saveCommunityProfileID(nil)
+            settingsStore.saveCommunityProfileDisplayName("")
+            statusMessage = strings.accountDeleted
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
         }
     }
 
@@ -1100,6 +1393,105 @@ final class AppState: ObservableObject {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
         }
+    }
+
+    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return
+        }
+
+        let previous = communityQuestions.first(where: { $0.id == question.id })
+        updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: max(0, question.likeCount + (isLiked ? 1 : -1)))
+
+        do {
+            let state = try await remotePushBackendClient.setCommunityQuestionLike(
+                registration: registration,
+                questionID: question.id,
+                isLiked: isLiked
+            )
+            updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+        } catch {
+            if let previous {
+                updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
+            }
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func loadCommunityQuestionComments(questionID: String, limit: Int = 30, offset: Int = 0) async -> CommunityCommentsResponse? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comments") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            return try await remotePushBackendClient.fetchCommunityQuestionComments(
+                registration: registration,
+                questionID: questionID,
+                limit: limit,
+                offset: offset
+            )
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func loadCommunityQuestionDetail(questionID: String) async -> CommunityQuestion? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-question-detail") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            let question = try await remotePushBackendClient.fetchPublicQuestion(
+                registration: registration,
+                questionID: questionID
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index] = question
+            }
+            return question
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return nil
+        }
+
+        do {
+            let comment = try await remotePushBackendClient.createCommunityQuestionComment(
+                registration: registration,
+                questionID: questionID,
+                body: body
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index].commentCount += 1
+            }
+            return comment
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func updateCommunityQuestionLike(id: String, isLiked: Bool, likeCount: Int) {
+        guard let index = communityQuestions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        communityQuestions[index].isLikedByMe = isLiked
+        communityQuestions[index].likeCount = likeCount
     }
 
     func setDraftNotificationSound(_ sound: NotificationSoundOption, preview: Bool = true) {
@@ -1722,6 +2114,29 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
+    func openStudyCategory(_ categoryID: String) {
+        let categories = synchronizedTopicCategories(for: settings).studyCategories
+        guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
+            return
+        }
+
+        if settings.selectedStudyCategoryID != targetCategory.id {
+            persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
+        }
+
+        if let record = preferredPendingRecord(for: targetCategory) {
+            notificationLandingMessage = nil
+            currentQuestion = record.question
+            lastAnswer = record.answer ?? ""
+            gradingResult = record.gradingResult
+            settingsStore.saveQuestion(record.question)
+            settingsStore.saveLastAnswer(record.answer ?? "")
+            settingsStore.saveGradingResult(record.gradingResult)
+        }
+
+        showStudyScreen(categoryID: targetCategory.id)
+    }
+
     func deleteStudyCategory(id: String) {
         guard let index = studyCategoriesForDisplay.firstIndex(where: { $0.id == id }) else {
             return
@@ -1866,6 +2281,9 @@ final class AppState: ObservableObject {
             isBackendOpenAIKeyConfigured = true
             log(.info, "온보딩 완료 후 백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
         }
@@ -1942,7 +2360,7 @@ final class AppState: ObservableObject {
             isBackendOpenAIKeyConfigured = true
             errorMessage = nil
         }
-        statusMessage = "설정을 저장했습니다."
+        statusMessage = nil
         StudyNotificationDelegate.shared.register(language: sanitizedSettings.appLanguage)
         log(.info, "설정을 저장했습니다. interval=\(sanitizedSettings.sanitizedIntervalMinutes), maxHistory=\(sanitizedSettings.sanitizedMaxHistoryCount)")
         markCloudDataChanged()
@@ -2015,7 +2433,7 @@ final class AppState: ObservableObject {
         }
 
         isValidatingAPIKey = true
-        statusMessage = "API 키를 확인 중입니다."
+        statusMessage = nil
         errorMessage = nil
 
         do {
@@ -2029,10 +2447,13 @@ final class AppState: ObservableObject {
             )
             _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
             hasAPIKeyError = false
-            statusMessage = "설정을 저장했고 API 키도 확인했습니다."
+            statusMessage = nil
             isBackendOpenAIKeyConfigured = true
             log(.info, "백엔드 OpenAI API 키 검증에 성공했습니다.")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
         }
@@ -2135,6 +2556,10 @@ final class AppState: ObservableObject {
     }
 
     private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool) async {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         guard await canCreateQuestionAfterGlobalPendingCheck(
             reason: "백엔드 새 질문 생성",
             updateVisibleQuestion: manual
@@ -2151,12 +2576,15 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: manual ? "manual-question-before-create" : "scheduled-question-before-create"
             )
-            let record = try await remotePushBackendClient.createQuestion(registration: registration)
+            let record = try await remotePushBackendClient.createQuestion(
+                registration: registration,
+                topic: settings.activeCategory?.normalizedTitle ?? settings.effectiveTopic
+            )
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             studyRecords = settingsStore.loadStudyRecords()
 
-            let shouldActivateQuestion = manual || !hasActiveUngradedCurrentQuestion
+            let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
             if shouldActivateQuestion {
                 currentQuestion = record.question
                 gradingResult = record.gradingResult
@@ -2167,10 +2595,13 @@ final class AppState: ObservableObject {
             }
 
             hasAPIKeyError = false
-            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 미제출 목록에 추가됐습니다."
+            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
             log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
             await syncRemotePushScheduleIfPossible(reason: "manual-question")
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
             handleOpenAIError(error)
             statusMessage = nil
             log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
@@ -2231,7 +2662,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        guard !hasReachedPendingQuestionLimit else {
+        guard !hasReachedPendingQuestionLimit(for: settings.category(for: settings.selectedStudyCategoryID)) else {
             showPendingQuestionLimitStatus(reason: reason)
             return false
         }
@@ -2333,6 +2764,19 @@ final class AppState: ObservableObject {
         }
 
         return gradingResult == nil
+    }
+
+    private func preferredPendingRecord(for category: StudyCategory) -> StudyRecord? {
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        let records = pendingRecordsIncludingCurrent
+            .filter { Self.normalizedCategoryText(for: $0.topic) == categoryKey }
+
+        if let currentQuestion,
+           let currentRecord = records.first(where: { studyRecordMatches($0, question: currentQuestion) }) {
+            return currentRecord
+        }
+
+        return records.max { $0.question.createdAt < $1.question.createdAt }
     }
 
     func gradeCurrentAnswer(answer submittedAnswer: String? = nil) async {
@@ -2516,6 +2960,9 @@ final class AppState: ObservableObject {
                     await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
                 } catch {
+                    if self.handlePageAccessError(error, page: .studyDetail) {
+                        return
+                    }
                     log(.warning, "백엔드 미제출 질문 넘기기 실패: \(error.localizedDescription)")
                 }
             }
@@ -2545,6 +2992,10 @@ final class AppState: ObservableObject {
     }
 
     func selectStudyRecord(_ record: StudyRecord) {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         notificationLandingMessage = nil
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
@@ -2559,6 +3010,10 @@ final class AppState: ObservableObject {
     }
 
     func prepareToOpenQuestionFromNotification() {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         showStudyScreen(categoryID: nil)
         notificationLandingMessage = strings.openingNotificationQuestion
         statusMessage = strings.openingNotificationQuestion
@@ -2573,6 +3028,10 @@ final class AppState: ObservableObject {
     ) -> Bool {
         if let recordID,
            settingsStore.loadRemotePushRegistration() != nil {
+            guard requirePageAccess(.studyDetail) else {
+                return false
+            }
+
             showStudyScreen(categoryID: nil)
             notificationLandingMessage = strings.openingNotificationQuestion
             statusMessage = strings.openingNotificationQuestion
@@ -2634,7 +3093,8 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func handleBackendRecordPush(recordID: String, openStudy: Bool, replyText: String? = nil) async -> Bool {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
             log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
             return false
         }
@@ -2675,6 +3135,9 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 push record를 처리했습니다. recordID=\(recordID), openStudy=\(openStudy)")
             return true
         } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return false
+            }
             if openStudy {
                 showNotificationQuestionUnavailable(preserveCurrentQuestion: true)
             }
@@ -2870,8 +3333,11 @@ final class AppState: ObservableObject {
         log(.warning, "학습 기록을 모두 삭제했습니다.")
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
+                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "clear-records") else {
+                    return
+                }
                 do {
-                    try await remotePushBackendClient.clearRecords(registration: registration)
+                    try await remotePushBackendClient.clearRecords(registration: tokenRegistration)
                     await syncRemotePushScheduleIfPossible(reason: "clear-records")
                 } catch {
                     log(.warning, "백엔드 학습 기록 전체삭제 실패: \(error.localizedDescription)")
@@ -2901,8 +3367,11 @@ final class AppState: ObservableObject {
         log(.info, "학습 기록을 1개 삭제했습니다.")
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
+                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "delete-record") else {
+                    return
+                }
                 do {
-                    try await remotePushBackendClient.deleteRecord(registration: registration, recordID: record.id)
+                    try await remotePushBackendClient.deleteRecord(registration: tokenRegistration, recordID: record.id)
                     await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "delete-record")
                 } catch {
@@ -2911,6 +3380,43 @@ final class AppState: ObservableObject {
             }
         }
         markCloudDataChanged(syncDelaySeconds: 0)
+    }
+
+    func updateStudyRecordPublicity(_ record: StudyRecord, isPublic: Bool) {
+        let updatedRecord = StudyRecord(
+            id: record.id,
+            question: record.question,
+            answer: record.answer,
+            gradingResult: record.gradingResult,
+            topic: record.topic,
+            difficulty: record.difficulty,
+            answeredAt: record.answeredAt,
+            isPublic: isPublic
+        )
+        settingsStore.saveStudyRecord(updatedRecord)
+        studyRecords = settingsStore.loadStudyRecords()
+        markCloudDataChanged()
+
+        guard let registration = settingsStore.loadRemotePushRegistration() else {
+            return
+        }
+
+        Task {
+            guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "record-publicity") else {
+                return
+            }
+            do {
+                let backendRecord = try await remotePushBackendClient.updateRecordPublicity(
+                    registration: tokenRegistration,
+                    recordID: record.id,
+                    isPublic: isPublic
+                )
+                settingsStore.saveStudyRecord(backendRecord)
+                studyRecords = settingsStore.loadStudyRecords()
+            } catch {
+                log(.warning, "기록 공개 상태 변경 실패: \(error.localizedDescription)")
+            }
+        }
     }
 
     func clearAppLogs() {
@@ -3266,7 +3772,7 @@ final class AppState: ObservableObject {
 
     private func backendRegistrationForOpenAIRequests(reason: String) async -> RemotePushRegistration? {
         if let registration = settingsStore.loadRemotePushRegistration() {
-            return registration
+            return await registrationWithAccessToken(registration, reason: reason)
         }
 
         do {
@@ -3286,6 +3792,25 @@ final class AppState: ObservableObject {
             return registration
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func registrationWithAccessToken(
+        _ registration: RemotePushRegistration,
+        reason: String
+    ) async -> RemotePushRegistration? {
+        guard !registration.hasAccessToken else {
+            return registration
+        }
+
+        do {
+            let updatedRegistration = try await remotePushBackendClient.bootstrapAccessToken(registration: registration)
+            settingsStore.saveRemotePushRegistration(updatedRegistration)
+            log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
+            return updatedRegistration
+        } catch {
+            log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
     }
@@ -3330,10 +3855,16 @@ final class AppState: ObservableObject {
 
             if let existingRegistration,
                existingRegistration.apnsToken == token {
-                registration = existingRegistration
+                guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-existing") else {
+                    return
+                }
+                registration = tokenRegistration
             } else if let existingRegistration {
+                guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-update") else {
+                    return
+                }
                 registration = try await remotePushBackendClient.updatePushToken(
-                    registration: existingRegistration,
+                    registration: tokenRegistration,
                     apnsToken: token,
                     apnsEnvironment: Self.backendAPNSEnvironment
                 )
@@ -3361,7 +3892,8 @@ final class AppState: ObservableObject {
     }
 
     private func syncRemotePushScheduleIfPossible(reason: String) async {
-        guard let registration = settingsStore.loadRemotePushRegistration() else {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
             return
         }
 
@@ -4618,6 +5150,10 @@ final class AppState: ObservableObject {
     }
 
     private func showStudyScreen(categoryID: String?) {
+        guard requirePageAccess(.studyDetail) else {
+            return
+        }
+
         #if os(iOS)
         selectedTab = .home
         homeStudyRoute = HomeStudyRoute(categoryID: categoryID)
@@ -4628,12 +5164,26 @@ final class AppState: ObservableObject {
 
     private func communityErrorMessage(for error: Error) -> String {
         if let backendError = error as? RemotePushBackendError,
-           case let .httpStatus(statusCode, _) = backendError,
+           case let .httpStatus(statusCode, _, _) = backendError,
            statusCode == 404 {
             return strings.communityUnavailable
         }
 
-        return strings.communityRequestFailed
+        return backendErrorDisplayMessage(error, fallback: strings.communityRequestFailed)
+    }
+
+    private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
+        if let backendError = error as? RemotePushBackendError,
+           let message = backendError.backendMessage,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+
+        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !localized.isEmpty else {
+            return fallback
+        }
+        return localized
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {
@@ -4668,10 +5218,12 @@ final class AppState: ObservableObject {
     nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
         if let backendError = error as? RemotePushBackendError {
             switch backendError {
-            case .httpStatus(let status, let body):
-                let lowercasedBody = body.lowercased()
+            case .httpStatus(let status, let body, let apiError):
+                let lowercasedBody = (apiError?.message ?? body).lowercased()
+                let code = apiError?.code ?? ""
                 return status == 401 ||
                     status == 403 ||
+                    code.contains("OPENAI_API_KEY") ||
                     lowercasedBody.contains("api key") ||
                     lowercasedBody.contains("unauthorized")
             case .invalidResponse:

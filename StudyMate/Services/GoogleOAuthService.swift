@@ -67,6 +67,12 @@ final class GoogleOAuthService: NSObject, ASWebAuthenticationPresentationContext
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [weak self] url, error in
                 self?.currentSession = nil
                 if let error {
+                    if let authenticationError = error as? ASWebAuthenticationSessionError,
+                       authenticationError.code == .canceledLogin {
+                        continuation.resume(throwing: GoogleOAuthError.cancelled)
+                        return
+                    }
+
                     continuation.resume(throwing: error)
                     return
                 }
@@ -140,6 +146,7 @@ final class GoogleOAuthService: NSObject, ASWebAuthenticationPresentationContext
 enum GoogleOAuthError: LocalizedError {
     case notConfigured
     case invalidResponse
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -147,6 +154,8 @@ enum GoogleOAuthError: LocalizedError {
             return "Google Login is not configured."
         case .invalidResponse:
             return "Google Login response was invalid."
+        case .cancelled:
+            return "Google Login was cancelled."
         }
     }
 }

@@ -1,29 +1,23 @@
-FROM python:3.12-slim
+FROM gradle:8.14.2-jdk24-alpine AS build
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    APP_HOST=0.0.0.0 \
-    APP_PORT=8080 \
-    DATABASE_PATH=/data/buddystuddy.db
+WORKDIR /workspace
+COPY settings.gradle.kts build.gradle.kts ./
+COPY src ./src
+RUN gradle --no-daemon clean bootJar
 
+FROM eclipse-temurin:24-jre-alpine
+
+ENV APP_PORT=8080
 WORKDIR /app
 
-RUN useradd --create-home --shell /usr/sbin/nologin appuser \
-    && mkdir -p /data \
-    && chown -R appuser:appuser /data
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=build /workspace/build/libs/*.jar /app/buddystuddy-backend.jar
+RUN chown -R app:app /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-COPY app /app/app
-RUN chown -R appuser:appuser /app
-
-USER appuser
-
+USER app
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1
 
-CMD ["sh", "-c", "uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT}"]
-
+CMD ["java", "-jar", "/app/buddystuddy-backend.jar"]

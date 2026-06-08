@@ -73,7 +73,7 @@ BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to 
 3. iCloud/CloudKit sync is no longer exposed or enabled; backend persistence is the active sync path.
 4. Only the regular OpenAI API key is supported; admin keys are not supported.
 5. The app does not call OpenAI directly. API-key validation, question generation, and grading go through `https://api.ghkdqhrbals.org`.
-6. Server-scheduled APNs delivery is handled by the Python backend. It generates each due question, stores it before push delivery, then sends the APNs alert.
+6. Server-scheduled APNs delivery is handled by the Spring Boot Kotlin backend. It generates each due question, stores it before push delivery, publishes a Redis stream push job, then sends the APNs alert from an `@StreamListener` consumer.
 7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
 

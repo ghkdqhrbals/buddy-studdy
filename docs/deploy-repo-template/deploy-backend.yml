@@ -54,6 +54,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           BACKEND_MASTER_KEY: ${{ secrets.BACKEND_MASTER_KEY }}
           BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
+          APP_SECRET_ID: buddystuddy/backend
           APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
@@ -76,6 +77,7 @@ jobs:
              GHCR_TOKEN='${GHCR_TOKEN}' \
              BACKEND_MASTER_KEY='${BACKEND_MASTER_KEY}' \
              BACKEND_API_TOKEN='${BACKEND_API_TOKEN}' \
+             APP_SECRET_ID='${APP_SECRET_ID}' \
              APNS_AUTH_KEY_BASE64='${APNS_AUTH_KEY_BASE64}' \
              APNS_KEY_ID='${APNS_KEY_ID}' \
              APNS_TEAM_ID='${APNS_TEAM_ID}' \
@@ -101,12 +103,14 @@ jobs:
             chmod 600 .postgres_password
           fi
           POSTGRES_PASSWORD="$(cat .postgres_password)"
-          DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@buddystuddy-db:5432/${POSTGRES_DB}"
+          DATABASE_URL="jdbc:postgresql://buddystuddy-db:5432/${POSTGRES_DB}"
 
           cat > .env <<ENV
           DATABASE_URL=${DATABASE_URL}
+          DATABASE_USERNAME=${POSTGRES_USER}
+          DATABASE_PASSWORD=${POSTGRES_PASSWORD}
           SCHEDULER_ENABLED=true
-          SCHEDULER_POLL_SECONDS=30
+          SCHEDULER_POLL_MS=30000
           OPENAI_MODEL=gpt-5.4
           ENABLE_OPENAPI_DOCS=false
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
@@ -118,6 +122,8 @@ jobs:
           APNS_ENV=${APNS_ENV}
           OPENAPI_ACCESS_TOKEN=${OPENAPI_ACCESS_TOKEN}
           GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}
+          AWS_SECRET_ID=${APP_SECRET_ID}
+          AWS_REGION=ap-northeast-2
           ENV
           chmod 600 .env
 
@@ -178,15 +184,6 @@ jobs:
 
           # Keep only the last 14 days of backups.
           find backups -type f -name "buddystuddy-*.dump" -mtime +14 -delete
-
-          if sudo docker volume inspect buddystuddy-backend-data >/dev/null 2>&1; then
-            sudo docker run --rm \
-              --network buddystuddy-net \
-              --env-file .env \
-              -v buddystuddy-backend-data:/legacy:ro \
-              "${IMAGE_REF}" \
-              python -m app.migrate_sqlite_to_postgres /legacy/buddystuddy.db
-          fi
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
