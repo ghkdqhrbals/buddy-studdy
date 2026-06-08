@@ -333,35 +333,31 @@ class ApiService(
         val q = questions.findPublicAnsweredById(id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         streams.publishQuestionViewed(id, principal?.userId)
-        val stats = questionStats.findById(id).orElse(QuestionStatsEntity(questionId = id))
-        stats.viewCount += 1
-        stats.updatedAt = Instant.now()
-        questionStats.save(stats)
         return community(q, principal)
     }
 
     @Transactional
     fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
+        var delta = 0
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
-                incrementStats(id, like = 1)
+                delta = 1
                 streams.publishQuestionChanged(id, "QUESTION_LIKED", principal.userId)
             }
         } else {
             if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
-                incrementStats(id, like = -1)
+                delta = -1
                 streams.publishQuestionChanged(id, "QUESTION_UNLIKED", principal.userId)
             }
         }
         val stats = questionStats.findById(id).orElse(QuestionStatsEntity(questionId = id))
-        return CommunityLikeResponse(id.toString(), stats.likeCount, liked)
+        return CommunityLikeResponse(id.toString(), (stats.likeCount + delta).coerceAtLeast(0), liked)
     }
 
     @Transactional
     fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
-        incrementStats(id, comment = 1)
         streams.publishQuestionChanged(id, "QUESTION_COMMENTED", principal.userId)
         return saved.toResponse(user(principal.userId).toProfile())
     }
@@ -388,15 +384,6 @@ class ApiService(
         val stats = questionStats.findById(q.id).orElse(null)
         val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
         return q.toCommunity(author, stats, liked)
-    }
-
-    private fun incrementStats(questionId: Long, like: Int = 0, comment: Int = 0, view: Int = 0) {
-        val stats = questionStats.findById(questionId).orElse(QuestionStatsEntity(questionId = questionId))
-        stats.likeCount = (stats.likeCount + like).coerceAtLeast(0)
-        stats.commentCount = (stats.commentCount + comment).coerceAtLeast(0)
-        stats.viewCount = (stats.viewCount + view).coerceAtLeast(0)
-        stats.updatedAt = Instant.now()
-        questionStats.save(stats)
     }
 
     private fun apiKeyFor(schedule: ScheduleEntity?): String =

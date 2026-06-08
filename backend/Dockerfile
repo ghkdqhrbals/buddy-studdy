@@ -2,7 +2,6 @@ FROM gradle:8.14.2-jdk24-alpine AS build
 
 WORKDIR /workspace
 COPY settings.gradle.kts build.gradle.kts ./
-COPY libs ./libs
 COPY src ./src
 RUN gradle --no-daemon clean bootJar
 
