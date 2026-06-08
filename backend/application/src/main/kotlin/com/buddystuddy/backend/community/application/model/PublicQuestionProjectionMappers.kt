@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.community.application.model
 
-import com.buddystuddy.backend.community.domain.PublicQuestionProjection
+import com.buddystuddy.community.domain.PublicQuestionProjection
 import com.buddystuddy.backend.profile.application.model.CommunityPageAccess
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.study.application.model.GradingResultResponse

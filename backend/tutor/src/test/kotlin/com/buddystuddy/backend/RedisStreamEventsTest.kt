@@ -3,8 +3,8 @@ package com.buddystuddy.backend
 import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionActionEvent
 import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
 import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystuddy.backend.common.application.model.QuestionStreamEventType
-import com.buddystuddy.backend.utils.toStringMapWithoutNull
+import com.buddystuddy.common.application.model.QuestionStreamEventType
+import com.buddystuddy.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

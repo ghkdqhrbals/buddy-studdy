@@ -1,7 +1,7 @@
-package com.buddystuddy.backend.study.domain
+package com.buddystuddy.study.domain
 
-import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionStatsEntity
+import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.domain.QuestionStatsEntity
 import java.time.Instant
 
 class StudyRecord private constructor(

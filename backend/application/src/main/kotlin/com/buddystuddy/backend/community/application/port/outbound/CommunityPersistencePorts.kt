@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.community.application.port.outbound
 
-import com.buddystuddy.backend.domain.QuestionCommentEntity
-import com.buddystuddy.backend.domain.QuestionLikeEntity
-import com.buddystuddy.backend.domain.ReportEntity
+import com.buddystuddy.domain.QuestionCommentEntity
+import com.buddystuddy.domain.QuestionLikeEntity
+import com.buddystuddy.domain.ReportEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 

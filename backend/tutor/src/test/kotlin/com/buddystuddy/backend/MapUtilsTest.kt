@@ -1,6 +1,6 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.utils.toStringMapWithoutNull
+import com.buddystuddy.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant

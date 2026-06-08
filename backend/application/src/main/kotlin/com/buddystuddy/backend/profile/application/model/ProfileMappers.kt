@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.profile.application.model
 
-import com.buddystuddy.backend.domain.UserEntity
+import com.buddystuddy.domain.UserEntity
 
 fun UserEntity.toProfile() = UserProfileResponse(
     id = id,

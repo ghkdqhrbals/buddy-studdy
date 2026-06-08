@@ -1,13 +1,13 @@
 package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.domain.QuestionEntity
+import com.buddystuddy.domain.QuestionEntity
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRecord
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import org.springframework.data.domain.PageRequest

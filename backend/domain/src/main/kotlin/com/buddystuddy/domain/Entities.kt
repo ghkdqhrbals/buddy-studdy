@@ -1,4 +1,4 @@
-package com.buddystuddy.backend.domain
+package com.buddystuddy.domain
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity

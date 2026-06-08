@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.application.model
 
-import com.buddystuddy.backend.study.domain.StudyRecordProjection
+import com.buddystuddy.study.domain.StudyRecordProjection
 
 fun StudyRecordProjection.toRecordResponse() = StudyRecordResponse(
     id = id,

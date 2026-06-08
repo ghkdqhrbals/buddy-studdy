@@ -2,8 +2,8 @@ package com.buddystuddy.backend.study.adapter.inbound.scheduler
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionStatsEntity
+import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort

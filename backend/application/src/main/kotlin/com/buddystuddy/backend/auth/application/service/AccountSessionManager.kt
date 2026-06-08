@@ -3,12 +3,12 @@ package com.buddystuddy.backend.auth.application.service
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
-import com.buddystuddy.backend.auth.domain.Account
+import com.buddystuddy.auth.domain.Account
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
-import com.buddystuddy.backend.domain.DeviceEntity
-import com.buddystuddy.backend.domain.UserDeviceEntity
-import com.buddystuddy.backend.domain.UserEntity
+import com.buddystuddy.domain.DeviceEntity
+import com.buddystuddy.domain.UserDeviceEntity
+import com.buddystuddy.domain.UserEntity
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.time.Instant

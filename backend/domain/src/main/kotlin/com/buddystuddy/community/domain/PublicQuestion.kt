@@ -1,7 +1,7 @@
-package com.buddystuddy.backend.community.domain
+package com.buddystuddy.community.domain
 
-import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionStatsEntity
+import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.domain.QuestionStatsEntity
 import java.time.Instant
 
 class PublicQuestion private constructor(

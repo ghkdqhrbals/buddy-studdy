@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.persistence
 
-import com.buddystuddy.backend.domain.ScheduleEntity
+import com.buddystuddy.domain.ScheduleEntity
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository

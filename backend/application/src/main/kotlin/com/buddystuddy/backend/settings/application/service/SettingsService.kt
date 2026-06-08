@@ -2,15 +2,15 @@ package com.buddystuddy.backend.settings.application.service
 
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.backend.domain.ScheduleEntity
+import com.buddystuddy.domain.ScheduleEntity
 import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
 import com.buddystuddy.backend.settings.application.model.ScheduleResponse
 import com.buddystuddy.backend.settings.application.model.toSettings
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
-import com.buddystuddy.backend.study.domain.StudyRoomSettings
-import com.buddystuddy.backend.study.domain.StudyRoomSettingsCommand
+import com.buddystuddy.study.domain.StudyRoomSettings
+import com.buddystuddy.study.domain.StudyRoomSettingsCommand
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

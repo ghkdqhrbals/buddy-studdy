@@ -9,19 +9,19 @@ import com.buddystuddy.backend.community.application.port.outbound.QuestionComme
 import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystuddy.backend.community.application.port.outbound.ReportPort
-import com.buddystuddy.backend.domain.QuestionCommentEntity
-import com.buddystuddy.backend.domain.QuestionEntity
-import com.buddystuddy.backend.domain.QuestionLikeEntity
-import com.buddystuddy.backend.domain.QuestionStatsEntity
-import com.buddystuddy.backend.domain.ReportEntity
+import com.buddystuddy.domain.QuestionCommentEntity
+import com.buddystuddy.domain.QuestionEntity
+import com.buddystuddy.domain.QuestionLikeEntity
+import com.buddystuddy.domain.QuestionStatsEntity
+import com.buddystuddy.domain.ReportEntity
 import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
 import com.buddystuddy.backend.community.application.model.CommunityCommentsResponse
 import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionsResponse
 import com.buddystuddy.backend.community.application.model.toCommunityQuestionResponse
-import com.buddystuddy.backend.community.domain.PublicQuestion
-import com.buddystuddy.backend.community.domain.PublicQuestionAuthorProjection
+import com.buddystuddy.community.domain.PublicQuestion
+import com.buddystuddy.community.domain.PublicQuestionAuthorProjection
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.profile.application.model.toProfile
@@ -134,7 +134,7 @@ class CommunityService(
     }.toProfile()
 }
 
-private fun com.buddystuddy.backend.domain.UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
+private fun com.buddystuddy.domain.UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
     id = id,
     displayName = displayName,
     bio = bio,

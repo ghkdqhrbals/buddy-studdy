@@ -2,8 +2,8 @@ package com.buddystuddy.backend.community.adapter.outbound.stream
 
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.common.application.model.QuestionStreamEventType
-import com.buddystuddy.backend.utils.toStringMapWithoutNull
+import com.buddystuddy.common.application.model.QuestionStreamEventType
+import com.buddystuddy.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory

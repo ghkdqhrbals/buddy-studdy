@@ -5,7 +5,7 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.backend.domain.ScheduleEntity
+import com.buddystuddy.domain.ScheduleEntity
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
 import org.springframework.data.domain.PageRequest

@@ -9,7 +9,7 @@ import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLi
 import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepository
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
-import com.buddystuddy.backend.domain.*
+import com.buddystuddy.domain.*
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.service.StudyService

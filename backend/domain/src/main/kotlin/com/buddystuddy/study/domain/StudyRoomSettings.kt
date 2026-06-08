@@ -1,6 +1,6 @@
-package com.buddystuddy.backend.study.domain
+package com.buddystuddy.study.domain
 
-import com.buddystuddy.backend.domain.ScheduleEntity
+import com.buddystuddy.domain.ScheduleEntity
 import java.time.Instant
 
 class StudyRoomSettings private constructor(

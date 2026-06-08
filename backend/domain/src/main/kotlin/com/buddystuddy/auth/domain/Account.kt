@@ -1,7 +1,7 @@
-package com.buddystuddy.backend.auth.domain
+package com.buddystuddy.auth.domain
 
-import com.buddystuddy.backend.domain.DeviceEntity
-import com.buddystuddy.backend.domain.UserEntity
+import com.buddystuddy.domain.DeviceEntity
+import com.buddystuddy.domain.UserEntity
 import java.time.Instant
 
 class Account private constructor(

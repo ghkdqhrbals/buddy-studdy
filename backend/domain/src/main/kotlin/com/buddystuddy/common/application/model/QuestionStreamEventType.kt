@@ -1,4 +1,4 @@
-package com.buddystuddy.backend.common.application.model
+package com.buddystuddy.common.application.model
 
 enum class QuestionStreamEventType {
     QUESTION_PUSH_REQUESTED,

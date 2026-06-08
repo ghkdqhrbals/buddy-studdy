@@ -1,6 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.stream
 
-import com.buddystuddy.backend.common.application.model.QuestionStreamEventType
+import com.buddystuddy.common.application.model.QuestionStreamEventType
 import java.time.Instant
 import java.util.UUID
 

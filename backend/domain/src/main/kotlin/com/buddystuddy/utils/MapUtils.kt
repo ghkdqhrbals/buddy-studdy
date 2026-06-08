@@ -1,4 +1,4 @@
-package com.buddystuddy.backend.utils
+package com.buddystuddy.utils
 
 import kotlin.reflect.full.memberProperties
 

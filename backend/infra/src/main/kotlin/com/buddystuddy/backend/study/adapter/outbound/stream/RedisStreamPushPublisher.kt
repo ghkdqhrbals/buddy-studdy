@@ -3,7 +3,7 @@ package com.buddystuddy.backend.study.adapter.outbound.stream
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
-import com.buddystuddy.backend.utils.toStringMapWithoutNull
+import com.buddystuddy.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory

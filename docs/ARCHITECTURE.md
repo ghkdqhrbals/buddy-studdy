@@ -43,7 +43,7 @@ BuddyStuddy is a SwiftUI app with shared domain logic across macOS and iOS. The 
   - Spring Boot Kotlin APNs push backend.
   - The backend is organized as multi-module hexagonal architecture: `domain`, `application`, `infra`, and executable `tutor`.
   - Incoming web/scheduler/stream handlers live in `backend/infra`, persistence/OpenAI/APNs/Redis integrations live in `backend/infra`, and use-case services live in `backend/application` behind inbound port interfaces.
-  - Spring Data JPA repositories live in outbound persistence adapters. Current JPA entities are centralized under `backend/domain/src/main/kotlin/com/buddystuddy/backend/domain` as a migration bridge.
+  - Spring Data JPA repositories live in outbound persistence adapters. Current JPA entities are centralized under `backend/domain/src/main/kotlin/com/buddystuddy/domain` as a migration bridge.
   - Topic-level statistics calculation is separated into `backend/application/src/main/kotlin/com/buddystuddy/backend/stats/StatsService.kt` and is consumed by study application services.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.

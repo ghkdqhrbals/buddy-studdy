@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.auth.application.port.outbound
 
-import com.buddystuddy.backend.domain.DeviceEntity
-import com.buddystuddy.backend.domain.UserDeviceEntity
-import com.buddystuddy.backend.domain.UserEntity
+import com.buddystuddy.domain.DeviceEntity
+import com.buddystuddy.domain.UserDeviceEntity
+import com.buddystuddy.domain.UserEntity
 import java.util.Optional
 
 interface UserPort {

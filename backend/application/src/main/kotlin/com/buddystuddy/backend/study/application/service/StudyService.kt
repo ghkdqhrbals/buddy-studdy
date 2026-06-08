@@ -4,13 +4,13 @@ import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.domain.QuestionStatsEntity
+import com.buddystuddy.domain.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.backend.study.domain.StudyRecord
-import com.buddystuddy.backend.study.domain.StudyRoom
-import com.buddystuddy.backend.study.domain.StudyRoomPendingLimitExceeded
+import com.buddystuddy.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRoom
+import com.buddystuddy.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort

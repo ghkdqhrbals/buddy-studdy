@@ -28,7 +28,7 @@ Use module-first, package-by-feature hexagonal architecture:
 ```text
 backend/domain
   com.buddystuddy.backend.{auth,study,community}.domain
-  com.buddystuddy.backend.domain
+  com.buddystuddy.domain
 
 backend/application
   com.buddystuddy.backend.{auth,study,community,settings,profile,admin}.application
@@ -225,7 +225,7 @@ auth
 
 ## Data Model
 
-JPA entities are currently centralized under `backend/domain/src/main/kotlin/com/buddystuddy/backend/domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in `infra` outbound persistence adapters implement those ports.
+JPA entities are currently centralized under `backend/domain/src/main/kotlin/com/buddystuddy/domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in `infra` outbound persistence adapters implement those ports.
 
 Domain root models are now used as the application-facing consistency boundary before the JPA entity bridge is fully removed:
 
