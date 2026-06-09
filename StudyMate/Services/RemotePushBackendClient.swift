@@ -1059,10 +1059,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func loginRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
         var request = authenticatedRequest(registration: registration, url: url)
-        if request.value(forHTTPHeaderField: "Authorization") == nil {
-            request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
-            request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
-        }
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         return request
     }
 
