@@ -9,6 +9,8 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.servlet.NoHandlerFoundException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 import java.util.UUID
 
 data class ApiErrorEnvelope(val error: ApiError)
@@ -37,6 +39,11 @@ class ErrorHandler {
     fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
         ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
             .body(envelope(ApiErrorCode.VALIDATION_ERROR, "Invalid request.", HttpStatus.UNPROCESSABLE_ENTITY, request))
+
+    @ExceptionHandler(NoResourceFoundException::class, NoHandlerFoundException::class)
+    fun notFound(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(envelope(ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found.", HttpStatus.NOT_FOUND, request))
 
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =

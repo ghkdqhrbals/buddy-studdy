@@ -51,6 +51,7 @@ class SecurityConfig {
             .logout { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                it.requestMatchers(NonApiRoutes.requestMatcher).permitAll()
                 AnonymousRoutes.requestMatchers.forEach { matcher -> it.requestMatchers(matcher).permitAll() }
                 it.anyRequest().authenticated()
             }
@@ -83,7 +84,7 @@ class BearerTokenFilter(
             authenticate(request)
             filterChain.doFilter(request, response)
         } catch (error: ApiException) {
-            if (AnonymousRoutes.matches(request)) {
+            if (AnonymousRoutes.matches(request) || NonApiRoutes.matches(request)) {
                 SecurityContextHolder.clearContext()
                 logIgnoredAuthenticationFailure(request, error)
                 filterChain.doFilter(request, response)
@@ -124,6 +125,13 @@ class BearerTokenFilter(
         )
     }
 
+}
+
+private object NonApiRoutes {
+    val requestMatcher: RequestMatcher = RequestMatcher { request -> matches(request) }
+
+    fun matches(request: HttpServletRequest): Boolean =
+        !request.requestURI.startsWith("/api")
 }
 
 private object AnonymousRoutes {

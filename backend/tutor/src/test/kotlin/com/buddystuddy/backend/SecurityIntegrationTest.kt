@@ -74,6 +74,28 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    fun `unknown non api scanner paths return not found without auth warning`(output: CapturedOutput) {
+        val response = get("/wp-su.php")
+
+        assertThat(response.statusCode()).isEqualTo(404)
+        assertThat(response.body()).doesNotContain("AUTH_ACCESS_TOKEN_REQUIRED")
+        assertThat(output.out)
+            .doesNotContain("api_auth_failed")
+            .doesNotContain("path=/wp-su.php")
+    }
+
+    @Test
+    fun `invalid bearer token on unknown non api path is ignored before not found`(output: CapturedOutput) {
+        val response = get("/ZSLeDE.php", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(404)
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(output.out)
+            .doesNotContain("api_auth_failed")
+            .doesNotContain("path=/ZSLeDE.php")
+    }
+
+    @Test
     fun `invalid bearer token does not block login endpoints before controller handling`() {
         val response = post("/api/v1/auth/google", """{"idToken":"invalid-google-token"}""", "not-a-token")
 
