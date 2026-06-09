@@ -25,6 +25,7 @@ interface StudyPort {
     fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
     fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
+    fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity>
     fun findDue(now: Instant, pageable: Pageable): List<StudyEntity>
 }
 
@@ -32,12 +33,15 @@ interface QuestionPort {
     fun save(entity: QuestionEntity): QuestionEntity
     fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
+    fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity>
     fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
+    fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity>
     fun countPendingForStudy(studyId: Long): Long
     fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
+    fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredById(id: Long): QuestionEntity?
     fun softDelete(id: Long, userId: Long, now: Instant): Int
 }

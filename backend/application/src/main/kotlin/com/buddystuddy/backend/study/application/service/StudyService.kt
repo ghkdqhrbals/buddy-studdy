@@ -95,8 +95,14 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
-        val page = questions.findVisibleByUser(principal.userId, includePending = false, PageRequest.of(offset / limit, limit))
+    override fun records(principal: Principal, limit: Int, offset: Int, query: String?): RecordsPageResponse {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val pageable = PageRequest.of(offset / limit, limit)
+        val page = if (search == null) {
+            questions.findVisibleByUser(principal.userId, includePending = false, pageable)
+        } else {
+            questions.findVisibleByUserAndQuery(principal.userId, includePending = false, search, pageable)
+        }
         return RecordsPageResponse(page.content.map { it.toStudyRecord(questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
     }
 

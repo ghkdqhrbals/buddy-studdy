@@ -5,6 +5,7 @@ import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsR
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
@@ -91,6 +92,20 @@ class StudyApiIntegrationTest {
         assertThat(schedule.statusCode()).isEqualTo(200)
 
         val study = studies.findAll().single()
+        val swiftStudy = studies.save(
+            StudyEntity(
+                deviceId = deviceId,
+                userId = study.userId,
+                topic = "SwiftUI",
+                difficultyLevel = 6,
+                intervalMinutes = 15,
+                enabled = true,
+                customPrompt = "Ask about state management.",
+                openaiModel = "gpt-5.4",
+                createdAt = Instant.parse("2026-06-09T00:30:00Z"),
+                updatedAt = Instant.parse("2026-06-09T00:30:00Z"),
+            )
+        )
         val pending = questions.save(
             QuestionEntity(
                 deviceId = deviceId,
@@ -134,25 +149,62 @@ class StudyApiIntegrationTest {
                 updatedAt = Instant.parse("2026-06-09T01:01:10Z"),
             )
         )
+        val swiftGraded = questions.save(
+            QuestionEntity(
+                deviceId = deviceId,
+                userId = swiftStudy.userId,
+                studyId = swiftStudy.id,
+                question = "SwiftUI StateObject는 언제 쓰나요?",
+                hint = "view owned observable state",
+                topic = "SwiftUI",
+                difficultyLevel = 6,
+                scheduledFor = Instant.parse("2026-06-09T02:00:00Z"),
+                sentAt = Instant.parse("2026-06-09T02:00:00Z"),
+                status = "graded",
+                answer = "뷰가 소유하는 observable object를 유지할 때 씁니다.",
+                score = 92,
+                correct = true,
+                feedback = "핵심을 잘 설명했습니다.",
+                explanation = "StateObject is retained by the view lifecycle.",
+                answeredAt = Instant.parse("2026-06-09T02:01:00Z"),
+                gradedAt = Instant.parse("2026-06-09T02:01:10Z"),
+                source = "manual",
+                publicQuestion = true,
+                createdAt = Instant.parse("2026-06-09T02:00:00Z"),
+                updatedAt = Instant.parse("2026-06-09T02:01:10Z"),
+            )
+        )
         stats.save(QuestionStatsEntity(questionId = graded.id, likeCount = 2, commentCount = 1, viewCount = 5))
 
         val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(studyPage["studies"]).hasSize(1)
-        assertThat(studyPage["studies"][0]["topic"].asText()).isEqualTo("Redis")
-        assertThat(studyPage["studies"][0]["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
-        assertThat(studyPage["studies"][0]["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
+        assertThat(studyPage["studies"]).hasSize(2)
+        assertThat(studyPage["studies"].map { it["topic"].asText() }).contains("Redis", "SwiftUI")
+        val redisStudyNode = studyPage["studies"].first { it["topic"].asText() == "Redis" }
+        assertThat(redisStudyNode["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
+        assertThat(redisStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
+
+        val searchedStudies = getJson("/api/v1/studies?limit=100&offset=0&query=swift", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(searchedStudies["studies"].map { it["topic"].asText() }).containsExactly("SwiftUI")
 
         val records = getJson("/api/v1/records?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(records["records"]).hasSize(1)
-        assertThat(records["records"][0]["id"].asText()).isEqualTo(graded.id.toString())
+        assertThat(records["records"]).hasSize(2)
+        assertThat(records["records"].map { it["id"].asText() }).contains(graded.id.toString(), swiftGraded.id.toString())
         assertThat(records["records"].map { it["id"].asText() }).doesNotContain(pending.id.toString())
-        assertThat(records["records"][0]["likeCount"].asInt()).isEqualTo(2)
-        assertThat(records["records"][0]["commentCount"].asInt()).isEqualTo(1)
-        assertThat(records["records"][0]["viewCount"].asInt()).isEqualTo(5)
+        val redisRecordNode = records["records"].first { it["id"].asText() == graded.id.toString() }
+        assertThat(redisRecordNode["likeCount"].asInt()).isEqualTo(2)
+        assertThat(redisRecordNode["commentCount"].asInt()).isEqualTo(1)
+        assertThat(redisRecordNode["viewCount"].asInt()).isEqualTo(5)
+
+        val searchedRecords = getJson("/api/v1/records?limit=100&offset=0&query=stateobject", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(searchedRecords["records"].map { it["id"].asText() }).containsExactly(swiftGraded.id.toString())
 
         val recordDetail = getJson("/api/v1/records/${graded.id}", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -180,7 +232,12 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(statsPage.toString()).contains("Redis")
 
-        val publicQuestions = getJson("/api/v1/public/questions?limit=20&offset=0", accessToken, deviceId, clientSecret)
+        val searchedStatsPage = getJson("/api/v1/stats?limit=10&offset=0&query=swift", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(searchedStatsPage["topics"].map { it["topic"].asText() }).containsExactly("SwiftUI")
+
+        val publicQuestions = getJson("/api/v1/public/questions?limit=20&offset=0&query=sorted", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(publicQuestions["questions"]).hasSize(1)

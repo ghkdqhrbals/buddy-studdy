@@ -49,13 +49,13 @@ class CommunityService(
     private val reactions: PublicQuestionReactionPublishPort,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override fun publicQuestions(principal: Principal?, topic: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override fun publicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
-        val normalizedTopic = topic?.takeIf { it.isNotBlank() }
-        val page = if (normalizedTopic == null) {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val page = if (search == null) {
             questions.findPublicAnswered(pageable)
         } else {
-            questions.findPublicAnsweredByTopic(normalizedTopic, pageable)
+            questions.findPublicAnsweredByQuery(search, pageable)
         }
         val rows = page.content.map { community(it, principal) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)

@@ -26,8 +26,14 @@ class StudySyncService(
     private val questionStats: QuestionStatsPort,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
-    override fun study(principal: Principal, limit: Int, offset: Int): StudyPageResponse {
-        val page = studies.findByUserId(principal.userId, PageRequest.of(offset / limit, limit))
+    override fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val pageable = PageRequest.of(offset / limit, limit)
+        val page = if (search == null) {
+            studies.findByUserId(principal.userId, pageable)
+        } else {
+            studies.findByUserIdAndQuery(principal.userId, search, pageable)
+        }
         return StudyPageResponse(
             studies = page.content.map { it.toStudyRoomResponse() },
             totalCount = page.totalElements,

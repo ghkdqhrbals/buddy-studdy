@@ -109,6 +109,7 @@ private struct MobileHomeView: View {
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var communitySearchDebounceTask: Task<Void, Never>?
+    @State private var homeStudySearchDebounceTask: Task<Void, Never>?
     @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
@@ -140,8 +141,13 @@ private struct MobileHomeView: View {
     }
 
     private var filteredStudyCategories: [StudyCategory] {
-        let categories = appState.studyCategoriesForDisplay
         let query = trimmedHomeStudySearchText
+        if !query.isEmpty,
+           let searchResults = appState.homeStudySearchResults {
+            return searchResults
+        }
+
+        let categories = appState.studyCategoriesForDisplay
         guard !query.isEmpty else {
             return categories
         }
@@ -263,8 +269,12 @@ private struct MobileHomeView: View {
         .onChange(of: appState.communitySearchText) {
             scheduleCommunitySearchReload()
         }
+        .onChange(of: homeStudySearchText) {
+            scheduleHomeStudySearchReload()
+        }
         .onDisappear {
             communitySearchDebounceTask?.cancel()
+            homeStudySearchDebounceTask?.cancel()
             searchFocusTask?.cancel()
             searchFocusTask = nil
             if activeTrimmedSearchText.isEmpty {
@@ -671,6 +681,9 @@ private struct MobileHomeView: View {
 
         if clearText {
             setActiveSearchText("")
+            if selectedHomeScope == .my {
+                appState.clearBackendStudySearchResults()
+            }
         }
 
         withAnimation(.smooth(duration: 0.22)) {
@@ -732,6 +745,25 @@ private struct MobileHomeView: View {
 
             hasLoadedCommunityQuestions = true
             await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+        }
+    }
+
+    @MainActor
+    private func scheduleHomeStudySearchReload() {
+        homeStudySearchDebounceTask?.cancel()
+        let query = trimmedHomeStudySearchText
+        guard !query.isEmpty else {
+            appState.clearBackendStudySearchResults()
+            return
+        }
+
+        homeStudySearchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await appState.searchBackendStudies(query: query)
         }
     }
 }

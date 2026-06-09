@@ -48,8 +48,10 @@ class StudyController(
         @RequestParam(defaultValue = "500") limit: Int,
         @Parameter(description = "Zero-based study offset for pagination.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed study search query.", example = "Swift")
+        @RequestParam(required = false) query: String?,
         authentication: Authentication,
-    ) = study.study(limit, offset, authentication)
+    ) = study.study(limit, offset, query, authentication)
 
     @Operation(
         summary = "List my graded records",
@@ -65,9 +67,11 @@ class StudyController(
         @RequestParam(defaultValue = "100") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed record search query.", example = "actor")
+        @RequestParam(required = false) query: String?,
         authentication: Authentication,
     ) =
-        study.records(limit, offset, authentication)
+        study.records(limit, offset, query, authentication)
 
     @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
     @ApiResponses(
@@ -153,9 +157,11 @@ class StudyController(
         @RequestParam(defaultValue = "8") limit: Int,
         @Parameter(description = "Zero-based topic offset for pagination.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed topic stat search query.", example = "Swift")
+        @RequestParam(required = false) query: String?,
         authentication: Authentication,
     ) =
-        study.stats(limit, offset, authentication)
+        study.stats(limit, offset, query, authentication)
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/questions")
@@ -167,8 +173,8 @@ class StudyController(
 }
 
 interface StudyWebPort {
-    fun study(limit: Int, offset: Int, authentication: Authentication): Any
-    fun records(limit: Int, offset: Int, authentication: Authentication): Any
+    fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
+    fun records(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
     fun record(id: Long, authentication: Authentication): Any
     fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): Any
@@ -176,7 +182,7 @@ interface StudyWebPort {
     fun skip(id: Long, authentication: Authentication): Any
     fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
     fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): Any
-    fun stats(limit: Int, offset: Int, authentication: Authentication): Any
+    fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
     fun createQuestion(body: CreateQuestionRequest, authentication: Authentication): Any
 }
 
@@ -187,11 +193,11 @@ class StudyWebAdapter(
     private val statsUseCase: GetStudyStatsUseCase,
     private val studySyncUseCase: StudySyncUseCase,
 ) : StudyWebPort {
-    override fun study(limit: Int, offset: Int, authentication: Authentication) =
-        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset))
+    override fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
 
-    override fun records(limit: Int, offset: Int, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset))
+    override fun records(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query)
 
     override fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
@@ -213,8 +219,8 @@ class StudyWebAdapter(
     override fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication) =
         studyUseCase.publicity(authentication.principalOrThrow(), id, body.isPublic)
 
-    override fun stats(limit: Int, offset: Int, authentication: Authentication) =
-        statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset))
+    override fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
 
     override fun createQuestion(body: CreateQuestionRequest, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), body.topic)

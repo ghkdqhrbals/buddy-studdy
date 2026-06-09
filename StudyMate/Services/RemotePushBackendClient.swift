@@ -157,13 +157,15 @@ protocol RemotePushBackendClientProtocol {
     func fetchStudy(
         registration: RemotePushRegistration,
         limit: Int,
-        offset: Int
+        offset: Int,
+        query: String
     ) async throws -> BackendStudyPage
 
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
-        offset: Int
+        offset: Int,
+        query: String
     ) async throws -> BackendRecordsPage
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
@@ -187,7 +189,7 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
-        topic: String?,
+        query: String?,
         limit: Int,
         offset: Int,
         excludeDeviceID: String?
@@ -446,7 +448,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchStudy(
         registration: RemotePushRegistration,
         limit: Int = 500,
-        offset: Int = 0
+        offset: Int = 0,
+        query: String = ""
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
             url: endpoint("api", "v1", "studies"),
@@ -454,7 +457,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(limit)"),
-            URLQueryItem(name: "offset", value: "\(offset)")
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "query", value: query)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -469,7 +473,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int = 100,
-        offset: Int = 0
+        offset: Int = 0,
+        query: String = ""
     ) async throws -> BackendRecordsPage {
         var components = URLComponents(
             url: endpoint("api", "v1", "records"),
@@ -477,7 +482,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(limit)"),
-            URLQueryItem(name: "offset", value: "\(offset)")
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "query", value: query)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -549,7 +555,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var queryItems = [
             URLQueryItem(name: "period", value: period.rawValue),
-            URLQueryItem(name: "search", value: search),
+            URLQueryItem(name: "query", value: search),
             URLQueryItem(name: "sort", value: sort.rawValue),
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)")
@@ -573,7 +579,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
-        topic: String?,
+        query: String?,
         limit: Int = 20,
         offset: Int = 0,
         excludeDeviceID: String? = nil
@@ -586,8 +592,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))")
         ]
-        if let topic, !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            queryItems.append(URLQueryItem(name: "topic", value: topic))
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: query))
         }
         if let excludeDeviceID,
            !excludeDeviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

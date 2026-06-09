@@ -41,12 +41,14 @@ class CommunityController(
     fun publicQuestions(
         @Parameter(description = "Optional topic keyword filter.", example = "Swift")
         @RequestParam(required = false) topic: String?,
+        @Parameter(description = "Optional DB-backed public question search query. Searches topic, question, answer, feedback, explanation, and author.", example = "Swift")
+        @RequestParam(required = false) query: String?,
         @Parameter(description = "Maximum number of items to return. Server clamps this to 1..100.", example = "20")
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication?,
-    ) = community.publicQuestions(topic, limit, offset, authentication)
+    ) = community.publicQuestions(query ?: topic, limit, offset, authentication)
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
@@ -111,7 +113,7 @@ class CommunityController(
 }
 
 interface CommunityWebPort {
-    fun publicQuestions(topic: String?, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun publicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
     fun publicQuestion(id: Long, authentication: Authentication?): Any
     fun like(id: Long, authentication: Authentication): Any
     fun unlike(id: Long, authentication: Authentication): Any
@@ -125,8 +127,8 @@ interface CommunityWebPort {
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
 ) : CommunityWebPort {
-    override fun publicQuestions(topic: String?, limit: Int, offset: Int, authentication: Authentication?) =
-        community.publicQuestions(authentication.optionalPrincipal(), topic, safeLimit(limit, 100), max(0, offset))
+    override fun publicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
+        community.publicQuestions(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
 
     override fun publicQuestion(id: Long, authentication: Authentication?) = community.publicQuestion(authentication.optionalPrincipal(), id)
 

@@ -114,6 +114,8 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
+    @Published var homeStudySearchResults: [StudyCategory]? = nil
+    @Published var recordSearchResults: [StudyRecord]? = nil
 
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
@@ -787,12 +789,14 @@ final class AppState: ObservableObject {
             let recordsPage = try await remotePushBackendClient.fetchRecords(
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
-                offset: 0
+                offset: 0,
+                query: ""
             )
             let studyPage = try await remotePushBackendClient.fetchStudy(
                 registration: registration,
                 limit: 100,
-                offset: 0
+                offset: 0,
+                query: ""
             )
             applyBackendStudyPage(studyPage)
             let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
@@ -865,6 +869,84 @@ final class AppState: ObservableObject {
         savedSettings = nextSettings
         draftSettings = nextSettings
         settingsStore.saveSettings(nextSettings)
+    }
+
+    func searchBackendStudies(query: String) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            homeStudySearchResults = nil
+            return
+        }
+
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "study-search") else {
+            homeStudySearchResults = []
+            return
+        }
+
+        do {
+            let page = try await remotePushBackendClient.fetchStudy(
+                registration: registration,
+                limit: 100,
+                offset: 0,
+                query: trimmedQuery
+            )
+            let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
+                let key = Self.normalizedCategoryText(for: category.title)
+                if result[key] == nil {
+                    result[key] = category
+                }
+            }
+            homeStudySearchResults = page.studies.map { room in
+                let existing = existingCategoriesByTopic[Self.normalizedCategoryText(for: room.topic)]
+                return StudyCategory(
+                    id: existing?.id ?? String(room.id),
+                    title: room.topic,
+                    difficulty: Difficulty(level: room.difficultyLevel),
+                    customPrompt: room.customPrompt,
+                    openAIModel: room.openAIModel,
+                    createdAt: existing?.createdAt ?? room.createdAt
+                )
+            }
+        } catch {
+            homeStudySearchResults = []
+            log(.warning, "학습 검색 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func clearBackendStudySearchResults() {
+        homeStudySearchResults = nil
+    }
+
+    func searchBackendRecords(query: String, limit: Int? = nil) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            recordSearchResults = nil
+            return
+        }
+
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
+            recordSearchResults = []
+            return
+        }
+
+        do {
+            let page = try await remotePushBackendClient.fetchRecords(
+                registration: registration,
+                limit: limit ?? settings.sanitizedMaxHistoryCount,
+                offset: 0,
+                query: trimmedQuery
+            )
+            recordSearchResults = page.records
+        } catch {
+            recordSearchResults = []
+            log(.warning, "기록 검색 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func clearBackendRecordSearchResults() {
+        recordSearchResults = nil
     }
 
     func fetchBackendStats(
@@ -962,7 +1044,7 @@ final class AppState: ObservableObject {
 
             let response = try await remotePushBackendClient.fetchPublicQuestions(
                 registration: registration,
-                topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
+                query: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
                 offset: normalizedOffset,
                 excludeDeviceID: nil
