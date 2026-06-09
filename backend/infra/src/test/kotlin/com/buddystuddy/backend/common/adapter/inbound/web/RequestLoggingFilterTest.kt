@@ -108,6 +108,20 @@ class RequestLoggingFilterTest {
         assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
     }
 
+    @Test
+    fun `json-like response body without content type is logged as nested json`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.writer.write("""{"records":[{"id":1}]}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1}]}")
+        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+    }
+
     private fun interface FilterChain : jakarta.servlet.FilterChain {
         fun doFilterInternal(request: ServletRequest, response: ServletResponse)
 

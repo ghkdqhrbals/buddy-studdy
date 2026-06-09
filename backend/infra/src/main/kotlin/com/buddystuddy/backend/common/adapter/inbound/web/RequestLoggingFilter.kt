@@ -106,7 +106,7 @@ class RequestLoggingFilter(
     private fun isSensitiveHeader(name: String): Boolean =
         name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
-    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any {
+    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any? {
         if (bytes.isEmpty()) return ""
         val charset = charsetFor(encoding, contentType)
         val body = redact(String(bytes, charset)).let {
@@ -115,8 +115,12 @@ class RequestLoggingFilter(
         return parseJsonBody(body, contentType)
     }
 
-    private fun parseJsonBody(body: String, contentType: String?): Any {
-        if (contentType?.contains("json", ignoreCase = true) != true) return body
+    private fun parseJsonBody(body: String, contentType: String?): Any? {
+        val trimmed = body.trim()
+        val jsonContentType = contentType?.contains("json", ignoreCase = true) == true
+        val jsonLikeBody = (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        if (!jsonContentType && !jsonLikeBody) return body
         return runCatching { objectMapper.readTree(body) }.getOrElse { body }
     }
 
