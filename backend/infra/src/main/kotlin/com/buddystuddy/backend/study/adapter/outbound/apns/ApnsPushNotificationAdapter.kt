@@ -2,6 +2,7 @@ package com.buddystuddy.backend.study.adapter.outbound.apns
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionPayload
 import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionSender
@@ -40,9 +41,7 @@ class ApnsPushNotificationAdapter(
         val jwt = apnsJwt()
         val environment = message.environment.lowercase()
         val host = if (environment == "sandbox") "api.sandbox.push.apple.com" else "api.push.apple.com"
-        val body = """
-            {"aps":{"alert":{"title":"BuddyStuddy","body":${jsonString(message.question)}},"sound":${jsonString(message.sound ?: "default")}},"recordId":${jsonString(message.recordId)},"topic":${jsonString(message.topic)}}
-        """.trimIndent()
+        val body = message.payload.toJson()
         val request = HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/$token"))
             .timeout(Duration.ofSeconds(15))
@@ -93,4 +92,9 @@ class ApnsPushNotificationAdapter(
                 else -> listOf(it)
             }
         }.joinToString("") + "\""
+
+    private fun ApnsQuestionPayload.toJson(): String =
+        """
+            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}},"recordId":${jsonString(recordId)},"topic":${jsonString(topic)},"landing":{"page":${jsonString(landing.page.wireName)},"recordId":${jsonString(landing.recordId)},"route":${jsonString(landing.route)},"topic":${jsonString(landing.topic)}}}
+        """.trimIndent()
 }
