@@ -1647,6 +1647,16 @@ struct AppStrings {
     var debuggingMode: String { text("디버깅 모드", "Debugging Mode") }
     var paste: String { text("붙여넣기", "Paste") }
     var debuggingHelp: String { text("켜면 Developer 로그를 확인할 수 있습니다.", "When enabled, Developer logs are available.") }
+    var debugBackendBaseURL: String { text("Debug API URL", "Debug API URL") }
+    var debugBackendBaseURLPlaceholder: String { "https://example.trycloudflare.com" }
+    var debugBackendBaseURLInvalid: String { text("http 또는 https URL을 입력하세요.", "Enter an http or https URL.") }
+    var debugBackendBaseURLHelp: String {
+        text(
+            "디버깅 모드가 켜져 있고 URL이 유효하면 모든 API 요청이 이 주소로 전송됩니다.",
+            "When debugging is on and the URL is valid, all API requests are sent here."
+        )
+    }
+    var cloudflareTunnel: String { text("Cloudflare 터널", "Cloudflare Tunnel") }
     var developerOptions: String { text("개발자 옵션", "Developer Options") }
     var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
     var requestLabel: String { text("요청", "Request") }

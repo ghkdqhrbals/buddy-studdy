@@ -60,6 +60,8 @@ docker compose up --build
 
 Local runs use PostgreSQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=dev`.
 
+For iPhone testing against a backend running on this Mac, see [Local Backend Tunnel](../docs/LOCAL_BACKEND_TUNNEL.md).
+
 ## Runtime Profiles
 
 - `dev`: development defaults, scheduler/stream disabled by default, API docs enabled.

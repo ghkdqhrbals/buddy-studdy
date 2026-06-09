@@ -99,6 +99,8 @@ final class AppState: ObservableObject {
     @Published var apiTrafficLogs: [APITrafficLogEntry] = []
     @Published var isAPIDebugPanelPresented = false
     @Published var isDebuggingEnabled: Bool
+    @Published var debugBackendBaseURL: String
+    @Published var draftDebugBackendBaseURL: String
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var notificationLandingMessage: String?
@@ -141,7 +143,8 @@ final class AppState: ObservableObject {
     @Published var profileAvatarColorSeed: String
 
     private let settingsStore: SettingsStore
-    private let remotePushBackendClient: RemotePushBackendClientProtocol
+    private var remotePushBackendClient: RemotePushBackendClientProtocol
+    private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
@@ -151,6 +154,7 @@ final class AppState: ObservableObject {
     private var didStart = false
     private var savedSettings: StudySettings
     private var savedAPIKey: String
+    private var savedDebugBackendBaseURL: String
     private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
     private var didReceiveCloudSnapshotWhileEditing = false
@@ -183,7 +187,13 @@ final class AppState: ObservableObject {
         }
 
         return comparableActiveSettings != comparableSavedSettings ||
-            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) ||
+            Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing) != Self.normalizedDebugBackendBaseURL(savedDebugBackendBaseURL)
+    }
+
+    var isDraftDebugBackendBaseURLValid: Bool {
+        let normalizedURL = Self.normalizedDebugBackendBaseURL(draftDebugBackendBaseURL)
+        return normalizedURL.isEmpty || Self.resolvedDebugBackendURL(from: normalizedURL) != nil
     }
 
     var mobileVisibleTab: AppTab {
@@ -358,6 +368,66 @@ final class AppState: ObservableObject {
         (isEditingSettings ? draftAPIKey : apiKey).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var activeDebugBackendBaseURLForEditing: String {
+        isEditingSettings ? draftDebugBackendBaseURL : debugBackendBaseURL
+    }
+
+    private static func normalizedDebugBackendBaseURL(_ value: String) -> String {
+        let trimmedURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedURL.count > 1 else {
+            return trimmedURL
+        }
+
+        return String(trimmedURL.drop { $0 == "/" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func makeRemotePushBackendClient(
+        isDebuggingEnabled: Bool,
+        debugBackendBaseURL: String
+    ) -> RemotePushBackendClient {
+        guard isDebuggingEnabled,
+              let debugURL = resolvedDebugBackendURL(from: debugBackendBaseURL) else {
+            return RemotePushBackendClient()
+        }
+
+        return RemotePushBackendClient(baseURL: debugURL)
+    }
+
+    private static func resolvedDebugBackendURL(from value: String) -> URL? {
+        let normalizedURL = normalizedDebugBackendBaseURL(value)
+        guard !normalizedURL.isEmpty,
+              let url = URL(string: normalizedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              url.host != nil else {
+            return nil
+        }
+
+        return url
+    }
+
+    private var activeBackendBaseURLDescription: String {
+        guard isDebuggingEnabled,
+              let debugURL = Self.resolvedDebugBackendURL(from: debugBackendBaseURL) else {
+            return RemotePushBackendClient.defaultBaseURL.absoluteString
+        }
+
+        return debugURL.absoluteString
+    }
+
+    private func refreshRemotePushBackendClient(reason: String) {
+        guard usesConfigurableRemotePushBackendClient else {
+            return
+        }
+
+        remotePushBackendClient = Self.makeRemotePushBackendClient(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        )
+        log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
+    }
+
     var pendingQuestionCount: Int {
         pendingRecordsIncludingCurrent.count
     }
@@ -435,7 +505,7 @@ final class AppState: ObservableObject {
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
-        remotePushBackendClient: RemotePushBackendClientProtocol = RemotePushBackendClient(),
+        remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
@@ -458,6 +528,8 @@ final class AppState: ObservableObject {
         let loadedHasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
         let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
         let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
+        let loadedIsDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
+        let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(settingsStore.loadDebugBackendBaseURL())
 
         self.settingsStore = settingsStore
         self.settings = effectiveLoadedSettings
@@ -481,10 +553,13 @@ final class AppState: ObservableObject {
         self.lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
         self.savedSettings = effectiveLoadedSettings
         self.savedAPIKey = loadedAPIKey
+        self.savedDebugBackendBaseURL = loadedDebugBackendBaseURL
         self.appLogs = loadedLogPage.entries
         self.appLogTotalCount = loadedLogPage.totalCount
         self.appLogPage = loadedLogPage.page
-        self.isDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
+        self.isDebuggingEnabled = loadedIsDebuggingEnabled
+        self.debugBackendBaseURL = loadedDebugBackendBaseURL
+        self.draftDebugBackendBaseURL = loadedDebugBackendBaseURL
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
         self.isCloudSyncEnabled = cloudSyncService == nil ? false : settingsStore.loadIsCloudSyncEnabled()
         if cloudSyncService == nil {
@@ -505,7 +580,11 @@ final class AppState: ObservableObject {
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
-        self.remotePushBackendClient = remotePushBackendClient
+        self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
+        self.remotePushBackendClient = remotePushBackendClient ?? Self.makeRemotePushBackendClient(
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
+            debugBackendBaseURL: loadedDebugBackendBaseURL
+        )
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1114,6 +1193,7 @@ final class AppState: ObservableObject {
         settings = syncedSettings
         draftSettings = syncedSettings
         draftAPIKey = apiKey
+        draftDebugBackendBaseURL = debugBackendBaseURL
         didReceiveCloudSnapshotWhileEditing = false
         didReceiveBackendSnapshotWhileEditing = false
         pendingBackendSnapshotWhileEditing = nil
@@ -1137,8 +1217,10 @@ final class AppState: ObservableObject {
         let pendingBackendSnapshot = pendingBackendSnapshotWhileEditing
         settings = savedSettings
         apiKey = savedAPIKey
+        debugBackendBaseURL = savedDebugBackendBaseURL
         draftSettings = savedSettings
         draftAPIKey = savedAPIKey
+        draftDebugBackendBaseURL = savedDebugBackendBaseURL
         isEditingSettings = false
         didReceiveCloudSnapshotWhileEditing = false
         didReceiveBackendSnapshotWhileEditing = false
@@ -2375,6 +2457,7 @@ final class AppState: ObservableObject {
             sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
         }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing)
         let now = Date()
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
         if didAPIKeyChange {
@@ -2389,16 +2472,20 @@ final class AppState: ObservableObject {
 
         settings = sanitizedSettings
         apiKey = trimmedAPIKey
+        debugBackendBaseURL = normalizedDebugBackendBaseURL
         draftSettings = sanitizedSettings
         draftAPIKey = trimmedAPIKey
+        draftDebugBackendBaseURL = normalizedDebugBackendBaseURL
         didReceiveCloudSnapshotWhileEditing = false
         didReceiveBackendSnapshotWhileEditing = false
         pendingBackendSnapshotWhileEditing = nil
 
         settingsStore.saveSettings(sanitizedSettings)
         settingsStore.saveAPIKey(trimmedAPIKey)
+        settingsStore.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
+        savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
         studyRecords = settingsStore.loadStudyRecords()
         if trimmedAPIKey.isEmpty {
             hasAPIKeyError = true
@@ -2415,6 +2502,7 @@ final class AppState: ObservableObject {
         StudyNotificationDelegate.shared.register(language: sanitizedSettings.appLanguage)
         log(.info, "설정을 저장했습니다. interval=\(sanitizedSettings.sanitizedIntervalMinutes), maxHistory=\(sanitizedSettings.sanitizedMaxHistoryCount)")
         markCloudDataChanged()
+        refreshRemotePushBackendClient(reason: "settings")
 
         restartTimer()
 
@@ -3519,6 +3607,7 @@ final class AppState: ObservableObject {
     func setDebuggingEnabled(_ isEnabled: Bool) {
         isDebuggingEnabled = isEnabled
         settingsStore.saveIsDebuggingEnabled(isEnabled)
+        refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }
 

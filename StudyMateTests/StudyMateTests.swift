@@ -113,6 +113,49 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(store.loadSettings(), settings)
     }
 
+    func testDebugBackendBaseURLRoundTripTrimsAndClearsValue() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+
+        store.saveDebugBackendBaseURL("  https://example.trycloudflare.com/  ")
+
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "https://example.trycloudflare.com/")
+
+        store.saveDebugBackendBaseURL("   ")
+
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "")
+    }
+
+    @MainActor
+    func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let appState = AppState(settingsStore: store)
+
+        appState.beginSettingsEditing()
+
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+
+        appState.draftDebugBackendBaseURL = " https://example.trycloudflare.com/ "
+
+        XCTAssertTrue(appState.hasUnsavedSettingsChanges)
+
+        await appState.saveSettingsAndValidateAPIKey()
+
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "https://example.trycloudflare.com")
+    }
+
     @MainActor
     func testSettingsStorePreservesStudyCategories() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"

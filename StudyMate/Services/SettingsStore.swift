@@ -19,6 +19,7 @@ final class SettingsStore {
         static let questionResponseID = "questionResponseID"
         static let appLogs = "appLogs"
         static let isDebuggingEnabled = "isDebuggingEnabled"
+        static let debugBackendBaseURL = "debugBackendBaseURL"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
@@ -422,6 +423,19 @@ final class SettingsStore {
 
     func saveIsDebuggingEnabled(_ isEnabled: Bool) {
         defaults.set(isEnabled, forKey: Keys.isDebuggingEnabled)
+    }
+
+    func loadDebugBackendBaseURL() -> String {
+        defaults.string(forKey: Keys.debugBackendBaseURL) ?? ""
+    }
+
+    func saveDebugBackendBaseURL(_ baseURL: String) {
+        let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedURL.isEmpty {
+            defaults.removeObject(forKey: Keys.debugBackendBaseURL)
+        } else {
+            defaults.set(trimmedURL, forKey: Keys.debugBackendBaseURL)
+        }
     }
 
     func loadHasCompletedOnboarding() -> Bool {
