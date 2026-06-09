@@ -95,6 +95,6 @@ class ApnsPushNotificationAdapter(
 
     private fun ApnsQuestionPayload.toJson(): String =
         """
-            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}},"recordId":${jsonString(recordId)},"topic":${jsonString(topic)},"landing":{"page":${jsonString(landing.page.wireName)},"recordId":${jsonString(landing.recordId)},"route":${jsonString(landing.route)},"topic":${jsonString(landing.topic)}}}
+            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}},"deepLink":${jsonString(deepLink)}}
         """.trimIndent()
 }

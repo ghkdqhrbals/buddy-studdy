@@ -6,8 +6,6 @@ import com.buddystuddy.backend.study.application.port.outbound.ApnsAps
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionPayload
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystuddy.backend.study.application.port.outbound.FcmQuestionMessage
-import com.buddystuddy.backend.study.application.port.outbound.PushLanding
-import com.buddystuddy.backend.study.application.port.outbound.PushLandingPage
 import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
@@ -64,22 +62,19 @@ class PushStreamListener(
             topic = this["topic"] ?: "",
             sound = this["sound"]?.takeIf(String::isNotBlank),
         )
-        val landing = PushLanding(
-            page = PushLandingPage.STUDY_RECORD,
-            recordId = common.recordId,
-            route = "/study/records/${common.recordId}",
-            topic = common.topic,
-        )
+        val deepLink = "buddystuddy://records/${common.recordId}"
         return when (provider.uppercase()) {
             PushMessageType.FCM.name -> FcmQuestionMessage(
                 recordId = common.recordId,
                 question = common.question,
                 topic = common.topic,
                 sound = common.sound,
-                landing = landing,
+                deepLink = deepLink,
                 token = this["fcmToken"] ?: this["pushToken"] ?: "",
             )
             else -> ApnsQuestionMessage(
+                recordId = common.recordId,
+                topic = common.topic,
                 token = apnsToken,
                 environment = apnsEnvironment,
                 payload = ApnsQuestionPayload(
@@ -90,9 +85,7 @@ class PushStreamListener(
                         ),
                         sound = common.sound ?: "default",
                     ),
-                    recordId = common.recordId,
-                    topic = common.topic,
-                    landing = landing,
+                    deepLink = deepLink,
                 ),
             )
         }
