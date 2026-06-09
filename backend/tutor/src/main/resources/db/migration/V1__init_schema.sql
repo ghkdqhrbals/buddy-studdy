@@ -139,6 +139,8 @@ create table if not exists question_comments (
     created_at timestamp with time zone not null,
     updated_at timestamp with time zone not null
 );
+create index if not exists idx_question_comments_question_active_created
+    on question_comments (question_id, deleted_at, created_at desc);
 
 create table if not exists reports (
     id bigserial primary key,
