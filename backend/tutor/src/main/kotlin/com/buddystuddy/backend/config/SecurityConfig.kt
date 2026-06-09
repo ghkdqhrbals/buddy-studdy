@@ -25,6 +25,7 @@ import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.core.userdetails.UsernameNotFoundException
+import org.springframework.security.web.util.matcher.RequestMatcher
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.web.filter.OncePerRequestFilter
@@ -50,13 +51,7 @@ class SecurityConfig {
             .logout { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
-                it.requestMatchers(HttpMethod.GET, "/health", "/api/v1/health").permitAll()
-                it.requestMatchers("/actuator/**").permitAll()
-                it.requestMatchers(HttpMethod.GET, "/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**", "/openapi.json", "/v3/api-docs/**").permitAll()
-                it.requestMatchers(HttpMethod.GET, "/api/v1/openai/models").permitAll()
-                it.requestMatchers(HttpMethod.POST, "/api/v1/devices/register").permitAll()
-                it.requestMatchers("/api/v1/auth/**").permitAll()
-                it.requestMatchers(HttpMethod.GET, "/api/v1/public/**").permitAll()
+                AnonymousRoutes.requestMatchers.forEach { matcher -> it.requestMatchers(matcher).permitAll() }
                 it.anyRequest().authenticated()
             }
             .exceptionHandling {
@@ -88,7 +83,7 @@ class BearerTokenFilter(
             authenticate(request)
             filterChain.doFilter(request, response)
         } catch (error: ApiException) {
-            if (allowsAnonymousAccess(request)) {
+            if (AnonymousRoutes.matches(request)) {
                 SecurityContextHolder.clearContext()
                 logIgnoredAuthenticationFailure(request, error)
                 filterChain.doFilter(request, response)
@@ -124,24 +119,44 @@ class BearerTokenFilter(
         )
     }
 
-    private fun allowsAnonymousAccess(request: HttpServletRequest): Boolean {
-        val path = request.requestURI
-        val method = request.method
-        return path == "/health" ||
-            path == "/api/v1/health" ||
-            path.startsWith("/actuator/") ||
-            path == "/docs" ||
-            path.startsWith("/docs/") ||
-            path == "/swagger-ui.html" ||
-            path.startsWith("/swagger-ui/") ||
-            path == "/openapi.json" ||
-            path.startsWith("/v3/api-docs/") ||
-            path.startsWith("/api/v1/auth/") ||
-            (method == HttpMethod.POST.name() && path == "/api/v1/devices/register") ||
-            (method == HttpMethod.GET.name() && path == "/api/v1/openai/models") ||
-            (method == HttpMethod.GET.name() && path.startsWith("/api/v1/public/"))
-    }
+}
 
+private object AnonymousRoutes {
+    private val routes = listOf(
+        Route(HttpMethod.GET, "/health"),
+        Route(HttpMethod.GET, "/api/v1/health"),
+        Route(null, "/actuator/**"),
+        Route(HttpMethod.GET, "/docs"),
+        Route(HttpMethod.GET, "/docs/**"),
+        Route(HttpMethod.GET, "/swagger-ui.html"),
+        Route(HttpMethod.GET, "/swagger-ui/**"),
+        Route(HttpMethod.GET, "/openapi.json"),
+        Route(HttpMethod.GET, "/v3/api-docs/**"),
+        Route(HttpMethod.POST, "/api/v1/devices/register"),
+        Route(null, "/api/v1/auth/**"),
+        Route(HttpMethod.GET, "/api/v1/openai/models"),
+        Route(HttpMethod.GET, "/api/v1/public/**"),
+    )
+
+    val requestMatchers: Array<RequestMatcher> = routes.map { route ->
+        RequestMatcher { request -> route.matches(request) }
+    }.toTypedArray()
+
+    fun matches(request: HttpServletRequest): Boolean =
+        routes.any { it.matches(request) }
+
+    private data class Route(val method: HttpMethod?, val pattern: String) {
+        fun matches(request: HttpServletRequest): Boolean =
+            (method == null || request.method == method.name()) && matchesPattern(request.requestURI)
+
+        private fun matchesPattern(path: String): Boolean {
+            if (pattern.endsWith("/**")) {
+                val prefix = pattern.removeSuffix("/**")
+                return path == prefix || path.startsWith("$prefix/")
+            }
+            return path == pattern
+        }
+    }
 }
 
 private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
