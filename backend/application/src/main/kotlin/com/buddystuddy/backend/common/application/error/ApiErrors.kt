@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus
 
 enum class ApiErrorCode {
     AUTH_ACCESS_TOKEN_REQUIRED,
+    AUTH_DEVICE_CREDENTIALS_REQUIRED,
     AUTH_DEVICE_MISMATCH,
     AUTH_GOOGLE_REQUIRED,
     AUTH_INVALID_ACCESS_TOKEN,

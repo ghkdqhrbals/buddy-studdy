@@ -133,8 +133,8 @@ class AuthWebAdapter(
                 if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) {
                     throw ApiException(
                         HttpStatus.UNAUTHORIZED,
-                        ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
-                        "Access token is required.",
+                        ApiErrorCode.AUTH_DEVICE_CREDENTIALS_REQUIRED,
+                        "Device credentials are required.",
                     )
                 }
                 issueDeviceToken.authenticateDevice(deviceId, clientSecret)

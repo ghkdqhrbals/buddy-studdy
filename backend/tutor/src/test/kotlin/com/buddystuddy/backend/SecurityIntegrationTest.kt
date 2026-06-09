@@ -78,7 +78,8 @@ class SecurityIntegrationTest {
         val response = post("/api/v1/auth/google", """{"idToken":"invalid-google-token"}""", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
-        assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+        assertThat(response.body()).contains("AUTH_DEVICE_CREDENTIALS_REQUIRED")
+        assertThat(response.body()).contains("Device credentials are required.")
         assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
     }
 
