@@ -321,6 +321,41 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testAddingStudyCategoryCreatesBackendStudyWithoutUpdatingSchedule() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveHasCompletedOnboarding(true)
+        store.saveAPIKey("sk-local")
+        store.saveSettings(
+            StudySettings(
+                topic: "SwiftUI",
+                difficulty: .level5,
+                customPrompt: "짧게",
+                intervalMinutes: 15,
+                studyCategories: [StudyCategory(title: "SwiftUI")]
+            )
+        )
+
+        let backend = FakeRemotePushBackendClient()
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        appState.addStudyCategory("Combine")
+
+        for _ in 0..<20 where backend.createdStudyTopics.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(backend.createdStudyTopics, ["Combine"])
+        XCTAssertEqual(backend.updateScheduleCallCount, 0)
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["SwiftUI", "Combine"])
+    }
+
+    @MainActor
     func testDeletingActiveStudyCategorySelectsNextAvailableStudy() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3454,6 +3489,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var scheduledAPIKeys: [String?] = []
     var scheduledModels: [String] = []
     var callEvents: [String] = []
+    var createdStudyTopics: [String] = []
     var createQuestionCallCount = 0
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
@@ -3510,6 +3546,63 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         scheduledAPIKeys.append(apiKey)
         scheduledModels.append(settings.sanitizedOpenAIModel)
         callEvents.append("updateSchedule:\(settings.sanitizedOpenAIModel)")
+    }
+
+    func createStudy(
+        registration: RemotePushRegistration,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws -> BackendStudyRoom {
+        createdStudyTopics.append(category.normalizedTitle)
+        callEvents.append("createStudy:\(category.normalizedTitle)")
+        let now = Date()
+        return BackendStudyRoom(
+            id: createdStudyTopics.count,
+            topic: category.normalizedTitle,
+            difficultyLevel: category.difficulty.level,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            enabled: true,
+            notificationSound: settings.notificationSound.backendSoundName,
+            customPrompt: category.normalizedCustomPrompt,
+            openAIModel: category.sanitizedOpenAIModel,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    func fetchStudy(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int,
+        query: String
+    ) async throws -> BackendStudyPage {
+        BackendStudyPage(
+            studies: [],
+            totalCount: 0,
+            limit: limit,
+            offset: offset,
+            serverTime: Date()
+        )
+    }
+
+    func fetchRecords(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int,
+        query: String
+    ) async throws -> BackendRecordsPage {
+        BackendRecordsPage(
+            records: [],
+            totalCount: 0,
+            limit: limit,
+            offset: offset
+        )
     }
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {

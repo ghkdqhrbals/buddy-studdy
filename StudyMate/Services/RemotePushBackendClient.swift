@@ -161,6 +161,12 @@ protocol RemotePushBackendClientProtocol {
         query: String
     ) async throws -> BackendStudyPage
 
+    func createStudy(
+        registration: RemotePushRegistration,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws -> BackendStudyRoom
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
@@ -468,6 +474,34 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStudyPage.self, from: data)
+    }
+
+    func createStudy(
+        registration: RemotePushRegistration,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws -> BackendStudyRoom {
+        let body = CreateStudyRequest(
+            topic: category.normalizedTitle,
+            difficultyLevel: category.difficulty.level,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            enabled: true,
+            notificationSound: settings.notificationSound.backendSoundName,
+            customPrompt: category.normalizedCustomPrompt,
+            openAIModel: category.sanitizedOpenAIModel,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            isQuestionPublic: settings.isQuestionPublic
+        )
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "study")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyRoom.self, from: data)
     }
 
     func fetchRecords(
@@ -1198,6 +1232,30 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case difficultyLevel
             case customPrompt
             case openAIModel = "openaiModel"
+        }
+    }
+
+    private struct CreateStudyRequest: Encodable {
+        var topic: String
+        var difficultyLevel: Int
+        var intervalMinutes: Int
+        var enabled: Bool
+        var notificationSound: String?
+        var customPrompt: String
+        var openAIModel: String
+        var maxHistoryCount: Int
+        var isQuestionPublic: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case topic
+            case difficultyLevel
+            case intervalMinutes
+            case enabled
+            case notificationSound
+            case customPrompt
+            case openAIModel = "openaiModel"
+            case maxHistoryCount
+            case isQuestionPublic
         }
     }
 

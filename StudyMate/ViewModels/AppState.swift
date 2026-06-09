@@ -2276,11 +2276,14 @@ final class AppState: ObservableObject {
             selectedStudyCategoryID: settings.selectedStudyCategoryID ?? nextCategory.id
         )
 
-        persistSettings(nextSettings, apiKey: apiKey)
+        persistSettings(nextSettings, apiKey: apiKey, syncBackendSchedule: false)
         if settings.selectedStudyCategoryID == nil {
             activateStudyContext(forTopic: nextSettings.topic)
         }
         statusMessage = nil
+        Task { [weak self] in
+            await self?.createBackendStudyIfPossible(nextCategory, settings: nextSettings)
+        }
     }
 
     func updateStudyCategory(
@@ -2546,7 +2549,8 @@ final class AppState: ObservableObject {
 
     private func persistSettings(
         _ pendingSettings: StudySettings,
-        apiKey pendingAPIKey: String
+        apiKey pendingAPIKey: String,
+        syncBackendSchedule: Bool = true
     ) {
         let profileSettings = settingsWithResolvedStudyProfile(from: pendingSettings)
         let synchronizedSettings = synchronizedTopicCategories(
@@ -2607,7 +2611,9 @@ final class AppState: ObservableObject {
 
         Task {
             await ensureCloudQuestionPushSubscription()
-            await syncRemotePushScheduleIfPossible(reason: "settings")
+            if syncBackendSchedule {
+                await syncRemotePushScheduleIfPossible(reason: "settings")
+            }
         }
     }
 
@@ -4023,6 +4029,25 @@ final class AppState: ObservableObject {
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    private func createBackendStudyIfPossible(_ category: StudyCategory, settings: StudySettings) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "create-study") else {
+            log(.warning, "백엔드 등록이 없어 학습 추가 동기화를 건너뛰었습니다. topic=\(category.normalizedTitle)")
+            return
+        }
+
+        do {
+            let room = try await remotePushBackendClient.createStudy(
+                registration: registration,
+                category: category,
+                settings: settings
+            )
+            log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        } catch {
+            log(.warning, "백엔드 학습 추가 실패: \(error.localizedDescription)")
         }
     }
 
