@@ -45,8 +45,9 @@ class StudyService(
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
         val study = context.studyFor(principal, topic)
+        val appLanguage = context.appLanguageFor(principal)
         val room = StudyRoom.of(
-            study.toStudyRoomSchedule(),
+            study.toStudyRoomSchedule(appLanguage),
             questions.countPendingForStudy(study.id),
         )
         try {
@@ -86,7 +87,7 @@ class StudyService(
                 answer,
                 q.topic,
                 q.difficultyLevel,
-                study?.appLanguage ?: "ko",
+                context.appLanguageFor(principal),
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
@@ -134,7 +135,7 @@ class StudyService(
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
-    private fun StudyEntity.toStudyRoomSchedule() = StudyRoomSchedule(
+    private fun StudyEntity.toStudyRoomSchedule(appLanguage: String) = StudyRoomSchedule(
         id = id,
         deviceId = deviceId,
         userId = userId,

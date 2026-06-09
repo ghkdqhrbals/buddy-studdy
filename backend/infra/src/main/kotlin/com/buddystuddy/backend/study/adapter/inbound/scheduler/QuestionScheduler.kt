@@ -40,6 +40,7 @@ class QuestionScheduler(
             try {
                 val userId = study.userId
                 val user = users.findById(userId).orElse(null)
+                val appLanguage = user?.appLanguage ?: "ko"
                 val pending = questions.countPendingForStudy(study.id)
                 if (pending >= properties.scheduler.maxPendingPerStudy) {
                     study.lastError = "Pending question limit reached ($pending)."
@@ -56,7 +57,7 @@ class QuestionScheduler(
                     return@forEach
                 }
                 val recent = questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
-                val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, study.appLanguage, study.customPrompt, recent)
+                val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
                 val saved = questions.save(
                     QuestionEntity(
                         deviceId = study.deviceId,
@@ -86,7 +87,7 @@ class QuestionScheduler(
                         expectedAnswerHint = generated.hint,
                         topic = study.topic,
                         difficultyLevel = study.difficultyLevel,
-                        language = study.appLanguage,
+                        language = appLanguage,
                         sound = study.notificationSound,
                         intervalMinutes = study.intervalMinutes,
                     )

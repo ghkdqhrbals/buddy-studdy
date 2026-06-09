@@ -1,3 +1,6 @@
+alter table users
+    add column if not exists app_language varchar(16) not null default 'ko';
+
 create table if not exists studies (
     id bigserial primary key,
     device_id varchar(191) not null,
@@ -8,7 +11,6 @@ create table if not exists studies (
     enabled boolean not null,
     notification_sound varchar(64),
     custom_prompt text not null,
-    app_language varchar(16) not null,
     openai_model varchar(64) not null,
     max_history_count integer not null,
     is_question_public boolean not null,
@@ -24,6 +26,28 @@ create index if not exists idx_studies_due on studies (enabled, next_due_at);
 create index if not exists idx_studies_user_updated on studies (user_id, updated_at);
 create index if not exists idx_studies_device_user on studies (device_id, user_id);
 
+create table if not exists schedules (
+    id bigserial primary key,
+    device_id varchar(191) not null,
+    user_id bigint,
+    topic varchar(255) not null,
+    difficulty_level integer not null,
+    interval_minutes integer not null,
+    enabled boolean not null,
+    notification_sound varchar(64),
+    custom_prompt text not null,
+    app_language varchar(16) not null,
+    openai_model varchar(64) not null,
+    max_history_count integer not null,
+    is_question_public boolean not null,
+    openai_api_key_cipher text,
+    next_due_at timestamp with time zone,
+    last_sent_at timestamp with time zone,
+    last_error text,
+    created_at timestamp with time zone not null,
+    updated_at timestamp with time zone not null
+);
+
 insert into studies (
     device_id,
     user_id,
@@ -33,7 +57,6 @@ insert into studies (
     enabled,
     notification_sound,
     custom_prompt,
-    app_language,
     openai_model,
     max_history_count,
     is_question_public,
@@ -52,7 +75,6 @@ select
     s.enabled,
     s.notification_sound,
     s.custom_prompt,
-    s.app_language,
     s.openai_model,
     s.max_history_count,
     s.is_question_public,

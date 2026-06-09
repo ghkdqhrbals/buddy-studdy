@@ -41,6 +41,8 @@ class UserEntity(
     var bio: String = "",
     @Column(name = "allow_public_questions", nullable = false)
     var allowPublicQuestions: Boolean = true,
+    @Column(name = "app_language", nullable = false, length = 16)
+    var appLanguage: String = "ko",
     @Column(name = "openai_api_key_cipher", columnDefinition = "text")
     var openaiApiKeyCipher: String? = null,
     @Column(name = "created_at", nullable = false)

@@ -284,7 +284,7 @@ Fields:
 - `openaiApiKey`: optional per-device OpenAI API key. If provided, it is encrypted at rest using `BACKEND_MASTER_KEY`.
 - `notificationSound`: optional APNs sound name.
 - `customPrompt`: optional tutor instruction.
-- `appLanguage`: `ko` or `en`. This also controls question/feedback language.
+- `appLanguage`: user-level app language, `ko` or `en`. It also controls generated question and feedback language.
 - `openaiModel`: selected model. Defaults to `gpt-5.4`.
 
 The `/api/v1/openai/models` endpoint returns all supported model IDs and metadata:

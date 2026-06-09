@@ -39,8 +39,6 @@ class StudyEntity(
     var notificationSound: String? = null,
     @Column(name = "custom_prompt", nullable = false, columnDefinition = "text")
     var customPrompt: String = "",
-    @Column(name = "app_language", nullable = false, length = 16)
-    var appLanguage: String = "ko",
     @Column(name = "openai_model", nullable = false, length = 64)
     var openaiModel: String = "gpt-5.4",
     @Column(name = "max_history_count", nullable = false)

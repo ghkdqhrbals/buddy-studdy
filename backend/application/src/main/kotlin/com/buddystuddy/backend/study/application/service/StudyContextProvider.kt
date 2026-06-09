@@ -30,6 +30,9 @@ class StudyContextProvider(
 
     fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel ?: properties.openai.model
 
+    fun appLanguageFor(principal: Principal): String =
+        users.findById(principal.userId).orElse(null)?.appLanguage ?: "ko"
+
     fun studyFor(principal: Principal, topic: String?): StudyEntity =
         topic?.takeIf { it.isNotBlank() }?.let { studies.findByUserIdAndTopic(principal.userId, it) }
             ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)

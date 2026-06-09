@@ -39,6 +39,7 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
+            user.appLanguage = command.appLanguage.ifBlank { user.appLanguage }
             user.updatedAt = now
             users.save(user)
         }
@@ -54,7 +55,6 @@ class SettingsService(
                     enabled = command.enabled,
                     notificationSound = command.notificationSound,
                     customPrompt = item.customPrompt,
-                    appLanguage = command.appLanguage,
                     openaiModel = item.openaiModel.ifBlank { command.openaiModel },
                     maxHistoryCount = command.maxHistoryCount,
                     questionPublic = command.isQuestionPublic,
@@ -93,6 +93,7 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
+            user.appLanguage = command.appLanguage.ifBlank { user.appLanguage }
             user.updatedAt = now
             users.save(user)
         }
@@ -104,7 +105,6 @@ class SettingsService(
                 enabled = command.enabled,
                 notificationSound = command.notificationSound,
                 customPrompt = command.customPrompt,
-                appLanguage = command.appLanguage,
                 openaiModel = command.openaiModel.ifBlank { study.openaiModel },
                 maxHistoryCount = command.maxHistoryCount,
                 questionPublic = command.isQuestionPublic,
@@ -130,7 +130,6 @@ class SettingsService(
         enabled = update.enabled
         notificationSound = update.notificationSound
         customPrompt = update.customPrompt
-        appLanguage = update.appLanguage
         openaiModel = update.openaiModel
         maxHistoryCount = update.maxHistoryCount
         questionPublic = update.questionPublic

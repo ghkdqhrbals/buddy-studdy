@@ -60,6 +60,7 @@ class UserOpenAISettingsTest {
                 enabled = true,
                 openaiApiKey = "sk-test-user-key",
                 openaiModel = "gpt-5.2",
+                appLanguage = "en",
                 schedules = listOf(ScheduleItemCommand(topic = "SwiftUI", openaiModel = "gpt-5.4")),
             ),
         )
@@ -68,11 +69,13 @@ class UserOpenAISettingsTest {
         val study = studies.findByUserIdAndTopic(principal.userId, "SwiftUI")
 
         assertThat(cipher.decrypt(user.openaiApiKeyCipher)).isEqualTo("sk-test-user-key")
+        assertThat(user.appLanguage).isEqualTo("en")
         assertThat(study?.openaiModel).isEqualTo("gpt-5.4")
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiKeyConfigured).isTrue()
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
         assertThat(settings.settings(otherDevicePrincipal).openaiKeyConfigured).isTrue()
         assertThat(settings.settings(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
+        assertThat(settings.settings(otherDevicePrincipal).appLanguage).isEqualTo("en")
     }
 
     @Test

@@ -11,6 +11,7 @@ create table if not exists users (
     avatar_color_seed varchar(64) not null,
     bio varchar(500) not null,
     allow_public_questions boolean not null,
+    app_language varchar(16) not null default 'ko',
     openai_api_key_cipher text,
     openai_model varchar(64) not null default 'gpt-5.4',
     created_at timestamp with time zone not null,
