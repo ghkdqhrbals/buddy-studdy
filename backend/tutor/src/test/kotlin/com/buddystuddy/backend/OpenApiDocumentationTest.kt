@@ -22,7 +22,10 @@ import java.net.http.HttpResponse
         "buddystuddy.crypto.master-key=test-master-key",
         "buddystuddy.auth.jwt-secret=test-jwt-secret",
         "springdoc.api-docs.enabled=true",
+        "springdoc.api-docs.path=/v3/api-docs",
         "springdoc.swagger-ui.enabled=true",
+        "springdoc.swagger-ui.path=/docs",
+        "springdoc.swagger-ui.url=/v3/api-docs",
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
@@ -32,7 +35,7 @@ class OpenApiDocumentationTest {
     @Test
     fun `openapi document includes split study endpoint descriptions`() {
         val response = HttpClient.newHttpClient().send(
-            HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/openapi.json")).GET().build(),
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/v3/api-docs")).GET().build(),
             HttpResponse.BodyHandlers.ofString(),
         )
 
@@ -46,5 +49,22 @@ class OpenApiDocumentationTest {
             .contains("Each study can include one pendingQuestion")
             .contains("Record history is intentionally split into /api/v1/records")
             .contains("Maximum number of studies to include")
+    }
+
+    @Test
+    fun `swagger ui remote configuration loads`() {
+        val client = HttpClient.newHttpClient()
+        val docs = client.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/docs")).GET().build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        val config = client.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/v3/api-docs/swagger-config")).GET().build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+        assertThat(docs.statusCode()).isIn(200, 302)
+        assertThat(config.statusCode()).isEqualTo(200)
+        assertThat(config.body()).contains("/v3/api-docs")
     }
 }

@@ -21,10 +21,11 @@ spring:
 springdoc:
   api-docs:
     enabled: ${ENABLE_OPENAPI_DOCS:true}
-    path: /openapi.json
+    path: /v3/api-docs
   swagger-ui:
     enabled: ${ENABLE_OPENAPI_DOCS:true}
     path: /docs
+    url: /v3/api-docs
 
 buddystuddy:
   scheduler:
