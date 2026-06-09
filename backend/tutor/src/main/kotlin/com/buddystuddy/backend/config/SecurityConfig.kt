@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -128,7 +129,18 @@ private fun writeSecurityError(
 ) {
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+    securityLog.warn(
+        "api_auth_failed requestId={} method={} path={} status={} code={} message={}",
+        requestId,
+        request.method,
+        request.requestURI,
+        status.value(),
+        code.name,
+        message,
+    )
     response.status = status.value()
     response.contentType = "application/json"
     objectMapper.writeValue(response.outputStream, ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value())))
 }
+
+private val securityLog = LoggerFactory.getLogger("com.buddystuddy.backend.security")

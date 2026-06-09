@@ -4,7 +4,10 @@ import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceComma
 import com.buddystuddy.backend.auth.application.service.LoginService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.TestPropertySource
@@ -27,6 +30,7 @@ import java.net.http.HttpResponse
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
+@ExtendWith(OutputCaptureExtension::class)
 class SecurityIntegrationTest {
     @Autowired lateinit var login: LoginService
     @LocalServerPort var port: Int = 0
@@ -49,11 +53,16 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `invalid bearer token is rejected before controller execution`() {
+    fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput) {
         val response = get("/api/v1/me/profile", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
         assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(output.out)
+            .contains("api_auth_failed")
+            .contains("path=/api/v1/me/profile")
+            .contains("status=401")
+            .contains("code=AUTH_INVALID_ACCESS_TOKEN")
     }
 
     @Test
