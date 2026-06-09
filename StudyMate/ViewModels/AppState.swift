@@ -3905,20 +3905,11 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let registration = try await remotePushBackendClient.registerDevice(
+            return try await registerFreshBackendDevice(
                 apnsToken: nil,
-                language: settings.appLanguage,
-                timezone: TimeZone.current.identifier,
-                apnsEnvironment: Self.backendAPNSEnvironment
-            )
-            settingsStore.saveRemotePushRegistration(registration)
-            log(.info, "OpenAI 요청용 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
-            try await updateBackendSettings(
-                registration: registration,
                 reason: reason,
                 includeAPIKey: true
             )
-            return registration
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
             return nil
@@ -3939,9 +3930,43 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
+            if Self.isBackendDeviceNotFound(error) {
+                do {
+                    log(.warning, "저장된 백엔드 기기를 찾을 수 없어 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID)")
+                    return try await registerFreshBackendDevice(
+                        apnsToken: registration.apnsToken.isEmpty ? nil : registration.apnsToken,
+                        reason: "\(reason)-device-recovery",
+                        includeAPIKey: true
+                    )
+                } catch {
+                    log(.warning, "백엔드 기기 재등록 실패: \(error.localizedDescription)")
+                    return nil
+                }
+            }
             log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func registerFreshBackendDevice(
+        apnsToken: String?,
+        reason: String,
+        includeAPIKey: Bool
+    ) async throws -> RemotePushRegistration {
+        let registration = try await remotePushBackendClient.registerDevice(
+            apnsToken: apnsToken,
+            language: settings.appLanguage,
+            timezone: TimeZone.current.identifier,
+            apnsEnvironment: Self.backendAPNSEnvironment
+        )
+        settingsStore.saveRemotePushRegistration(registration)
+        log(.info, "새 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
+        try await updateBackendSettings(
+            registration: registration,
+            reason: reason,
+            includeAPIKey: includeAPIKey
+        )
+        return registration
     }
 
     private func clearStoredBackendAccessToken() {
@@ -5373,6 +5398,14 @@ final class AppState: ObservableObject {
         }
 
         return false
+    }
+
+    nonisolated private static func isBackendDeviceNotFound(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        return backendError.backendCode == "DEVICE_NOT_FOUND"
     }
 
     nonisolated private static func trimmedOptional(_ value: String) -> String? {
