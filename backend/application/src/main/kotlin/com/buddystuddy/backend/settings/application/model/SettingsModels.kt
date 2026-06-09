@@ -1,6 +1,5 @@
 package com.buddystuddy.backend.settings.application.model
 
-import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import java.time.Instant
 
 data class ScheduleResponse(val deviceId: String, val enabled: Boolean, val nextDueAt: Instant?)
@@ -20,5 +19,4 @@ data class StudySettingsResponse(
     val openaiKeyConfigured: Boolean = false,
     val nextDueAt: Instant? = null,
     val lastError: String? = null,
-    val pendingQuestion: StudyRecordResponse? = null,
 )

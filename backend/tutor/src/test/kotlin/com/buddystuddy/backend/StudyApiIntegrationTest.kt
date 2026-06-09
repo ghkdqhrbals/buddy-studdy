@@ -136,7 +136,7 @@ class StudyApiIntegrationTest {
         )
         stats.save(QuestionStatsEntity(questionId = graded.id, likeCount = 2, commentCount = 1, viewCount = 5))
 
-        val studyPage = getJson("/api/v1/me/study?limit=100&offset=0", accessToken, deviceId, clientSecret)
+        val studyPage = getJson("/api/v1/study?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studyPage["studies"]).hasSize(1)
@@ -169,8 +169,6 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studySettings["topic"].asText()).isEqualTo("Redis")
-        assertThat(studySettings["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
-        assertThat(studySettings["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
 
         val apiStatus = getJson("/api/v1/me/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }

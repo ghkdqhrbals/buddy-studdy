@@ -38,7 +38,7 @@ class OpenApiDocumentationTest {
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
-            .contains("\"/api/v1/me/study\"")
+            .contains("\"/api/v1/study\"")
             .contains("\"/api/v1/records\"")
             .contains("\"/api/v1/me/stats\"")
             .contains("\"/api/v1/study/{studyId}/settings\"")

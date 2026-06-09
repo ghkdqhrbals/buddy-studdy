@@ -108,7 +108,7 @@ See [API.md](API.md) for request/response examples.
 - `DELETE /api/v1/me/profile`
 - `GET /api/v1/me/api`
 - `POST /api/v1/me/api/validate`
-- `GET /api/v1/me/study`
+- `GET /api/v1/study`
 - `GET /api/v1/me/stats`
 - `POST /api/v1/me/questions`
 - `GET /api/v1/records`

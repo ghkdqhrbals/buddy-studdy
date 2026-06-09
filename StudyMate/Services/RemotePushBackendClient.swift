@@ -443,7 +443,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "me", "study"),
+            url: endpoint("api", "v1", "study"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -1581,7 +1581,6 @@ struct BackendStudySettings: Decodable, Equatable {
     var openAIKeyConfigured: Bool
     var nextDueAt: Date?
     var lastError: String?
-    var pendingQuestion: StudyRecord?
 
     enum CodingKeys: String, CodingKey {
         case topic
@@ -1597,7 +1596,6 @@ struct BackendStudySettings: Decodable, Equatable {
         case openAIKeyConfigured = "openaiKeyConfigured"
         case nextDueAt
         case lastError
-        case pendingQuestion
     }
 
     init(from decoder: Decoder) throws {
@@ -1615,7 +1613,6 @@ struct BackendStudySettings: Decodable, Equatable {
         openAIKeyConfigured = try container.decodeIfPresent(Bool.self, forKey: .openAIKeyConfigured) ?? false
         nextDueAt = try container.decodeIfPresent(Date.self, forKey: .nextDueAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
-        pendingQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .pendingQuestion)
     }
 
     func studySettings(fallback: StudySettings) -> StudySettings {

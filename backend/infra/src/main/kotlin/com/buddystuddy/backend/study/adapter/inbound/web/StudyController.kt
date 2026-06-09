@@ -42,7 +42,7 @@ class StudyController(
         ApiResponse(responseCode = "200", description = "Study rooms returned."),
         ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
     )
-    @GetMapping("/me/study")
+    @GetMapping("/study", "/me/study")
     fun study(
         @Parameter(description = "Maximum number of studies to include. Server clamps this to 1..1000.", example = "500")
         @RequestParam(defaultValue = "500") limit: Int,

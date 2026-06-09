@@ -388,13 +388,13 @@ The iOS/macOS apps must not validate keys by calling OpenAI directly.
 ### My Studies
 
 ```http
-GET /api/v1/me/study?limit=500&offset=0
+GET /api/v1/study?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
 Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
 
-Use `/me/study`, `/me/settings`, `/me/api`, and `/me/stats` as separate focused endpoints.
+Use `/study`, `/me/settings`, `/me/api`, and `/me/stats` as separate focused endpoints. `/me/study` remains available only as a compatibility alias.
 
 ### Records
 
