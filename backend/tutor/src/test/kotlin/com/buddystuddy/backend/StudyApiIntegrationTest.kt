@@ -169,6 +169,8 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studySettings["topic"].asText()).isEqualTo("Redis")
+        assertThat(studySettings["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
+        assertThat(studySettings["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
 
         val apiStatus = getJson("/api/v1/me/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }

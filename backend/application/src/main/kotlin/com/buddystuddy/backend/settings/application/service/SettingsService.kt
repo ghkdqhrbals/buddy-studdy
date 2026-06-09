@@ -10,13 +10,22 @@ import com.buddystuddy.backend.settings.application.model.toSettings
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
+import com.buddystuddy.backend.study.application.model.toRecordResponse
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
+import com.buddystuddy.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRecordState
+import com.buddystuddy.study.domain.StudyRecordStats
 import com.buddystuddy.study.domain.StudyRoomSettings
 import com.buddystuddy.study.domain.StudyRoomSettingsCommand
 import com.buddystuddy.study.domain.StudyRoomSettingsState
 import com.buddystuddy.study.domain.StudyRoomSettingsUpdate
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -25,6 +34,8 @@ import java.time.Instant
 @Service
 class SettingsService(
     private val studies: StudyPort,
+    private val questions: QuestionPort,
+    private val questionStats: QuestionStatsPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
 ) : SettingsUseCase {
@@ -77,10 +88,9 @@ class SettingsService(
     @Transactional(readOnly = true)
     override fun studySettings(principal: Principal, studyId: Long): StudySettingsResponse {
         val user = users.findById(principal.userId).orElse(null)
-        return studies.findByIdAndUserId(studyId, principal.userId)
-            .toSettings(user)
-            .takeIf { it.id != null }
+        val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
+        return study.toSettings(user).copy(pendingQuestion = pendingQuestion(study.id))
     }
 
     @Transactional
@@ -136,4 +146,30 @@ class SettingsService(
         nextDueAt = update.nextDueAt
         updatedAt = update.updatedAt
     }
+
+    private fun pendingQuestion(studyId: Long) = questions.findPendingByStudyId(studyId, PageRequest.of(0, 1))
+        .content
+        .firstOrNull()
+        ?.let { question ->
+            question.toStudyRecord(questionStats.findById(question.id).orElse(null)).toProjection().toRecordResponse()
+        }
+
+    private fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
+        StudyRecordState(
+            id = id,
+            question = question,
+            hint = hint,
+            createdAt = createdAt,
+            answer = answer,
+            score = score,
+            correct = correct,
+            feedback = feedback,
+            explanation = explanation,
+            topic = topic,
+            difficultyLevel = difficultyLevel,
+            answeredAt = answeredAt,
+            publicQuestion = publicQuestion,
+        ),
+        stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
+    )
 }
