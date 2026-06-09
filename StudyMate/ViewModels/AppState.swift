@@ -1601,6 +1601,33 @@ final class AppState: ObservableObject {
         }
     }
 
+    func deleteCommunityQuestionComment(questionID: String, commentID: String) async -> Bool {
+        guard isCommunitySignedIn else {
+            return false
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-delete") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return false
+        }
+
+        do {
+            try await remotePushBackendClient.deleteCommunityQuestionComment(
+                registration: registration,
+                questionID: questionID,
+                commentID: commentID
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
+            }
+            return true
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private func updateCommunityQuestionLike(id: String, isLiked: Bool, likeCount: Int) {
         guard let index = communityQuestions.firstIndex(where: { $0.id == id }) else {
             return

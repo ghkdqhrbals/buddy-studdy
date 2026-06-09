@@ -254,6 +254,12 @@ protocol RemotePushBackendClientProtocol {
         body: String
     ) async throws -> CommunityQuestionComment
 
+    func deleteCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        commentID: String
+    ) async throws
+
     func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord
 
     func gradeRecord(
@@ -803,6 +809,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpBody = try encoder.encode(CommunityCommentRequest(body: body))
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionComment.self, from: data)
+    }
+
+    func deleteCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        commentID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "public", "questions", questionID, "comments", commentID)
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
     }
 
     func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {

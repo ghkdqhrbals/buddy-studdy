@@ -2158,6 +2158,7 @@ private struct CommunityQuestionDetailView: View {
     @State private var isLoadingComments = false
     @State private var commentDraft = ""
     @State private var isSendingComment = false
+    @State private var deletingCommentIDs: Set<String> = []
 
     init(question: CommunityQuestion) {
         self.question = question
@@ -2288,7 +2289,14 @@ private struct CommunityQuestionDetailView: View {
                     .padding(.vertical, 6)
             } else {
                 ForEach(comments) { comment in
-                    CommunityCommentRow(comment: comment)
+                    CommunityCommentRow(
+                        comment: comment,
+                        canDelete: canDeleteComment(comment),
+                        isDeleting: deletingCommentIDs.contains(comment.id),
+                        deleteTitle: strings.clear
+                    ) {
+                        deleteComment(comment)
+                    }
                 }
             }
 
@@ -2317,6 +2325,15 @@ private struct CommunityQuestionDetailView: View {
                 .opacity(canWriteCommunityReaction ? 1 : 0.45)
             }
         }
+    }
+
+    private func canDeleteComment(_ comment: CommunityQuestionComment) -> Bool {
+        guard canWriteCommunityReaction,
+              let profile = appState.communityProfile else {
+            return false
+        }
+
+        return comment.author.id == profile.id
     }
 
     private func toggleLike() {
@@ -2380,10 +2397,36 @@ private struct CommunityQuestionDetailView: View {
             }
         }
     }
+
+    private func deleteComment(_ comment: CommunityQuestionComment) {
+        guard canDeleteComment(comment),
+              !deletingCommentIDs.contains(comment.id) else {
+            return
+        }
+
+        deletingCommentIDs.insert(comment.id)
+        Task {
+            let didDelete = await appState.deleteCommunityQuestionComment(questionID: displayQuestion.id, commentID: comment.id)
+            await MainActor.run {
+                deletingCommentIDs.remove(comment.id)
+                guard didDelete else {
+                    return
+                }
+
+                comments.removeAll { $0.id == comment.id }
+                commentsTotalCount = max(0, commentsTotalCount - 1)
+                displayQuestion.commentCount = commentsTotalCount
+            }
+        }
+    }
 }
 
 private struct CommunityCommentRow: View {
     var comment: CommunityQuestionComment
+    var canDelete: Bool
+    var isDeleting: Bool
+    var deleteTitle: String
+    var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -2404,6 +2447,29 @@ private struct CommunityCommentRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if canDelete {
+                Menu {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label(deleteTitle, systemImage: "trash")
+                    }
+                    .disabled(isDeleting)
+                } label: {
+                    if isDeleting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

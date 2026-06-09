@@ -170,10 +170,36 @@ class CommunityStudyServiceTest {
     }
 
     @Test
+    fun `comment owner can delete comment and deleted comments are hidden`() {
+        val q = answeredPublicQuestion(author, "SwiftUI")
+        val saved = community.comment(principal, q.id, "delete me")
+
+        val response = community.deleteComment(principal, q.id, saved.id.toLong())
+        val page = community.comments(q.id, limit = 20, offset = 0)
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.id).isEqualTo(saved.id)
+        assertThat(page.totalCount).isZero()
+        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNotNull()
+    }
+
+    @Test
+    fun `comment delete rejects other users and missing comments`() {
+        val q = answeredPublicQuestion(author, "SwiftUI")
+        val saved = community.comment(principal, q.id, "not yours")
+        val otherPrincipal = Principal(userId = author.id, deviceId = "device-author", sessionId = 2, anonymous = false)
+
+        assertRecordNotFound { community.deleteComment(otherPrincipal, q.id, saved.id.toLong()) }
+        assertRecordNotFound { community.deleteComment(principal, q.id, 999_999) }
+        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
     fun `comment and comments reject non public answered records`() {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
         assertRecordNotFound { community.comment(principal, q.id, "body") }
+        assertRecordNotFound { community.deleteComment(principal, q.id, 1) }
         assertRecordNotFound { community.comments(q.id, limit = 10, offset = 0) }
     }
 

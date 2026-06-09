@@ -14,6 +14,7 @@ interface QuestionLikePort {
 
 interface QuestionCommentPort {
     fun save(entity: QuestionCommentEntity): QuestionCommentEntity
+    fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity?
     fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity>
 }
 

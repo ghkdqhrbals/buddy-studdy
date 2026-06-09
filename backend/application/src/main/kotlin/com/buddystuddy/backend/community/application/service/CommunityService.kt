@@ -15,6 +15,7 @@ import com.buddystuddy.community.domain.entity.QuestionLikeEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.community.domain.entity.ReportEntity
 import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
+import com.buddystuddy.backend.community.application.model.CommunityCommentDeleteResponse
 import com.buddystuddy.backend.community.application.model.CommunityCommentsResponse
 import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
@@ -35,6 +36,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 
 @Service
 class CommunityService(
@@ -92,6 +94,23 @@ class CommunityService(
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         reactions.publishCommented(id, principal.userId)
         return saved.toResponse(userProfile(principal.userId))
+    }
+
+    @Transactional
+    override fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse {
+        publicAnsweredQuestion(id)
+        val comment = comments.findByIdAndQuestionIdAndDeletedAtIsNull(commentId, id)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Comment not found.")
+        if (comment.userId != principal.userId) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Comment not found.")
+        }
+
+        val now = Instant.now()
+        comment.deletedAt = now
+        comment.updatedAt = now
+        comments.save(comment)
+        reactions.publishCommentDeleted(id, principal.userId)
+        return CommunityCommentDeleteResponse(comment.id.toString(), id.toString())
     }
 
     @Transactional(readOnly = true)

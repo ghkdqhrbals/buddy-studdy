@@ -88,6 +88,17 @@ class CommunityController(
     ) =
         community.comment(id, body, authentication)
 
+    @Operation(summary = "Delete a comment", description = "Soft-deletes the authenticated user's own comment on a public question. Comment counts may be aggregated asynchronously.")
+    @DeleteMapping("/public/questions/{id}/comments/{commentId}")
+    fun deleteComment(
+        @Parameter(description = "Public question id.", example = "42")
+        @PathVariable id: Long,
+        @Parameter(description = "Comment id.", example = "7")
+        @PathVariable commentId: Long,
+        authentication: Authentication,
+    ) =
+        community.deleteComment(id, commentId, authentication)
+
     @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
     fun report(
@@ -106,6 +117,7 @@ interface CommunityWebPort {
     fun unlike(id: Long, authentication: Authentication): Any
     fun comments(id: Long, limit: Int, offset: Int): Any
     fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
+    fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
 }
 
@@ -127,6 +139,9 @@ class CommunityWebAdapter(
 
     override fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
         community.comment(authentication.principalOrThrow(), id, body.body)
+
+    override fun deleteComment(id: Long, commentId: Long, authentication: Authentication) =
+        community.deleteComment(authentication.principalOrThrow(), id, commentId)
 
     override fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
         community.report(authentication.principalOrThrow(), id, body.toCommand())

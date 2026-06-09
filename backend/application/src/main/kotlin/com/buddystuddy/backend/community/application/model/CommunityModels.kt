@@ -27,4 +27,5 @@ data class CommunityQuestionResponse(
 data class CommunityQuestionsResponse(val questions: List<CommunityQuestionResponse>, val totalCount: Long, val limit: Int, val offset: Int)
 data class CommunityLikeResponse(val questionId: String, val likeCount: Int, val isLikedByMe: Boolean)
 data class CommunityCommentResponse(val id: String, val questionId: String, val body: String, val createdAt: Instant, val author: UserProfileResponse)
+data class CommunityCommentDeleteResponse(val id: String, val questionId: String, val ok: Boolean = true)
 data class CommunityCommentsResponse(val comments: List<CommunityCommentResponse>, val totalCount: Long, val limit: Int, val offset: Int)
