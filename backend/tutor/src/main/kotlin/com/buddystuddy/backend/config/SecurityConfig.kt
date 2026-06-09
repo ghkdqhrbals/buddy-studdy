@@ -22,6 +22,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.core.userdetails.UserDetailsService
+import org.springframework.security.core.userdetails.UsernameNotFoundException
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.web.filter.OncePerRequestFilter
@@ -34,9 +36,17 @@ class SecurityConfig {
     fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Bean
+    fun userDetailsService(): UserDetailsService = UserDetailsService {
+        throw UsernameNotFoundException("BuddyStuddy uses bearer token authentication only.")
+    }
+
+    @Bean
     fun securityFilterChain(http: HttpSecurity, bearerTokenFilter: BearerTokenFilter, objectMapper: ObjectMapper): SecurityFilterChain =
         http
             .csrf { it.disable() }
+            .httpBasic { it.disable() }
+            .formLogin { it.disable() }
+            .logout { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
                 it.requestMatchers(HttpMethod.GET, "/health", "/api/v1/health").permitAll()
