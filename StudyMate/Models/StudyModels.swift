@@ -470,7 +470,7 @@ struct StudySettings: Codable, Equatable {
         customPrompt: String,
         intervalMinutes: Int,
         maxHistoryCount: Int = 100,
-        isQuestionPublic: Bool = false,
+        isQuestionPublic: Bool = true,
         studyCategories: [StudyCategory] = [],
         selectedStudyCategoryID: String? = nil
     ) {
@@ -535,7 +535,7 @@ struct StudySettings: Codable, Equatable {
         let decodedCustomPrompt = try container.decode(String.self, forKey: .customPrompt)
         intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? 100
-        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? false
+        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? true
 
         let decodedCategories = try container.decodeIfPresent([StudyCategory].self, forKey: .studyCategories) ?? []
         let resolvedTopic = Self.normalizedString(rawTopic, fallback: Self.fallbackTopic(for: appLanguage))

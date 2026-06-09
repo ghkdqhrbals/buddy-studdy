@@ -4,6 +4,28 @@ import UserNotifications
 @testable import StudyMate
 
 final class StudyMateTests: XCTestCase {
+    func testStudySettingsDefaultsQuestionsToPublic() throws {
+        let settings = StudySettings(
+            topic: "Swift",
+            difficulty: .level5,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+
+        XCTAssertTrue(settings.isQuestionPublic)
+
+        let legacyPayload = """
+        {
+          "topic": "Swift",
+          "difficulty": 5,
+          "customPrompt": "짧게",
+          "intervalMinutes": 15
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(StudySettings.self, from: legacyPayload)
+        XCTAssertTrue(decoded.isQuestionPublic)
+    }
+
     func testFreshInstallRequiresOnboarding() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

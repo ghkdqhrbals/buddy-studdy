@@ -1609,7 +1609,7 @@ struct BackendStudySettings: Decodable, Equatable {
         appLanguage = try container.decodeIfPresent(String.self, forKey: .appLanguage) ?? "ko"
         openAIModel = try container.decodeIfPresent(String.self, forKey: .openAIModel) ?? StudySettings.defaultOpenAIModel
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? 100
-        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? false
+        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? true
         openAIKeyConfigured = try container.decodeIfPresent(Bool.self, forKey: .openAIKeyConfigured) ?? false
         nextDueAt = try container.decodeIfPresent(Date.self, forKey: .nextDueAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)

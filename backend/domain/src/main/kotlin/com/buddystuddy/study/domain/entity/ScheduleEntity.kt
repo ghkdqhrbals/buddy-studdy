@@ -45,7 +45,7 @@ class ScheduleEntity(
     @Column(name = "max_history_count", nullable = false)
     var maxHistoryCount: Int = 100,
     @Column(name = "is_question_public", nullable = false)
-    var questionPublic: Boolean = false,
+    var questionPublic: Boolean = true,
     @Column(name = "openai_api_key_cipher", columnDefinition = "text")
     var openaiApiKeyCipher: String? = null,
     @Column(name = "next_due_at")
