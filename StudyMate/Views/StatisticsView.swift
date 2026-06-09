@@ -67,7 +67,7 @@ struct StatisticsView: View {
                         strings: strings
                     )
 
-                    if let statsErrorMessage = appState.backendStatsErrorMessage {
+                    if count > 0, let statsErrorMessage = appState.backendStatsErrorMessage {
                         Text(statsErrorMessage)
                             .font(.caption2)
                             .foregroundStyle(.orange)
@@ -83,28 +83,11 @@ struct StatisticsView: View {
                             .controlSize(.small)
                             .frame(maxWidth: .infinity, minHeight: 220)
                     } else if count == 0 {
-                        if appState.backendStatsErrorMessage != nil {
-                            ContentUnavailableView(
-                                strings.syncUnavailable,
-                                systemImage: "wifi.exclamationmark",
-                                description: Text(appState.backendStatsErrorMessage ?? strings.syncFailed(strings.syncUnavailable))
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 280)
-                        } else if selectedPeriod == .all && topicSearch.isEmpty {
-                            ContentUnavailableView(
-                                strings.noScores,
-                                systemImage: "chart.xyaxis.line",
-                                description: Text(strings.noScoresDescription)
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 280)
-                        } else {
-                            ContentUnavailableView(
-                                strings.noScoresInPeriod,
-                                systemImage: "calendar.badge.exclamationmark",
-                                description: Text(strings.noScoresInPeriodDescription)
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 280)
-                        }
+                        ContentUnavailableView(
+                            strings.noStatsRecords,
+                            systemImage: "doc.text.magnifyingglass"
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 280)
                     } else {
                         TopicBrowserSection(
                             stats: pagedTopicStats,

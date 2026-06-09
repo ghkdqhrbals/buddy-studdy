@@ -1748,6 +1748,7 @@ struct AppStrings {
     func answerPrefix(_ answer: String) -> String { text("답변: \(answer)", "Answer: \(answer)") }
 
     var stats: String { text("통계", "Stats") }
+    var noStatsRecords: String { text("기록이 없습니다", "No records") }
     var noScores: String { text("점수 없음", "No Scores") }
     var noScoresDescription: String { text("답변을 채점하면 점수 그래프가 표시됩니다.", "A score graph appears after you grade answers.") }
     var noScoresInPeriod: String { text("선택한 기간에 점수 없음", "No Scores in This Period") }

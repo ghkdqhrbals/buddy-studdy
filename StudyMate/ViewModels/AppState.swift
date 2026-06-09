@@ -1005,6 +1005,11 @@ final class AppState: ObservableObject {
                 return
             }
 
+            if Self.isCancellationLikeError(error) {
+                log(.info, "통계 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
+                return
+            }
+
             if handlePageAccessError(error, page: .statistics) {
                 backendStatsErrorMessage = strings.pageAccessDenied(strings.tabStatistics)
                 return
@@ -5487,6 +5492,21 @@ final class AppState: ObservableObject {
         }
 
         return backendError.backendCode == "DEVICE_NOT_FOUND"
+    }
+
+    nonisolated private static func isCancellationLikeError(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        return error.localizedDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveContains("cancelled")
     }
 
     nonisolated private static func trimmedOptional(_ value: String) -> String? {
