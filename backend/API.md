@@ -347,7 +347,15 @@ GET /api/v1/me/settings
 Authorization: Bearer <accessToken>
 ```
 
-Returns the same backend settings object used in the startup snapshot.
+Returns the latest saved study settings. For editing one study room, prefer the study-scoped endpoint:
+
+```http
+GET /api/v1/study/{studyId}/settings
+PUT /api/v1/study/{studyId}/settings
+Authorization: Bearer <accessToken>
+```
+
+`studyId` is the database-generated id returned in each study settings response.
 
 ### API Status
 
@@ -377,15 +385,16 @@ Validates the device's stored regular OpenAI API key through the backend and ret
 
 The iOS/macOS apps must not validate keys by calling OpenAI directly.
 
-### Snapshot
+### Study Records
 
 ```http
-GET /api/v1/me/snapshot?limit=500&offset=0
+GET /api/v1/me/study?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Returns backend settings plus a paged record cache for app startup and pull-to-refresh.
-The snapshot also includes `api` and `stats` objects so clients can render API status and topic statistics without recomputing them locally.
+Returns only the paginated study record cache plus server time. Settings, API status, and stats are intentionally split into dedicated endpoints.
+
+`GET /api/v1/me/snapshot` remains as a legacy compatibility endpoint, but new clients should use `/me/study`, `/me/settings`, `/me/api`, and `/me/stats`.
 
 ### Records
 

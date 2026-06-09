@@ -12,6 +12,7 @@ interface SchedulePort {
     fun save(entity: ScheduleEntity): ScheduleEntity
     fun findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(deviceId: String, userId: Long?): ScheduleEntity?
     fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long?): ScheduleEntity?
+    fun findByIdAndUserId(id: Long, userId: Long?): ScheduleEntity?
     fun findByDeviceIdAndUserIdAndTopic(deviceId: String, userId: Long?, topic: String): ScheduleEntity?
     fun findByUserIdAndTopic(userId: Long?, topic: String): ScheduleEntity?
     fun findDue(now: Instant, pageable: Pageable): List<ScheduleEntity>

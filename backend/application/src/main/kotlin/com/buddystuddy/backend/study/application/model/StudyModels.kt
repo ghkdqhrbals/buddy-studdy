@@ -1,7 +1,7 @@
 package com.buddystuddy.backend.study.application.model
 
 import com.buddystuddy.backend.admin.application.model.APIStatusResponse
-import com.buddystuddy.backend.settings.application.model.BackendSettingsResponse
+import com.buddystuddy.backend.settings.application.model.StudySettingsResponse
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import java.time.Instant
 
@@ -24,8 +24,16 @@ data class StudyRecordResponse(
 
 data class RecordsPageResponse(val records: List<StudyRecordResponse>, val totalCount: Long, val limit: Int, val offset: Int)
 
+data class StudyPageResponse(
+    val records: List<StudyRecordResponse>,
+    val totalCount: Long,
+    val limit: Int,
+    val offset: Int,
+    val serverTime: Instant,
+)
+
 data class BackendSyncResponse(
-    val settings: BackendSettingsResponse,
+    val settings: StudySettingsResponse,
     val api: APIStatusResponse?,
     val records: List<StudyRecordResponse>,
     val stats: StatsResponse?,

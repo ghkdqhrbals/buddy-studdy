@@ -101,12 +101,15 @@ See [API.md](API.md) for request/response examples.
 - `PUT /api/v1/me/schedule`
 - `GET /api/v1/me/settings`
 - `PUT /api/v1/me/settings`
+- `GET /api/v1/study/{study_id}/settings`
+- `PUT /api/v1/study/{study_id}/settings`
 - `GET /api/v1/me/profile`
 - `PATCH /api/v1/me/profile`
 - `DELETE /api/v1/me/profile`
 - `GET /api/v1/me/api`
 - `POST /api/v1/me/api/validate`
-- `GET /api/v1/me/snapshot`
+- `GET /api/v1/me/study`
+- `GET /api/v1/me/snapshot` (legacy)
 - `GET /api/v1/me/stats`
 - `POST /api/v1/me/questions`
 - `GET /api/v1/me/records`

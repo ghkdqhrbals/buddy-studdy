@@ -30,7 +30,7 @@ class OpenApiDocumentationTest {
     @LocalServerPort var port: Int = 0
 
     @Test
-    fun `openapi document includes study snapshot descriptions`() {
+    fun `openapi document includes split study endpoint descriptions`() {
         val response = HttpClient.newHttpClient().send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/openapi.json")).GET().build(),
             HttpResponse.BodyHandlers.ofString(),
@@ -38,9 +38,11 @@ class OpenApiDocumentationTest {
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
-            .contains("\"/api/v1/me/snapshot\"")
-            .contains("Fetch my startup snapshot")
-            .contains("Returns the authenticated user's study settings")
+            .contains("\"/api/v1/me/study\"")
+            .contains("\"/api/v1/me/stats\"")
+            .contains("\"/api/v1/study/{studyId}/settings\"")
+            .contains("Fetch my study records")
+            .contains("Returns only the authenticated user's paginated study record data")
             .contains("Maximum number of records to include")
     }
 }

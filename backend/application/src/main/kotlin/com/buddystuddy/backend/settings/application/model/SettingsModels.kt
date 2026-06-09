@@ -4,7 +4,8 @@ import java.time.Instant
 
 data class ScheduleResponse(val deviceId: String, val enabled: Boolean, val nextDueAt: Instant?)
 
-data class BackendSettingsResponse(
+data class StudySettingsResponse(
+    val id: Long? = null,
     val topic: String = "",
     val difficultyLevel: Int = 5,
     val intervalMinutes: Int = 15,

@@ -11,6 +11,7 @@ import java.time.Instant
 interface ScheduleRepository : JpaRepository<ScheduleEntity, Long>, SchedulePort {
     override fun findFirstByDeviceIdAndUserIdOrderByUpdatedAtDesc(deviceId: String, userId: Long?): ScheduleEntity?
     override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long?): ScheduleEntity?
+    override fun findByIdAndUserId(id: Long, userId: Long?): ScheduleEntity?
     override fun findByDeviceIdAndUserIdAndTopic(deviceId: String, userId: Long?, topic: String): ScheduleEntity?
     override fun findByUserIdAndTopic(userId: Long?, topic: String): ScheduleEntity?
 

@@ -36,7 +36,7 @@ class StudyController(
 ) {
     @Operation(
         summary = "Fetch my startup snapshot",
-        description = "Returns the authenticated user's study settings, API-key status, paginated study records, topic statistics, and related startup data in one response. The iOS app uses this endpoint after launch or pull-to-refresh to hydrate the local screen state without recomputing records or stats locally.",
+        description = "Legacy startup endpoint. Prefer /me/study for study records, /me/stats for topic statistics, and /study/{studyId}/settings for a single study room's settings.",
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Snapshot returned."),
@@ -49,8 +49,24 @@ class StudyController(
         @Parameter(description = "Zero-based record offset for pagination.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication,
-    ) =
-        study.sync(limit, offset, authentication)
+    ) = study.sync(limit, offset, authentication)
+
+    @Operation(
+        summary = "Fetch my study records",
+        description = "Returns only the authenticated user's paginated study record data. Settings and statistics are intentionally split into dedicated endpoints.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study records returned."),
+        ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
+    )
+    @GetMapping("/me/study")
+    fun study(
+        @Parameter(description = "Maximum number of records to include. Server clamps this to 1..1000.", example = "500")
+        @RequestParam(defaultValue = "500") limit: Int,
+        @Parameter(description = "Zero-based record offset for pagination.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        authentication: Authentication,
+    ) = study.study(limit, offset, authentication)
 
     @Operation(
         summary = "List my graded records",
@@ -169,6 +185,7 @@ class StudyController(
 
 interface StudyWebPort {
     fun sync(limit: Int, offset: Int, authentication: Authentication): Any
+    fun study(limit: Int, offset: Int, authentication: Authentication): Any
     fun records(limit: Int, offset: Int, authentication: Authentication): Any
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
     fun record(id: Long, authentication: Authentication): Any
@@ -190,6 +207,9 @@ class StudyWebAdapter(
 ) : StudyWebPort {
     override fun sync(limit: Int, offset: Int, authentication: Authentication) =
         studySyncUseCase.sync(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset))
+
+    override fun study(limit: Int, offset: Int, authentication: Authentication) =
+        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset))
 
     override fun records(limit: Int, offset: Int, authentication: Authentication) =
         recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset))

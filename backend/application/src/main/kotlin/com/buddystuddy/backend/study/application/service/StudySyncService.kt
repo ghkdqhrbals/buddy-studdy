@@ -5,6 +5,7 @@ import com.buddystuddy.backend.study.application.model.BackendSyncResponse
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystuddy.backend.study.application.model.StudyPageResponse
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import org.springframework.stereotype.Service
@@ -27,6 +28,18 @@ class StudySyncService(
             records = records.records,
             stats = statsUseCase.stats(principal, 8, 0),
             totalCount = records.totalCount,
+            serverTime = Instant.now(),
+        )
+    }
+
+    @Transactional(readOnly = true)
+    override fun study(principal: Principal, limit: Int, offset: Int): StudyPageResponse {
+        val records = recordsUseCase.records(principal, limit, offset)
+        return StudyPageResponse(
+            records = records.records,
+            totalCount = records.totalCount,
+            limit = records.limit,
+            offset = records.offset,
             serverTime = Instant.now(),
         )
     }

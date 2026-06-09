@@ -4,7 +4,8 @@ import com.buddystuddy.study.domain.entity.ScheduleEntity
 import com.buddystuddy.account.domain.entity.UserEntity
 
 fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
-    BackendSettingsResponse(
+    StudySettingsResponse(
+        id = it.id,
         topic = it.topic,
         difficultyLevel = it.difficultyLevel,
         intervalMinutes = it.intervalMinutes,
@@ -19,4 +20,4 @@ fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
         nextDueAt = it.nextDueAt,
         lastError = it.lastError,
     )
-} ?: BackendSettingsResponse(openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank())
+} ?: StudySettingsResponse(openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank())

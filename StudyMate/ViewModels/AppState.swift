@@ -801,10 +801,20 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let snapshot = try await remotePushBackendClient.fetchSnapshot(
+            let remoteSettings = try await remotePushBackendClient.fetchSettings(registration: registration)
+            let apiStatus = try await remotePushBackendClient.fetchAPIStatus(registration: registration)
+            let studyPage = try await remotePushBackendClient.fetchStudy(
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
+            )
+            let snapshot = BackendSnapshot(
+                settings: remoteSettings,
+                api: apiStatus,
+                records: studyPage.records,
+                stats: nil,
+                totalCount: studyPage.totalCount,
+                serverTime: studyPage.serverTime
             )
             applyBackendSnapshot(
                 snapshot,
@@ -1036,7 +1046,9 @@ final class AppState: ObservableObject {
         settingsStore.saveSettings(sanitizedSettings)
         settingsStore.replaceStudyRecords(snapshot.records)
         studyRecords = settingsStore.loadStudyRecords()
-        backendStats = snapshot.stats
+        if let stats = snapshot.stats {
+            backendStats = stats
+        }
 
         if snapshot.settings.enabled != isRunning {
             log(.info, "백엔드 schedule enabled=\(snapshot.settings.enabled) 상태를 확인했습니다. 사용자 running 설정은 \(isRunning) 상태로 유지합니다.")
