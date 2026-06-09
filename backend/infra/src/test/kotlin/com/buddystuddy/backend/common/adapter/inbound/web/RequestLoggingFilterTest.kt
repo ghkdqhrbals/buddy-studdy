@@ -5,9 +5,13 @@ import jakarta.servlet.ServletResponse
 import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 
+@ExtendWith(OutputCaptureExtension::class)
 class RequestLoggingFilterTest {
     private val filter = RequestLoggingFilter()
 
@@ -45,6 +49,32 @@ class RequestLoggingFilterTest {
         filter.doFilter(request, response, chain)
 
         assertThat(response.contentAsString).isEqualTo("""{"saved":true}""")
+    }
+
+    @Test
+    fun `api request and response are logged in a single exchange line`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("POST", "/api/v1/auth/google")
+        request.contentType = "application/json"
+        request.addHeader("Authorization", "Bearer access-token")
+        request.setContent("""{"idToken":"google-id-token"}""".toByteArray())
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { servletRequest, servletResponse ->
+            servletRequest.inputStream.readBytes()
+            servletResponse.contentType = "application/json"
+            servletResponse.writer.write("""{"accessToken":"app-token"}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("api_exchange")
+        assertThat(output.out).contains("\"request\":{")
+        assertThat(output.out).contains("\"response\":{")
+        assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\\\"idToken\\\":\\\"[REDACTED]\\\"")
+        assertThat(output.out).contains("\\\"accessToken\\\":\\\"[REDACTED]\\\"")
+        assertThat(output.out).doesNotContain("api_request")
+        assertThat(output.out).doesNotContain("api_response {\"requestId\"")
     }
 
     private fun interface FilterChain : jakarta.servlet.FilterChain {
