@@ -30,6 +30,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
     implementation("io.github.ghkdqhrbals:redisstream-spring-boot-starter:0.2.0")
     implementation("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager")

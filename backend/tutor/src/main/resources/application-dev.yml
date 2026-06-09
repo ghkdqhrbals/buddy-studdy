@@ -18,6 +18,14 @@ spring:
         enabled: true
         region: ap-northeast-2
 
+springdoc:
+  api-docs:
+    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    path: /openapi.json
+  swagger-ui:
+    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    path: /docs
+
 buddystuddy:
   scheduler:
     enabled: ${SCHEDULER_ENABLED:false}

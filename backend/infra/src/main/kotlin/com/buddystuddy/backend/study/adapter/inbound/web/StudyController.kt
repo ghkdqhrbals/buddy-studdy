@@ -8,6 +8,11 @@ import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCa
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.stereotype.Component
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -25,47 +30,140 @@ import kotlin.math.min
 
 @RestController
 @RequestMapping("/api/v1")
+@Tag(name = "Study", description = "Authenticated study-room, question, record, and topic-stat APIs.")
 class StudyController(
     private val study: StudyWebPort,
 ) {
+    @Operation(
+        summary = "Fetch my startup snapshot",
+        description = "Returns the authenticated user's study settings, API-key status, paginated study records, topic statistics, and related startup data in one response. The iOS app uses this endpoint after launch or pull-to-refresh to hydrate the local screen state without recomputing records or stats locally.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Snapshot returned."),
+        ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
+    )
     @GetMapping("/me/snapshot")
-    fun sync(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
+    fun sync(
+        @Parameter(description = "Maximum number of records to include. Server clamps this to 1..1000.", example = "500")
+        @RequestParam(defaultValue = "500") limit: Int,
+        @Parameter(description = "Zero-based record offset for pagination.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        authentication: Authentication,
+    ) =
         study.sync(limit, offset, authentication)
 
+    @Operation(
+        summary = "List my graded records",
+        description = "Returns the authenticated user's graded or completed study records. Ungraded active questions are intentionally managed from the study room and should not be shown as regular history.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Records returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
     @GetMapping("/me/records")
-    fun records(@RequestParam(defaultValue = "100") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
+    fun records(
+        @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
+        @RequestParam(defaultValue = "100") limit: Int,
+        @Parameter(description = "Zero-based pagination offset.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        authentication: Authentication,
+    ) =
         study.records(limit, offset, authentication)
 
+    @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Records cleared."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
     @DeleteMapping("/me/records")
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = study.clearRecords(authentication)
 
+    @Operation(summary = "Fetch one record", description = "Returns one study record owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Record returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
     @GetMapping("/me/records/{id}")
-    fun record(@PathVariable id: Long, authentication: Authentication) = study.record(id, authentication)
+    fun record(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ) = study.record(id, authentication)
 
+    @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/me/records/{id}/answer")
-    fun saveAnswer(@PathVariable id: Long, @RequestBody body: AnswerRequest, authentication: Authentication) =
+    fun saveAnswer(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: AnswerRequest,
+        authentication: Authentication,
+    ) =
         study.saveAnswer(id, body, authentication)
 
+    @Operation(summary = "Submit an answer for grading", description = "Submits the answer, asks the tutor model to grade it, and returns the updated record with score, correctness, feedback, and explanation.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Answer graded."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
     @PostMapping("/me/records/{id}/answer")
-    fun grade(@PathVariable id: Long, @RequestBody body: AnswerRequest, authentication: Authentication) =
+    fun grade(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: AnswerRequest,
+        authentication: Authentication,
+    ) =
         study.grade(id, body, authentication)
 
+    @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
     @PostMapping("/me/records/{id}/skip")
-    fun skip(@PathVariable id: Long, authentication: Authentication) = study.skip(id, authentication)
+    fun skip(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ) = study.skip(id, authentication)
 
+    @Operation(summary = "Delete one record", description = "Immediately deletes a record owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Record deleted."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
     @DeleteMapping("/me/records/{id}")
-    fun delete(@PathVariable id: Long, authentication: Authentication): ResponseEntity<Unit> = study.delete(id, authentication)
+    fun delete(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ): ResponseEntity<Unit> = study.delete(id, authentication)
 
+    @Operation(summary = "Update record visibility", description = "Sets whether a completed record can be included in public questions. The user's global public-question setting must also allow public sharing.")
     @PatchMapping("/me/records/{id}/publicity")
-    fun publicity(@PathVariable id: Long, @RequestBody body: RecordPublicityRequest, authentication: Authentication) =
+    fun publicity(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: RecordPublicityRequest,
+        authentication: Authentication,
+    ) =
         study.publicity(id, body, authentication)
 
+    @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
     @GetMapping("/me/stats")
-    fun stats(@RequestParam(defaultValue = "8") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
+    fun stats(
+        @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
+        @RequestParam(defaultValue = "8") limit: Int,
+        @Parameter(description = "Zero-based topic offset for pagination.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        authentication: Authentication,
+    ) =
         study.stats(limit, offset, authentication)
 
+    @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/me/questions")
-    fun createQuestion(@RequestBody body: CreateQuestionRequest, authentication: Authentication) =
+    fun createQuestion(
+        @RequestBody body: CreateQuestionRequest,
+        authentication: Authentication,
+    ) =
         study.createQuestion(body, authentication)
 }
 

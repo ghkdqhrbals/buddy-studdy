@@ -52,6 +52,7 @@ class SecurityConfig {
             .authorizeHttpRequests {
                 it.requestMatchers(HttpMethod.GET, "/health", "/api/v1/health").permitAll()
                 it.requestMatchers("/actuator/**").permitAll()
+                it.requestMatchers(HttpMethod.GET, "/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**", "/openapi.json", "/v3/api-docs/**").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/api/v1/openai/models").permitAll()
                 it.requestMatchers(HttpMethod.POST, "/api/v1/devices/register").permitAll()
                 it.requestMatchers("/api/v1/auth/**").permitAll()
@@ -129,6 +130,12 @@ class BearerTokenFilter(
         return path == "/health" ||
             path == "/api/v1/health" ||
             path.startsWith("/actuator/") ||
+            path == "/docs" ||
+            path.startsWith("/docs/") ||
+            path == "/swagger-ui.html" ||
+            path.startsWith("/swagger-ui/") ||
+            path == "/openapi.json" ||
+            path.startsWith("/v3/api-docs/") ||
             path.startsWith("/api/v1/auth/") ||
             (method == HttpMethod.POST.name() && path == "/api/v1/devices/register") ||
             (method == HttpMethod.GET.name() && path == "/api/v1/openai/models") ||

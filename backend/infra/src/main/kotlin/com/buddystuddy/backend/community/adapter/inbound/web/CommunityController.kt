@@ -7,6 +7,11 @@ import com.buddystuddy.backend.community.adapter.inbound.web.dto.CommunityCommen
 import com.buddystuddy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.model.ReportQuestionResponse
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -23,36 +28,74 @@ import kotlin.math.min
 
 @RestController
 @RequestMapping("/api/v1")
+@Tag(name = "Public Questions", description = "Public completed-question browsing, reactions, comments, and report APIs.")
 class CommunityController(
     private val community: CommunityWebPort,
 ) {
+    @Operation(
+        summary = "List public completed questions",
+        description = "Returns completed questions that are public both at the user level and at the individual record level. The list includes author profile data, answer, grading feedback, and aggregated view/like/comment counts.",
+    )
+    @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned."))
     @GetMapping("/public/questions")
     fun publicQuestions(
+        @Parameter(description = "Optional topic keyword filter.", example = "Swift")
         @RequestParam(required = false) topic: String?,
+        @Parameter(description = "Maximum number of items to return. Server clamps this to 1..100.", example = "20")
         @RequestParam(defaultValue = "20") limit: Int,
+        @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication?,
     ) = community.publicQuestions(topic, limit, offset, authentication)
 
+    @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
-    fun publicQuestion(@PathVariable id: Long, authentication: Authentication?) = community.publicQuestion(id, authentication)
+    fun publicQuestion(
+        @Parameter(description = "Public question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication?,
+    ) = community.publicQuestion(id, authentication)
 
+    @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
-    fun like(@PathVariable id: Long, authentication: Authentication) = community.like(id, authentication)
+    fun like(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
+        community.like(id, authentication)
 
+    @Operation(summary = "Unlike a public question", description = "Removes the authenticated user's like. Like counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/like")
-    fun unlike(@PathVariable id: Long, authentication: Authentication) = community.unlike(id, authentication)
+    fun unlike(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
+        community.unlike(id, authentication)
 
+    @Operation(summary = "List public question comments", description = "Returns paginated comments for a public question.")
     @GetMapping("/public/questions/{id}/comments")
-    fun comments(@PathVariable id: Long, @RequestParam(defaultValue = "30") limit: Int, @RequestParam(defaultValue = "0") offset: Int) =
+    fun comments(
+        @Parameter(description = "Public question id.", example = "42")
+        @PathVariable id: Long,
+        @Parameter(description = "Maximum number of comments to return. Server clamps this to 1..100.", example = "30")
+        @RequestParam(defaultValue = "30") limit: Int,
+        @Parameter(description = "Zero-based pagination offset.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+    ) =
         community.comments(id, limit, offset)
 
+    @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
-    fun comment(@PathVariable id: Long, @RequestBody body: CommunityCommentRequest, authentication: Authentication) =
+    fun comment(
+        @Parameter(description = "Public question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: CommunityCommentRequest,
+        authentication: Authentication,
+    ) =
         community.comment(id, body, authentication)
 
+    @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
-    fun report(@PathVariable id: Long, @RequestBody body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse =
+    fun report(
+        @Parameter(description = "Public question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: ReportQuestionRequest,
+        authentication: Authentication,
+    ): ReportQuestionResponse =
         community.report(id, body, authentication)
 }
 
