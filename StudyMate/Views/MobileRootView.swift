@@ -228,6 +228,12 @@ private struct MobileHomeView: View {
         .task {
             await loadCommunityQuestionsIfNeeded(userInitiated: false)
         }
+        .onAppear {
+            handleAppRouteRequest(appState.appRouteRequest)
+        }
+        .onChange(of: appState.appRouteRequest) { _, request in
+            handleAppRouteRequest(request)
+        }
         .onChange(of: isSearchFocused) { _, isFocused in
             guard !isFocused,
                   activeTrimmedSearchText.isEmpty else {
@@ -293,6 +299,35 @@ private struct MobileHomeView: View {
                 ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
             }
         }
+    }
+
+    private func handleAppRouteRequest(_ request: AppRouteRequest?) {
+        guard let request else {
+            return
+        }
+
+        switch request.route {
+        case .profile:
+            isShowingProfileSettings = true
+        case .studyList:
+            selectedHomeScope = .my
+        case .publicQuestions:
+            selectedHomeScope = .all
+            Task { @MainActor in
+                await loadCommunityQuestionsIfNeeded(userInitiated: false)
+            }
+        case .publicQuestion(let id):
+            selectedHomeScope = .all
+            selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
+            Task { @MainActor in
+                await loadCommunityQuestionsIfNeeded(userInitiated: false)
+                selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
+            }
+        default:
+            break
+        }
+
+        appState.appRouteRequest = nil
     }
 
     private var homeTitleRow: some View {

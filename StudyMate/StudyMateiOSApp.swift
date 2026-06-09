@@ -8,10 +8,30 @@ struct StudyMateiOSApp: App {
     @UIApplicationDelegateAdaptor(StudyMateiOSAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @State private var appState: AppState?
+    @State private var pendingDeepLinkURLs: [URL] = []
 
     var body: some Scene {
         WindowGroup {
             StudyMateiOSBootstrapView(appState: $appState)
+                .onOpenURL { url in
+                    guard let appState else {
+                        pendingDeepLinkURLs.append(url)
+                        return
+                    }
+
+                    appState.openDeepLink(url)
+                }
+                .onChange(of: appState != nil) { _, isReady in
+                    guard isReady, let appState else {
+                        return
+                    }
+
+                    let urls = pendingDeepLinkURLs
+                    pendingDeepLinkURLs.removeAll()
+                    for url in urls {
+                        appState.openDeepLink(url)
+                    }
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             guard let appState else {

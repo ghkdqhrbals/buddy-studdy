@@ -104,6 +104,7 @@ final class AppState: ObservableObject {
     @Published var notificationLandingMessage: String?
     @Published var selectedTab: AppTab = .study
     @Published var homeStudyRoute: HomeStudyRoute?
+    @Published var appRouteRequest: AppRouteRequest?
     @Published var focusedRecordRequest: FocusedRecordRequest?
     @Published var openAIModelOptions: [OpenAIModelOption] = OpenAIModelOption.all
     @Published var hasCompletedOnboarding: Bool
@@ -215,6 +216,56 @@ final class AppState: ObservableObject {
         selectedTab = nextTab
         if nextTab == .home {
             homeStudyRoute = nil
+        }
+    }
+
+    func openDeepLink(_ url: URL) {
+        guard let route = AppRoute(url: url) else {
+            log(.warning, "지원하지 않는 딥링크를 무시했습니다. url=\(url.absoluteString)")
+            return
+        }
+
+        openRoute(route)
+    }
+
+    @discardableResult
+    func openRoute(_ route: AppRoute) -> Bool {
+        switch route {
+        case .home:
+            selectedTab = .home
+            homeStudyRoute = nil
+            return true
+        case .studyList, .publicQuestions:
+            selectedTab = .home
+            homeStudyRoute = nil
+            appRouteRequest = AppRouteRequest(route: route)
+            return true
+        case .studyRoom(let categoryID):
+            showStudyScreen(categoryID: categoryID)
+            return true
+        case .records:
+            setSelectedTab(.records)
+            return mobileVisibleTab == .records
+        case .recordDetail(let recordID):
+            guard requirePageAccess(.records) else {
+                return false
+            }
+            selectedTab = .records
+            homeStudyRoute = nil
+            focusedRecordRequest = FocusedRecordRequest(recordID: recordID)
+            return true
+        case .statistics:
+            setSelectedTab(.statistics)
+            return mobileVisibleTab == .statistics
+        case .settings, .settingsOpenAI:
+            setSelectedTab(.settings)
+            appRouteRequest = AppRouteRequest(route: route)
+            return true
+        case .profile, .publicQuestion:
+            selectedTab = .home
+            homeStudyRoute = nil
+            appRouteRequest = AppRouteRequest(route: route)
+            return true
         }
     }
 

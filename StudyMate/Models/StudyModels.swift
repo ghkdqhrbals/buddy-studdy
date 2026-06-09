@@ -1,5 +1,11 @@
 import Foundation
 
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 enum Difficulty: Int, CaseIterable, Codable, Identifiable {
     case level1 = 1
     case level2 = 2
@@ -230,6 +236,110 @@ enum AppTab: Int, Hashable {
 struct HomeStudyRoute: Identifiable, Hashable {
     let id = UUID()
     var categoryID: String?
+}
+
+enum AppRoute: Equatable, Hashable {
+    case home
+    case studyList
+    case studyRoom(categoryID: String?)
+    case records
+    case recordDetail(recordID: String)
+    case statistics
+    case settings
+    case settingsOpenAI
+    case profile
+    case publicQuestions
+    case publicQuestion(id: String)
+
+    init?(url: URL) {
+        guard url.scheme?.lowercased() == "buddystuddy" else {
+            return nil
+        }
+
+        let components = [url.host, url.path]
+            .compactMap { $0 }
+            .flatMap { $0.split(separator: "/") }
+            .map(String.init)
+
+        guard !components.isEmpty else {
+            self = .home
+            return
+        }
+
+        let normalized = components.map { $0.lowercased() }
+        if normalized == ["home"] {
+            self = .home
+        } else if normalized == ["study"] || normalized == ["studies"] {
+            self = .studyList
+        } else if normalized.count == 2,
+                  normalized[0] == "study" || normalized[0] == "studies" {
+            self = .studyRoom(categoryID: components[safe: 1])
+        } else if normalized == ["records"] || normalized == ["history"] {
+            self = .records
+        } else if normalized.count == 2,
+                  normalized[0] == "record" || normalized[0] == "records" || normalized[0] == "history",
+                  let recordID = components[safe: 1] {
+            self = .recordDetail(recordID: recordID)
+        } else if normalized == ["stats"] || normalized == ["statistics"] {
+            self = .statistics
+        } else if normalized == ["settings"] {
+            self = .settings
+        } else if normalized == ["settings", "openai"] || normalized == ["settings", "api-key"] {
+            self = .settingsOpenAI
+        } else if normalized == ["profile"] {
+            self = .profile
+        } else if normalized == ["public"] || normalized == ["public", "questions"] {
+            self = .publicQuestions
+        } else if normalized.count == 3,
+                  normalized[0] == "public",
+                  normalized[1] == "question" || normalized[1] == "questions",
+                  let questionID = components[safe: 2] {
+            self = .publicQuestion(id: questionID)
+        } else {
+            return nil
+        }
+    }
+
+    init?(route: String, params: [String: String] = [:]) {
+        let normalized = route.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "home":
+            self = .home
+        case "study", "study.list", "studies":
+            self = .studyList
+        case "study.room", "study.detail":
+            self = .studyRoom(categoryID: params["categoryId"] ?? params["studyId"])
+        case "records", "record.list", "history":
+            self = .records
+        case "record.detail", "records.detail", "history.detail":
+            guard let recordID = params["recordId"] ?? params["recordID"] ?? params["id"] else {
+                return nil
+            }
+            self = .recordDetail(recordID: recordID)
+        case "stats", "statistics":
+            self = .statistics
+        case "settings":
+            self = .settings
+        case "settings.openai", "settings.api-key":
+            self = .settingsOpenAI
+        case "profile":
+            self = .profile
+        case "public.questions", "community.questions":
+            self = .publicQuestions
+        case "public.question", "community.question":
+            guard let questionID = params["questionId"] ?? params["questionID"] ?? params["id"] else {
+                return nil
+            }
+            self = .publicQuestion(id: questionID)
+        default:
+            return nil
+        }
+    }
+}
+
+struct AppRouteRequest: Identifiable, Equatable {
+    let id = UUID()
+    var route: AppRoute
 }
 
 struct FocusedRecordRequest: Equatable {

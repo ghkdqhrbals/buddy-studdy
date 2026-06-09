@@ -50,6 +50,32 @@ enum StudyNotificationRouting {
 }
 
 enum StudyNotificationPayload {
+    static func appRoute(from userInfo: [AnyHashable: Any]) -> AppRoute? {
+        let dictionaries = cloudKitDictionaries(from: userInfo)
+
+        for dictionary in dictionaries {
+            for key in ["deepLink", "deeplink", "url", "landingUrl", "landingURL"] {
+                if let value = stringValue(dictionary[key]),
+                   let url = URL(string: value),
+                   let route = AppRoute(url: url) {
+                    return route
+                }
+            }
+        }
+
+        for dictionary in dictionaries {
+            let params = routeParams(from: dictionary)
+            for key in ["route", "screen", "destination"] {
+                if let value = stringValue(dictionary[key]),
+                   let route = AppRoute(route: value, params: params) {
+                    return route
+                }
+            }
+        }
+
+        return nil
+    }
+
     static func backendRecordID(from userInfo: [AnyHashable: Any]) -> String? {
         let candidateKeys = [
             StudyNotificationAction.recordID,
@@ -203,6 +229,27 @@ enum StudyNotificationPayload {
         }
 
         return nil
+    }
+
+    private static func routeParams(from dictionary: [AnyHashable: Any]) -> [String: String] {
+        var params: [String: String] = [:]
+
+        for (key, value) in dictionary {
+            let normalizedKey = String(describing: key)
+            if let string = stringValue(value) {
+                params[normalizedKey] = string
+            }
+        }
+
+        if let nestedParams = dictionaryValue(dictionary["params"]) ?? dictionaryValue(dictionary["parameters"]) {
+            for (key, value) in nestedParams {
+                if let string = stringValue(value) {
+                    params[String(describing: key)] = string
+                }
+            }
+        }
+
+        return params
     }
 
     private static func stringValue(_ value: Any?) -> String? {
@@ -516,6 +563,8 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     private weak var appState: AppState?
     @MainActor
     private var pendingLocalResponses: [PendingLocalNotificationResponse] = []
+    @MainActor
+    private var pendingAppRoutes: [AppRoute] = []
 
     private struct PendingLocalNotificationResponse {
         var actionIdentifier: String
@@ -529,7 +578,31 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     func configure(appState: AppState) {
         self.appState = appState
         register(language: appState.settings.appLanguage)
+        processPendingAppRoutes()
         processPendingLocalResponsesIfActive()
+    }
+
+    @MainActor
+    private func enqueueAppRoute(_ route: AppRoute) {
+        guard let appState else {
+            pendingAppRoutes.append(route)
+            return
+        }
+
+        appState.openRoute(route)
+    }
+
+    @MainActor
+    private func processPendingAppRoutes() {
+        guard let appState else {
+            return
+        }
+
+        let routes = pendingAppRoutes
+        pendingAppRoutes.removeAll()
+        for route in routes {
+            appState.openRoute(route)
+        }
     }
 
     @MainActor
@@ -673,6 +746,19 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo)
 
         #if os(iOS)
+        if !StudyNotificationRouting.isIgnored(actionIdentifier),
+           StudyNotificationRouting.shouldOpenStudyImmediately(
+               actionIdentifier: actionIdentifier,
+               applicationState: UIApplication.shared.applicationState
+           ),
+           let route = StudyNotificationPayload.appRoute(from: userInfo) {
+            Task { @MainActor in
+                StudyNotificationDelegate.shared.enqueueAppRoute(route)
+            }
+            completionHandler()
+            return
+        }
+
         if StudyNotificationPayload.isCloudQuestionPush(from: userInfo) {
             Task { @MainActor in
                 StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
@@ -989,6 +1075,11 @@ final class StudyRemoteNotificationBridge {
                 )
             )
             return false
+        }
+
+        if let route = StudyNotificationPayload.appRoute(from: userInfo) {
+            appState.logRemoteNotificationEvent("Push 딥링크 route를 열었습니다. route=\(route)")
+            return appState.openRoute(route)
         }
 
         appState.prepareToOpenQuestionFromNotification()
