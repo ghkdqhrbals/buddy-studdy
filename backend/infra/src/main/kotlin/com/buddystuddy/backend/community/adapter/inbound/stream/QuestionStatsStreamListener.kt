@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.community.adapter.inbound.stream
 
+import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
@@ -88,6 +89,7 @@ class QuestionStatsStreamListener(
 @Component
 class QuestionStatsStreamEventHandler(
     private val stats: QuestionStatsRepository,
+    private val likes: QuestionLikePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -125,12 +127,10 @@ class QuestionStatsStreamEventHandler(
         }
         when (fields["eventType"]) {
             "QUESTION_LIKED" -> {
-                increment(questionId) { stats.incrementLike(questionId, 1, Instant.now()) }
-                logApplied(fields, questionId, "likeCount", 1)
+                synchronizeLikeCount(fields, questionId)
             }
             "QUESTION_UNLIKED" -> {
-                increment(questionId) { stats.incrementLike(questionId, -1, Instant.now()) }
-                logApplied(fields, questionId, "likeCount", -1)
+                synchronizeLikeCount(fields, questionId)
             }
             "QUESTION_COMMENTED" -> {
                 increment(questionId) { stats.incrementComment(questionId, 1, Instant.now()) }
@@ -147,6 +147,27 @@ class QuestionStatsStreamEventHandler(
                 questionId,
                 fields.keys,
             )
+        }
+    }
+
+    private fun synchronizeLikeCount(fields: Map<String, String>, questionId: Long) {
+        val likeCount = likes.countByQuestionId(questionId).toInt()
+        overwriteLikeCount(questionId, likeCount)
+        logger.info(
+            "question_stats_event_applied eventId={} eventType={} questionId={} userId={} field={} value={}",
+            fields["eventId"],
+            fields["eventType"],
+            questionId,
+            fields["userId"],
+            "likeCount",
+            likeCount,
+        )
+    }
+
+    private fun overwriteLikeCount(questionId: Long, likeCount: Int) {
+        val now = Instant.now()
+        if (stats.setLikeCount(questionId, likeCount, now) == 0) {
+            stats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
         }
     }
 

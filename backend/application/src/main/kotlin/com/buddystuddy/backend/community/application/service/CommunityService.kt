@@ -71,21 +71,19 @@ class CommunityService(
     @Transactional
     override fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
         publicAnsweredQuestion(id)
-        var delta = 0
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
-                delta = 1
                 reactions.publishLiked(id, principal.userId)
             }
         } else {
             if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
-                delta = -1
                 reactions.publishUnliked(id, principal.userId)
             }
         }
-        val stats = questionStats.findById(id).orElse(QuestionStatsEntity(questionId = id))
-        return CommunityLikeResponse(id.toString(), (stats.likeCount + delta).coerceAtLeast(0), liked)
+        val likeCount = likes.countByQuestionId(id).toInt()
+        overwriteLikeCount(id, likeCount)
+        return CommunityLikeResponse(id.toString(), likeCount, liked)
     }
 
     @Transactional
@@ -150,6 +148,13 @@ class CommunityService(
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =
         questions.findPublicAnsweredById(id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+
+    private fun overwriteLikeCount(questionId: Long, likeCount: Int) {
+        val now = Instant.now()
+        if (questionStats.setLikeCount(questionId, likeCount, now) == 0) {
+            questionStats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
+        }
+    }
 
     private fun userProfile(id: Long) = users.findById(id).orElseThrow {
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")

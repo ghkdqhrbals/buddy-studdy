@@ -48,4 +48,5 @@ interface QuestionStatsPort {
     fun incrementView(questionId: Long, delta: Int, now: Instant): Int
     fun incrementLike(questionId: Long, delta: Int, now: Instant): Int
     fun incrementComment(questionId: Long, delta: Int, now: Instant): Int
+    fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
 }

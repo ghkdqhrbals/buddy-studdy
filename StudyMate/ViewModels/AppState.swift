@@ -1503,14 +1503,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async {
+    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
         guard isCommunitySignedIn else {
-            return
+            return nil
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
             communityErrorMessage = strings.communityRequestFailed
-            return
+            return nil
         }
 
         let previous = communityQuestions.first(where: { $0.id == question.id })
@@ -1523,12 +1523,14 @@ final class AppState: ObservableObject {
                 isLiked: isLiked
             )
             updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+            return state
         } catch {
             if let previous {
                 updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
             }
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
+            return nil
         }
     }
 

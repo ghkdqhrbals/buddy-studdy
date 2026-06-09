@@ -10,6 +10,7 @@ interface QuestionLikePort {
     fun save(entity: QuestionLikeEntity): QuestionLikeEntity
     fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
     fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
+    fun countByQuestionId(questionId: Long): Long
 }
 
 interface QuestionCommentPort {

@@ -2548,11 +2548,17 @@ private struct CommunityQuestionDetailView: View {
         }
 
         let next = !displayQuestion.isLikedByMe
+        let previous = displayQuestion
         displayQuestion.isLikedByMe = next
         displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
 
         Task {
-            await appState.setCommunityQuestionLike(question, isLiked: next)
+            if let state = await appState.setCommunityQuestionLike(displayQuestion, isLiked: next) {
+                displayQuestion.isLikedByMe = state.isLikedByMe
+                displayQuestion.likeCount = state.likeCount
+            } else {
+                displayQuestion = previous
+            }
         }
     }
 

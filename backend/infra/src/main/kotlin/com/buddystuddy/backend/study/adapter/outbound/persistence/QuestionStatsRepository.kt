@@ -9,7 +9,7 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, QuestionStatsPort {
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         update QuestionStatsEntity s
@@ -20,7 +20,7 @@ interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, Qu
     )
     override fun incrementView(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         update QuestionStatsEntity s
@@ -31,7 +31,7 @@ interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, Qu
     )
     override fun incrementLike(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
         update QuestionStatsEntity s
@@ -41,4 +41,15 @@ interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, Qu
         """
     )
     override fun incrementComment(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        update QuestionStatsEntity s
+           set s.likeCount = :count,
+               s.updatedAt = :now
+         where s.questionId = :questionId
+        """
+    )
+    override fun setLikeCount(@Param("questionId") questionId: Long, @Param("count") count: Int, @Param("now") now: Instant): Int
 }
