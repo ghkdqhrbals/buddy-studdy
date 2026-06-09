@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ github.event.inputs.publish_public == true }}
+    if: ${{ inputs.publish_public == true }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
