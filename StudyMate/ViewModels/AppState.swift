@@ -2180,11 +2180,13 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
-    func openStudyCategory(_ categoryID: String) {
+    func openStudyCategory(_ categoryID: String) async {
         let categories = synchronizedTopicCategories(for: settings).studyCategories
         guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
             return
         }
+
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
 
         if settings.selectedStudyCategoryID != targetCategory.id {
             persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
