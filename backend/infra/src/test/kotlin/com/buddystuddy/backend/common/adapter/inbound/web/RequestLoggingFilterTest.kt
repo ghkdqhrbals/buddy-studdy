@@ -71,8 +71,8 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"response\":{")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
         assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
-        assertThat(output.out).contains("\\\"idToken\\\":\\\"[REDACTED]\\\"")
-        assertThat(output.out).contains("\\\"accessToken\\\":\\\"[REDACTED]\\\"")
+        assertThat(output.out).contains("\"body\":{\"idToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"body\":{\"accessToken\":\"[REDACTED]\"}")
         assertThat(output.out).doesNotContain("api_request")
         assertThat(output.out).doesNotContain("api_response {\"requestId\"")
     }
@@ -91,6 +91,21 @@ class RequestLoggingFilterTest {
         assertThat(response.contentAsByteArray.decodeToString()).contains("짧고 명확하게")
         assertThat(output.out).contains("짧고 명확하게")
         assertThat(output.out).doesNotContain("ì§§")
+    }
+
+    @Test
+    fun `json response body is logged as nested json without escaped quotes`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.contentType = "application/json"
+            servletResponse.writer.write("""{"records":[{"id":1,"question":"Swift?"}]}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1,\"question\":\"Swift?\"}]}")
+        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
     }
 
     private fun interface FilterChain : jakarta.servlet.FilterChain {

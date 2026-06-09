@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.common.adapter.inbound.web
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -14,7 +16,9 @@ import java.util.Locale
 import java.util.UUID
 
 @Component
-class RequestLoggingFilter : OncePerRequestFilter() {
+class RequestLoggingFilter(
+    private val objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
+) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
@@ -54,7 +58,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             "response" to responseFields(response, durationMs),
         )
 
-    private fun requestFields(request: ContentCachingRequestWrapper): Map<String, Any> =
+    private fun requestFields(request: ContentCachingRequestWrapper): Map<String, Any?> =
         mapOf(
             "method" to request.method,
             "path" to request.requestURI,
@@ -67,7 +71,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
         response: ContentCachingResponseWrapper,
         durationMs: Double,
         includeBody: Boolean = true,
-    ): Map<String, Any> =
+    ): Map<String, Any?> =
         mapOf(
             "status" to response.status,
             "durationMs" to "%.2f".format(Locale.US, durationMs),
@@ -102,12 +106,18 @@ class RequestLoggingFilter : OncePerRequestFilter() {
     private fun isSensitiveHeader(name: String): Boolean =
         name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
-    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): String {
+    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any {
         if (bytes.isEmpty()) return ""
         val charset = charsetFor(encoding, contentType)
-        return redact(String(bytes, charset)).let {
+        val body = redact(String(bytes, charset)).let {
             if (it.length > MAX_BODY_CHARS) it.take(MAX_BODY_CHARS) + "...[truncated]" else it
         }
+        return parseJsonBody(body, contentType)
+    }
+
+    private fun parseJsonBody(body: String, contentType: String?): Any {
+        if (contentType?.contains("json", ignoreCase = true) != true) return body
+        return runCatching { objectMapper.readTree(body) }.getOrElse { body }
     }
 
     private fun charsetFor(encoding: String?, contentType: String?): Charset {
@@ -146,6 +156,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
         when (value) {
             null -> "null"
             is Number, is Boolean -> value.toString()
+            is JsonNode -> value.toString()
             is Map<*, *> -> value.entries.joinToString(prefix = "{", postfix = "}") { entry ->
                 "\"${escape(entry.key.toString())}\":${jsonValue(entry.value)}"
             }
