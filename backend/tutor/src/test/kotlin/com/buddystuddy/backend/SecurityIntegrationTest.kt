@@ -66,15 +66,11 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `invalid bearer token is ignored on public endpoints`(output: CapturedOutput) {
+    fun `invalid bearer token is ignored on public endpoints`() {
         val response = get("/api/v1/public/questions", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
-        assertThat(output.out)
-            .contains("api_auth_ignored")
-            .contains("path=/api/v1/public/questions")
-            .contains("code=AUTH_INVALID_ACCESS_TOKEN")
     }
 
     @Test

@@ -166,7 +166,7 @@ private object AnonymousRoutes {
 
 private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
-    securityLog.warn(
+    securityLog.debug(
         "api_auth_ignored requestId={} method={} path={} status={} code={} message={}",
         requestId,
         request.method,
