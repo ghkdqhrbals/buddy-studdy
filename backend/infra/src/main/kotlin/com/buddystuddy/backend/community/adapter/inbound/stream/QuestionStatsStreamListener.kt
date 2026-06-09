@@ -26,7 +26,7 @@ class QuestionStatsStreamListener(
         pollTimeoutMs = "3000",
     )
     fun onQuestionViewed(message: ConsumedRedisStreamMessage) {
-        consume(message) { processViewEvent(message.fields) }
+        consume("buddystuddy-question-view-listener", message) { processViewEvent(message.fields) }
     }
 
     @StreamListener(
@@ -39,36 +39,103 @@ class QuestionStatsStreamListener(
         pollTimeoutMs = "3000",
     )
     fun onQuestionAction(message: ConsumedRedisStreamMessage) {
-        consume(message) { processActionEvent(message.fields) }
+        consume("buddystuddy-question-action-listener", message) { processActionEvent(message.fields) }
     }
 
     @Transactional
     fun processViewEvent(fields: Map<String, String>) {
-        val questionId = fields.questionIdOrNull() ?: return
+        val questionId = fields.questionIdOrNull() ?: run {
+            logger.info(
+                "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
+                fields["eventId"],
+                fields["eventType"],
+                fields.keys,
+            )
+            return
+        }
         increment(questionId) { stats.incrementView(questionId, 1, Instant.now()) }
+        logger.info(
+            "question_stats_event_applied eventId={} eventType={} questionId={} deltaField={}",
+            fields["eventId"],
+            fields["eventType"] ?: "CONTENT_VIEWED",
+            questionId,
+            "viewCount",
+        )
     }
 
     @Transactional
     fun processActionEvent(fields: Map<String, String>) {
-        val questionId = fields.questionIdOrNull() ?: return
+        val questionId = fields.questionIdOrNull() ?: run {
+            logger.info(
+                "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
+                fields["eventId"],
+                fields["eventType"],
+                fields.keys,
+            )
+            return
+        }
         when (fields["eventType"]) {
-            "QUESTION_LIKED" -> increment(questionId) { stats.incrementLike(questionId, 1, Instant.now()) }
-            "QUESTION_UNLIKED" -> increment(questionId) { stats.incrementLike(questionId, -1, Instant.now()) }
-            "QUESTION_COMMENTED" -> increment(questionId) { stats.incrementComment(questionId, 1, Instant.now()) }
-            "QUESTION_COMMENT_DELETED" -> increment(questionId) { stats.incrementComment(questionId, -1, Instant.now()) }
-            else -> logger.debug("question_stats_stream_ignored eventType={} fields={}", fields["eventType"], fields.keys)
+            "QUESTION_LIKED" -> {
+                increment(questionId) { stats.incrementLike(questionId, 1, Instant.now()) }
+                logApplied(fields, questionId, "likeCount", 1)
+            }
+            "QUESTION_UNLIKED" -> {
+                increment(questionId) { stats.incrementLike(questionId, -1, Instant.now()) }
+                logApplied(fields, questionId, "likeCount", -1)
+            }
+            "QUESTION_COMMENTED" -> {
+                increment(questionId) { stats.incrementComment(questionId, 1, Instant.now()) }
+                logApplied(fields, questionId, "commentCount", 1)
+            }
+            "QUESTION_COMMENT_DELETED" -> {
+                increment(questionId) { stats.incrementComment(questionId, -1, Instant.now()) }
+                logApplied(fields, questionId, "commentCount", -1)
+            }
+            else -> logger.info(
+                "question_stats_event_ignored reason=unknown_event_type eventId={} eventType={} questionId={} fieldKeys={}",
+                fields["eventId"],
+                fields["eventType"],
+                questionId,
+                fields.keys,
+            )
         }
     }
 
-    private fun consume(message: ConsumedRedisStreamMessage, block: () -> Unit) {
+    private fun consume(listenerId: String, message: ConsumedRedisStreamMessage, block: () -> Unit) {
         try {
-            block()
-            message.ack()
-        } catch (error: Exception) {
-            logger.warn(
-                "question_stats_stream_consume_failed stream={} recordId={} error={}",
+            logger.info(
+                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} fieldKeys={}",
+                listenerId,
                 message.streamKey,
                 message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["questionId"] ?: message.fields["recordId"],
+                message.fields["userId"],
+                message.fields.keys,
+            )
+            block()
+            message.ack()
+            logger.info(
+                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={}",
+                listenerId,
+                message.streamKey,
+                message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["questionId"] ?: message.fields["recordId"],
+                message.fields["userId"],
+            )
+        } catch (error: Exception) {
+            logger.warn(
+                "redis_stream_consume_failed listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} error={}",
+                listenerId,
+                message.streamKey,
+                message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["questionId"] ?: message.fields["recordId"],
+                message.fields["userId"],
                 error.message,
             )
             message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
@@ -80,6 +147,18 @@ class QuestionStatsStreamListener(
             stats.save(QuestionStatsEntity(questionId = questionId, updatedAt = Instant.now()))
             update()
         }
+    }
+
+    private fun logApplied(fields: Map<String, String>, questionId: Long, deltaField: String, delta: Int) {
+        logger.info(
+            "question_stats_event_applied eventId={} eventType={} questionId={} userId={} deltaField={} delta={}",
+            fields["eventId"],
+            fields["eventType"],
+            questionId,
+            fields["userId"],
+            deltaField,
+            delta,
+        )
     }
 
     private fun Map<String, String>.questionIdOrNull(): Long? =

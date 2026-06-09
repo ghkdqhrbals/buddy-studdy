@@ -10,9 +10,13 @@ import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import java.util.stream.Stream
 
+@ExtendWith(OutputCaptureExtension::class)
 class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
     fun `publish methods return false when streams are disabled`() {
@@ -31,7 +35,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `view and action events publish typed field maps`() {
+    fun `view and action events publish typed field maps`(output: CapturedOutput) {
         val viewPublisher = RecordingPublisher()
         val actionPublisher = RecordingPublisher()
         val service = service(enabled = true, viewPublisher = viewPublisher, actionPublisher = actionPublisher)
@@ -49,6 +53,11 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_COMMENTED")
         assertThat(actionPublisher.requests[0].fields).containsEntry("userId", "40")
         assertThat(actionPublisher.requests[1].fields).containsEntry("eventType", "QUESTION_UNLIKED")
+        assertThat(output.out)
+            .contains("redis_stream_publish_started")
+            .contains("redis_stream_publish_succeeded")
+            .contains("eventType=CONTENT_VIEWED")
+            .contains("eventType=QUESTION_COMMENTED")
     }
 
     @Test

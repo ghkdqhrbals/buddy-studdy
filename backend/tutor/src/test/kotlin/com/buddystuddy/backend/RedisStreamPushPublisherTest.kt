@@ -10,10 +10,14 @@ import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import java.time.Instant
 import java.util.stream.Stream
 
+@ExtendWith(OutputCaptureExtension::class)
 class RedisStreamPushPublisherTest {
     @Test
     fun `publish methods return false when streams are disabled`() {
@@ -30,7 +34,7 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event publishes with topic as stream key hint`() {
+    fun `push event publishes with topic as stream key hint`(output: CapturedOutput) {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, pushPublisher = publisher)
 
@@ -42,6 +46,11 @@ class RedisStreamPushPublisherTest {
         assertThat(request.fields).containsEntry("recordId", "10")
         assertThat(request.options.maxLen).isEqualTo(100_000)
         assertThat(request.options.approximateTrimming).isTrue()
+        assertThat(output.out)
+            .contains("redis_stream_publish_started")
+            .contains("redis_stream_publish_succeeded")
+            .contains("eventType=QUESTION_PUSH_REQUESTED")
+            .contains("recordId=10")
     }
 
     @Test

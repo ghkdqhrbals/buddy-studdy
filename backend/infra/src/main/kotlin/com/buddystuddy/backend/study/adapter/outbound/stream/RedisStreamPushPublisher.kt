@@ -20,8 +20,27 @@ class RedisStreamPushPublisher(
     private val pushPublisher: RedisStreamPublisher? = pushPublisherProvider.ifAvailable
 
     override fun publishPush(request: QuestionPushRequest): Boolean {
-        if (!properties.streams.enabled) return false
-        val publisher = pushPublisher ?: return false
+        if (!properties.streams.enabled) {
+            logger.info(
+                "redis_stream_publish_skipped reason=streams_disabled eventType={} recordId={} deviceId={} userId={}",
+                "QUESTION_PUSH_REQUESTED",
+                request.recordId,
+                request.deviceId,
+                request.userId,
+            )
+            return false
+        }
+        val publisher = pushPublisher ?: run {
+            logger.warn(
+                "redis_stream_publish_skipped reason=publisher_missing eventType={} prefix={} recordId={} deviceId={} userId={}",
+                "QUESTION_PUSH_REQUESTED",
+                properties.streams.pushPrefix,
+                request.recordId,
+                request.deviceId,
+                request.userId,
+            )
+            return false
+        }
         val event = QuestionPushRequestedEvent(
             recordId = request.recordId,
             deviceId = request.deviceId,
@@ -36,16 +55,49 @@ class RedisStreamPushPublisher(
             createdAt = request.createdAt,
         )
         val fields = event.toStringMapWithoutNull()
+        val partitionKey = event.topic.ifBlank { event.recordId.toString() }
+        logger.info(
+            "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",
+            properties.streams.pushPrefix,
+            fields["eventId"],
+            fields["eventType"],
+            partitionKey,
+            event.recordId,
+            event.deviceId,
+            event.userId,
+            event.topic,
+            fields.keys,
+        )
         return try {
             val published = publisher.publish(
-                event.topic.ifBlank { event.recordId.toString() },
+                partitionKey,
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
-            logger.info("redis_stream_published stream={} id={} fields={}", published.streamKey, published.recordId, fields.keys)
+            logger.info(
+                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={}",
+                published.streamKey,
+                published.recordId,
+                fields["eventId"],
+                fields["eventType"],
+                partitionKey,
+                event.recordId,
+                event.deviceId,
+                event.userId,
+            )
             true
         } catch (error: Exception) {
-            logger.warn("redis_stream_publish_failed prefix={} error={}", properties.streams.pushPrefix, error.message)
+            logger.warn(
+                "redis_stream_publish_failed prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} error={}",
+                properties.streams.pushPrefix,
+                fields["eventId"],
+                fields["eventType"],
+                partitionKey,
+                event.recordId,
+                event.deviceId,
+                event.userId,
+                error.message,
+            )
             false
         }
     }
