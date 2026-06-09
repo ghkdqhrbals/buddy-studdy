@@ -120,7 +120,7 @@ jobs:
           docker network create buddystuddy-net >/dev/null 2>&1 || true
           docker volume create buddystuddy-postgres-data >/dev/null
 
-          docker rm -f buddystuddy-nginx buddystuddy-caddy buddystuddy-backend >/dev/null 2>&1 || true
+          docker rm -f buddystuddy-caddy >/dev/null 2>&1 || true
           if docker inspect buddystuddy-db >/dev/null 2>&1; then
             docker start buddystuddy-db >/dev/null
             docker network connect buddystuddy-net buddystuddy-db >/dev/null 2>&1 || true
@@ -151,12 +151,58 @@ jobs:
             sleep 2
           done
 
+          BLUE_SLOT="buddystuddy-backend-a"
+          GREEN_SLOT="buddystuddy-backend-b"
+          LEGACY_SLOT="buddystuddy-backend"
+          ACTIVE_SLOT="$(cat .active_backend_slot 2>/dev/null || true)"
+          if [ -n "${ACTIVE_SLOT}" ] && ! docker inspect -f '{{.State.Running}}' "${ACTIVE_SLOT}" 2>/dev/null | grep -qx true; then
+            ACTIVE_SLOT=""
+          fi
+          if [ -z "${ACTIVE_SLOT}" ]; then
+            if docker inspect -f '{{.State.Running}}' "${BLUE_SLOT}" 2>/dev/null | grep -qx true; then
+              ACTIVE_SLOT="${BLUE_SLOT}"
+            elif docker inspect -f '{{.State.Running}}' "${GREEN_SLOT}" 2>/dev/null | grep -qx true; then
+              ACTIVE_SLOT="${GREEN_SLOT}"
+            elif docker inspect -f '{{.State.Running}}' "${LEGACY_SLOT}" 2>/dev/null | grep -qx true; then
+              ACTIVE_SLOT="${LEGACY_SLOT}"
+            fi
+          fi
+          if [ "${ACTIVE_SLOT}" = "${BLUE_SLOT}" ]; then
+            NEW_SLOT="${GREEN_SLOT}"
+            OLD_SLOT="${BLUE_SLOT}"
+          else
+            NEW_SLOT="${BLUE_SLOT}"
+            OLD_SLOT="${ACTIVE_SLOT}"
+          fi
+          echo "Deploying ${IMAGE_REF} to ${NEW_SLOT}; active slot is ${OLD_SLOT:-none}."
+
+          docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
           docker run -d \
-            --name buddystuddy-backend \
+            --name "${NEW_SLOT}" \
             --network buddystuddy-net \
             --restart unless-stopped \
             --env-file .env \
             "${IMAGE_REF}"
+
+          if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then
+            docker network connect redis-stream-coordinator-net "${NEW_SLOT}" >/dev/null 2>&1 || true
+          fi
+
+          for attempt in $(seq 1 30); do
+            if docker run --rm \
+              --network buddystuddy-net \
+              curlimages/curl:8.11.0 \
+              -fsS "http://${NEW_SLOT}:8080/health"; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "New backend slot ${NEW_SLOT} failed health check after ${attempt} attempts." >&2
+              docker logs "${NEW_SLOT}" || true
+              docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
+              exit 1
+            fi
+            sleep 2
+          done
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
@@ -296,7 +342,9 @@ jobs:
           )"
           fi
 
-          cat > nginx/nginx.conf <<NGINX
+          write_nginx_config() {
+            local backend_slot="$1"
+            cat > nginx/nginx.conf <<NGINX
           events {}
 
           http {
@@ -338,7 +386,7 @@ jobs:
               }
 
               location / {
-                set \$backend http://buddystuddy-backend:8080;
+                set \$backend http://${backend_slot}:8080;
                 proxy_pass \$backend;
                 proxy_http_version 1.1;
                 proxy_set_header Host \$host;
@@ -386,31 +434,40 @@ jobs:
           ${COORDINATOR_SERVER_BLOCK}
           }
           NGINX
+          }
 
-          docker run -d \
-            --name buddystuddy-nginx \
-            --network buddystuddy-net \
-            --restart unless-stopped \
-            -p 443:443 \
-            -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-            -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
-            -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
-            nginx:1.27-alpine
+          write_nginx_config "${NEW_SLOT}"
+
+          if docker inspect buddystuddy-nginx >/dev/null 2>&1; then
+            docker start buddystuddy-nginx >/dev/null 2>&1 || true
+            docker network connect buddystuddy-net buddystuddy-nginx >/dev/null 2>&1 || true
+            docker exec buddystuddy-nginx nginx -t
+            docker exec buddystuddy-nginx nginx -s reload
+          else
+            docker run -d \
+              --name buddystuddy-nginx \
+              --network buddystuddy-net \
+              --restart unless-stopped \
+              -p 443:443 \
+              -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+              -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+              -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
+              nginx:1.27-alpine
+          fi
           if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then
             docker network connect redis-stream-coordinator-net buddystuddy-nginx >/dev/null 2>&1 || true
-            docker network connect redis-stream-coordinator-net buddystuddy-backend >/dev/null 2>&1 || true
           fi
 
           for attempt in $(seq 1 30); do
             if docker run --rm \
               --network buddystuddy-net \
               curlimages/curl:8.11.0 \
-              -fsS http://buddystuddy-backend:8080/health; then
+              -fsS "http://${NEW_SLOT}:8080/health"; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
               echo "Backend container health check failed after ${attempt} attempts." >&2
-              docker logs buddystuddy-backend || true
+              docker logs "${NEW_SLOT}" || true
               exit 1
             fi
             sleep 2
@@ -422,10 +479,22 @@ jobs:
             fi
             if [ "$attempt" -eq 30 ]; then
               echo "Backend health check failed after ${attempt} attempts." >&2
-              docker logs buddystuddy-backend || true
+              docker logs "${NEW_SLOT}" || true
               docker logs buddystuddy-nginx || true
+              if [ -n "${OLD_SLOT}" ]; then
+                echo "Rolling Nginx back to ${OLD_SLOT}." >&2
+                write_nginx_config "${OLD_SLOT}"
+                docker exec buddystuddy-nginx nginx -t || true
+                docker exec buddystuddy-nginx nginx -s reload || true
+              fi
               exit 1
             fi
             sleep 2
           done
+
+          printf '%s' "${NEW_SLOT}" > .active_backend_slot
+          if [ -n "${OLD_SLOT}" ] && [ "${OLD_SLOT}" != "${NEW_SLOT}" ]; then
+            docker stop --time 30 "${OLD_SLOT}" >/dev/null 2>&1 || true
+            docker rm "${OLD_SLOT}" >/dev/null 2>&1 || true
+          fi
           docker image prune -f
