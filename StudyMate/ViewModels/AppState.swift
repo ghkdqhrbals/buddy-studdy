@@ -799,21 +799,21 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let studyPage = try await remotePushBackendClient.fetchStudy(
+            let recordsPage = try await remotePushBackendClient.fetchRecords(
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
             )
-            applyBackendStudyPage(
-                studyPage,
+            applyBackendRecordsPage(
+                recordsPage,
                 updateVisibleQuestion: updateVisibleQuestion,
                 preserveLocalQuestionState: preserveLocalSettings
             )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(studyPage.records.count)")
+            log(.info, "백엔드 기록 데이터를 동기화했습니다. records=\(recordsPage.records.count)")
             return true
         } catch {
-            log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
+            log(.warning, "백엔드 기록 데이터 동기화 실패: \(error.localizedDescription)")
             return false
         }
     }
@@ -986,13 +986,13 @@ final class AppState: ObservableObject {
         return currentCount < communityTotalCount
     }
 
-    private func applyBackendStudyPage(
-        _ studyPage: BackendStudyPage,
+    private func applyBackendRecordsPage(
+        _ recordsPage: BackendRecordsPage,
         updateVisibleQuestion: Bool,
         preserveLocalQuestionState: Bool = true
     ) {
         guard !isEditingSettings else {
-            log(.info, "설정 편집 중이어서 백엔드 학습 페이지 적용을 건너뛰었습니다.")
+            log(.info, "설정 편집 중이어서 백엔드 기록 페이지 적용을 건너뛰었습니다.")
             return
         }
 
@@ -1000,7 +1000,7 @@ final class AppState: ObservableObject {
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
 
-        settingsStore.replaceStudyRecords(studyPage.records)
+        settingsStore.replaceStudyRecords(recordsPage.records)
         studyRecords = settingsStore.loadStudyRecords()
 
         guard updateVisibleQuestion else {

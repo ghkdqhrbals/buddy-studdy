@@ -21,8 +21,26 @@ data class StudyRecordResponse(
 
 data class RecordsPageResponse(val records: List<StudyRecordResponse>, val totalCount: Long, val limit: Int, val offset: Int)
 
+data class StudyRoomResponse(
+    val id: Long,
+    val topic: String,
+    val difficultyLevel: Int,
+    val intervalMinutes: Int,
+    val enabled: Boolean,
+    val notificationSound: String?,
+    val customPrompt: String,
+    val openaiModel: String,
+    val maxHistoryCount: Int,
+    val isQuestionPublic: Boolean,
+    val nextDueAt: Instant?,
+    val lastSentAt: Instant?,
+    val lastError: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
 data class StudyPageResponse(
-    val records: List<StudyRecordResponse>,
+    val studies: List<StudyRoomResponse>,
     val totalCount: Long,
     val limit: Int,
     val offset: Int,

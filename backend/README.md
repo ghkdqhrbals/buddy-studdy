@@ -111,9 +111,9 @@ See [API.md](API.md) for request/response examples.
 - `GET /api/v1/me/study`
 - `GET /api/v1/me/stats`
 - `POST /api/v1/me/questions`
-- `GET /api/v1/me/records`
-- `POST /api/v1/me/records/{record_id}/answer`
-- `DELETE /api/v1/me/records/{record_id}`
+- `GET /api/v1/records`
+- `POST /api/v1/records/{record_id}/answer`
+- `DELETE /api/v1/records/{record_id}`
 - `POST /api/v1/admin/scheduler/run-once`
 
 Protected endpoints require:

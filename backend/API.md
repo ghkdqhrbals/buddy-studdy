@@ -385,27 +385,27 @@ Validates the device's stored regular OpenAI API key through the backend and ret
 
 The iOS/macOS apps must not validate keys by calling OpenAI directly.
 
-### Study Records
+### My Studies
 
 ```http
 GET /api/v1/me/study?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Returns only the paginated study record cache plus server time. Settings, API status, and stats are intentionally split into dedicated endpoints.
+Returns the authenticated user's study rooms. It does not return record history.
 
 Use `/me/study`, `/me/settings`, `/me/api`, and `/me/stats` as separate focused endpoints.
 
 ### Records
 
 ```http
-GET /api/v1/me/records?limit=100&offset=0
-GET /api/v1/me/records/{recordId}
-PATCH /api/v1/me/records/{recordId}/answer
-POST /api/v1/me/records/{recordId}/answer
-POST /api/v1/me/records/{recordId}/skip
-DELETE /api/v1/me/records/{recordId}
-DELETE /api/v1/me/records
+GET /api/v1/records?limit=100&offset=0
+GET /api/v1/records/{recordId}
+PATCH /api/v1/records/{recordId}/answer
+POST /api/v1/records/{recordId}/answer
+POST /api/v1/records/{recordId}/skip
+DELETE /api/v1/records/{recordId}
+DELETE /api/v1/records
 ```
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.

@@ -160,6 +160,12 @@ protocol RemotePushBackendClientProtocol {
         offset: Int
     ) async throws -> BackendStudyPage
 
+    func fetchRecords(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendRecordsPage
+
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
 
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus
@@ -452,6 +458,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStudyPage.self, from: data)
+    }
+
+    func fetchRecords(
+        registration: RemotePushRegistration,
+        limit: Int = 100,
+        offset: Int = 0
+    ) async throws -> BackendRecordsPage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "records"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)")
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendRecordsPage.self, from: data)
     }
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
@@ -795,7 +824,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID, "answer")
+            url: endpoint("api", "v1", "records", recordID, "answer")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -811,7 +840,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID, "answer")
+            url: endpoint("api", "v1", "records", recordID, "answer")
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -826,7 +855,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID, "skip")
+            url: endpoint("api", "v1", "records", recordID, "skip")
         )
         request.httpMethod = "POST"
         let data = try await perform(request)
@@ -839,7 +868,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID)
+            url: endpoint("api", "v1", "records", recordID)
         )
         request.httpMethod = "DELETE"
         _ = try await perform(request)
@@ -852,7 +881,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID, "publicity")
+            url: endpoint("api", "v1", "records", recordID, "publicity")
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -864,7 +893,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func clearRecords(registration: RemotePushRegistration) async throws {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records")
+            url: endpoint("api", "v1", "records")
         )
         request.httpMethod = "DELETE"
         _ = try await perform(request)
@@ -876,7 +905,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "records", recordID)
+            url: endpoint("api", "v1", "records", recordID)
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -1209,11 +1238,54 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 }
 
 struct BackendStudyPage: Decodable, Equatable {
-    var records: [StudyRecord]
+    var studies: [BackendStudyRoom]
     var totalCount: Int
     var limit: Int
     var offset: Int
     var serverTime: Date
+}
+
+struct BackendStudyRoom: Decodable, Equatable, Identifiable {
+    var id: Int
+    var topic: String
+    var difficultyLevel: Int
+    var intervalMinutes: Int
+    var enabled: Bool
+    var notificationSound: String?
+    var customPrompt: String
+    var openAIModel: String
+    var maxHistoryCount: Int
+    var isQuestionPublic: Bool
+    var nextDueAt: Date?
+    var lastSentAt: Date?
+    var lastError: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case topic
+        case difficultyLevel
+        case intervalMinutes
+        case enabled
+        case notificationSound
+        case customPrompt
+        case openAIModel = "openaiModel"
+        case maxHistoryCount
+        case isQuestionPublic
+        case nextDueAt
+        case lastSentAt
+        case lastError
+        case createdAt
+        case updatedAt
+    }
+}
+
+struct BackendRecordsPage: Decodable, Equatable {
+    var records: [StudyRecord]
+    var totalCount: Int
+    var limit: Int
+    var offset: Int
 }
 
 struct BackendAPIStatus: Decodable, Equatable {

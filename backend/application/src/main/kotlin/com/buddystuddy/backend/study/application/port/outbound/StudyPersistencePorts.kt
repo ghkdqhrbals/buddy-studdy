@@ -24,6 +24,7 @@ interface StudyPort {
     fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
+    fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
     fun findDue(now: Instant, pageable: Pageable): List<StudyEntity>
 }
 
