@@ -73,6 +73,8 @@ struct EmailVerificationCodeResult: Equatable {
 
 @MainActor
 struct BackendBaseURLConfiguration: Equatable {
+    static let defaultDebugBaseURL = URL(string: "https://lowfidev.cloud")!
+
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
 
@@ -85,12 +87,11 @@ struct BackendBaseURLConfiguration: Equatable {
     }
 
     var effectiveBaseURL: URL {
-        guard isDebuggingEnabled,
-              let debugBackendURL else {
+        guard isDebuggingEnabled else {
             return RemotePushBackendClient.defaultBaseURL
         }
 
-        return debugBackendURL
+        return debugBackendURL ?? Self.defaultDebugBaseURL
     }
 
     var displayBaseURL: String {
