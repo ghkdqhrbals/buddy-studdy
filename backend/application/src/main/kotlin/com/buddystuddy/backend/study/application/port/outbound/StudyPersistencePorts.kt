@@ -3,6 +3,7 @@ package com.buddystuddy.backend.study.application.port.outbound
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.ScheduleEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
@@ -18,13 +19,21 @@ interface SchedulePort {
     fun findDue(now: Instant, pageable: Pageable): List<ScheduleEntity>
 }
 
+interface StudyPort {
+    fun save(entity: StudyEntity): StudyEntity
+    fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
+    fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
+    fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
+    fun findDue(now: Instant, pageable: Pageable): List<StudyEntity>
+}
+
 interface QuestionPort {
     fun save(entity: QuestionEntity): QuestionEntity
     fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
-    fun countPendingForStudy(deviceId: String, userId: Long?, topic: String): Long
+    fun countPendingForStudy(studyId: Long): Long
     fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredById(id: Long): QuestionEntity?

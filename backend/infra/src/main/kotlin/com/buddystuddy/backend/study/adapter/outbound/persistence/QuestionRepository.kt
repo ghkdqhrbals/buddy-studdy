@@ -22,8 +22,8 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
     @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and (:includePending = true or q.score is not null) order by q.createdAt desc")
     override fun findVisibleByUser(@Param("userId") userId: Long, @Param("includePending") includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
 
-    @Query("select count(q) from QuestionEntity q where q.deviceId = :deviceId and q.userId = :userId and lower(q.topic) = lower(:topic) and q.deletedAt is null and q.skippedAt is null and q.score is null")
-    override fun countPendingForStudy(@Param("deviceId") deviceId: String, @Param("userId") userId: Long?, @Param("topic") topic: String): Long
+    @Query("select count(q) from QuestionEntity q where q.studyId = :studyId and q.deletedAt is null and q.skippedAt is null and q.score is null")
+    override fun countPendingForStudy(@Param("studyId") studyId: Long): Long
 
     @Query(
         """

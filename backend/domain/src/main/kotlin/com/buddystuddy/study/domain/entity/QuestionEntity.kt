@@ -15,8 +15,9 @@ import java.time.Instant
     indexes = [
         Index(name = "idx_questions_user_created", columnList = "user_id,created_at"),
         Index(name = "idx_questions_device_created", columnList = "device_id,created_at"),
+        Index(name = "idx_questions_study_created", columnList = "study_id,created_at"),
         Index(name = "idx_questions_public", columnList = "is_public,deleted_at,created_at"),
-        Index(name = "idx_questions_pending_study", columnList = "device_id,user_id,topic,deleted_at,skipped_at,score,status"),
+        Index(name = "idx_questions_pending_study", columnList = "study_id,deleted_at,skipped_at,score,status"),
     ]
 )
 class QuestionEntity(
@@ -26,6 +27,8 @@ class QuestionEntity(
     var deviceId: String = "",
     @Column(name = "user_id")
     var userId: Long? = null,
+    @Column(name = "study_id")
+    var studyId: Long? = null,
     @Column(nullable = false, columnDefinition = "text")
     var question: String = "",
     @Column(columnDefinition = "text")

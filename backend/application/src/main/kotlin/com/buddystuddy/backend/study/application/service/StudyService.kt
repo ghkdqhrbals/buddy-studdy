@@ -6,7 +6,7 @@ import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
-import com.buddystuddy.study.domain.entity.ScheduleEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
@@ -26,7 +26,7 @@ import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
-import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
+import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -36,7 +36,7 @@ import java.time.Instant
 @Service
 class StudyService(
     private val properties: BuddyStuddyProperties,
-    private val schedules: SchedulePort,
+    private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
@@ -44,10 +44,10 @@ class StudyService(
 ) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
     override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
-        val schedule = context.scheduleFor(principal, topic)
+        val study = context.studyFor(principal, topic)
         val room = StudyRoom.of(
-            schedule.toStudyRoomSchedule(),
-            questions.countPendingForStudy(principal.deviceId, principal.userId, schedule.topic),
+            study.toStudyRoomSchedule(),
+            questions.countPendingForStudy(study.id),
         )
         try {
             room.assertCanCreateQuestion(properties.scheduler.maxPendingPerStudy)
@@ -55,8 +55,8 @@ class StudyService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
         val generated = openAI.generateQuestion(
-            context.apiKeyFor(principal, schedule),
-            context.openAIModelFor(schedule),
+            context.apiKeyFor(principal, study),
+            context.openAIModelFor(study),
             room.topic,
             room.difficultyLevel,
             room.appLanguage,
@@ -76,17 +76,17 @@ class StudyService(
         val record = q.toStudyRecord(questionStats.findById(q.id).orElse(null))
         q.apply(record.answer(answer))
         if (grade && q.score == null) {
-            val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, q.topic)
-                ?: schedules.findByUserIdAndTopic(principal.userId, q.topic)
-                ?: schedules.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
+            val study = q.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
+                ?: studies.findByUserIdAndTopic(principal.userId, q.topic)
+                ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             val graded = openAI.grade(
-                context.apiKeyFor(principal, schedule),
-                context.openAIModelFor(schedule),
+                context.apiKeyFor(principal, study),
+                context.openAIModelFor(study),
                 q.question,
                 answer,
                 q.topic,
                 q.difficultyLevel,
-                schedule?.appLanguage ?: "ko",
+                study?.appLanguage ?: "ko",
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
@@ -134,7 +134,8 @@ class StudyService(
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
-    private fun ScheduleEntity.toStudyRoomSchedule() = StudyRoomSchedule(
+    private fun StudyEntity.toStudyRoomSchedule() = StudyRoomSchedule(
+        id = id,
         deviceId = deviceId,
         userId = userId,
         topic = topic,
@@ -146,6 +147,7 @@ class StudyService(
     )
 
     private fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(
+        studyId = studyId,
         deviceId = deviceId,
         userId = userId,
         question = question,

@@ -9,7 +9,7 @@ import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.service.SettingsService
-import com.buddystuddy.backend.study.adapter.outbound.persistence.ScheduleRepository
+import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,7 +35,7 @@ class UserOpenAISettingsTest {
     @Autowired lateinit var settings: SettingsService
     @Autowired lateinit var admin: AdminService
     @Autowired lateinit var users: UserRepository
-    @Autowired lateinit var schedules: ScheduleRepository
+    @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var cipher: KeyCipher
 
     @Test
@@ -62,11 +62,10 @@ class UserOpenAISettingsTest {
         )
 
         val user = users.findAll().first { it.id == principal.userId }
-        val schedule = schedules.findByDeviceIdAndUserIdAndTopic(principal.deviceId, principal.userId, "SwiftUI")
+        val study = studies.findByUserIdAndTopic(principal.userId, "SwiftUI")
 
         assertThat(cipher.decrypt(user.openaiApiKeyCipher)).isEqualTo("sk-test-user-key")
-        assertThat(schedule?.openaiApiKeyCipher).isNull()
-        assertThat(schedule?.openaiModel).isEqualTo("gpt-5.4")
+        assertThat(study?.openaiModel).isEqualTo("gpt-5.4")
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiKeyConfigured).isTrue()
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
         assertThat(settings.settings(otherDevicePrincipal).openaiKeyConfigured).isTrue()

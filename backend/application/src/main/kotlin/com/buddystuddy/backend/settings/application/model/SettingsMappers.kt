@@ -1,9 +1,9 @@
 package com.buddystuddy.backend.settings.application.model
 
-import com.buddystuddy.study.domain.entity.ScheduleEntity
 import com.buddystuddy.account.domain.entity.UserEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 
-fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
+fun StudyEntity?.toSettings(user: UserEntity?) = this?.let {
     StudySettingsResponse(
         id = it.id,
         topic = it.topic,
@@ -16,7 +16,7 @@ fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
         openaiModel = it.openaiModel,
         maxHistoryCount = it.maxHistoryCount,
         isQuestionPublic = it.questionPublic,
-        openaiKeyConfigured = !(user?.openaiApiKeyCipher ?: it.openaiApiKeyCipher).isNullOrBlank(),
+        openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
         nextDueAt = it.nextDueAt,
         lastError = it.lastError,
     )
