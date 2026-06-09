@@ -4,13 +4,13 @@ import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
+import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-@Component
+@StreamConfiguration
 class QuestionStatsStreamListener(
     private val stats: QuestionStatsRepository,
 ) {

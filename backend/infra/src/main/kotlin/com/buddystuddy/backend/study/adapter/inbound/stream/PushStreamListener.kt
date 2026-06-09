@@ -11,11 +11,11 @@ import com.buddystuddy.backend.study.application.port.outbound.PushNotificationP
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
+import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
 
-@Component
+@StreamConfiguration
 class PushStreamListener(
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
