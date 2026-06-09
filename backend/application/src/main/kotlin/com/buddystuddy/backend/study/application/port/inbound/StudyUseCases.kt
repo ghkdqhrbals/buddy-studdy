@@ -4,6 +4,19 @@ import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
+import com.buddystuddy.backend.study.application.model.StudyRoomResponse
+
+data class CreateStudyCommand(
+    val topic: String,
+    val difficultyLevel: Int = 5,
+    val intervalMinutes: Int = 15,
+    val enabled: Boolean = true,
+    val notificationSound: String? = null,
+    val customPrompt: String = "",
+    val openaiModel: String = "gpt-5.4",
+    val maxHistoryCount: Int = 100,
+    val isQuestionPublic: Boolean = true,
+)
 
 interface StudyUseCase {
     fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse
@@ -21,4 +34,5 @@ interface BrowseRecordsUseCase {
 
 interface StudySyncUseCase {
     fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
+    fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
 }

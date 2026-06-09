@@ -244,6 +244,78 @@ class StudyApiIntegrationTest {
         assertThat(publicQuestions["questions"][0]["id"].asText()).isEqualTo(graded.id.toString())
     }
 
+    @Test
+    fun `post study creates and updates a study room`() {
+        val registration = postJson(
+            "/api/v1/devices/register",
+            """
+            {
+              "apnsToken": "test-token-create-study",
+              "platform": "ios",
+              "apnsEnvironment": "development",
+              "language": "ko",
+              "timezone": "Asia/Seoul"
+            }
+            """.trimIndent(),
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        val deviceId = registration["deviceId"].asText()
+        val clientSecret = registration["clientSecret"].asText()
+        val accessToken = registration["accessToken"].asText()
+
+        val created = postJson(
+            "/api/v1/study",
+            """
+            {
+              "topic": "Kotlin Architecture",
+              "difficultyLevel": 7,
+              "intervalMinutes": 30,
+              "customPrompt": "Ask practical backend architecture questions.",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 300,
+              "isQuestionPublic": true
+            }
+            """.trimIndent(),
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+
+        assertThat(created["topic"].asText()).isEqualTo("Kotlin Architecture")
+        assertThat(created["difficultyLevel"].asInt()).isEqualTo(7)
+        assertThat(created["intervalMinutes"].asInt()).isEqualTo(30)
+        assertThat(created["pendingQuestion"].isNull).isTrue()
+
+        val updated = postJson(
+            "/api/v1/study",
+            """
+            {
+              "topic": "Kotlin Architecture",
+              "difficultyLevel": 8,
+              "intervalMinutes": 45,
+              "customPrompt": "Focus on production scale-in and scale-out tradeoffs.",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 500,
+              "isQuestionPublic": false
+            }
+            """.trimIndent(),
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+
+        assertThat(updated["id"].asLong()).isEqualTo(created["id"].asLong())
+        assertThat(updated["difficultyLevel"].asInt()).isEqualTo(8)
+        assertThat(updated["intervalMinutes"].asInt()).isEqualTo(45)
+        assertThat(updated["customPrompt"].asText()).isEqualTo("Focus on production scale-in and scale-out tradeoffs.")
+        assertThat(updated["isQuestionPublic"].asBoolean()).isFalse()
+
+        val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(studyPage["studies"]).hasSize(1)
+        assertThat(studyPage["studies"][0]["id"].asLong()).isEqualTo(created["id"].asLong())
+    }
+
     private fun postJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("POST", path, body, bearerToken, deviceId, clientSecret)
 

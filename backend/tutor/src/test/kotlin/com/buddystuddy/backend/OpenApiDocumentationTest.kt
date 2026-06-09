@@ -41,6 +41,7 @@ class OpenApiDocumentationTest {
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
+            .contains("\"/api/v1/study\"")
             .contains("\"/api/v1/studies\"")
             .contains("\"/api/v1/records\"")
             .contains("\"/api/v1/stats\"")
@@ -49,6 +50,7 @@ class OpenApiDocumentationTest {
             .contains("\"accessToken\"")
             .contains("\"scheme\":\"bearer\"")
             .contains("Fetch my studies")
+            .contains("Create a study")
             .contains("Each study can include one pendingQuestion")
             .contains("Record history is intentionally split into /api/v1/records")
             .contains("Maximum number of studies to include")

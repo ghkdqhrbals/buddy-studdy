@@ -3,8 +3,10 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
+import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import jakarta.validation.Valid
 import kotlin.math.max
 import kotlin.math.min
 
@@ -52,6 +55,21 @@ class StudyController(
         @RequestParam(required = false) query: String?,
         authentication: Authentication,
     ) = study.study(limit, offset, query, authentication)
+
+    @Operation(
+        summary = "Create a study",
+        description = "Creates a study room for the authenticated user. If the same topic already exists for the user, the existing study is updated with the request values and returned.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study created or updated."),
+        ApiResponse(responseCode = "400", description = "Invalid study request."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
+    @PostMapping("/study")
+    fun createStudy(
+        @Valid @RequestBody body: CreateStudyRequest,
+        authentication: Authentication,
+    ) = study.createStudy(body, authentication)
 
     @Operation(
         summary = "List my graded records",
@@ -184,6 +202,7 @@ interface StudyWebPort {
     fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): Any
     fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
     fun createQuestion(body: CreateQuestionRequest, authentication: Authentication): Any
+    fun createStudy(body: CreateStudyRequest, authentication: Authentication): Any
 }
 
 @Component
@@ -224,6 +243,22 @@ class StudyWebAdapter(
 
     override fun createQuestion(body: CreateQuestionRequest, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), body.topic)
+
+    override fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
+        studySyncUseCase.createStudy(
+            authentication.principalOrThrow(),
+            CreateStudyCommand(
+                topic = body.topic,
+                difficultyLevel = body.difficultyLevel,
+                intervalMinutes = body.intervalMinutes,
+                enabled = body.enabled,
+                notificationSound = body.notificationSound,
+                customPrompt = body.customPrompt,
+                openaiModel = body.openaiModel,
+                maxHistoryCount = body.maxHistoryCount,
+                isQuestionPublic = body.isQuestionPublic,
+            )
+        )
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }
