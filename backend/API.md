@@ -95,7 +95,7 @@ The app must store the device credentials locally because the backend does not r
 ### Update Push Token
 
 ```http
-PUT /api/v1/me/push-token
+PUT /api/v1/push-token
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
@@ -200,9 +200,9 @@ Response:
 Profile endpoints:
 
 ```http
-GET /api/v1/me/profile
-PATCH /api/v1/me/profile
-DELETE /api/v1/me/profile
+GET /api/v1/profile
+PATCH /api/v1/profile
+DELETE /api/v1/profile
 GET /api/v1/public/users/{userId}/profile
 ```
 
@@ -226,7 +226,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/me/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
+`DELETE /api/v1/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
 
 ### Report Public Question
 
@@ -250,8 +250,8 @@ Reports are always stored in PostgreSQL. If `REPORT_EMAIL_TO` and SMTP settings 
 ### Upsert Study Settings And Schedule
 
 ```http
-PUT /api/v1/me/schedule
-PUT /api/v1/me/settings
+PUT /api/v1/schedule
+PUT /api/v1/settings
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
@@ -343,15 +343,15 @@ Response:
 ### Settings
 
 ```http
-GET /api/v1/me/settings
+GET /api/v1/settings
 Authorization: Bearer <accessToken>
 ```
 
 Returns the latest saved study settings. For editing one study room, prefer the study-scoped endpoint:
 
 ```http
-GET /api/v1/study/{studyId}/settings
-PUT /api/v1/study/{studyId}/settings
+GET /api/v1/studies/{studyId}/settings
+PUT /api/v1/studies/{studyId}/settings
 Authorization: Bearer <accessToken>
 ```
 
@@ -360,7 +360,7 @@ Authorization: Bearer <accessToken>
 ### API Status
 
 ```http
-GET /api/v1/me/api
+GET /api/v1/api
 Authorization: Bearer <accessToken>
 ```
 
@@ -369,7 +369,7 @@ Returns whether the device has an encrypted OpenAI API key configured, the selec
 ### Validate API Key
 
 ```http
-POST /api/v1/me/api/validate
+POST /api/v1/api/validate
 Authorization: Bearer <accessToken>
 ```
 
@@ -388,13 +388,11 @@ The iOS/macOS apps must not validate keys by calling OpenAI directly.
 ### My Studies
 
 ```http
-GET /api/v1/study?limit=500&offset=0
+GET /api/v1/studies?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
 Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
-
-Use `/study`, `/me/settings`, `/me/api`, and `/me/stats` as separate focused endpoints. `/me/study` remains available only as a compatibility alias.
 
 ### Records
 
@@ -414,8 +412,8 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 ### Statistics
 
 ```http
-GET /api/v1/me/stats?period=all&sort=level&limit=8&offset=0
-GET /api/v1/me/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
+GET /api/v1/stats?period=all&sort=level&limit=8&offset=0
+GET /api/v1/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
 Authorization: Bearer <accessToken>
 ```
 
@@ -432,7 +430,7 @@ The response is topic-first and includes total response/topic counts, topic alia
 ### Manual Question
 
 ```http
-POST /api/v1/me/questions
+POST /api/v1/questions
 Authorization: Bearer <accessToken>
 ```
 
@@ -441,7 +439,7 @@ Generates one question using the device settings and stored OpenAI API key, stor
 ### Delete Device
 
 ```http
-DELETE /api/v1/me/device
+DELETE /api/v1/device
 Authorization: Bearer <accessToken>
 ```
 

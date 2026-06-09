@@ -33,7 +33,7 @@ class SettingsController(
         ApiResponse(responseCode = "200", description = "Settings saved and returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @PutMapping("/me/schedule", "/me/settings")
+    @PutMapping("/schedule", "/settings")
     fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
         settings.schedule(body, authentication)
 
@@ -42,7 +42,7 @@ class SettingsController(
         ApiResponse(responseCode = "200", description = "Settings returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @GetMapping("/me/settings")
+    @GetMapping("/settings")
     fun settings(authentication: Authentication) = settings.settings(authentication)
 
     @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings state when editing one study.")
@@ -51,7 +51,7 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
         ApiResponse(responseCode = "404", description = "Study settings not found."),
     )
-    @GetMapping("/study/{studyId}/settings")
+    @GetMapping("/studies/{studyId}/settings")
     fun studySettings(
         @PathVariable studyId: Long,
         authentication: Authentication,
@@ -63,7 +63,7 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
         ApiResponse(responseCode = "404", description = "Study settings not found."),
     )
-    @PutMapping("/study/{studyId}/settings")
+    @PutMapping("/studies/{studyId}/settings")
     fun saveStudySettings(
         @PathVariable studyId: Long,
         @Valid @RequestBody body: ScheduleRequest,

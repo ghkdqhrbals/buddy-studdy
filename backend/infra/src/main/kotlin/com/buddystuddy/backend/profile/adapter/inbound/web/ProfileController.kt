@@ -27,11 +27,11 @@ class ProfileController(
         ApiResponse(responseCode = "200", description = "Profile returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @GetMapping("/me/profile")
+    @GetMapping("/profile")
     fun profile(authentication: Authentication) = profiles.profile(authentication)
 
     @Operation(summary = "Update my profile", description = "Updates editable profile fields such as display name, avatar choice/color, and public-question preference.")
-    @PatchMapping("/me/profile")
+    @PatchMapping("/profile")
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(body, authentication)
 }

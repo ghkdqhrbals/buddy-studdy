@@ -45,7 +45,7 @@ class SecurityIntegrationTest {
 
     @Test
     fun `protected endpoints return unified auth error without access token`() {
-        val response = get("/api/v1/me/profile")
+        val response = get("/api/v1/profile")
 
         assertThat(response.statusCode()).isEqualTo(401)
         assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
@@ -54,13 +54,13 @@ class SecurityIntegrationTest {
 
     @Test
     fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput) {
-        val response = get("/api/v1/me/profile", "not-a-token")
+        val response = get("/api/v1/profile", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
         assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
         assertThat(output.out)
             .contains("api_auth_failed")
-            .contains("path=/api/v1/me/profile")
+            .contains("path=/api/v1/profile")
             .contains("status=401")
             .contains("code=AUTH_INVALID_ACCESS_TOKEN")
     }
@@ -87,7 +87,7 @@ class SecurityIntegrationTest {
     fun `valid bearer token reaches protected endpoint with security principal`() {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
-        val response = get("/api/v1/me/profile", auth.accessToken)
+        val response = get("/api/v1/profile", auth.accessToken)
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body()).contains("\"displayName\":\"Buddy\"")

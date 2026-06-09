@@ -28,11 +28,11 @@ class AdminController(
         ApiResponse(responseCode = "200", description = "API status returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @GetMapping("/me/api")
+    @GetMapping("/api")
     fun api(authentication: Authentication) = admin.api(authentication)
 
     @Operation(summary = "Validate saved OpenAI API key", description = "Tests the authenticated user's saved OpenAI API key and returns the current validation result.")
-    @PostMapping("/me/api/validate")
+    @PostMapping("/api/validate")
     fun validateApi(authentication: Authentication) = admin.validateApi(authentication)
 }
 

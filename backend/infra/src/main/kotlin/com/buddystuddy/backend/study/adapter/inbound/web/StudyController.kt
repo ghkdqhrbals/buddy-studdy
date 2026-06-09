@@ -42,7 +42,7 @@ class StudyController(
         ApiResponse(responseCode = "200", description = "Study rooms returned."),
         ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
     )
-    @GetMapping("/study", "/me/study")
+    @GetMapping("/studies")
     fun study(
         @Parameter(description = "Maximum number of studies to include. Server clamps this to 1..1000.", example = "500")
         @RequestParam(defaultValue = "500") limit: Int,
@@ -59,7 +59,7 @@ class StudyController(
         ApiResponse(responseCode = "200", description = "Records returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @GetMapping("/records", "/me/records")
+    @GetMapping("/records")
     fun records(
         @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
         @RequestParam(defaultValue = "100") limit: Int,
@@ -74,7 +74,7 @@ class StudyController(
         ApiResponse(responseCode = "204", description = "Records cleared."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @DeleteMapping("/records", "/me/records")
+    @DeleteMapping("/records")
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = study.clearRecords(authentication)
 
     @Operation(summary = "Fetch one record", description = "Returns one study record owned by the authenticated user.")
@@ -83,7 +83,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
-    @GetMapping("/records/{id}", "/me/records/{id}")
+    @GetMapping("/records/{id}")
     fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -91,7 +91,7 @@ class StudyController(
     ) = study.record(id, authentication)
 
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
-    @PatchMapping("/records/{id}/answer", "/me/records/{id}/answer")
+    @PatchMapping("/records/{id}/answer")
     fun saveAnswer(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -106,7 +106,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
-    @PostMapping("/records/{id}/answer", "/me/records/{id}/answer")
+    @PostMapping("/records/{id}/answer")
     fun grade(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -116,7 +116,7 @@ class StudyController(
         study.grade(id, body, authentication)
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
-    @PostMapping("/records/{id}/skip", "/me/records/{id}/skip")
+    @PostMapping("/records/{id}/skip")
     fun skip(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -129,7 +129,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
-    @DeleteMapping("/records/{id}", "/me/records/{id}")
+    @DeleteMapping("/records/{id}")
     fun delete(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -137,7 +137,7 @@ class StudyController(
     ): ResponseEntity<Unit> = study.delete(id, authentication)
 
     @Operation(summary = "Update record visibility", description = "Sets whether a completed record can be included in public questions. The user's global public-question setting must also allow public sharing.")
-    @PatchMapping("/records/{id}/publicity", "/me/records/{id}/publicity")
+    @PatchMapping("/records/{id}/publicity")
     fun publicity(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -147,7 +147,7 @@ class StudyController(
         study.publicity(id, body, authentication)
 
     @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
-    @GetMapping("/me/stats")
+    @GetMapping("/stats")
     fun stats(
         @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
         @RequestParam(defaultValue = "8") limit: Int,
@@ -158,7 +158,7 @@ class StudyController(
         study.stats(limit, offset, authentication)
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
-    @PostMapping("/me/questions")
+    @PostMapping("/questions")
     fun createQuestion(
         @RequestBody body: CreateQuestionRequest,
         authentication: Authentication,

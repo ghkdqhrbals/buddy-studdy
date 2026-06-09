@@ -61,7 +61,7 @@ class StudyApiIntegrationTest {
         val accessToken = registration["accessToken"].asText()
 
         val schedule = putJson(
-            "/api/v1/me/schedule",
+            "/api/v1/schedule",
             """
             {
               "topic": "Redis",
@@ -136,7 +136,7 @@ class StudyApiIntegrationTest {
         )
         stats.save(QuestionStatsEntity(questionId = graded.id, likeCount = 2, commentCount = 1, viewCount = 5))
 
-        val studyPage = getJson("/api/v1/study?limit=100&offset=0", accessToken, deviceId, clientSecret)
+        val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studyPage["studies"]).hasSize(1)
@@ -159,23 +159,23 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(recordDetail["id"].asText()).isEqualTo(graded.id.toString())
 
-        val settings = getJson("/api/v1/me/settings", accessToken, deviceId, clientSecret)
+        val settings = getJson("/api/v1/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(settings["topic"].asText()).isEqualTo("Redis")
         assertThat(settings["appLanguage"].asText()).isEqualTo("ko")
 
-        val studySettings = getJson("/api/v1/study/${study.id}/settings", accessToken, deviceId, clientSecret)
+        val studySettings = getJson("/api/v1/studies/${study.id}/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studySettings["topic"].asText()).isEqualTo("Redis")
 
-        val apiStatus = getJson("/api/v1/me/api", accessToken, deviceId, clientSecret)
+        val apiStatus = getJson("/api/v1/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isFalse()
 
-        val statsPage = getJson("/api/v1/me/stats?limit=10&offset=0", accessToken, deviceId, clientSecret)
+        val statsPage = getJson("/api/v1/stats?limit=10&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(statsPage.toString()).contains("Redis")

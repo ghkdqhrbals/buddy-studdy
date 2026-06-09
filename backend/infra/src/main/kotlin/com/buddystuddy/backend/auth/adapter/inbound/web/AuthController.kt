@@ -86,7 +86,7 @@ class AuthController(
     ) = auth.email(body, authentication, deviceId, clientSecret)
 
     @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
-    @PutMapping("/me/push-token")
+    @PutMapping("/push-token")
     fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
         auth.pushToken(body, authentication)
 }

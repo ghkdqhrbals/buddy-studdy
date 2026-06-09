@@ -17,7 +17,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `response body is preserved after content caching logging`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/me/study")
+        val request = MockHttpServletRequest("GET", "/api/v1/studies")
         val response = MockHttpServletResponse()
         val chain = FilterChain { _, servletResponse ->
             servletResponse.contentType = "application/json"
@@ -32,7 +32,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `request body is still available to downstream handlers`() {
-        val request = MockHttpServletRequest("PUT", "/api/v1/me/schedule")
+        val request = MockHttpServletRequest("PUT", "/api/v1/schedule")
         request.contentType = "application/json"
         request.setContent(
             """
@@ -79,7 +79,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `json response body without charset is logged as utf8`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/study")
+        val request = MockHttpServletRequest("GET", "/api/v1/studies")
         val response = MockHttpServletResponse()
         val chain = FilterChain { _, servletResponse ->
             servletResponse.contentType = "application/json"

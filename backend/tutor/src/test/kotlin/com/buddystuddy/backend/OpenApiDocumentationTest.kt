@@ -38,10 +38,10 @@ class OpenApiDocumentationTest {
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
-            .contains("\"/api/v1/study\"")
+            .contains("\"/api/v1/studies\"")
             .contains("\"/api/v1/records\"")
-            .contains("\"/api/v1/me/stats\"")
-            .contains("\"/api/v1/study/{studyId}/settings\"")
+            .contains("\"/api/v1/stats\"")
+            .contains("\"/api/v1/studies/{studyId}/settings\"")
             .contains("Fetch my studies")
             .contains("Each study can include one pendingQuestion")
             .contains("Record history is intentionally split into /api/v1/records")

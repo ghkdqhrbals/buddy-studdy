@@ -356,7 +356,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "push-token")
+            url: endpoint("api", "v1", "push-token")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -428,7 +428,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "schedule")
+            url: endpoint("api", "v1", "schedule")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -443,7 +443,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "me", "study"),
+            url: endpoint("api", "v1", "studies"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -486,7 +486,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "settings")
+            url: endpoint("api", "v1", "settings")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -496,7 +496,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "api")
+            url: endpoint("api", "v1", "api")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -520,7 +520,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func validateAPIKey(registration: RemotePushRegistration) async throws -> BackendAPIValidation {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "api", "validate")
+            url: endpoint("api", "v1", "api", "validate")
         )
         request.httpMethod = "POST"
         let data = try await perform(request)
@@ -538,7 +538,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendStats {
         var components = URLComponents(
-            url: endpoint("api", "v1", "me", "stats"),
+            url: endpoint("api", "v1", "stats"),
             resolvingAgainstBaseURL: false
         )
         var queryItems = [
@@ -684,7 +684,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "profile")
+            url: endpoint("api", "v1", "profile")
         )
         request.httpMethod = "GET"
         let data = try await perform(request)
@@ -701,7 +701,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "profile")
+            url: endpoint("api", "v1", "profile")
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -721,7 +721,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "profile")
+            url: endpoint("api", "v1", "profile")
         )
         request.httpMethod = "DELETE"
         let data = try await perform(request)
@@ -808,7 +808,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "me", "questions")
+            url: endpoint("api", "v1", "questions")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
