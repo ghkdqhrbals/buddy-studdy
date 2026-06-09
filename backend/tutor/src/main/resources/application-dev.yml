@@ -2,12 +2,20 @@ spring:
   config:
     activate:
       on-profile: dev
+    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/dev}
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystuddy}
     username: ${DATABASE_USERNAME:buddystuddy}
     password: ${DATABASE_PASSWORD:local-password}
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+      secretsmanager:
+        enabled: true
+        region: ${AWS_REGION:ap-northeast-2}
 
 buddystuddy:
   scheduler:

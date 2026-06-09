@@ -41,7 +41,7 @@ jobs:
           BACKEND_MASTER_KEY: ${{ secrets.BACKEND_MASTER_KEY }}
           BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
           POSTGRES_SECRET_ID: buddystuddy/prod/postgres
-          APP_SECRET_ID: buddystuddy/backend
+          APP_SECRET_ID: buddystuddy/prod
           GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
           APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}

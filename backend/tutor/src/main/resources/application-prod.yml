@@ -2,7 +2,7 @@ spring:
   config:
     activate:
       on-profile: prod
-    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/backend}
+    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/prod}
   datasource:
     url: ${DATABASE_URL}
     username: ${DATABASE_USERNAME}
