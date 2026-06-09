@@ -1,7 +1,11 @@
 package com.buddystuddy.backend.study.adapter.inbound.stream
 
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.FcmQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
+import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamListener
@@ -27,11 +31,11 @@ class PushStreamListener(
     fun onPushRequested(message: ConsumedRedisStreamMessage) {
         try {
             val device = message.fields["deviceId"]?.let { devices.findByDeviceId(it) }
-            val fields = message.fields + mapOf(
-                "apnsToken" to (message.fields["apnsToken"] ?: device?.apnsToken ?: ""),
-                "apnsEnvironment" to (message.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production"),
+            val pushMessage = message.fields.toPushQuestionMessage(
+                apnsToken = message.fields["apnsToken"] ?: device?.apnsToken ?: "",
+                apnsEnvironment = message.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production",
             )
-            pushNotifications.sendQuestion(fields)
+            pushNotifications.sendQuestion(pushMessage)
             message.ack()
         } catch (error: Exception) {
             logger.warn(
@@ -43,4 +47,41 @@ class PushStreamListener(
             message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
         }
     }
+
+    private fun Map<String, String>.toPushQuestionMessage(
+        apnsToken: String,
+        apnsEnvironment: String,
+    ): PushQuestionMessage {
+        val provider = this["pushProvider"] ?: this["provider"] ?: PushMessageType.APNS.name
+        val common = QuestionPushMessageFields(
+            recordId = this["recordId"] ?: "",
+            question = this["question"] ?: "A new study question is ready.",
+            topic = this["topic"] ?: "",
+            sound = this["sound"]?.takeIf(String::isNotBlank),
+        )
+        return when (provider.uppercase()) {
+            PushMessageType.FCM.name -> FcmQuestionMessage(
+                recordId = common.recordId,
+                question = common.question,
+                topic = common.topic,
+                sound = common.sound,
+                token = this["fcmToken"] ?: this["pushToken"] ?: "",
+            )
+            else -> ApnsQuestionMessage(
+                recordId = common.recordId,
+                question = common.question,
+                topic = common.topic,
+                sound = common.sound,
+                token = apnsToken,
+                environment = apnsEnvironment,
+            )
+        }
+    }
+
+    private data class QuestionPushMessageFields(
+        val recordId: String,
+        val question: String,
+        val topic: String,
+        val sound: String?,
+    )
 }

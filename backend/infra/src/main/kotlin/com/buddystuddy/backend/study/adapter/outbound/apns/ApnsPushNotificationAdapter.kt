@@ -1,7 +1,10 @@
 package com.buddystuddy.backend.study.adapter.outbound.apns
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
+import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
+import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.PushQuestionSender
 import io.jsonwebtoken.Jwts
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
@@ -19,25 +22,26 @@ import java.util.Date
 @Component
 class ApnsPushNotificationAdapter(
     private val properties: BuddyStuddyProperties,
-) : PushNotificationPort {
+) : PushQuestionSender {
+    override val type: PushMessageType = PushMessageType.APNS
     private val logger = LoggerFactory.getLogger(javaClass)
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
-    override fun sendQuestion(fields: Map<String, String>) {
-        val token = fields["apnsToken"]?.takeIf { it.isNotBlank() }
+    override fun sendQuestion(message: PushQuestionMessage) {
+        require(message is ApnsQuestionMessage) { "APNs adapter cannot send ${message.type} messages." }
+        val token = message.token.takeIf { it.isNotBlank() }
         if (token == null) {
-            logger.warn("apns_push_skipped_missing_token recordId={}", fields["recordId"])
+            logger.warn("apns_push_skipped_missing_token recordId={}", message.recordId)
             return
         }
         val jwt = apnsJwt()
-        val environment = fields["apnsEnvironment"]?.lowercase()
+        val environment = message.environment.lowercase()
         val host = if (environment == "sandbox") "api.sandbox.push.apple.com" else "api.push.apple.com"
-        val question = fields["question"] ?: "A new study question is ready."
         val body = """
-            {"aps":{"alert":{"title":"BuddyStuddy","body":${jsonString(question)}},"sound":${jsonString(fields["sound"]?.takeIf { it.isNotBlank() } ?: "default")}},"recordId":${jsonString(fields["recordId"] ?: "")},"topic":${jsonString(fields["topic"] ?: "")}}
+            {"aps":{"alert":{"title":"BuddyStuddy","body":${jsonString(message.question)}},"sound":${jsonString(message.sound ?: "default")}},"recordId":${jsonString(message.recordId)},"topic":${jsonString(message.topic)}}
         """.trimIndent()
         val request = HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/$token"))
@@ -52,7 +56,7 @@ class ApnsPushNotificationAdapter(
         if (response.statusCode() !in 200..299) {
             throw IllegalStateException("APNs failed status=${response.statusCode()} body=${response.body()}")
         }
-        logger.info("apns_push_sent recordId={} topic={} status={}", fields["recordId"], fields["topic"], response.statusCode())
+        logger.info("apns_push_sent recordId={} topic={} status={}", message.recordId, message.topic, response.statusCode())
     }
 
     private fun apnsJwt(): String {
