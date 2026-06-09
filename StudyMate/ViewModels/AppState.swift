@@ -1504,6 +1504,10 @@ final class AppState: ObservableObject {
     }
 
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async {
+        guard isCommunitySignedIn else {
+            return
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
             communityErrorMessage = strings.communityRequestFailed
             return
@@ -1571,6 +1575,10 @@ final class AppState: ObservableObject {
     }
 
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
+        guard isCommunitySignedIn else {
+            return nil
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
             communityErrorMessage = strings.communityRequestFailed
             return nil

@@ -1771,6 +1771,7 @@ struct AppStrings {
     var comments: String { text("댓글", "Comments") }
     var noComments: String { text("아직 댓글이 없습니다.", "No comments yet.") }
     var writeComment: String { text("댓글 쓰기", "Write a comment") }
+    var signInToComment: String { text("로그인 후 댓글을 쓸 수 있습니다.", "Sign in to write a comment.") }
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { "Sign in with Google" }
     var signInWithEmail: String { "Sign in with Email" }

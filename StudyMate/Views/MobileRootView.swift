@@ -2168,6 +2168,10 @@ private struct CommunityQuestionDetailView: View {
         appState.strings
     }
 
+    private var canWriteCommunityReaction: Bool {
+        appState.isCommunitySignedIn
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -2252,7 +2256,9 @@ private struct CommunityQuestionDetailView: View {
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.plain)
+            .disabled(!canWriteCommunityReaction)
             .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
+            .opacity(canWriteCommunityReaction ? 1 : 0.45)
 
             Label("\(commentsTotalCount)", systemImage: "bubble.right")
                 .font(.subheadline.weight(.semibold))
@@ -2287,12 +2293,13 @@ private struct CommunityQuestionDetailView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(strings.writeComment, text: $commentDraft, axis: .vertical)
+                TextField(canWriteCommunityReaction ? strings.writeComment : strings.signInToComment, text: $commentDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...4)
                     .padding(.vertical, 9)
                     .padding(.horizontal, 12)
                     .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .disabled(!canWriteCommunityReaction)
 
                 Button {
                     sendComment()
@@ -2306,12 +2313,17 @@ private struct CommunityQuestionDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+                .disabled(!canWriteCommunityReaction || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+                .opacity(canWriteCommunityReaction ? 1 : 0.45)
             }
         }
     }
 
     private func toggleLike() {
+        guard canWriteCommunityReaction else {
+            return
+        }
+
         let next = !displayQuestion.isLikedByMe
         displayQuestion.isLikedByMe = next
         displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
@@ -2341,6 +2353,10 @@ private struct CommunityQuestionDetailView: View {
     }
 
     private func sendComment() {
+        guard canWriteCommunityReaction else {
+            return
+        }
+
         let body = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isSendingComment else {
             return
