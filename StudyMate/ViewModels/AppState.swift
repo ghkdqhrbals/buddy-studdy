@@ -804,13 +804,20 @@ final class AppState: ObservableObject {
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
             )
+            let studyPage = try await remotePushBackendClient.fetchStudy(
+                registration: registration,
+                limit: 100,
+                offset: 0
+            )
+            let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
             applyBackendRecordsPage(
                 recordsPage,
+                pendingRecords: pendingRecords,
                 updateVisibleQuestion: updateVisibleQuestion,
                 preserveLocalQuestionState: preserveLocalSettings
             )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 기록 데이터를 동기화했습니다. records=\(recordsPage.records.count)")
+            log(.info, "백엔드 기록 데이터를 동기화했습니다. records=\(recordsPage.records.count), pending=\(pendingRecords.count)")
             return true
         } catch {
             log(.warning, "백엔드 기록 데이터 동기화 실패: \(error.localizedDescription)")
@@ -988,6 +995,7 @@ final class AppState: ObservableObject {
 
     private func applyBackendRecordsPage(
         _ recordsPage: BackendRecordsPage,
+        pendingRecords: [StudyRecord] = [],
         updateVisibleQuestion: Bool,
         preserveLocalQuestionState: Bool = true
     ) {
@@ -1000,7 +1008,10 @@ final class AppState: ObservableObject {
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
 
-        settingsStore.replaceStudyRecords(recordsPage.records)
+        let mergedRecords = pendingRecords.reduce(recordsPage.records) { records, pendingRecord in
+            mergeBackendRecord(pendingRecord, into: records)
+        }
+        settingsStore.replaceStudyRecords(mergedRecords)
         studyRecords = settingsStore.loadStudyRecords()
 
         guard updateVisibleQuestion else {

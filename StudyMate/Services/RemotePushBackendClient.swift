@@ -1259,6 +1259,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var nextDueAt: Date?
     var lastSentAt: Date?
     var lastError: String?
+    var pendingQuestion: StudyRecord?
     var createdAt: Date
     var updatedAt: Date
 
@@ -1276,6 +1277,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case nextDueAt
         case lastSentAt
         case lastError
+        case pendingQuestion
         case createdAt
         case updatedAt
     }

@@ -10,12 +10,15 @@ import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepo
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
+import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.service.StudySyncService
 import com.buddystuddy.backend.study.application.service.StudyService
 import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.community.domain.entity.QuestionLikeEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -44,8 +47,10 @@ import java.time.Instant
 class CommunityStudyServiceTest {
     @Autowired lateinit var community: CommunityService
     @Autowired lateinit var study: StudyService
+    @Autowired lateinit var studySync: StudySyncService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var questions: QuestionRepository
+    @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var stats: QuestionStatsPort
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
@@ -197,6 +202,31 @@ class CommunityStudyServiceTest {
 
         assertThat(records.records.map { it.id }).containsExactly(graded.id.toString())
         assertThat(pendingRecords.records.map { it.id }).containsExactly(pending.id.toString())
+    }
+
+    @Test
+    fun `study page includes the current pending question for each study`() {
+        val room = studies.save(
+            StudyEntity(
+                deviceId = principal.deviceId,
+                userId = principal.userId,
+                topic = "Redis",
+                difficultyLevel = 2,
+                createdAt = now,
+                updatedAt = now,
+            )
+        )
+        val pending = pendingPublicQuestion(viewer, "Redis").also {
+            it.studyId = room.id
+            questions.save(it)
+        }
+
+        val page = studySync.study(principal, limit = 10, offset = 0)
+
+        assertThat(page.studies).hasSize(1)
+        assertThat(page.studies.single().topic).isEqualTo("Redis")
+        assertThat(page.studies.single().pendingQuestion?.id).isEqualTo(pending.id.toString())
+        assertThat(page.studies.single().pendingQuestion?.question?.question).isEqualTo("Pending question for Redis")
     }
 
     @Test
