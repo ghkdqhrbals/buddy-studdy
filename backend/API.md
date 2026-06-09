@@ -394,7 +394,7 @@ Authorization: Bearer <accessToken>
 
 Returns only the paginated study record cache plus server time. Settings, API status, and stats are intentionally split into dedicated endpoints.
 
-`GET /api/v1/me/snapshot` remains as a legacy compatibility endpoint, but new clients should use `/me/study`, `/me/settings`, `/me/api`, and `/me/stats`.
+Use `/me/study`, `/me/settings`, `/me/api`, and `/me/stats` as separate focused endpoints.
 
 ### Records
 

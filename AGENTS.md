@@ -39,7 +39,7 @@ Read these first:
 
 ## CloudKit And Push
 
-- CloudKit sync is snapshot based.
+- CloudKit sync is state based.
 - Mac currently creates `StudyMateQuestionPush` records.
 - iPhone currently receives CloudKit/APNs push via `StudyRemoteNotificationBridge`.
 - Push arrival should sync quietly. Only explicit notification taps/replies should navigate to the pushed question.

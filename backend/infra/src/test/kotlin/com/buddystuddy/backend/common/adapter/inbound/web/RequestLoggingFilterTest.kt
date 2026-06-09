@@ -17,7 +17,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `response body is preserved after content caching logging`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/me/snapshot")
+        val request = MockHttpServletRequest("GET", "/api/v1/me/study")
         val response = MockHttpServletResponse()
         val chain = FilterChain { _, servletResponse ->
             servletResponse.contentType = "application/json"

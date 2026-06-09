@@ -1110,7 +1110,7 @@ enum TopicGrouping {
     }
 }
 
-struct CloudSyncSnapshot: Codable, Equatable {
+struct CloudSyncState: Codable, Equatable {
     var schemaVersion: Int
     var updatedAt: Date
     var apiKey: String?

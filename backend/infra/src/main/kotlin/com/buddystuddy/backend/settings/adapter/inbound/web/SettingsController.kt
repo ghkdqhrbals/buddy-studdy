@@ -45,7 +45,7 @@ class SettingsController(
     @GetMapping("/me/settings")
     fun settings(authentication: Authentication) = settings.settings(authentication)
 
-    @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings snapshot when editing one study.")
+    @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings state when editing one study.")
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Study settings returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),

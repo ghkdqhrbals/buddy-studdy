@@ -154,11 +154,6 @@ protocol RemotePushBackendClientProtocol {
         enabled: Bool
     ) async throws
 
-    func fetchSnapshot(
-        registration: RemotePushRegistration,
-        limit: Int,
-        offset: Int
-    ) async throws -> BackendSnapshot
     func fetchStudy(
         registration: RemotePushRegistration,
         limit: Int,
@@ -434,29 +429,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpBody = try encoder.encode(requestBody)
 
         _ = try await perform(request)
-    }
-
-    func fetchSnapshot(
-        registration: RemotePushRegistration,
-        limit: Int = 500,
-        offset: Int = 0
-    ) async throws -> BackendSnapshot {
-        var components = URLComponents(
-            url: endpoint("api", "v1", "me", "snapshot"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [
-            URLQueryItem(name: "limit", value: "\(limit)"),
-            URLQueryItem(name: "offset", value: "\(offset)")
-        ]
-        guard let url = components?.url else {
-            throw RemotePushBackendError.invalidResponse
-        }
-
-        var request = authenticatedRequest(registration: registration, url: url)
-        request.httpMethod = "GET"
-        let data = try await perform(request)
-        return try decoder.decode(BackendSnapshot.self, from: data)
     }
 
     func fetchStudy(
@@ -1234,15 +1206,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var displayName: String
         var supportsTextVerbosity: Bool
     }
-}
-
-struct BackendSnapshot: Decodable, Equatable {
-    var settings: BackendStudySettings
-    var api: BackendAPIStatus?
-    var records: [StudyRecord]
-    var stats: BackendStats?
-    var totalCount: Int
-    var serverTime: Date
 }
 
 struct BackendStudyPage: Decodable, Equatable {

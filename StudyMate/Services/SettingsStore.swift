@@ -28,7 +28,7 @@ final class SettingsStore {
         static let profileAvatarColorSeed = "profileAvatarColorSeed"
         static let communityProfileDisplayName = "communityProfileDisplayName"
         static let communityProfileID = "communityProfileID"
-        static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
+        static let cloudSyncStateUpdatedAt = "cloudSyncStateUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
@@ -524,21 +524,21 @@ final class SettingsStore {
         }
     }
 
-    func loadCloudSyncSnapshotUpdatedAt() -> Date? {
-        guard let value = defaults.object(forKey: Keys.cloudSyncSnapshotUpdatedAt) as? TimeInterval else {
+    func loadCloudSyncStateUpdatedAt() -> Date? {
+        guard let value = defaults.object(forKey: Keys.cloudSyncStateUpdatedAt) as? TimeInterval else {
             return nil
         }
 
         return Date(timeIntervalSince1970: value)
     }
 
-    func saveCloudSyncSnapshotUpdatedAt(_ date: Date?) {
+    func saveCloudSyncStateUpdatedAt(_ date: Date?) {
         guard let date else {
-            defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
+            defaults.removeObject(forKey: Keys.cloudSyncStateUpdatedAt)
             return
         }
 
-        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncSnapshotUpdatedAt)
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncStateUpdatedAt)
     }
 
     func loadAppLogs() -> [AppLogEntry] {

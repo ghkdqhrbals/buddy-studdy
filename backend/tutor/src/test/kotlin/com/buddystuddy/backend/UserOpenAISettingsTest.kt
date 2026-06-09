@@ -9,7 +9,9 @@ import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.service.SettingsService
+import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
+import com.buddystuddy.study.domain.entity.QuestionEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -36,6 +38,7 @@ class UserOpenAISettingsTest {
     @Autowired lateinit var admin: AdminService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var studies: StudyRepository
+    @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var cipher: KeyCipher
 
     @Test
@@ -70,5 +73,42 @@ class UserOpenAISettingsTest {
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
         assertThat(settings.settings(otherDevicePrincipal).openaiKeyConfigured).isTrue()
         assertThat(settings.settings(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")
+    }
+
+    @Test
+    fun `study owns generated questions through study id`() {
+        val registered = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = login.authenticateDevice(registered.deviceId, registered.clientSecret)
+
+        settings.upsertSchedule(
+            principal,
+            ScheduleCommand(
+                topic = "Kotlin",
+                intervalMinutes = 10,
+                enabled = true,
+                openaiApiKey = "sk-test-user-key",
+                schedules = listOf(
+                    ScheduleItemCommand(topic = "Kotlin", openaiModel = "gpt-5.4"),
+                    ScheduleItemCommand(topic = "SwiftUI", openaiModel = "gpt-5.4"),
+                ),
+            ),
+        )
+
+        val kotlinStudy = studies.findByUserIdAndTopic(principal.userId, "Kotlin")!!
+        val swiftStudy = studies.findByUserIdAndTopic(principal.userId, "SwiftUI")!!
+
+        questions.save(
+            QuestionEntity(
+                deviceId = principal.deviceId,
+                userId = principal.userId,
+                studyId = kotlinStudy.id,
+                question = "What is a Kotlin data class?",
+                topic = kotlinStudy.topic,
+                difficultyLevel = kotlinStudy.difficultyLevel,
+            ),
+        )
+
+        assertThat(questions.countPendingForStudy(kotlinStudy.id)).isEqualTo(1)
+        assertThat(questions.countPendingForStudy(swiftStudy.id)).isZero()
     }
 }

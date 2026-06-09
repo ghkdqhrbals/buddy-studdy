@@ -1,7 +1,6 @@
 package com.buddystuddy.backend.study.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.study.application.model.BackendSyncResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
@@ -21,6 +20,5 @@ interface BrowseRecordsUseCase {
 }
 
 interface StudySyncUseCase {
-    fun sync(principal: Principal, limit: Int, offset: Int): BackendSyncResponse
     fun study(principal: Principal, limit: Int, offset: Int): StudyPageResponse
 }

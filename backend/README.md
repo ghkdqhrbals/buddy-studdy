@@ -109,7 +109,6 @@ See [API.md](API.md) for request/response examples.
 - `GET /api/v1/me/api`
 - `POST /api/v1/me/api/validate`
 - `GET /api/v1/me/study`
-- `GET /api/v1/me/snapshot` (legacy)
 - `GET /api/v1/me/stats`
 - `POST /api/v1/me/questions`
 - `GET /api/v1/me/records`
@@ -131,7 +130,7 @@ Spring Boot Actuator serves health checks at `/health` and `/api/v1/health`.
 - In deploy workflow, a logical backup is generated on each rollout as:
   `backups/buddystuddy-YYYYMMDDTHHMMSS.dump`.
 - Locally, `docker compose` also starts a dedicated backup service (`buddystuddy-db-backups`) that writes
-  daily snapshots to that same 14-day retention policy.
+  daily states to that same 14-day retention policy.
 
 Backup artifacts are written to the mounted backup volume:
 
