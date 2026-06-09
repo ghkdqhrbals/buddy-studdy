@@ -1148,14 +1148,45 @@ private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
+    @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
+    @State private var draftAvatarColorSeed = ""
     @State private var allowPublicQuestionsAccess = true
     @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
+    @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
 
     private var strings: AppStrings {
         appState.strings
+    }
+
+    private var trimmedProfileDisplayName: String {
+        profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasProfileChanges: Bool {
+        guard appState.isCommunitySignedIn else {
+            return false
+        }
+
+        let profile = appState.communityProfile
+        let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
+        let currentColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
+
+        return trimmedProfileDisplayName != currentDisplayName
+            || ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) != currentSymbolName
+            || draftAvatarColorSeed != currentColorSeed
+            || allowPublicQuestionsAccess != currentPublicQuestions
+    }
+
+    private var canSaveProfile: Bool {
+        appState.isCommunitySignedIn
+            && !appState.isUpdatingCommunityProfile
+            && !trimmedProfileDisplayName.isEmpty
+            && hasProfileChanges
     }
 
     var body: some View {
@@ -1165,35 +1196,40 @@ private struct MobileProfileSettingsSheet: View {
             Form {
                 if appState.isCommunitySignedIn {
                     Section {
-                        HStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: appState.profileAvatarSymbolName,
+                                symbolName: draftAvatarSymbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
-                                colorSeed: appState.profileAvatarColorSeed,
+                                colorSeed: draftAvatarColorSeed,
                                 usesNeutralColor: appState.communityProfile == nil,
-                                size: 54
+                                size: 72
                             )
+                            .frame(maxWidth: .infinity)
 
                             TextField(strings.profileDisplayName, text: $profileDisplayName)
-                                .font(.headline)
+                                .font(.title3.weight(.semibold))
                                 .textInputAutocapitalization(.words)
                                 .submitLabel(.done)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 8)
                     }
+                    .listRowBackground(Color.clear)
 
                     Section(strings.profileCharacter) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                             ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                 Button {
-                                    appState.updateCommunityProfileAvatar(symbolName: option)
+                                    draftAvatarSymbolName = option
                                 } label: {
                                     HomeProfileAvatar(
                                         symbolName: option,
                                         displayName: profileDisplayName,
                                         imageData: nil,
-                                        colorSeed: appState.profileAvatarColorSeed,
+                                        colorSeed: draftAvatarColorSeed,
                                         usesNeutralColor: false,
                                         size: 50
                                     )
@@ -1201,12 +1237,12 @@ private struct MobileProfileSettingsSheet: View {
                                     .padding(.vertical, 8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? 0.16 : 0.06))
+                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? 0.16 : 0.06))
                                     )
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             .stroke(
-                                                ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
+                                                ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
                                                 lineWidth: 1
                                             )
                                     }
@@ -1221,13 +1257,13 @@ private struct MobileProfileSettingsSheet: View {
                         HStack(spacing: 12) {
                             ForEach(ProfileAvatarColorOption.all) { option in
                                 Button {
-                                    appState.updateCommunityProfileAvatar(colorSeed: option.id)
+                                    draftAvatarColorSeed = option.id
                                 } label: {
                                     Circle()
                                         .fill(option.color)
                                         .frame(width: 28, height: 28)
                                         .overlay {
-                                            if appState.profileAvatarColorSeed == option.id {
+                                            if draftAvatarColorSeed == option.id {
                                                 Image(systemName: "checkmark")
                                                     .font(.caption.weight(.bold))
                                                     .foregroundStyle(.white)
@@ -1235,7 +1271,7 @@ private struct MobileProfileSettingsSheet: View {
                                         }
                                         .overlay {
                                             Circle()
-                                                .stroke(Color.primary.opacity(appState.profileAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
+                                                .stroke(Color.primary.opacity(draftAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
                                         }
                                 }
                                 .buttonStyle(.plain)
@@ -1253,7 +1289,7 @@ private struct MobileProfileSettingsSheet: View {
                                     )
                                     .frame(width: 28, height: 28)
                                     .overlay {
-                                        if ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil {
+                                        if ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil {
                                             Image(systemName: "slider.horizontal.3")
                                                 .font(.caption2.weight(.bold))
                                                 .foregroundStyle(.white)
@@ -1261,7 +1297,7 @@ private struct MobileProfileSettingsSheet: View {
                                     }
                                     .overlay {
                                         Circle()
-                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
+                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
                                     }
                             }
                             .buttonStyle(.plain)
@@ -1357,9 +1393,9 @@ private struct MobileProfileSettingsSheet: View {
 
                         Task {
                             await appState.updateCommunityProfile(
-                                displayName: profileDisplayName,
-                                avatarSymbolName: appState.profileAvatarSymbolName,
-                                avatarColorSeed: appState.profileAvatarColorSeed,
+                                displayName: trimmedProfileDisplayName,
+                                avatarSymbolName: draftAvatarSymbolName,
+                                avatarColorSeed: draftAvatarColorSeed,
                                 pageAccess: CommunityPageAccess(
                                     publicQuestions: allowPublicQuestionsAccess,
                                     statistics: true,
@@ -1377,27 +1413,32 @@ private struct MobileProfileSettingsSheet: View {
                             Text(profileConfirmationTitle(strings: strings))
                         }
                     }
-                    .disabled(appState.isUpdatingCommunityProfile)
+                    .disabled(appState.isCommunitySignedIn ? !canSaveProfile : appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
                 wasSignedInWhenOpened = appState.isCommunitySignedIn
-                profileDisplayName = appState.communityProfile?.displayName ?? ""
-                allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
+                resetDraftProfile()
                 Task {
+                    isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
-                    profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
-                    allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? allowPublicQuestionsAccess
+                    resetDraftProfile()
+                    isLoadingProfileDraft = false
                 }
             }
             .onChange(of: appState.communityProfile) { _, profile in
+                guard isLoadingProfileDraft || !hasProfileChanges else {
+                    return
+                }
+
                 guard let profile else {
-                    profileDisplayName = ""
-                    allowPublicQuestionsAccess = true
+                    resetDraftProfile()
                     return
                 }
 
                 profileDisplayName = profile.displayName
+                draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
+                draftAvatarColorSeed = profile.avatarColorSeed
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
             }
             .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
@@ -1435,13 +1476,20 @@ private struct MobileProfileSettingsSheet: View {
             }
             .sheet(isPresented: $isShowingCustomColorEditor) {
                 ProfileAvatarColorEditorSheet(
-                    initialColor: ProfileAvatarCustomColor.from(seed: appState.profileAvatarColorSeed)
+                    initialColor: ProfileAvatarCustomColor.from(seed: draftAvatarColorSeed)
                 ) { color in
-                    appState.updateCommunityProfileAvatar(colorSeed: color.seed)
+                    draftAvatarColorSeed = color.seed
                 }
                 .environmentObject(appState)
             }
         }
+    }
+
+    private func resetDraftProfile() {
+        profileDisplayName = appState.communityProfile?.displayName ?? ""
+        draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
+        draftAvatarColorSeed = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
     }
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
