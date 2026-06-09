@@ -922,6 +922,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
+                if statusCode == 401 {
+                    NotificationCenter.default.post(
+                        name: BackendAuthorizationNotification.didReceiveUnauthorized,
+                        object: self
+                    )
+                }
                 let entry = APITrafficLogEntry(
                     id: requestLog.id,
                     method: requestLog.method,

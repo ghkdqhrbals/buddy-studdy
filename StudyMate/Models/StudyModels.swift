@@ -1292,6 +1292,10 @@ enum APITrafficNotification {
     static let userInfoKey = "studyAPITrafficLogEntry"
 }
 
+enum BackendAuthorizationNotification {
+    static let didReceiveUnauthorized = Notification.Name("studyBackendDidReceiveUnauthorized")
+}
+
 enum LogLevel: String, Codable, CaseIterable {
     case info
     case warning

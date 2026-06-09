@@ -163,6 +163,7 @@ final class AppState: ObservableObject {
     private var backendStatsRequestID = UUID()
     private var communityQuestionLoadRequestID = UUID()
     private var apiTrafficLogCancellable: AnyCancellable?
+    private var backendUnauthorizedCancellable: AnyCancellable?
     private var lastAPIKeyUpdatedAt: Date?
     private var lastLocalSettingsMutationAt: Date?
 
@@ -576,6 +577,13 @@ final class AppState: ObservableObject {
         }
         .sink { [weak self] entry in
             self?.appendAPITrafficLog(entry)
+        }
+        self.backendUnauthorizedCancellable = NotificationCenter.default.publisher(
+            for: BackendAuthorizationNotification.didReceiveUnauthorized,
+            object: nil
+        )
+        .sink { [weak self] _ in
+            self?.clearStoredBackendAccessToken()
         }
 
         if shouldRecoverLegacyRunningState {
@@ -3934,6 +3942,18 @@ final class AppState: ObservableObject {
             log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func clearStoredBackendAccessToken() {
+        guard var registration = settingsStore.loadRemotePushRegistration(),
+              registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
+            return
+        }
+
+        registration.accessToken = nil
+        registration.accessTokenExpiresAt = nil
+        settingsStore.saveRemotePushRegistration(registration)
+        log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
     private func updateBackendSettings(
