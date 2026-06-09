@@ -35,18 +35,18 @@ class StudyController(
     private val study: StudyWebPort,
 ) {
     @Operation(
-        summary = "Fetch my study records",
-        description = "Returns only the authenticated user's paginated study record data. Settings and statistics are intentionally split into dedicated endpoints.",
+        summary = "Fetch my studies",
+        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion for the current unanswered study-room question. Record history is intentionally split into /api/v1/records.",
     )
     @ApiResponses(
-        ApiResponse(responseCode = "200", description = "Study records returned."),
+        ApiResponse(responseCode = "200", description = "Study rooms returned."),
         ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
     )
     @GetMapping("/me/study")
     fun study(
-        @Parameter(description = "Maximum number of records to include. Server clamps this to 1..1000.", example = "500")
+        @Parameter(description = "Maximum number of studies to include. Server clamps this to 1..1000.", example = "500")
         @RequestParam(defaultValue = "500") limit: Int,
-        @Parameter(description = "Zero-based record offset for pagination.", example = "0")
+        @Parameter(description = "Zero-based study offset for pagination.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication,
     ) = study.study(limit, offset, authentication)

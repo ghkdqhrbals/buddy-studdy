@@ -39,10 +39,12 @@ class OpenApiDocumentationTest {
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body())
             .contains("\"/api/v1/me/study\"")
+            .contains("\"/api/v1/records\"")
             .contains("\"/api/v1/me/stats\"")
             .contains("\"/api/v1/study/{studyId}/settings\"")
-            .contains("Fetch my study records")
-            .contains("Returns only the authenticated user's paginated study record data")
-            .contains("Maximum number of records to include")
+            .contains("Fetch my studies")
+            .contains("Each study can include one pendingQuestion")
+            .contains("Record history is intentionally split into /api/v1/records")
+            .contains("Maximum number of studies to include")
     }
 }
