@@ -809,6 +809,7 @@ final class AppState: ObservableObject {
                 limit: 100,
                 offset: 0
             )
+            applyBackendStudyPage(studyPage)
             let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
             applyBackendRecordsPage(
                 recordsPage,
@@ -823,6 +824,62 @@ final class AppState: ObservableObject {
             log(.warning, "백엔드 기록 데이터 동기화 실패: \(error.localizedDescription)")
             return false
         }
+    }
+
+    private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
+        guard !isEditingSettings, !studyPage.studies.isEmpty else {
+            return
+        }
+
+        let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
+            let key = Self.normalizedCategoryText(for: category.title)
+            if result[key] == nil {
+                result[key] = category
+            }
+        }
+        let selectedTopicKey = settings
+            .category(for: settings.selectedStudyCategoryID)
+            .map { Self.normalizedCategoryText(for: $0.title) }
+
+        let categories = studyPage.studies.map { room in
+            let topicKey = Self.normalizedCategoryText(for: room.topic)
+            let existing = existingCategoriesByTopic[topicKey]
+            return StudyCategory(
+                id: existing?.id ?? String(room.id),
+                title: room.topic,
+                difficulty: Difficulty(level: room.difficultyLevel),
+                customPrompt: room.customPrompt,
+                openAIModel: room.openAIModel,
+                createdAt: existing?.createdAt ?? room.createdAt
+            )
+        }
+
+        let selectedCategoryID = selectedTopicKey.flatMap { key in
+            categories.first { Self.normalizedCategoryText(for: $0.title) == key }?.id
+        } ?? categories.first(where: { $0.id == settings.selectedStudyCategoryID })?.id ?? categories.first?.id
+        let selectedCategory = categories.first { $0.id == selectedCategoryID } ?? categories.first
+
+        let nextSettings = normalizedSettings(
+            StudySettings(
+                topic: selectedCategory?.title ?? settings.topic,
+                difficulty: selectedCategory?.difficulty ?? settings.difficulty,
+                appLanguage: settings.appLanguage,
+                language: settings.appLanguage.studyLanguage,
+                openAIModel: selectedCategory?.openAIModel ?? settings.sanitizedOpenAIModel,
+                notificationSound: settings.notificationSound,
+                customPrompt: selectedCategory?.customPrompt ?? settings.customPrompt,
+                intervalMinutes: settings.sanitizedIntervalMinutes,
+                maxHistoryCount: settings.sanitizedMaxHistoryCount,
+                isQuestionPublic: settings.isQuestionPublic,
+                studyCategories: categories,
+                selectedStudyCategoryID: selectedCategoryID
+            )
+        )
+
+        settings = nextSettings
+        savedSettings = nextSettings
+        draftSettings = nextSettings
+        settingsStore.saveSettings(nextSettings)
     }
 
     func fetchBackendStats(

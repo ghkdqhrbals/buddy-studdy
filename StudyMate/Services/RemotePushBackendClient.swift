@@ -443,7 +443,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
-            url: endpoint("api", "v1", "study"),
+            url: endpoint("api", "v1", "me", "study"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
