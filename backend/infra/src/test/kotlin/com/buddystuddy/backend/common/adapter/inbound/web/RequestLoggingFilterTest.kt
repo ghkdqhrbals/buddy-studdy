@@ -77,6 +77,22 @@ class RequestLoggingFilterTest {
         assertThat(output.out).doesNotContain("api_response {\"requestId\"")
     }
 
+    @Test
+    fun `json response body without charset is logged as utf8`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/study")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.contentType = "application/json"
+            servletResponse.outputStream.write("""{"customPrompt":"짧고 명확하게"}""".toByteArray(Charsets.UTF_8))
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(response.contentAsByteArray.decodeToString()).contains("짧고 명확하게")
+        assertThat(output.out).contains("짧고 명확하게")
+        assertThat(output.out).doesNotContain("ì§§")
+    }
+
     private fun interface FilterChain : jakarta.servlet.FilterChain {
         fun doFilterInternal(request: ServletRequest, response: ServletResponse)
 

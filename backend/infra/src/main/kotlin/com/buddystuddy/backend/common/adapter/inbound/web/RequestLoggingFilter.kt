@@ -60,7 +60,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             "path" to request.requestURI,
             "query" to (request.queryString ?: ""),
             "headers" to headers(request),
-            "body" to body(request.contentAsByteArray, request.characterEncoding),
+            "body" to body(request.contentAsByteArray, request.characterEncoding, request.contentType),
         )
 
     private fun responseFields(
@@ -72,7 +72,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             "status" to response.status,
             "durationMs" to "%.2f".format(Locale.US, durationMs),
             "headers" to responseHeaders(response),
-            "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding) else "",
+            "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding, response.contentType) else "",
         )
 
     private fun apiResponseJson(
@@ -102,12 +102,33 @@ class RequestLoggingFilter : OncePerRequestFilter() {
     private fun isSensitiveHeader(name: String): Boolean =
         name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
-    private fun body(bytes: ByteArray, encoding: String?): String {
+    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): String {
         if (bytes.isEmpty()) return ""
-        val charset = encoding?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
+        val charset = charsetFor(encoding, contentType)
         return redact(String(bytes, charset)).let {
             if (it.length > MAX_BODY_CHARS) it.take(MAX_BODY_CHARS) + "...[truncated]" else it
         }
+    }
+
+    private fun charsetFor(encoding: String?, contentType: String?): Charset {
+        contentType
+            ?.split(";")
+            ?.asSequence()
+            ?.map { it.trim() }
+            ?.firstOrNull { it.startsWith("charset=", ignoreCase = true) }
+            ?.substringAfter("=")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { charsetName ->
+                runCatching { Charset.forName(charsetName) }.getOrNull()
+            }
+            ?.let { return it }
+
+        if (contentType?.contains("json", ignoreCase = true) == true) {
+            return StandardCharsets.UTF_8
+        }
+
+        return encoding?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
     }
 
     private fun redact(value: String): String =
