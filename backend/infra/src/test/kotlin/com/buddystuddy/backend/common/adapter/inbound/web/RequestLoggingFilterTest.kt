@@ -32,7 +32,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `request body is still available to downstream handlers`() {
-        val request = MockHttpServletRequest("PUT", "/api/v1/schedule")
+        val request = MockHttpServletRequest("PUT", "/api/v1/settings")
         request.contentType = "application/json"
         request.setContent(
             """

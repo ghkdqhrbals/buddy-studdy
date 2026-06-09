@@ -98,9 +98,9 @@ See [API.md](API.md) for request/response examples.
 - `GET /health`
 - `POST /api/v1/devices/register`
 - `PUT /api/v1/push-token`
-- `PUT /api/v1/schedule`
 - `GET /api/v1/settings`
 - `PUT /api/v1/settings`
+- `POST /api/v1/test/push`
 - `GET /api/v1/studies/{study_id}/settings`
 - `PUT /api/v1/studies/{study_id}/settings`
 - `GET /api/v1/profile`

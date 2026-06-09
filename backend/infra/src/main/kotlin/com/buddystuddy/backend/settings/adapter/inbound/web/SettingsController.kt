@@ -33,7 +33,7 @@ class SettingsController(
         ApiResponse(responseCode = "200", description = "Settings saved and returned."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @PutMapping("/schedule", "/settings")
+    @PutMapping("/settings")
     fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
         settings.schedule(body, authentication)
 

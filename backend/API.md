@@ -111,6 +111,39 @@ Request:
 
 Use this after iOS returns an APNs token for an already registered backend device. This preserves the same backend identity instead of creating a second device.
 
+### Send Test Push
+
+```http
+POST /api/v1/test/push
+Content-Type: application/json
+Authorization: Bearer <accessToken>
+```
+
+Request body is optional. When omitted, the backend sends a default BuddyStuddy test notification to the authenticated device's saved APNs token.
+
+```json
+{
+  "title": "BuddyStuddy",
+  "body": "Test push",
+  "topic": "Test",
+  "recordId": "test",
+  "sound": "default",
+  "deepLink": "buddystuddy://test-push"
+}
+```
+
+Response:
+
+```json
+{
+  "sent": true,
+  "provider": "APNS",
+  "deviceId": "generated-device-id",
+  "topic": "Test",
+  "recordId": "test"
+}
+```
+
 ### Login And Profile
 
 ```http
@@ -247,10 +280,9 @@ Request:
 
 Reports are always stored in PostgreSQL. If `REPORT_EMAIL_TO` and SMTP settings are configured, the backend also forwards the report by email.
 
-### Upsert Study Settings And Schedule
+### Upsert Study Settings
 
 ```http
-PUT /api/v1/schedule
 PUT /api/v1/settings
 Content-Type: application/json
 Authorization: Bearer <accessToken>
@@ -272,8 +304,6 @@ Request:
   "maxHistoryCount": 100
 }
 ```
-
-`/settings` is the clearer settings endpoint. `/schedule` remains as a backward-compatible alias.
 
 Fields:
 

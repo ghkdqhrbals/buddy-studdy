@@ -61,7 +61,7 @@ class StudyApiIntegrationTest {
         val accessToken = registration["accessToken"].asText()
 
         val schedule = putJson(
-            "/api/v1/schedule",
+            "/api/v1/settings",
             """
             {
               "topic": "Redis",
