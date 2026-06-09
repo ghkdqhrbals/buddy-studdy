@@ -3,6 +3,7 @@ package com.buddystuddy.backend.auth
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import io.jsonwebtoken.Claims
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import org.springframework.http.HttpStatus
@@ -36,9 +37,12 @@ class TokenProvider(private val properties: BuddyStuddyProperties) {
         return token to expiresAt
     }
 
+    fun validate(raw: String): Boolean =
+        runCatching { parseClaims(raw) }.isSuccess
+
     fun parse(raw: String): Principal {
         try {
-            val claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(raw).payload
+            val claims = parseClaims(raw)
             return Principal(
                 userId = (claims["user_id"] as Number).toLong(),
                 deviceId = claims["device_id"] as String,
@@ -49,6 +53,9 @@ class TokenProvider(private val properties: BuddyStuddyProperties) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }
     }
+
+    private fun parseClaims(raw: String): Claims =
+        Jwts.parser().verifyWith(key).build().parseSignedClaims(raw).payload
 }
 
 fun sha256(value: String): String =

@@ -102,7 +102,12 @@ class BearerTokenFilter(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }
 
-        val principal = tokenProvider.parse(authorization.removePrefix("Bearer ").trim())
+        val rawToken = authorization.removePrefix("Bearer ").trim()
+        if (!tokenProvider.validate(rawToken)) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
+        }
+
+        val principal = tokenProvider.parse(rawToken)
         val session = userDevices.findByIdAndUserId(principal.sessionId, principal.userId)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Access token principal is no longer valid.")
         if (session.deviceId != principal.deviceId) {
