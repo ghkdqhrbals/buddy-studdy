@@ -291,23 +291,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func canAccess(_ page: ProtectedAppPage) -> Bool {
-        guard isCommunitySignedIn else {
-            return false
-        }
-
-        guard let access = communityProfile?.pageAccess else {
-            return true
-        }
-
-        switch page {
-        case .records:
-            return access.records
-        case .statistics:
-            return access.statistics
-        case .studyDetail:
-            return access.studyDetail
-        }
+    private func canAccess(_: ProtectedAppPage) -> Bool {
+        isCommunitySignedIn
     }
 
     @discardableResult
