@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.common.adapter.inbound.web
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import jakarta.servlet.http.HttpServletRequest
@@ -14,7 +15,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException
 import java.util.UUID
 
 data class ApiErrorEnvelope(val error: ApiError)
-data class ApiError(val code: String, val message: String, val requestId: String, val status: Int)
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ApiError(val code: String, val message: String, val requestId: String, val status: Int, val reason: String? = null)
 
 @RestControllerAdvice
 class ErrorHandler {
@@ -48,10 +50,22 @@ class ErrorHandler {
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
         ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(envelope(ApiErrorCode.INTERNAL_SERVER_ERROR, "Internal backend error.", HttpStatus.INTERNAL_SERVER_ERROR, request))
+            .body(envelope(ApiErrorCode.INTERNAL_SERVER_ERROR, "Internal backend error.", HttpStatus.INTERNAL_SERVER_ERROR, request, error.toReason()))
 
-    private fun envelope(code: ApiErrorCode, message: String, status: HttpStatus, request: HttpServletRequest): ApiErrorEnvelope {
+    private fun envelope(
+        code: ApiErrorCode,
+        message: String,
+        status: HttpStatus,
+        request: HttpServletRequest,
+        reason: String? = null,
+    ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
-        return ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value()))
+        return ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), reason))
+    }
+
+    private fun Exception.toReason(): String {
+        val type = this::class.simpleName ?: javaClass.simpleName
+        val detail = message?.takeIf { it.isNotBlank() }
+        return if (detail == null) type else "$type: $detail"
     }
 }
