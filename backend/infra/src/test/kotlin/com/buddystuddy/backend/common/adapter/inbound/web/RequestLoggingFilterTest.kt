@@ -70,7 +70,7 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"request\":{")
         assertThat(output.out).contains("\"response\":{")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
-        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
         assertThat(output.out).contains("\\\"idToken\\\":\\\"[REDACTED]\\\"")
         assertThat(output.out).contains("\\\"accessToken\\\":\\\"[REDACTED]\\\"")
         assertThat(output.out).doesNotContain("api_request")

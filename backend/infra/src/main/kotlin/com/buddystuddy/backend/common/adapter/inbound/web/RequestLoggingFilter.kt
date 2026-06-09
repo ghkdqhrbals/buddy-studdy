@@ -115,9 +115,6 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             .replace(Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\"")) {
                 "${it.groupValues[1]}\"[REDACTED]\""
             }
-            .replace(Regex("(?i)(Bearer\\s+)[A-Za-z0-9._\\-]+")) {
-                "${it.groupValues[1]}[REDACTED]"
-            }
 
     private fun buildJson(vararg fields: Pair<String, Any?>): String =
         fields.joinToString(prefix = "{", postfix = "}") { (key, value) ->
@@ -149,6 +146,6 @@ class RequestLoggingFilter : OncePerRequestFilter() {
     companion object {
         private const val MAX_BODY_CHARS = 2_000
         private const val MAX_BODY_BYTES = 8_192
-        private val SENSITIVE_HEADERS = setOf("authorization", "x-client-secret")
+        private val SENSITIVE_HEADERS = setOf("x-client-secret")
     }
 }

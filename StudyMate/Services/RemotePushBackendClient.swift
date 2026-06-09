@@ -989,7 +989,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         }
 
         var safeHeaders = headers
-        for sensitiveKey in ["X-Client-Secret", "Authorization"] {
+        for sensitiveKey in ["X-Client-Secret"] {
             if safeHeaders[sensitiveKey] != nil {
                 safeHeaders[sensitiveKey] = "[REDACTED]"
             }
