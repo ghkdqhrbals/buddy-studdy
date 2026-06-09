@@ -952,6 +952,30 @@ enum PixelAvatarPattern {
             return scientist
         case "pixel-astronaut":
             return astronaut
+        case "pixel-dachshund":
+            return dachshund
+        case "pixel-pencil-pup":
+            return pencilPup
+        case "pixel-sleepy-pup":
+            return sleepyPup
+        case "pixel-book-pup":
+            return bookPup
+        case "pixel-cat":
+            return cat
+        case "pixel-bear":
+            return bear
+        case "pixel-rabbit":
+            return rabbit
+        case "pixel-penguin":
+            return penguin
+        case "pixel-fox":
+            return fox
+        case "pixel-chick":
+            return chick
+        case "pixel-tutor-bot":
+            return tutorBot
+        case "pixel-study-mage":
+            return studyMage
         default:
             return buddy
         }
@@ -1135,6 +1159,128 @@ enum PixelAvatarPattern {
             + points(.outline, (1, 2), (7, 2), (1, 3), (7, 3), (1, 4), (7, 4))
             + baseFace
             + points(.accent, (2, 8), (3, 8), (5, 8), (6, 8))
+    }
+
+    static var dachshund: [PixelAvatarCell] {
+        row(3, 2...6, .shade)
+            + row(4, 1...7, .accent)
+            + row(5, 1...7, .accent)
+            + points(.outline, (1, 3), (7, 3), (0, 4), (8, 4), (0, 5), (8, 5), (2, 6), (6, 6))
+            + points(.light, (3, 4), (4, 4), (5, 4), (3, 5), (4, 5), (5, 5))
+            + points(.eye, (2, 4), (6, 4), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var pencilPup: [PixelAvatarCell] {
+        row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4), (2, 6), (6, 6))
+            + baseFace
+            + points(.light, (6, 1), (7, 1), (5, 2), (6, 2), (4, 3), (5, 3))
+            + points(.outline, (8, 1), (7, 2), (6, 3))
+            + row(8, 2...6, .accent)
+    }
+
+    static var sleepyPup: [PixelAvatarCell] {
+        row(1, 3...5, .shade)
+            + row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4), (2, 6), (6, 6))
+            + row(3, 3...5, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.outline, (3, 4), (5, 4), (4, 6))
+            + row(8, 1...7, .light)
+    }
+
+    static var bookPup: [PixelAvatarCell] {
+        row(1, 3...5, .accent)
+            + row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4))
+            + baseFace
+            + points(.light, (1, 7), (2, 7), (3, 7), (5, 7), (6, 7), (7, 7), (1, 8), (2, 8), (3, 8), (5, 8), (6, 8), (7, 8))
+            + points(.outline, (4, 7), (4, 8))
+    }
+
+    static var cat: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1), (1, 2), (3, 2), (5, 2), (7, 2))
+            + row(3, 2...6, .accent)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 5))
+            + points(.outline, (2, 6), (6, 6), (3, 7), (5, 7))
+            + row(8, 2...6, .accent)
+    }
+
+    static var bear: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1))
+            + points(.accent, (2, 2), (6, 2))
+            + row(2, 3...5, .outline)
+            + row(3, 2...6, .accent)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 5))
+            + row(8, 2...6, .accent)
+    }
+
+    static var rabbit: [PixelAvatarCell] {
+        points(.light, (2, 0), (6, 0), (2, 1), (6, 1), (3, 2), (5, 2))
+            + row(3, 2...6, .light)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + points(.outline, (2, 7), (6, 7))
+            + row(8, 3...5, .accent)
+    }
+
+    static var penguin: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .outline)
+            + row(3, 2...6, .shade)
+            + row(4, 2...6, .light)
+            + row(5, 2...6, .light)
+            + points(.eye, (3, 3), (5, 3))
+            + points(.accent, (4, 4), (1, 6), (7, 6), (3, 8), (5, 8))
+            + row(6, 3...5, .light)
+    }
+
+    static var fox: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1), (1, 2), (3, 2), (5, 2), (7, 2))
+            + row(3, 2...6, .accent)
+            + points(.accent, (1, 4), (7, 4), (2, 5), (6, 5))
+            + row(4, 3...5, .skin)
+            + row(5, 3...5, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var chick: [PixelAvatarCell] {
+        points(.accent, (4, 0), (3, 1), (5, 1))
+            + row(2, 2...6, .light)
+            + row(3, 2...6, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 3...5, .skin)
+            + points(.eye, (3, 3), (5, 3))
+            + points(.accent, (4, 4), (2, 7), (6, 7), (3, 8), (5, 8))
+    }
+
+    static var tutorBot: [PixelAvatarCell] {
+        points(.accent, (4, 0))
+            + row(1, 3...5, .outline)
+            + row(2, 2...6, .shade)
+            + row(3, 2...6, .light)
+            + row(4, 2...6, .light)
+            + points(.eye, (3, 4), (5, 4))
+            + points(.accent, (1, 5), (7, 5), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var studyMage: [PixelAvatarCell] {
+        points(.accent, (4, 0), (3, 1), (4, 1), (5, 1), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2))
+            + points(.light, (5, 0), (6, 1), (2, 7), (6, 7))
+            + row(3, 2...6, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + row(8, 2...6, .accent)
     }
 }
 
@@ -1778,7 +1924,19 @@ enum ProfileAvatarOption {
         "pixel-dancer",
         "pixel-gamer",
         "pixel-scientist",
-        "pixel-astronaut"
+        "pixel-astronaut",
+        "pixel-dachshund",
+        "pixel-pencil-pup",
+        "pixel-sleepy-pup",
+        "pixel-book-pup",
+        "pixel-cat",
+        "pixel-bear",
+        "pixel-rabbit",
+        "pixel-penguin",
+        "pixel-fox",
+        "pixel-chick",
+        "pixel-tutor-bot",
+        "pixel-study-mage"
     ]
 
     static func glyphName(for symbolName: String) -> String {
