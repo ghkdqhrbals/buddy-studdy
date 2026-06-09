@@ -801,28 +801,18 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let remoteSettings = try await remotePushBackendClient.fetchSettings(registration: registration)
-            let apiStatus = try await remotePushBackendClient.fetchAPIStatus(registration: registration)
             let studyPage = try await remotePushBackendClient.fetchStudy(
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0
             )
-            let snapshot = BackendSnapshot(
-                settings: remoteSettings,
-                api: apiStatus,
-                records: studyPage.records,
-                stats: nil,
-                totalCount: studyPage.totalCount,
-                serverTime: studyPage.serverTime
-            )
-            applyBackendSnapshot(
-                snapshot,
+            applyBackendStudyPage(
+                studyPage,
                 updateVisibleQuestion: updateVisibleQuestion,
-                preserveLocalSettings: preserveLocalSettings
+                preserveLocalQuestionState: preserveLocalSettings
             )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(snapshot.records.count)")
+            log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(studyPage.records.count)")
             return true
         } catch {
             log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
@@ -1075,6 +1065,51 @@ final class AppState: ObservableObject {
             settingsStore.saveQuestion(localCurrentQuestion)
             settingsStore.saveLastAnswer(localLastAnswer)
             settingsStore.saveGradingResult(localGradingResult)
+            restartTimer()
+            return
+        }
+
+        let visibleRecord = localCurrentQuestion.flatMap { studyRecord(matching: $0) } ??
+            studyRecords
+                .filter { $0.gradingResult == nil }
+                .sorted { $0.question.createdAt > $1.question.createdAt }
+                .first
+
+        currentQuestion = visibleRecord?.question
+        lastAnswer = visibleRecord?.answer ?? ""
+        gradingResult = visibleRecord?.gradingResult
+        settingsStore.saveQuestion(currentQuestion)
+        settingsStore.saveLastAnswer(lastAnswer)
+        settingsStore.saveGradingResult(gradingResult)
+        restartTimer()
+    }
+
+    private func applyBackendStudyPage(
+        _ studyPage: BackendStudyPage,
+        updateVisibleQuestion: Bool,
+        preserveLocalQuestionState: Bool = true
+    ) {
+        guard !isEditingSettings else {
+            log(.info, "설정 편집 중이어서 백엔드 학습 페이지 적용을 건너뛰었습니다.")
+            return
+        }
+
+        let localCurrentQuestion = currentQuestion
+        let localLastAnswer = lastAnswer
+        let localGradingResult = gradingResult
+
+        settingsStore.replaceStudyRecords(studyPage.records)
+        studyRecords = settingsStore.loadStudyRecords()
+
+        guard updateVisibleQuestion else {
+            if preserveLocalQuestionState {
+                currentQuestion = localCurrentQuestion
+                lastAnswer = localLastAnswer
+                gradingResult = localGradingResult
+                settingsStore.saveQuestion(localCurrentQuestion)
+                settingsStore.saveLastAnswer(localLastAnswer)
+                settingsStore.saveGradingResult(localGradingResult)
+            }
             restartTimer()
             return
         }
