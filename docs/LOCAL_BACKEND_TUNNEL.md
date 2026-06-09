@@ -23,7 +23,13 @@ From the repository root:
 scripts/start-local-api-tunnel.sh
 ```
 
-Cloudflare prints a public HTTPS URL like:
+On this Mac, `~/.cloudflared/config.yaml` already defines a named tunnel:
+
+```text
+https://lowfidev.cloud -> http://localhost:8080
+```
+
+If no named tunnel config exists, Cloudflare prints a temporary HTTPS URL like:
 
 ```text
 https://example.trycloudflare.com
@@ -35,13 +41,42 @@ In BuddyStuddy on iPhone:
 
 1. Open Settings.
 2. Enable Debugging Mode.
-3. Paste the Cloudflare HTTPS URL into Debug API URL.
+3. Paste the Cloudflare HTTPS URL into Debug API URL. On this Mac, use `https://lowfidev.cloud`.
 4. Tap Save.
 
 After saving, every backend API request made by the app uses the debug URL until Debugging Mode is turned off.
 
+## Auto Start On Login
+
+The persistent local tunnel is registered as a user LaunchAgent:
+
+```text
+~/Library/LaunchAgents/com.buddystuddy.local-api-tunnel.plist
+```
+
+It runs:
+
+```text
+scripts/start-local-api-tunnel.sh
+```
+
+Logs are written to:
+
+```text
+~/Library/Logs/BuddyStuddy/local-api-tunnel.log
+~/Library/Logs/BuddyStuddy/local-api-tunnel.err
+```
+
+Useful commands:
+
+```sh
+launchctl print "gui/$(id -u)/com.buddystuddy.local-api-tunnel"
+launchctl kickstart -k "gui/$(id -u)/com.buddystuddy.local-api-tunnel"
+```
+
 ## Notes
 
 - Do not use `localhost` or `127.0.0.1` in the iPhone app. Those point to the iPhone, not the Mac.
-- Quick tunnel URLs change each time the tunnel starts. Update Debug API URL after restarting the tunnel.
+- Quick tunnel URLs change each time the tunnel starts. Named tunnel URLs such as `https://lowfidev.cloud` do not.
+- The tunnel can be healthy while the backend is down. In that case Cloudflare returns 502 until `localhost:8080` is running.
 - Keep production debugging off before App Store or TestFlight verification.
