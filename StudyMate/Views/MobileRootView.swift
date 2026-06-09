@@ -109,6 +109,7 @@ private struct MobileHomeView: View {
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var communitySearchDebounceTask: Task<Void, Never>?
+    @State private var homeStudySearchDebounceTask: Task<Void, Never>?
     @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
@@ -140,8 +141,13 @@ private struct MobileHomeView: View {
     }
 
     private var filteredStudyCategories: [StudyCategory] {
-        let categories = appState.studyCategoriesForDisplay
         let query = trimmedHomeStudySearchText
+        if !query.isEmpty,
+           let searchResults = appState.homeStudySearchResults {
+            return searchResults
+        }
+
+        let categories = appState.studyCategoriesForDisplay
         guard !query.isEmpty else {
             return categories
         }
@@ -263,8 +269,12 @@ private struct MobileHomeView: View {
         .onChange(of: appState.communitySearchText) {
             scheduleCommunitySearchReload()
         }
+        .onChange(of: homeStudySearchText) {
+            scheduleHomeStudySearchReload()
+        }
         .onDisappear {
             communitySearchDebounceTask?.cancel()
+            homeStudySearchDebounceTask?.cancel()
             searchFocusTask?.cancel()
             searchFocusTask = nil
             if activeTrimmedSearchText.isEmpty {
@@ -434,7 +444,9 @@ private struct MobileHomeView: View {
             )
         } else {
             Button {
-                appState.openStudyCategory(category.id)
+                Task {
+                    await appState.openStudyCategory(category.id)
+                }
             } label: {
                 MobileHomeCategoryRow(
                     category: category,
@@ -669,6 +681,9 @@ private struct MobileHomeView: View {
 
         if clearText {
             setActiveSearchText("")
+            if selectedHomeScope == .my {
+                appState.clearBackendStudySearchResults()
+            }
         }
 
         withAnimation(.smooth(duration: 0.22)) {
@@ -730,6 +745,25 @@ private struct MobileHomeView: View {
 
             hasLoadedCommunityQuestions = true
             await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+        }
+    }
+
+    @MainActor
+    private func scheduleHomeStudySearchReload() {
+        homeStudySearchDebounceTask?.cancel()
+        let query = trimmedHomeStudySearchText
+        guard !query.isEmpty else {
+            appState.clearBackendStudySearchResults()
+            return
+        }
+
+        homeStudySearchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await appState.searchBackendStudies(query: query)
         }
     }
 }
@@ -950,6 +984,30 @@ enum PixelAvatarPattern {
             return scientist
         case "pixel-astronaut":
             return astronaut
+        case "pixel-dachshund":
+            return dachshund
+        case "pixel-pencil-pup":
+            return pencilPup
+        case "pixel-sleepy-pup":
+            return sleepyPup
+        case "pixel-book-pup":
+            return bookPup
+        case "pixel-cat":
+            return cat
+        case "pixel-bear":
+            return bear
+        case "pixel-rabbit":
+            return rabbit
+        case "pixel-penguin":
+            return penguin
+        case "pixel-fox":
+            return fox
+        case "pixel-chick":
+            return chick
+        case "pixel-tutor-bot":
+            return tutorBot
+        case "pixel-study-mage":
+            return studyMage
         default:
             return buddy
         }
@@ -1134,6 +1192,128 @@ enum PixelAvatarPattern {
             + baseFace
             + points(.accent, (2, 8), (3, 8), (5, 8), (6, 8))
     }
+
+    static var dachshund: [PixelAvatarCell] {
+        row(3, 2...6, .shade)
+            + row(4, 1...7, .accent)
+            + row(5, 1...7, .accent)
+            + points(.outline, (1, 3), (7, 3), (0, 4), (8, 4), (0, 5), (8, 5), (2, 6), (6, 6))
+            + points(.light, (3, 4), (4, 4), (5, 4), (3, 5), (4, 5), (5, 5))
+            + points(.eye, (2, 4), (6, 4), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var pencilPup: [PixelAvatarCell] {
+        row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4), (2, 6), (6, 6))
+            + baseFace
+            + points(.light, (6, 1), (7, 1), (5, 2), (6, 2), (4, 3), (5, 3))
+            + points(.outline, (8, 1), (7, 2), (6, 3))
+            + row(8, 2...6, .accent)
+    }
+
+    static var sleepyPup: [PixelAvatarCell] {
+        row(1, 3...5, .shade)
+            + row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4), (2, 6), (6, 6))
+            + row(3, 3...5, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.outline, (3, 4), (5, 4), (4, 6))
+            + row(8, 1...7, .light)
+    }
+
+    static var bookPup: [PixelAvatarCell] {
+        row(1, 3...5, .accent)
+            + row(2, 2...6, .accent)
+            + points(.outline, (1, 3), (7, 3), (1, 4), (7, 4))
+            + baseFace
+            + points(.light, (1, 7), (2, 7), (3, 7), (5, 7), (6, 7), (7, 7), (1, 8), (2, 8), (3, 8), (5, 8), (6, 8), (7, 8))
+            + points(.outline, (4, 7), (4, 8))
+    }
+
+    static var cat: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1), (1, 2), (3, 2), (5, 2), (7, 2))
+            + row(3, 2...6, .accent)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 5))
+            + points(.outline, (2, 6), (6, 6), (3, 7), (5, 7))
+            + row(8, 2...6, .accent)
+    }
+
+    static var bear: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1))
+            + points(.accent, (2, 2), (6, 2))
+            + row(2, 3...5, .outline)
+            + row(3, 2...6, .accent)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 5))
+            + row(8, 2...6, .accent)
+    }
+
+    static var rabbit: [PixelAvatarCell] {
+        points(.light, (2, 0), (6, 0), (2, 1), (6, 1), (3, 2), (5, 2))
+            + row(3, 2...6, .light)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + points(.outline, (2, 7), (6, 7))
+            + row(8, 3...5, .accent)
+    }
+
+    static var penguin: [PixelAvatarCell] {
+        row(1, 3...5, .outline)
+            + row(2, 2...6, .outline)
+            + row(3, 2...6, .shade)
+            + row(4, 2...6, .light)
+            + row(5, 2...6, .light)
+            + points(.eye, (3, 3), (5, 3))
+            + points(.accent, (4, 4), (1, 6), (7, 6), (3, 8), (5, 8))
+            + row(6, 3...5, .light)
+    }
+
+    static var fox: [PixelAvatarCell] {
+        points(.outline, (2, 1), (6, 1), (1, 2), (3, 2), (5, 2), (7, 2))
+            + row(3, 2...6, .accent)
+            + points(.accent, (1, 4), (7, 4), (2, 5), (6, 5))
+            + row(4, 3...5, .skin)
+            + row(5, 3...5, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var chick: [PixelAvatarCell] {
+        points(.accent, (4, 0), (3, 1), (5, 1))
+            + row(2, 2...6, .light)
+            + row(3, 2...6, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 3...5, .skin)
+            + points(.eye, (3, 3), (5, 3))
+            + points(.accent, (4, 4), (2, 7), (6, 7), (3, 8), (5, 8))
+    }
+
+    static var tutorBot: [PixelAvatarCell] {
+        points(.accent, (4, 0))
+            + row(1, 3...5, .outline)
+            + row(2, 2...6, .shade)
+            + row(3, 2...6, .light)
+            + row(4, 2...6, .light)
+            + points(.eye, (3, 4), (5, 4))
+            + points(.accent, (1, 5), (7, 5), (4, 6))
+            + row(8, 2...6, .accent)
+    }
+
+    static var studyMage: [PixelAvatarCell] {
+        points(.accent, (4, 0), (3, 1), (4, 1), (5, 1), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2))
+            + points(.light, (5, 0), (6, 1), (2, 7), (6, 7))
+            + row(3, 2...6, .skin)
+            + row(4, 2...6, .skin)
+            + row(5, 2...6, .skin)
+            + points(.eye, (3, 4), (5, 4), (4, 6))
+            + row(8, 2...6, .accent)
+    }
 }
 
 extension Color {
@@ -1146,14 +1326,45 @@ private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
+    @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
+    @State private var draftAvatarColorSeed = ""
     @State private var allowPublicQuestionsAccess = true
     @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
+    @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
 
     private var strings: AppStrings {
         appState.strings
+    }
+
+    private var trimmedProfileDisplayName: String {
+        profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasProfileChanges: Bool {
+        guard appState.isCommunitySignedIn else {
+            return false
+        }
+
+        let profile = appState.communityProfile
+        let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
+        let currentColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
+
+        return trimmedProfileDisplayName != currentDisplayName
+            || ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) != currentSymbolName
+            || draftAvatarColorSeed != currentColorSeed
+            || allowPublicQuestionsAccess != currentPublicQuestions
+    }
+
+    private var canSaveProfile: Bool {
+        appState.isCommunitySignedIn
+            && !appState.isUpdatingCommunityProfile
+            && !trimmedProfileDisplayName.isEmpty
+            && hasProfileChanges
     }
 
     var body: some View {
@@ -1163,35 +1374,40 @@ private struct MobileProfileSettingsSheet: View {
             Form {
                 if appState.isCommunitySignedIn {
                     Section {
-                        HStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: appState.profileAvatarSymbolName,
+                                symbolName: draftAvatarSymbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
-                                colorSeed: appState.profileAvatarColorSeed,
+                                colorSeed: draftAvatarColorSeed,
                                 usesNeutralColor: appState.communityProfile == nil,
-                                size: 54
+                                size: 72
                             )
+                            .frame(maxWidth: .infinity)
 
                             TextField(strings.profileDisplayName, text: $profileDisplayName)
-                                .font(.headline)
+                                .font(.title3.weight(.semibold))
                                 .textInputAutocapitalization(.words)
                                 .submitLabel(.done)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 8)
                     }
+                    .listRowBackground(Color.clear)
 
                     Section(strings.profileCharacter) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
                             ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                 Button {
-                                    appState.updateCommunityProfileAvatar(symbolName: option)
+                                    draftAvatarSymbolName = option
                                 } label: {
                                     HomeProfileAvatar(
                                         symbolName: option,
                                         displayName: profileDisplayName,
                                         imageData: nil,
-                                        colorSeed: appState.profileAvatarColorSeed,
+                                        colorSeed: draftAvatarColorSeed,
                                         usesNeutralColor: false,
                                         size: 50
                                     )
@@ -1199,12 +1415,12 @@ private struct MobileProfileSettingsSheet: View {
                                     .padding(.vertical, 8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? 0.16 : 0.06))
+                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? 0.16 : 0.06))
                                     )
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             .stroke(
-                                                ProfileAvatarOption.canonicalName(for: appState.profileAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
+                                                ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
                                                 lineWidth: 1
                                             )
                                     }
@@ -1219,13 +1435,13 @@ private struct MobileProfileSettingsSheet: View {
                         HStack(spacing: 12) {
                             ForEach(ProfileAvatarColorOption.all) { option in
                                 Button {
-                                    appState.updateCommunityProfileAvatar(colorSeed: option.id)
+                                    draftAvatarColorSeed = option.id
                                 } label: {
                                     Circle()
                                         .fill(option.color)
                                         .frame(width: 28, height: 28)
                                         .overlay {
-                                            if appState.profileAvatarColorSeed == option.id {
+                                            if draftAvatarColorSeed == option.id {
                                                 Image(systemName: "checkmark")
                                                     .font(.caption.weight(.bold))
                                                     .foregroundStyle(.white)
@@ -1233,7 +1449,7 @@ private struct MobileProfileSettingsSheet: View {
                                         }
                                         .overlay {
                                             Circle()
-                                                .stroke(Color.primary.opacity(appState.profileAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
+                                                .stroke(Color.primary.opacity(draftAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
                                         }
                                 }
                                 .buttonStyle(.plain)
@@ -1251,7 +1467,7 @@ private struct MobileProfileSettingsSheet: View {
                                     )
                                     .frame(width: 28, height: 28)
                                     .overlay {
-                                        if ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil {
+                                        if ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil {
                                             Image(systemName: "slider.horizontal.3")
                                                 .font(.caption2.weight(.bold))
                                                 .foregroundStyle(.white)
@@ -1259,7 +1475,7 @@ private struct MobileProfileSettingsSheet: View {
                                     }
                                     .overlay {
                                         Circle()
-                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: appState.profileAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
+                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
                                     }
                             }
                             .buttonStyle(.plain)
@@ -1355,9 +1571,9 @@ private struct MobileProfileSettingsSheet: View {
 
                         Task {
                             await appState.updateCommunityProfile(
-                                displayName: profileDisplayName,
-                                avatarSymbolName: appState.profileAvatarSymbolName,
-                                avatarColorSeed: appState.profileAvatarColorSeed,
+                                displayName: trimmedProfileDisplayName,
+                                avatarSymbolName: draftAvatarSymbolName,
+                                avatarColorSeed: draftAvatarColorSeed,
                                 pageAccess: CommunityPageAccess(
                                     publicQuestions: allowPublicQuestionsAccess,
                                     statistics: true,
@@ -1375,27 +1591,32 @@ private struct MobileProfileSettingsSheet: View {
                             Text(profileConfirmationTitle(strings: strings))
                         }
                     }
-                    .disabled(appState.isUpdatingCommunityProfile)
+                    .disabled(appState.isCommunitySignedIn ? !canSaveProfile : appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
                 wasSignedInWhenOpened = appState.isCommunitySignedIn
-                profileDisplayName = appState.communityProfile?.displayName ?? ""
-                allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
+                resetDraftProfile()
                 Task {
+                    isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
-                    profileDisplayName = appState.communityProfile?.displayName ?? profileDisplayName
-                    allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? allowPublicQuestionsAccess
+                    resetDraftProfile()
+                    isLoadingProfileDraft = false
                 }
             }
             .onChange(of: appState.communityProfile) { _, profile in
+                guard isLoadingProfileDraft || !hasProfileChanges else {
+                    return
+                }
+
                 guard let profile else {
-                    profileDisplayName = ""
-                    allowPublicQuestionsAccess = true
+                    resetDraftProfile()
                     return
                 }
 
                 profileDisplayName = profile.displayName
+                draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
+                draftAvatarColorSeed = profile.avatarColorSeed
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
             }
             .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
@@ -1433,13 +1654,20 @@ private struct MobileProfileSettingsSheet: View {
             }
             .sheet(isPresented: $isShowingCustomColorEditor) {
                 ProfileAvatarColorEditorSheet(
-                    initialColor: ProfileAvatarCustomColor.from(seed: appState.profileAvatarColorSeed)
+                    initialColor: ProfileAvatarCustomColor.from(seed: draftAvatarColorSeed)
                 ) { color in
-                    appState.updateCommunityProfileAvatar(colorSeed: color.seed)
+                    draftAvatarColorSeed = color.seed
                 }
                 .environmentObject(appState)
             }
         }
+    }
+
+    private func resetDraftProfile() {
+        profileDisplayName = appState.communityProfile?.displayName ?? ""
+        draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
+        draftAvatarColorSeed = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
     }
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
@@ -1552,7 +1780,14 @@ private struct EmailSignInSheet: View {
     @State private var isSendingCode = false
     @State private var didSendCode = false
     @State private var requiresVerification = false
+    @FocusState private var focusedField: Field?
     var onSignedIn: () -> Void
+
+    private enum Field {
+        case email
+        case password
+        case verificationCode
+    }
 
     private var strings: AppStrings {
         appState.strings
@@ -1580,16 +1815,19 @@ private struct EmailSignInSheet: View {
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
                         .submitLabel(.next)
+                        .focused($focusedField, equals: .email)
 
                     SecureField(strings.password, text: $password)
                         .textContentType(.password)
                         .submitLabel(.done)
+                        .focused($focusedField, equals: .password)
 
                     if requiresVerification {
                         TextField(strings.emailVerificationCode, text: $verificationCode)
                             .textContentType(.oneTimeCode)
                             .keyboardType(.numberPad)
                             .submitLabel(.done)
+                            .focused($focusedField, equals: .verificationCode)
                     }
                 } footer: {
                     if requiresVerification {
@@ -1671,8 +1909,11 @@ private struct EmailSignInSheet: View {
                             case .signedIn:
                                 onSignedIn()
                             case .verificationRequired:
-                                requiresVerification = true
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    requiresVerification = true
+                                }
                                 didSendCode = false
+                                focusedField = .verificationCode
                             case .failed:
                                 break
                             }
@@ -1715,7 +1956,19 @@ enum ProfileAvatarOption {
         "pixel-dancer",
         "pixel-gamer",
         "pixel-scientist",
-        "pixel-astronaut"
+        "pixel-astronaut",
+        "pixel-dachshund",
+        "pixel-pencil-pup",
+        "pixel-sleepy-pup",
+        "pixel-book-pup",
+        "pixel-cat",
+        "pixel-bear",
+        "pixel-rabbit",
+        "pixel-penguin",
+        "pixel-fox",
+        "pixel-chick",
+        "pixel-tutor-bot",
+        "pixel-study-mage"
     ]
 
     static func glyphName(for symbolName: String) -> String {
@@ -2143,6 +2396,7 @@ private struct CommunityQuestionDetailView: View {
     @State private var isLoadingComments = false
     @State private var commentDraft = ""
     @State private var isSendingComment = false
+    @State private var deletingCommentIDs: Set<String> = []
 
     init(question: CommunityQuestion) {
         self.question = question
@@ -2151,6 +2405,10 @@ private struct CommunityQuestionDetailView: View {
 
     private var strings: AppStrings {
         appState.strings
+    }
+
+    private var canWriteCommunityReaction: Bool {
+        appState.isCommunitySignedIn
     }
 
     var body: some View {
@@ -2237,7 +2495,9 @@ private struct CommunityQuestionDetailView: View {
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.plain)
+            .disabled(!canWriteCommunityReaction)
             .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
+            .opacity(canWriteCommunityReaction ? 1 : 0.45)
 
             Label("\(commentsTotalCount)", systemImage: "bubble.right")
                 .font(.subheadline.weight(.semibold))
@@ -2267,17 +2527,25 @@ private struct CommunityQuestionDetailView: View {
                     .padding(.vertical, 6)
             } else {
                 ForEach(comments) { comment in
-                    CommunityCommentRow(comment: comment)
+                    CommunityCommentRow(
+                        comment: comment,
+                        canDelete: canDeleteComment(comment),
+                        isDeleting: deletingCommentIDs.contains(comment.id),
+                        deleteTitle: strings.clear
+                    ) {
+                        deleteComment(comment)
+                    }
                 }
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(strings.writeComment, text: $commentDraft, axis: .vertical)
+                TextField(canWriteCommunityReaction ? strings.writeComment : strings.signInToComment, text: $commentDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...4)
                     .padding(.vertical, 9)
                     .padding(.horizontal, 12)
                     .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .disabled(!canWriteCommunityReaction)
 
                 Button {
                     sendComment()
@@ -2291,18 +2559,38 @@ private struct CommunityQuestionDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+                .disabled(!canWriteCommunityReaction || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+                .opacity(canWriteCommunityReaction ? 1 : 0.45)
             }
         }
     }
 
+    private func canDeleteComment(_ comment: CommunityQuestionComment) -> Bool {
+        guard canWriteCommunityReaction,
+              let profile = appState.communityProfile else {
+            return false
+        }
+
+        return comment.author.id == profile.id
+    }
+
     private func toggleLike() {
+        guard canWriteCommunityReaction else {
+            return
+        }
+
         let next = !displayQuestion.isLikedByMe
+        let previous = displayQuestion
         displayQuestion.isLikedByMe = next
         displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
 
         Task {
-            await appState.setCommunityQuestionLike(question, isLiked: next)
+            if let state = await appState.setCommunityQuestionLike(displayQuestion, isLiked: next) {
+                displayQuestion.isLikedByMe = state.isLikedByMe
+                displayQuestion.likeCount = state.likeCount
+            } else {
+                displayQuestion = previous
+            }
         }
     }
 
@@ -2326,6 +2614,10 @@ private struct CommunityQuestionDetailView: View {
     }
 
     private func sendComment() {
+        guard canWriteCommunityReaction else {
+            return
+        }
+
         let body = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isSendingComment else {
             return
@@ -2349,10 +2641,36 @@ private struct CommunityQuestionDetailView: View {
             }
         }
     }
+
+    private func deleteComment(_ comment: CommunityQuestionComment) {
+        guard canDeleteComment(comment),
+              !deletingCommentIDs.contains(comment.id) else {
+            return
+        }
+
+        deletingCommentIDs.insert(comment.id)
+        Task {
+            let didDelete = await appState.deleteCommunityQuestionComment(questionID: displayQuestion.id, commentID: comment.id)
+            await MainActor.run {
+                deletingCommentIDs.remove(comment.id)
+                guard didDelete else {
+                    return
+                }
+
+                comments.removeAll { $0.id == comment.id }
+                commentsTotalCount = max(0, commentsTotalCount - 1)
+                displayQuestion.commentCount = commentsTotalCount
+            }
+        }
+    }
 }
 
 private struct CommunityCommentRow: View {
     var comment: CommunityQuestionComment
+    var canDelete: Bool
+    var isDeleting: Bool
+    var deleteTitle: String
+    var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -2373,6 +2691,29 @@ private struct CommunityCommentRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if canDelete {
+                Menu {
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label(deleteTitle, systemImage: "trash")
+                    }
+                    .disabled(isDeleting)
+                } label: {
+                    if isDeleting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
@@ -2755,6 +3096,42 @@ private struct MobileSettingsView: View {
                     ) {
                         ForEach(NotificationSoundOption.allCases) { sound in
                             Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
+                        }
+                    }
+                }
+
+                Section(strings.developerOptions) {
+                    Toggle(
+                        strings.debuggingMode,
+                        isOn: Binding(
+                            get: { appState.isDebuggingEnabled },
+                            set: { appState.setDebuggingEnabled($0) }
+                        )
+                    )
+
+                    if appState.isDebuggingEnabled {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                strings.debugBackendBaseURL,
+                                text: $appState.draftDebugBackendBaseURL,
+                                prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                            )
+                            #if os(iOS)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            #endif
+
+                            if !appState.isDraftDebugBackendBaseURLValid {
+                                Text(strings.debugBackendBaseURLInvalid)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+
+                            Text(strings.debugBackendBaseURLHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

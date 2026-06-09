@@ -4,6 +4,28 @@ import UserNotifications
 @testable import StudyMate
 
 final class StudyMateTests: XCTestCase {
+    func testStudySettingsDefaultsQuestionsToPublic() throws {
+        let settings = StudySettings(
+            topic: "Swift",
+            difficulty: .level5,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+
+        XCTAssertTrue(settings.isQuestionPublic)
+
+        let legacyPayload = """
+        {
+          "topic": "Swift",
+          "difficulty": 5,
+          "customPrompt": "짧게",
+          "intervalMinutes": 15
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(StudySettings.self, from: legacyPayload)
+        XCTAssertTrue(decoded.isQuestionPublic)
+    }
+
     func testFreshInstallRequiresOnboarding() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -111,6 +133,49 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(settings)
 
         XCTAssertEqual(store.loadSettings(), settings)
+    }
+
+    func testDebugBackendBaseURLRoundTripTrimsAndClearsValue() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+
+        store.saveDebugBackendBaseURL("  https://example.trycloudflare.com/  ")
+
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "https://example.trycloudflare.com/")
+
+        store.saveDebugBackendBaseURL("   ")
+
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "")
+    }
+
+    @MainActor
+    func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let appState = AppState(settingsStore: store)
+
+        appState.beginSettingsEditing()
+
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+
+        appState.draftDebugBackendBaseURL = " https://example.trycloudflare.com/ "
+
+        XCTAssertTrue(appState.hasUnsavedSettingsChanges)
+
+        await appState.saveSettingsAndValidateAPIKey()
+
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+        XCTAssertEqual(store.loadDebugBackendBaseURL(), "https://example.trycloudflare.com")
     }
 
     @MainActor
@@ -394,14 +459,14 @@ final class StudyMateTests: XCTestCase {
         let syncedAt = Date(timeIntervalSince1970: 123)
 
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(syncedAt)
+        store.saveCloudSyncStateUpdatedAt(syncedAt)
 
         XCTAssertTrue(store.loadIsCloudSyncEnabled())
-        XCTAssertEqual(store.loadCloudSyncSnapshotUpdatedAt(), syncedAt)
+        XCTAssertEqual(store.loadCloudSyncStateUpdatedAt(), syncedAt)
     }
 
     @MainActor
-    func testCloudSyncPullsNewerSnapshotIntoAppState() async {
+    func testCloudSyncPullsNewerStateIntoAppState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -412,7 +477,7 @@ final class StudyMateTests: XCTestCase {
         store.saveIsCloudSyncEnabled(true)
         let question = QuestionItem(question: "iPhone 동기화 질문", expectedAnswerHint: "힌트", createdAt: Date(timeIntervalSince1970: 10))
         let record = StudyRecord(question: question, topic: "iCloud", difficulty: .level4)
-        let snapshot = CloudSyncSnapshot(
+        let state = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             apiKey: "sk-remote",
             settings: StudySettings(topic: "iCloud", difficulty: .level4, customPrompt: "질문", intervalMinutes: 9),
@@ -424,7 +489,7 @@ final class StudyMateTests: XCTestCase {
             hasCompletedOnboarding: true,
             studyRecords: [record]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
+        let syncService = FakeCloudSyncService(remoteState: state)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -439,7 +504,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testCloudSyncPushesLocalSnapshotWhenRemoteIsEmpty() async {
+    func testCloudSyncPushesLocalStateWhenRemoteIsEmpty() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -450,14 +515,14 @@ final class StudyMateTests: XCTestCase {
         store.saveIsCloudSyncEnabled(true)
         store.saveAPIKey("sk-local")
         store.saveSettings(StudySettings(topic: "SwiftUI", difficulty: .level5, customPrompt: "질문", intervalMinutes: 12))
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
-        XCTAssertEqual(syncService.savedSnapshot?.settings.topic, "SwiftUI")
-        XCTAssertEqual(syncService.savedSnapshot?.settings.difficulty, .level5)
-        XCTAssertEqual(syncService.savedSnapshot?.apiKey, "sk-local")
+        XCTAssertEqual(syncService.savedState?.settings.topic, "SwiftUI")
+        XCTAssertEqual(syncService.savedState?.settings.difficulty, .level5)
+        XCTAssertEqual(syncService.savedState?.apiKey, "sk-local")
     }
 
     @MainActor
@@ -471,7 +536,7 @@ final class StudyMateTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
         store.saveIsCloudSyncEnabled(true)
         store.saveSettings(StudySettings(topic: "SwiftUI", difficulty: .level5, customPrompt: "질문", intervalMinutes: 12))
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil, saveError: CKError(.quotaExceeded))
+        let syncService = FakeCloudSyncService(remoteState: nil, saveError: CKError(.quotaExceeded))
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -503,7 +568,7 @@ final class StudyMateTests: XCTestCase {
         ])
 
         let remoteQuestion = QuestionItem(question: "맥 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 10))
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: StudySettings(topic: "Mac", difficulty: .level4, customPrompt: "원격", intervalMinutes: 9),
             currentQuestion: remoteQuestion,
@@ -516,7 +581,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: remoteQuestion, topic: "Mac", difficulty: .level4)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -526,13 +591,13 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(appState.hasCompletedOnboarding)
         XCTAssertEqual(appState.settings.topic, "Mac")
         XCTAssertEqual(appState.currentQuestion, remoteQuestion)
-        XCTAssertEqual(syncService.savedSnapshot?.settings.topic, "Mac")
-        XCTAssertEqual(syncService.savedSnapshot?.studyRecords.count, 2)
-        XCTAssertEqual(syncService.savedSnapshot?.apiKey, "sk-local")
+        XCTAssertEqual(syncService.savedState?.settings.topic, "Mac")
+        XCTAssertEqual(syncService.savedState?.studyRecords.count, 2)
+        XCTAssertEqual(syncService.savedState?.apiKey, "sk-local")
     }
 
     @MainActor
-    func testCloudSyncMergesLocalAPIKeyIntoNewerRemoteSnapshotWhenRemoteKeyIsMissing() async {
+    func testCloudSyncMergesLocalAPIKeyIntoNewerRemoteStateWhenRemoteKeyIsMissing() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -541,11 +606,11 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
         store.saveAPIKey("sk-local")
 
         let remoteQuestion = QuestionItem(question: "원격 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 100))
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             apiKey: nil,
             settings: StudySettings(topic: "Remote", difficulty: .level4, customPrompt: "원격", intervalMinutes: 9),
@@ -559,7 +624,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: remoteQuestion, topic: "Remote", difficulty: .level4)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -567,12 +632,12 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(appState.settings.topic, "Remote")
         XCTAssertEqual(appState.apiKey, "sk-local")
         XCTAssertEqual(store.loadAPIKey(), "sk-local")
-        XCTAssertEqual(syncService.savedSnapshot?.settings.topic, "Remote")
-        XCTAssertEqual(syncService.savedSnapshot?.apiKey, "sk-local")
+        XCTAssertEqual(syncService.savedState?.settings.topic, "Remote")
+        XCTAssertEqual(syncService.savedState?.apiKey, "sk-local")
     }
 
     @MainActor
-    func testCloudSyncPreservesRemoteAPIKeyWhenPushingNewerLocalSnapshot() async {
+    func testCloudSyncPreservesRemoteAPIKeyWhenPushingNewerLocalState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -581,11 +646,11 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 200))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 200))
         store.saveSettings(StudySettings(topic: "Local", difficulty: .level6, customPrompt: "로컬", intervalMinutes: 10))
 
         let remoteQuestion = QuestionItem(question: "원격 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 100))
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             apiKey: "sk-remote",
             settings: StudySettings(topic: "Remote", difficulty: .level4, customPrompt: "원격", intervalMinutes: 9),
@@ -599,19 +664,19 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: remoteQuestion, topic: "Remote", difficulty: .level4)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
-        XCTAssertEqual(syncService.savedSnapshot?.settings.topic, "Local")
-        XCTAssertEqual(syncService.savedSnapshot?.apiKey, "sk-remote")
+        XCTAssertEqual(syncService.savedState?.settings.topic, "Local")
+        XCTAssertEqual(syncService.savedState?.apiKey, "sk-remote")
         XCTAssertEqual(appState.apiKey, "sk-remote")
         XCTAssertEqual(store.loadAPIKey(), "sk-remote")
     }
 
     @MainActor
-    func testCloudSyncDoesNotRewriteSnapshotWhenContentAlreadyMatches() async {
+    func testCloudSyncDoesNotRewriteStateWhenContentAlreadyMatches() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -621,9 +686,9 @@ final class StudyMateTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
         store.saveIsCloudSyncEnabled(true)
         store.saveHasCompletedOnboarding(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 200))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 200))
 
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: .default,
             currentQuestion: nil,
@@ -634,18 +699,18 @@ final class StudyMateTests: XCTestCase {
             hasCompletedOnboarding: true,
             studyRecords: []
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
-        XCTAssertNil(syncService.savedSnapshot)
-        XCTAssertEqual(syncService.saveSnapshotCallCount, 0)
+        XCTAssertNil(syncService.savedState)
+        XCTAssertEqual(syncService.saveStateCallCount, 0)
         XCTAssertEqual(appState.cloudSyncMessage, appState.strings.syncAlreadyCurrent)
     }
 
     @MainActor
-    func testCloudSyncMergesRemoteRecordsWhenPushingNewerLocalSnapshot() async {
+    func testCloudSyncMergesRemoteRecordsWhenPushingNewerLocalState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -654,7 +719,7 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 200))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 200))
         let localSettings = StudySettings(topic: "Local", difficulty: .level6, customPrompt: "로컬", intervalMinutes: 10)
         store.saveSettings(localSettings)
         let localQuestion = QuestionItem(question: "로컬 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 200))
@@ -662,7 +727,7 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: localQuestion, settings: localSettings)
 
         let remoteQuestion = QuestionItem(question: "원격 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 150))
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: StudySettings(topic: "Remote", difficulty: .level4, customPrompt: "원격", intervalMinutes: 9),
             currentQuestion: remoteQuestion,
@@ -675,19 +740,19 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: remoteQuestion, topic: "Remote", difficulty: .level4)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
-        let savedQuestions = syncService.savedSnapshot?.studyRecords.map(\.question.question) ?? []
+        let savedQuestions = syncService.savedState?.studyRecords.map(\.question.question) ?? []
         XCTAssertTrue(savedQuestions.contains("로컬 질문"))
         XCTAssertTrue(savedQuestions.contains("원격 질문"))
-        XCTAssertEqual(syncService.savedSnapshot?.currentQuestion?.question, "로컬 질문")
+        XCTAssertEqual(syncService.savedState?.currentQuestion?.question, "로컬 질문")
     }
 
     @MainActor
-    func testCloudSyncDoesNotResurrectDeletedRecordWhenPushingNewerLocalSnapshot() async throws {
+    func testCloudSyncDoesNotResurrectDeletedRecordWhenPushingNewerLocalState() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -697,7 +762,7 @@ final class StudyMateTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
         let settings = StudySettings(topic: "Sync", difficulty: .level5, customPrompt: "질문", intervalMinutes: 10)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 200))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 200))
         store.saveSettings(settings)
 
         let deletedQuestion = QuestionItem(question: "삭제될 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 100))
@@ -706,7 +771,7 @@ final class StudyMateTests: XCTestCase {
         store.appendStudyRecord(question: keptQuestion, settings: settings)
         let remoteRecords = store.loadStudyRecords()
         let deletedRecord = try XCTUnwrap(remoteRecords.first { $0.question.question == "삭제될 질문" })
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 150),
             settings: settings,
             currentQuestion: keptQuestion,
@@ -717,21 +782,21 @@ final class StudyMateTests: XCTestCase {
             hasCompletedOnboarding: true,
             studyRecords: remoteRecords
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         appState.deleteStudyRecord(deletedRecord)
         await appState.syncCloudNow()
 
-        let savedQuestions = syncService.savedSnapshot?.studyRecords.map(\.question.question) ?? []
+        let savedQuestions = syncService.savedState?.studyRecords.map(\.question.question) ?? []
         XCTAssertFalse(savedQuestions.contains("삭제될 질문"))
         XCTAssertTrue(savedQuestions.contains("남을 질문"))
         XCTAssertFalse(appState.studyRecords.contains { $0.question.question == "삭제될 질문" })
-        XCTAssertEqual(syncService.savedSnapshot?.deletedStudyRecordMarkers.count, 1)
+        XCTAssertEqual(syncService.savedState?.deletedStudyRecordMarkers.count, 1)
     }
 
     @MainActor
-    func testCloudSyncLocalTombstoneFiltersNewerRemoteSnapshot() async throws {
+    func testCloudSyncLocalTombstoneFiltersNewerRemoteState() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -741,7 +806,7 @@ final class StudyMateTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
         let settings = StudySettings(topic: "Sync", difficulty: .level5, customPrompt: "질문", intervalMinutes: 10)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
         store.saveSettings(settings)
 
         let deletedQuestion = QuestionItem(question: "원격에서 살아나면 안 되는 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 100))
@@ -751,7 +816,7 @@ final class StudyMateTests: XCTestCase {
         store.replaceStudyRecords([deletedRecord, keptRecord])
         store.deleteStudyRecord(deletedRecord)
 
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: keptQuestion,
@@ -762,7 +827,7 @@ final class StudyMateTests: XCTestCase {
             hasCompletedOnboarding: true,
             studyRecords: [deletedRecord, keptRecord]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -770,8 +835,8 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(appState.studyRecords.contains { $0.question.question == "원격에서 살아나면 안 되는 질문" })
         XCTAssertTrue(appState.studyRecords.contains { $0.question.question == "유지할 질문" })
         XCTAssertEqual(store.loadDeletedStudyRecordMarkers().count, 1)
-        XCTAssertFalse(syncService.savedSnapshot?.studyRecords.contains { $0.question.question == "원격에서 살아나면 안 되는 질문" } ?? true)
-        XCTAssertEqual(syncService.savedSnapshot?.deletedStudyRecordMarkers.count, 1)
+        XCTAssertFalse(syncService.savedState?.studyRecords.contains { $0.question.question == "원격에서 살아나면 안 되는 질문" } ?? true)
+        XCTAssertEqual(syncService.savedState?.deletedStudyRecordMarkers.count, 1)
     }
 
     @MainActor
@@ -785,7 +850,7 @@ final class StudyMateTests: XCTestCase {
         let store = SettingsStore(defaults: defaults)
         let settings = StudySettings(topic: "Sync", difficulty: .level5, customPrompt: "질문", intervalMinutes: 10)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
         store.saveSettings(settings)
 
         let deletedQuestion = QuestionItem(question: "아이폰에서 삭제한 질문", expectedAnswerHint: nil, createdAt: Date(timeIntervalSince1970: 100))
@@ -794,7 +859,7 @@ final class StudyMateTests: XCTestCase {
         let keptRecord = StudyRecord(question: keptQuestion, topic: settings.topic, difficulty: settings.difficulty)
         store.replaceStudyRecords([deletedRecord, keptRecord])
 
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: keptQuestion,
@@ -808,7 +873,7 @@ final class StudyMateTests: XCTestCase {
         )
         let appState = AppState(
             settingsStore: store,
-            cloudSyncService: FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+            cloudSyncService: FakeCloudSyncService(remoteState: remoteState)
         )
 
         await appState.syncCloudNow()
@@ -1071,14 +1136,14 @@ final class StudyMateTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 200)
         )
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
         store.saveSettings(localSettings)
         store.saveQuestion(localQuestion)
         store.appendStudyRecord(question: localQuestion, settings: localSettings)
         store.updateStudyRecordAnswer(question: localQuestion, answer: "로컬 작성 중")
         store.saveLastAnswer("로컬 작성 중")
 
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: StudySettings(topic: "Remote", difficulty: .level6, customPrompt: "원격", intervalMinutes: 15),
             currentQuestion: remoteQuestion,
@@ -1091,7 +1156,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: remoteQuestion, topic: "Remote", difficulty: .level6)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -1120,7 +1185,7 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: nil,
             createdAt: Date(timeIntervalSince1970: 300)
         )
-        let snapshot = CloudSyncSnapshot(
+        let state = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 400),
             settings: settings,
             currentQuestion: pushedQuestion,
@@ -1134,8 +1199,8 @@ final class StudyMateTests: XCTestCase {
             ]
         )
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 100))
-        let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 100))
+        let syncService = FakeCloudSyncService(remoteState: state)
         syncService.questionPushesByRecordName["question-300000"] = CloudQuestionPush(
             question: pushedQuestion,
             topic: "CloudKit",
@@ -1171,8 +1236,8 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 100))
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 100))
+        let syncService = FakeCloudSyncService(remoteState: nil)
         syncService.questionPushesByRecordName["question-310000"] = CloudQuestionPush(
             question: pushedQuestion,
             topic: "CloudKit",
@@ -1218,7 +1283,7 @@ final class StudyMateTests: XCTestCase {
             topic: "Swift",
             difficulty: .level6
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         let appState = AppState(
             settingsStore: store,
             remotePushBackendClient: backend,
@@ -1248,7 +1313,7 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: "레코드 변경",
             createdAt: Date(timeIntervalSince1970: 300)
         )
-        let snapshot = CloudSyncSnapshot(
+        let state = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 400),
             settings: StudySettings(topic: "CloudKit", difficulty: .level5, customPrompt: "", intervalMinutes: 15),
             currentQuestion: question,
@@ -1261,7 +1326,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: question, topic: "CloudKit", difficulty: .level5)
             ]
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
+        let syncService = FakeCloudSyncService(remoteState: state)
         syncService.questionPushesByRecordName["question-300000"] = CloudQuestionPush(
             question: question,
             topic: "CloudKit",
@@ -1420,7 +1485,7 @@ final class StudyMateTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 200)
         )
         store.appendStudyRecord(question: existingQuestion, settings: settings)
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         let didHandle = await appState.handleCloudQuestionPush(
@@ -1459,7 +1524,7 @@ final class StudyMateTests: XCTestCase {
         }
         store.deleteStudyRecord(deletedRecord)
 
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         syncService.questionPushesByRecordName["question-300000"] = CloudQuestionPush(
             question: deletedQuestion,
             topic: "CloudKit",
@@ -1512,7 +1577,7 @@ final class StudyMateTests: XCTestCase {
         }
         store.deleteStudyRecord(deletedRecord)
 
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         syncService.questionPushesByRecordName["question-300000"] = CloudQuestionPush(
             question: deletedQuestion,
             topic: "CloudKit",
@@ -2576,7 +2641,7 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: nil,
             createdAt: Date(timeIntervalSince1970: 100)
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
+        let syncService = FakeCloudSyncService(remoteState: nil)
         syncService.questionPushesByRecordName["question-100000"] = CloudQuestionPush(
             question: pushedQuestion,
             topic: "CloudKit",
@@ -2618,7 +2683,7 @@ final class StudyMateTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: Double(index))
             )
         }
-        let snapshot = CloudSyncSnapshot(
+        let state = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: questions[3],
@@ -2631,7 +2696,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: $0, topic: "CloudKit", difficulty: .level5)
             }
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: snapshot)
+        let syncService = FakeCloudSyncService(remoteState: state)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
@@ -2658,7 +2723,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
 
         for index in 0..<2 {
             store.appendStudyRecord(
@@ -2678,7 +2743,7 @@ final class StudyMateTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: Double(100 + index))
             )
         }
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: remoteQuestions[2],
@@ -2695,7 +2760,7 @@ final class StudyMateTests: XCTestCase {
         let appState = AppState(
             settingsStore: store,
             remotePushBackendClient: backend,
-            cloudSyncService: FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+            cloudSyncService: FakeCloudSyncService(remoteState: remoteState)
         )
 
         await appState.generateQuestion()
@@ -2743,7 +2808,7 @@ final class StudyMateTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: Double(100 + index))
             )
         }
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: remoteQuestions[1],
@@ -2768,8 +2833,8 @@ final class StudyMateTests: XCTestCase {
             topic: "CloudKit",
             difficulty: .level5
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: nil)
-        syncService.fetchSnapshots = [nil, nil, remoteSnapshot]
+        let syncService = FakeCloudSyncService(remoteState: nil)
+        syncService.fetchStates = [nil, nil, remoteState]
         let appState = AppState(
             settingsStore: store,
             remotePushBackendClient: backend,
@@ -2801,7 +2866,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 50))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 50))
 
         for index in 0..<2 {
             store.appendStudyRecord(
@@ -2826,7 +2891,7 @@ final class StudyMateTests: XCTestCase {
             expectedAnswerHint: nil,
             createdAt: Date(timeIntervalSince1970: 300)
         )
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: remoteQuestions[2],
@@ -2839,7 +2904,7 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: $0, topic: "CloudKit", difficulty: .level5)
             }
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         syncService.questionPushesByRecordName["question-300000"] = CloudQuestionPush(
             question: pushedQuestion,
             topic: "CloudKit",
@@ -2858,7 +2923,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testCloudSyncPreservesLocalUngradedOverflowAfterPushingSnapshot() async {
+    func testCloudSyncPreservesLocalUngradedOverflowAfterPushingState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -2874,7 +2939,7 @@ final class StudyMateTests: XCTestCase {
         )
         store.saveSettings(settings)
         store.saveIsCloudSyncEnabled(true)
-        store.saveCloudSyncSnapshotUpdatedAt(Date(timeIntervalSince1970: 200))
+        store.saveCloudSyncStateUpdatedAt(Date(timeIntervalSince1970: 200))
 
         for index in 0..<5 {
             store.appendStudyRecord(
@@ -2887,7 +2952,7 @@ final class StudyMateTests: XCTestCase {
             )
         }
 
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: nil,
@@ -2898,18 +2963,18 @@ final class StudyMateTests: XCTestCase {
             hasCompletedOnboarding: true,
             studyRecords: []
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
         XCTAssertEqual(appState.pendingStudyRecords.count, 5)
         XCTAssertEqual(store.loadStudyRecords().filter { $0.gradingResult == nil }.count, 5)
-        XCTAssertEqual(syncService.savedSnapshot?.studyRecords.filter { $0.gradingResult == nil }.count, 5)
+        XCTAssertEqual(syncService.savedState?.studyRecords.filter { $0.gradingResult == nil }.count, 5)
     }
 
     @MainActor
-    func testFirstCloudSyncPreservesRemoteUngradedOverflowWithoutOverwritingRemoteSnapshot() async {
+    func testFirstCloudSyncPreservesRemoteUngradedOverflowWithoutOverwritingRemoteState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -2932,7 +2997,7 @@ final class StudyMateTests: XCTestCase {
                 createdAt: Date(timeIntervalSince1970: Double(index))
             )
         }
-        let remoteSnapshot = CloudSyncSnapshot(
+        let remoteState = CloudSyncState(
             updatedAt: Date(timeIntervalSince1970: 100),
             settings: settings,
             currentQuestion: remoteQuestions[4],
@@ -2945,13 +3010,13 @@ final class StudyMateTests: XCTestCase {
                 StudyRecord(question: $0, topic: "Redis", difficulty: .level5)
             }
         )
-        let syncService = FakeCloudSyncService(remoteSnapshot: remoteSnapshot)
+        let syncService = FakeCloudSyncService(remoteState: remoteState)
         let appState = AppState(settingsStore: store, cloudSyncService: syncService)
 
         await appState.syncCloudNow()
 
         XCTAssertEqual(appState.pendingStudyRecords.count, 5)
-        XCTAssertNil(syncService.savedSnapshot)
+        XCTAssertNil(syncService.savedState)
     }
 
     func testQuestionPromptIncludesRecentQuestionsToAvoid() {
@@ -3161,31 +3226,10 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
     }
 
-    func testBackendSnapshotDecoderAcceptsOpenAIModelAndFractionalSecondDates() throws {
+    func testBackendStudyPageDecoderAcceptsFractionalSecondDates() throws {
         let payload = try XCTUnwrap(
             """
             {
-              "settings": {
-                "topic": "Swift",
-                "difficultyLevel": 2,
-                "intervalMinutes": 1,
-                "enabled": true,
-                "notificationSound": "default",
-                "customPrompt": "짧게",
-                "appLanguage": "ko",
-                "openaiModel": "gpt-5.4",
-                "maxHistoryCount": 100,
-                "openaiKeyConfigured": true,
-                "nextDueAt": "2026-06-01T19:29:23.180849+00:00",
-                "lastError": null
-              },
-              "api": {
-                "openaiKeyConfigured": true,
-                "openaiModel": "gpt-5.4",
-                "usageUrl": "https://platform.openai.com/usage",
-                "billingUrl": "https://platform.openai.com/settings/organization/billing/overview",
-                "creditsUrl": "https://platform.openai.com/settings/organization/billing/credit-grants"
-              },
               "records": [
                 {
                   "id": "1",
@@ -3202,26 +3246,21 @@ final class StudyMateTests: XCTestCase {
                   "status": "ungraded"
                 }
               ],
-              "stats": {
-                "totalResponses": 0,
-                "totalTopics": 0,
-                "topics": [],
-                "limit": 8,
-                "offset": 0,
-                "generatedAt": "2026-06-01T19:29:23.180849+00:00"
-              },
               "totalCount": 1,
+              "limit": 100,
+              "offset": 0,
               "serverTime": "2026-06-01T19:29:23.180849+00:00"
             }
             """.data(using: .utf8)
         )
 
-        let snapshot = try RemotePushBackendClient.makeDecoder().decode(BackendSnapshot.self, from: payload)
+        let state = try RemotePushBackendClient.makeDecoder().decode(BackendStudyPage.self, from: payload)
 
-        XCTAssertEqual(snapshot.settings.openAIModel, "gpt-5.4")
-        XCTAssertEqual(snapshot.records.count, 1)
-        XCTAssertEqual(snapshot.records.first?.id, "1")
-        XCTAssertEqual(snapshot.totalCount, 1)
+        XCTAssertEqual(state.records.count, 1)
+        XCTAssertEqual(state.records.first?.id, "1")
+        XCTAssertEqual(state.totalCount, 1)
+        XCTAssertEqual(state.limit, 100)
+        XCTAssertEqual(state.offset, 0)
     }
 
     func testQuestionResponseIDRoundTripUsesUserDefaults() {
@@ -3471,14 +3510,6 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         scheduledAPIKeys.append(apiKey)
         scheduledModels.append(settings.sanitizedOpenAIModel)
         callEvents.append("updateSchedule:\(settings.sanitizedOpenAIModel)")
-    }
-
-    func fetchSnapshot(
-        registration: RemotePushRegistration,
-        limit: Int,
-        offset: Int
-    ) async throws -> BackendSnapshot {
-        throw RemotePushBackendError.invalidResponse
     }
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
@@ -3740,42 +3771,42 @@ private final class URLRequestRecorder: @unchecked Sendable {
 
 @MainActor
 private final class FakeCloudSyncService: CloudSyncServiceProtocol {
-    var remoteSnapshot: CloudSyncSnapshot?
-    var fetchSnapshots: [CloudSyncSnapshot?] = []
-    var savedSnapshot: CloudSyncSnapshot?
-    var saveSnapshotCallCount = 0
+    var remoteState: CloudSyncState?
+    var fetchStates: [CloudSyncState?] = []
+    var savedState: CloudSyncState?
+    var saveStateCallCount = 0
     var savedQuestionPushes: [(question: QuestionItem, settings: StudySettings)] = []
     var questionPushesByRecordName: [String: CloudQuestionPush] = [:]
     var didEnsureQuestionPushSubscription = false
     var fetchError: Error?
     var saveError: Error?
 
-    init(remoteSnapshot: CloudSyncSnapshot?, fetchError: Error? = nil, saveError: Error? = nil) {
-        self.remoteSnapshot = remoteSnapshot
+    init(remoteState: CloudSyncState?, fetchError: Error? = nil, saveError: Error? = nil) {
+        self.remoteState = remoteState
         self.fetchError = fetchError
         self.saveError = saveError
     }
 
-    func fetchSnapshot() async throws -> CloudSyncSnapshot? {
+    func fetchState() async throws -> CloudSyncState? {
         if let fetchError {
             throw fetchError
         }
 
-        if !fetchSnapshots.isEmpty {
-            return fetchSnapshots.removeFirst()
+        if !fetchStates.isEmpty {
+            return fetchStates.removeFirst()
         }
 
-        return remoteSnapshot
+        return remoteState
     }
 
-    func saveSnapshot(_ snapshot: CloudSyncSnapshot) async throws {
+    func saveState(_ state: CloudSyncState) async throws {
         if let saveError {
             throw saveError
         }
 
-        saveSnapshotCallCount += 1
-        savedSnapshot = snapshot
-        remoteSnapshot = snapshot
+        saveStateCallCount += 1
+        savedState = state
+        remoteState = state
     }
 
     func ensureQuestionPushSubscription(language: AppLanguage, sound: NotificationSoundOption) async throws {

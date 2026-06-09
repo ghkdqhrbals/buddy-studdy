@@ -470,7 +470,7 @@ struct StudySettings: Codable, Equatable {
         customPrompt: String,
         intervalMinutes: Int,
         maxHistoryCount: Int = 100,
-        isQuestionPublic: Bool = false,
+        isQuestionPublic: Bool = true,
         studyCategories: [StudyCategory] = [],
         selectedStudyCategoryID: String? = nil
     ) {
@@ -535,7 +535,7 @@ struct StudySettings: Codable, Equatable {
         let decodedCustomPrompt = try container.decode(String.self, forKey: .customPrompt)
         intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         maxHistoryCount = try container.decodeIfPresent(Int.self, forKey: .maxHistoryCount) ?? 100
-        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? false
+        isQuestionPublic = try container.decodeIfPresent(Bool.self, forKey: .isQuestionPublic) ?? true
 
         let decodedCategories = try container.decodeIfPresent([StudyCategory].self, forKey: .studyCategories) ?? []
         let resolvedTopic = Self.normalizedString(rawTopic, fallback: Self.fallbackTopic(for: appLanguage))
@@ -1110,7 +1110,7 @@ enum TopicGrouping {
     }
 }
 
-struct CloudSyncSnapshot: Codable, Equatable {
+struct CloudSyncState: Codable, Equatable {
     var schemaVersion: Int
     var updatedAt: Date
     var apiKey: String?
@@ -1290,6 +1290,10 @@ extension APITrafficLogEntry {
 enum APITrafficNotification {
     static let didReceiveLog = Notification.Name("studyAPITrafficDidReceiveLog")
     static let userInfoKey = "studyAPITrafficLogEntry"
+}
+
+enum BackendAuthorizationNotification {
+    static let didReceiveUnauthorized = Notification.Name("studyBackendDidReceiveUnauthorized")
 }
 
 enum LogLevel: String, Codable, CaseIterable {
@@ -1647,6 +1651,16 @@ struct AppStrings {
     var debuggingMode: String { text("디버깅 모드", "Debugging Mode") }
     var paste: String { text("붙여넣기", "Paste") }
     var debuggingHelp: String { text("켜면 Developer 로그를 확인할 수 있습니다.", "When enabled, Developer logs are available.") }
+    var debugBackendBaseURL: String { text("Debug API URL", "Debug API URL") }
+    var debugBackendBaseURLPlaceholder: String { "https://lowfidev.cloud" }
+    var debugBackendBaseURLInvalid: String { text("http 또는 https URL을 입력하세요.", "Enter an http or https URL.") }
+    var debugBackendBaseURLHelp: String {
+        text(
+            "디버깅 모드가 켜져 있고 URL이 유효하면 모든 API 요청이 이 주소로 전송됩니다.",
+            "When debugging is on and the URL is valid, all API requests are sent here."
+        )
+    }
+    var cloudflareTunnel: String { text("Cloudflare 터널", "Cloudflare Tunnel") }
     var developerOptions: String { text("개발자 옵션", "Developer Options") }
     var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
     var requestLabel: String { text("요청", "Request") }
@@ -1757,6 +1771,7 @@ struct AppStrings {
     var comments: String { text("댓글", "Comments") }
     var noComments: String { text("아직 댓글이 없습니다.", "No comments yet.") }
     var writeComment: String { text("댓글 쓰기", "Write a comment") }
+    var signInToComment: String { text("로그인 후 댓글을 쓸 수 있습니다.", "Sign in to write a comment.") }
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { "Sign in with Google" }
     var signInWithEmail: String { "Sign in with Email" }

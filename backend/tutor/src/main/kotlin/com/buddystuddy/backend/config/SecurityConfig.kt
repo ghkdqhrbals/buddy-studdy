@@ -17,11 +17,15 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.core.userdetails.UserDetailsService
+import org.springframework.security.core.userdetails.UsernameNotFoundException
+import org.springframework.security.web.util.matcher.RequestMatcher
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.web.filter.OncePerRequestFilter
@@ -34,17 +38,21 @@ class SecurityConfig {
     fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Bean
+    fun userDetailsService(): UserDetailsService = UserDetailsService {
+        throw UsernameNotFoundException("BuddyStuddy uses bearer token authentication only.")
+    }
+
+    @Bean
     fun securityFilterChain(http: HttpSecurity, bearerTokenFilter: BearerTokenFilter, objectMapper: ObjectMapper): SecurityFilterChain =
         http
             .csrf { it.disable() }
+            .httpBasic { it.disable() }
+            .formLogin { it.disable() }
+            .logout { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
-                it.requestMatchers(HttpMethod.GET, "/health", "/api/v1/health").permitAll()
-                it.requestMatchers("/actuator/**").permitAll()
-                it.requestMatchers(HttpMethod.GET, "/api/v1/openai/models").permitAll()
-                it.requestMatchers(HttpMethod.POST, "/api/v1/devices/register").permitAll()
-                it.requestMatchers("/api/v1/auth/**").permitAll()
-                it.requestMatchers(HttpMethod.GET, "/api/v1/public/**").permitAll()
+                it.requestMatchers(NonApiRoutes.requestMatcher).permitAll()
+                AnonymousRoutes.requestMatchers.forEach { matcher -> it.requestMatchers(matcher).permitAll() }
                 it.anyRequest().authenticated()
             }
             .exceptionHandling {
@@ -76,7 +84,13 @@ class BearerTokenFilter(
             authenticate(request)
             filterChain.doFilter(request, response)
         } catch (error: ApiException) {
-            writeSecurityError(objectMapper, request, response, error.status, error.code, error.message)
+            if (AnonymousRoutes.matches(request) || NonApiRoutes.matches(request)) {
+                SecurityContextHolder.clearContext()
+                logIgnoredAuthenticationFailure(request, error)
+                filterChain.doFilter(request, response)
+            } else {
+                writeSecurityError(objectMapper, request, response, error.status, error.code, error.message)
+            }
         } finally {
             SecurityContextHolder.clearContext()
         }
@@ -89,7 +103,12 @@ class BearerTokenFilter(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }
 
-        val principal = tokenProvider.parse(authorization.removePrefix("Bearer ").trim())
+        val rawToken = authorization.removePrefix("Bearer ").trim()
+        if (!tokenProvider.validate(rawToken)) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
+        }
+
+        val principal = tokenProvider.parse(rawToken)
         val session = userDevices.findByIdAndUserId(principal.sessionId, principal.userId)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Access token principal is no longer valid.")
         if (session.deviceId != principal.deviceId) {
@@ -108,6 +127,64 @@ class BearerTokenFilter(
 
 }
 
+private object NonApiRoutes {
+    val requestMatcher: RequestMatcher = RequestMatcher { request -> matches(request) }
+
+    fun matches(request: HttpServletRequest): Boolean =
+        !request.requestURI.startsWith("/api")
+}
+
+private object AnonymousRoutes {
+    private val routes = listOf(
+        Route(HttpMethod.GET, "/health"),
+        Route(HttpMethod.GET, "/api/v1/health"),
+        Route(null, "/actuator/**"),
+        Route(HttpMethod.GET, "/docs"),
+        Route(HttpMethod.GET, "/docs/**"),
+        Route(HttpMethod.GET, "/swagger-ui.html"),
+        Route(HttpMethod.GET, "/swagger-ui/**"),
+        Route(HttpMethod.GET, "/openapi.json"),
+        Route(HttpMethod.GET, "/v3/api-docs/**"),
+        Route(HttpMethod.POST, "/api/v1/devices/register"),
+        Route(null, "/api/v1/auth/**"),
+        Route(HttpMethod.GET, "/api/v1/openai/models"),
+        Route(HttpMethod.GET, "/api/v1/public/**"),
+    )
+
+    val requestMatchers: Array<RequestMatcher> = routes.map { route ->
+        RequestMatcher { request -> route.matches(request) }
+    }.toTypedArray()
+
+    fun matches(request: HttpServletRequest): Boolean =
+        routes.any { it.matches(request) }
+
+    private data class Route(val method: HttpMethod?, val pattern: String) {
+        fun matches(request: HttpServletRequest): Boolean =
+            (method == null || request.method == method.name()) && matchesPattern(request.requestURI)
+
+        private fun matchesPattern(path: String): Boolean {
+            if (pattern.endsWith("/**")) {
+                val prefix = pattern.removeSuffix("/**")
+                return path == prefix || path.startsWith("$prefix/")
+            }
+            return path == pattern
+        }
+    }
+}
+
+private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
+    val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+    securityLog.debug(
+        "api_auth_ignored requestId={} method={} path={} status={} code={} message={}",
+        requestId,
+        request.method,
+        request.requestURI,
+        error.status.value(),
+        error.code.name,
+        error.message,
+    )
+}
+
 private fun writeSecurityError(
     objectMapper: ObjectMapper,
     request: HttpServletRequest,
@@ -118,7 +195,18 @@ private fun writeSecurityError(
 ) {
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+    securityLog.warn(
+        "api_auth_failed requestId={} method={} path={} status={} code={} message={}",
+        requestId,
+        request.method,
+        request.requestURI,
+        status.value(),
+        code.name,
+        message,
+    )
     response.status = status.value()
     response.contentType = "application/json"
     objectMapper.writeValue(response.outputStream, ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value())))
 }
+
+private val securityLog = LoggerFactory.getLogger("com.buddystuddy.backend.security")

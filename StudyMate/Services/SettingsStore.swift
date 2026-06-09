@@ -19,6 +19,7 @@ final class SettingsStore {
         static let questionResponseID = "questionResponseID"
         static let appLogs = "appLogs"
         static let isDebuggingEnabled = "isDebuggingEnabled"
+        static let debugBackendBaseURL = "debugBackendBaseURL"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
@@ -27,7 +28,7 @@ final class SettingsStore {
         static let profileAvatarColorSeed = "profileAvatarColorSeed"
         static let communityProfileDisplayName = "communityProfileDisplayName"
         static let communityProfileID = "communityProfileID"
-        static let cloudSyncSnapshotUpdatedAt = "cloudSyncSnapshotUpdatedAt"
+        static let cloudSyncStateUpdatedAt = "cloudSyncStateUpdatedAt"
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
@@ -424,6 +425,19 @@ final class SettingsStore {
         defaults.set(isEnabled, forKey: Keys.isDebuggingEnabled)
     }
 
+    func loadDebugBackendBaseURL() -> String {
+        defaults.string(forKey: Keys.debugBackendBaseURL) ?? ""
+    }
+
+    func saveDebugBackendBaseURL(_ baseURL: String) {
+        let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedURL.isEmpty {
+            defaults.removeObject(forKey: Keys.debugBackendBaseURL)
+        } else {
+            defaults.set(trimmedURL, forKey: Keys.debugBackendBaseURL)
+        }
+    }
+
     func loadHasCompletedOnboarding() -> Bool {
         if defaults.object(forKey: Keys.hasCompletedOnboarding) != nil {
             return defaults.bool(forKey: Keys.hasCompletedOnboarding)
@@ -510,21 +524,21 @@ final class SettingsStore {
         }
     }
 
-    func loadCloudSyncSnapshotUpdatedAt() -> Date? {
-        guard let value = defaults.object(forKey: Keys.cloudSyncSnapshotUpdatedAt) as? TimeInterval else {
+    func loadCloudSyncStateUpdatedAt() -> Date? {
+        guard let value = defaults.object(forKey: Keys.cloudSyncStateUpdatedAt) as? TimeInterval else {
             return nil
         }
 
         return Date(timeIntervalSince1970: value)
     }
 
-    func saveCloudSyncSnapshotUpdatedAt(_ date: Date?) {
+    func saveCloudSyncStateUpdatedAt(_ date: Date?) {
         guard let date else {
-            defaults.removeObject(forKey: Keys.cloudSyncSnapshotUpdatedAt)
+            defaults.removeObject(forKey: Keys.cloudSyncStateUpdatedAt)
             return
         }
 
-        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncSnapshotUpdatedAt)
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.cloudSyncStateUpdatedAt)
     }
 
     func loadAppLogs() -> [AppLogEntry] {

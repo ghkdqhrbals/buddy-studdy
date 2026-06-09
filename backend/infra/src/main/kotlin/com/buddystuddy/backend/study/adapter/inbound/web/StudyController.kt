@@ -8,6 +8,11 @@ import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCa
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.stereotype.Component
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -25,53 +30,151 @@ import kotlin.math.min
 
 @RestController
 @RequestMapping("/api/v1")
+@Tag(name = "Study", description = "Authenticated study-room, question, record, and topic-stat APIs.")
 class StudyController(
     private val study: StudyWebPort,
 ) {
-    @GetMapping("/me/snapshot")
-    fun sync(@RequestParam(defaultValue = "500") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
-        study.sync(limit, offset, authentication)
+    @Operation(
+        summary = "Fetch my studies",
+        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion for the current unanswered study-room question. Record history is intentionally split into /api/v1/records.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study rooms returned."),
+        ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
+    )
+    @GetMapping("/studies")
+    fun study(
+        @Parameter(description = "Maximum number of studies to include. Server clamps this to 1..1000.", example = "500")
+        @RequestParam(defaultValue = "500") limit: Int,
+        @Parameter(description = "Zero-based study offset for pagination.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed study search query.", example = "Swift")
+        @RequestParam(required = false) query: String?,
+        authentication: Authentication,
+    ) = study.study(limit, offset, query, authentication)
 
-    @GetMapping("/me/records")
-    fun records(@RequestParam(defaultValue = "100") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
-        study.records(limit, offset, authentication)
+    @Operation(
+        summary = "List my graded records",
+        description = "Returns the authenticated user's graded or completed study records. Ungraded active questions are intentionally managed from the study room and should not be shown as regular history.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Records returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
+    @GetMapping("/records")
+    fun records(
+        @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
+        @RequestParam(defaultValue = "100") limit: Int,
+        @Parameter(description = "Zero-based pagination offset.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed record search query.", example = "actor")
+        @RequestParam(required = false) query: String?,
+        authentication: Authentication,
+    ) =
+        study.records(limit, offset, query, authentication)
 
-    @DeleteMapping("/me/records")
+    @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Records cleared."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
+    @DeleteMapping("/records")
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = study.clearRecords(authentication)
 
-    @GetMapping("/me/records/{id}")
-    fun record(@PathVariable id: Long, authentication: Authentication) = study.record(id, authentication)
+    @Operation(summary = "Fetch one record", description = "Returns one study record owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Record returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
+    @GetMapping("/records/{id}")
+    fun record(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ) = study.record(id, authentication)
 
-    @PatchMapping("/me/records/{id}/answer")
-    fun saveAnswer(@PathVariable id: Long, @RequestBody body: AnswerRequest, authentication: Authentication) =
+    @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
+    @PatchMapping("/records/{id}/answer")
+    fun saveAnswer(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: AnswerRequest,
+        authentication: Authentication,
+    ) =
         study.saveAnswer(id, body, authentication)
 
-    @PostMapping("/me/records/{id}/answer")
-    fun grade(@PathVariable id: Long, @RequestBody body: AnswerRequest, authentication: Authentication) =
+    @Operation(summary = "Submit an answer for grading", description = "Submits the answer, asks the tutor model to grade it, and returns the updated record with score, correctness, feedback, and explanation.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Answer graded."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
+    @PostMapping("/records/{id}/answer")
+    fun grade(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: AnswerRequest,
+        authentication: Authentication,
+    ) =
         study.grade(id, body, authentication)
 
-    @PostMapping("/me/records/{id}/skip")
-    fun skip(@PathVariable id: Long, authentication: Authentication) = study.skip(id, authentication)
+    @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
+    @PostMapping("/records/{id}/skip")
+    fun skip(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ) = study.skip(id, authentication)
 
-    @DeleteMapping("/me/records/{id}")
-    fun delete(@PathVariable id: Long, authentication: Authentication): ResponseEntity<Unit> = study.delete(id, authentication)
+    @Operation(summary = "Delete one record", description = "Immediately deletes a record owned by the authenticated user.")
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Record deleted."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
+    )
+    @DeleteMapping("/records/{id}")
+    fun delete(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        authentication: Authentication,
+    ): ResponseEntity<Unit> = study.delete(id, authentication)
 
-    @PatchMapping("/me/records/{id}/publicity")
-    fun publicity(@PathVariable id: Long, @RequestBody body: RecordPublicityRequest, authentication: Authentication) =
+    @Operation(summary = "Update record visibility", description = "Sets whether a completed record can be included in public questions. The user's global public-question setting must also allow public sharing.")
+    @PatchMapping("/records/{id}/publicity")
+    fun publicity(
+        @Parameter(description = "Record/question id.", example = "42")
+        @PathVariable id: Long,
+        @RequestBody body: RecordPublicityRequest,
+        authentication: Authentication,
+    ) =
         study.publicity(id, body, authentication)
 
-    @GetMapping("/me/stats")
-    fun stats(@RequestParam(defaultValue = "8") limit: Int, @RequestParam(defaultValue = "0") offset: Int, authentication: Authentication) =
-        study.stats(limit, offset, authentication)
+    @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
+    @GetMapping("/stats")
+    fun stats(
+        @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
+        @RequestParam(defaultValue = "8") limit: Int,
+        @Parameter(description = "Zero-based topic offset for pagination.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Optional DB-backed topic stat search query.", example = "Swift")
+        @RequestParam(required = false) query: String?,
+        authentication: Authentication,
+    ) =
+        study.stats(limit, offset, query, authentication)
 
-    @PostMapping("/me/questions")
-    fun createQuestion(@RequestBody body: CreateQuestionRequest, authentication: Authentication) =
+    @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
+    @PostMapping("/questions")
+    fun createQuestion(
+        @RequestBody body: CreateQuestionRequest,
+        authentication: Authentication,
+    ) =
         study.createQuestion(body, authentication)
 }
 
 interface StudyWebPort {
-    fun sync(limit: Int, offset: Int, authentication: Authentication): Any
-    fun records(limit: Int, offset: Int, authentication: Authentication): Any
+    fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
+    fun records(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
     fun record(id: Long, authentication: Authentication): Any
     fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): Any
@@ -79,7 +182,7 @@ interface StudyWebPort {
     fun skip(id: Long, authentication: Authentication): Any
     fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
     fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): Any
-    fun stats(limit: Int, offset: Int, authentication: Authentication): Any
+    fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
     fun createQuestion(body: CreateQuestionRequest, authentication: Authentication): Any
 }
 
@@ -90,11 +193,11 @@ class StudyWebAdapter(
     private val statsUseCase: GetStudyStatsUseCase,
     private val studySyncUseCase: StudySyncUseCase,
 ) : StudyWebPort {
-    override fun sync(limit: Int, offset: Int, authentication: Authentication) =
-        studySyncUseCase.sync(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset))
+    override fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
 
-    override fun records(limit: Int, offset: Int, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset))
+    override fun records(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query)
 
     override fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
@@ -116,8 +219,8 @@ class StudyWebAdapter(
     override fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication) =
         studyUseCase.publicity(authentication.principalOrThrow(), id, body.isPublic)
 
-    override fun stats(limit: Int, offset: Int, authentication: Authentication) =
-        statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset))
+    override fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+        statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
 
     override fun createQuestion(body: CreateQuestionRequest, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), body.topic)

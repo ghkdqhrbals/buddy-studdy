@@ -11,11 +11,11 @@ import com.buddystuddy.backend.study.application.port.outbound.PushNotificationP
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
+import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
 
-@Component
+@StreamConfiguration
 class PushStreamListener(
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
@@ -33,6 +33,18 @@ class PushStreamListener(
     )
     fun onPushRequested(message: ConsumedRedisStreamMessage) {
         try {
+            logger.info(
+                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} fieldKeys={}",
+                "buddystuddy-push-listener",
+                message.streamKey,
+                message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["recordId"],
+                message.fields["deviceId"],
+                message.fields["userId"],
+                message.fields.keys,
+            )
             val device = message.fields["deviceId"]?.let { devices.findByDeviceId(it) }
             val pushMessage = message.fields.toPushQuestionMessage(
                 apnsToken = message.fields["apnsToken"] ?: device?.apnsToken ?: "",
@@ -40,11 +52,29 @@ class PushStreamListener(
             )
             pushNotifications.sendQuestion(pushMessage)
             message.ack()
-        } catch (error: Exception) {
-            logger.warn(
-                "push_stream_consume_failed stream={} recordId={} error={}",
+            logger.info(
+                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={}",
+                "buddystuddy-push-listener",
                 message.streamKey,
                 message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["recordId"],
+                message.fields["deviceId"],
+                message.fields["userId"],
+                message.fields["pushProvider"] ?: message.fields["provider"] ?: PushMessageType.APNS.name,
+            )
+        } catch (error: Exception) {
+            logger.warn(
+                "redis_stream_consume_failed listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
+                "buddystuddy-push-listener",
+                message.streamKey,
+                message.recordId,
+                message.fields["eventId"],
+                message.fields["eventType"],
+                message.fields["recordId"],
+                message.fields["deviceId"],
+                message.fields["userId"],
                 error.message,
             )
             message.nack(RedisStreamXNackMode.SILENT, 30_000, false)

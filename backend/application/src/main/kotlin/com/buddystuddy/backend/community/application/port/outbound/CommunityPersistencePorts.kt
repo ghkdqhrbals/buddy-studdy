@@ -10,10 +10,12 @@ interface QuestionLikePort {
     fun save(entity: QuestionLikeEntity): QuestionLikeEntity
     fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
     fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
+    fun countByQuestionId(questionId: Long): Long
 }
 
 interface QuestionCommentPort {
     fun save(entity: QuestionCommentEntity): QuestionCommentEntity
+    fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity?
     fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity>
 }
 

@@ -24,11 +24,16 @@ class StatsService(
     private val questions: QuestionPort,
     private val stats: QuestionStatsPort,
 ) : GetStudyStatsUseCase {
-    override fun stats(principal: Principal, limit: Int, offset: Int): StatsResponse =
-        stats(principal.userId, limit, offset)
+    override fun stats(principal: Principal, limit: Int, offset: Int, query: String?): StatsResponse =
+        stats(principal.userId, limit, offset, query)
 
-    private fun stats(userId: Long, limit: Int, offset: Int): StatsResponse {
-        val page = questions.findGradedByUser(userId, PageRequest.of(0, 10_000))
+    private fun stats(userId: Long, limit: Int, offset: Int, query: String?): StatsResponse {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val page = if (search == null) {
+            questions.findGradedByUser(userId, PageRequest.of(0, 10_000))
+        } else {
+            questions.findGradedByUserAndQuery(userId, search, PageRequest.of(0, 10_000))
+        }
         val grouped = page.content.groupBy { normalizedTopic(it.topic) }
         val topics = grouped.values
             .sortedByDescending { it.size }

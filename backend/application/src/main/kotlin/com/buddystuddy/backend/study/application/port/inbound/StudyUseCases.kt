@@ -1,8 +1,8 @@
 package com.buddystuddy.backend.study.application.port.inbound
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.study.application.model.BackendSyncResponse
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
+import com.buddystuddy.backend.study.application.model.StudyPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 
 interface StudyUseCase {
@@ -14,11 +14,11 @@ interface StudyUseCase {
 }
 
 interface BrowseRecordsUseCase {
-    fun records(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
+    fun records(principal: Principal, limit: Int, offset: Int, query: String? = null): RecordsPageResponse
     fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
     fun record(principal: Principal, id: Long): StudyRecordResponse
 }
 
 interface StudySyncUseCase {
-    fun sync(principal: Principal, limit: Int, offset: Int): BackendSyncResponse
+    fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
 }

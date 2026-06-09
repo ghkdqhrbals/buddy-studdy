@@ -10,12 +10,15 @@ import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepo
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
+import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.service.StudySyncService
 import com.buddystuddy.backend.study.application.service.StudyService
 import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.community.domain.entity.QuestionLikeEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -44,8 +47,10 @@ import java.time.Instant
 class CommunityStudyServiceTest {
     @Autowired lateinit var community: CommunityService
     @Autowired lateinit var study: StudyService
+    @Autowired lateinit var studySync: StudySyncService
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var questions: QuestionRepository
+    @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var stats: QuestionStatsPort
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
@@ -133,11 +138,12 @@ class CommunityStudyServiceTest {
         val unliked = community.setLike(principal, q.id, liked = false)
         val unlikedAgain = community.setLike(principal, q.id, liked = false)
 
-        assertThat(liked.likeCount).isEqualTo(4)
-        assertThat(likedAgain.likeCount).isEqualTo(3)
-        assertThat(unliked.likeCount).isEqualTo(2)
-        assertThat(unlikedAgain.likeCount).isEqualTo(3)
+        assertThat(liked.likeCount).isEqualTo(1)
+        assertThat(likedAgain.likeCount).isEqualTo(1)
+        assertThat(unliked.likeCount).isEqualTo(0)
+        assertThat(unlikedAgain.likeCount).isEqualTo(0)
         assertThat(likes.existsByQuestionIdAndUserId(q.id, viewer.id)).isFalse()
+        assertThat(stats.findById(q.id).orElseThrow().likeCount).isEqualTo(0)
     }
 
     @Test
@@ -165,10 +171,36 @@ class CommunityStudyServiceTest {
     }
 
     @Test
+    fun `comment owner can delete comment and deleted comments are hidden`() {
+        val q = answeredPublicQuestion(author, "SwiftUI")
+        val saved = community.comment(principal, q.id, "delete me")
+
+        val response = community.deleteComment(principal, q.id, saved.id.toLong())
+        val page = community.comments(q.id, limit = 20, offset = 0)
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.id).isEqualTo(saved.id)
+        assertThat(page.totalCount).isZero()
+        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNotNull()
+    }
+
+    @Test
+    fun `comment delete rejects other users and missing comments`() {
+        val q = answeredPublicQuestion(author, "SwiftUI")
+        val saved = community.comment(principal, q.id, "not yours")
+        val otherPrincipal = Principal(userId = author.id, deviceId = "device-author", sessionId = 2, anonymous = false)
+
+        assertRecordNotFound { community.deleteComment(otherPrincipal, q.id, saved.id.toLong()) }
+        assertRecordNotFound { community.deleteComment(principal, q.id, 999_999) }
+        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNull()
+    }
+
+    @Test
     fun `comment and comments reject non public answered records`() {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
         assertRecordNotFound { community.comment(principal, q.id, "body") }
+        assertRecordNotFound { community.deleteComment(principal, q.id, 1) }
         assertRecordNotFound { community.comments(q.id, limit = 10, offset = 0) }
     }
 
@@ -197,6 +229,31 @@ class CommunityStudyServiceTest {
 
         assertThat(records.records.map { it.id }).containsExactly(graded.id.toString())
         assertThat(pendingRecords.records.map { it.id }).containsExactly(pending.id.toString())
+    }
+
+    @Test
+    fun `study page includes the current pending question for each study`() {
+        val room = studies.save(
+            StudyEntity(
+                deviceId = principal.deviceId,
+                userId = principal.userId,
+                topic = "Redis",
+                difficultyLevel = 2,
+                createdAt = now,
+                updatedAt = now,
+            )
+        )
+        val pending = pendingPublicQuestion(viewer, "Redis").also {
+            it.studyId = room.id
+            questions.save(it)
+        }
+
+        val page = studySync.study(principal, limit = 10, offset = 0)
+
+        assertThat(page.studies).hasSize(1)
+        assertThat(page.studies.single().topic).isEqualTo("Redis")
+        assertThat(page.studies.single().pendingQuestion?.id).isEqualTo(pending.id.toString())
+        assertThat(page.studies.single().pendingQuestion?.question?.question).isEqualTo("Pending question for Redis")
     }
 
     @Test

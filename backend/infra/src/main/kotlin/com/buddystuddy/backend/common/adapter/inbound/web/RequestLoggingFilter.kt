@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.common.adapter.inbound.web
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -14,7 +16,9 @@ import java.util.Locale
 import java.util.UUID
 
 @Component
-class RequestLoggingFilter : OncePerRequestFilter() {
+class RequestLoggingFilter(
+    private val objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
+) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
@@ -29,12 +33,8 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             val durationMs = (System.nanoTime() - started) / 1_000_000.0
             if (requestWrapper.requestURI.startsWith("/api/")) {
                 log.info(
-                    "api_request {}",
-                    apiRequestJson(requestId, requestWrapper),
-                )
-                log.info(
-                    "api_response {}",
-                    apiResponseJson(requestId, requestWrapper, responseWrapper, durationMs),
+                    "api_exchange {}",
+                    apiExchangeJson(requestId, requestWrapper, responseWrapper, durationMs),
                 )
             } else {
                 log.info(
@@ -46,14 +46,37 @@ class RequestLoggingFilter : OncePerRequestFilter() {
         }
     }
 
-    private fun apiRequestJson(requestId: String, request: ContentCachingRequestWrapper): String =
+    private fun apiExchangeJson(
+        requestId: String,
+        request: ContentCachingRequestWrapper,
+        response: ContentCachingResponseWrapper,
+        durationMs: Double,
+    ): String =
         buildJson(
             "requestId" to requestId,
+            "request" to requestFields(request),
+            "response" to responseFields(response, durationMs),
+        )
+
+    private fun requestFields(request: ContentCachingRequestWrapper): Map<String, Any?> =
+        mapOf(
             "method" to request.method,
             "path" to request.requestURI,
             "query" to (request.queryString ?: ""),
             "headers" to headers(request),
-            "body" to body(request.contentAsByteArray, request.characterEncoding),
+            "body" to body(request.contentAsByteArray, request.characterEncoding, request.contentType),
+        )
+
+    private fun responseFields(
+        response: ContentCachingResponseWrapper,
+        durationMs: Double,
+        includeBody: Boolean = true,
+    ): Map<String, Any?> =
+        mapOf(
+            "status" to response.status,
+            "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "headers" to responseHeaders(response),
+            "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding, response.contentType) else "",
         )
 
     private fun apiResponseJson(
@@ -67,10 +90,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
             "requestId" to requestId,
             "method" to request.method,
             "path" to request.requestURI,
-            "status" to response.status,
-            "durationMs" to "%.2f".format(Locale.US, durationMs),
-            "headers" to responseHeaders(response),
-            "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding) else "",
+            "response" to responseFields(response, durationMs, includeBody),
         )
 
     private fun headers(request: HttpServletRequest): Map<String, String> =
@@ -84,24 +104,51 @@ class RequestLoggingFilter : OncePerRequestFilter() {
         }
 
     private fun isSensitiveHeader(name: String): Boolean =
-        name.equals("Authorization", ignoreCase = true) ||
-            name.equals("X-Client-Secret", ignoreCase = true)
+        name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
-    private fun body(bytes: ByteArray, encoding: String?): String {
+    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any? {
         if (bytes.isEmpty()) return ""
-        val charset = encoding?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
-        return redact(String(bytes, charset)).let {
+        val charset = charsetFor(encoding, contentType)
+        val body = redact(String(bytes, charset)).let {
             if (it.length > MAX_BODY_CHARS) it.take(MAX_BODY_CHARS) + "...[truncated]" else it
         }
+        return parseJsonBody(body, contentType)
+    }
+
+    private fun parseJsonBody(body: String, contentType: String?): Any? {
+        val trimmed = body.trim()
+        val jsonContentType = contentType?.contains("json", ignoreCase = true) == true
+        val jsonLikeBody = (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        if (!jsonContentType && !jsonLikeBody) return body
+        return runCatching { objectMapper.readTree(body) }.getOrElse { body }
+    }
+
+    private fun charsetFor(encoding: String?, contentType: String?): Charset {
+        contentType
+            ?.split(";")
+            ?.asSequence()
+            ?.map { it.trim() }
+            ?.firstOrNull { it.startsWith("charset=", ignoreCase = true) }
+            ?.substringAfter("=")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { charsetName ->
+                runCatching { Charset.forName(charsetName) }.getOrNull()
+            }
+            ?.let { return it }
+
+        if (contentType?.contains("json", ignoreCase = true) == true) {
+            return StandardCharsets.UTF_8
+        }
+
+        return encoding?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
     }
 
     private fun redact(value: String): String =
         value
-            .replace(Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|clientSecret|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\"")) {
+            .replace(Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\"")) {
                 "${it.groupValues[1]}\"[REDACTED]\""
-            }
-            .replace(Regex("(?i)(Bearer\\s+)[A-Za-z0-9._\\-]+")) {
-                "${it.groupValues[1]}[REDACTED]"
             }
 
     private fun buildJson(vararg fields: Pair<String, Any?>): String =
@@ -113,6 +160,7 @@ class RequestLoggingFilter : OncePerRequestFilter() {
         when (value) {
             null -> "null"
             is Number, is Boolean -> value.toString()
+            is JsonNode -> value.toString()
             is Map<*, *> -> value.entries.joinToString(prefix = "{", postfix = "}") { entry ->
                 "\"${escape(entry.key.toString())}\":${jsonValue(entry.value)}"
             }
@@ -134,5 +182,6 @@ class RequestLoggingFilter : OncePerRequestFilter() {
     companion object {
         private const val MAX_BODY_CHARS = 2_000
         private const val MAX_BODY_BYTES = 8_192
+        private val SENSITIVE_HEADERS = setOf("authorization", "cookie", "set-cookie", "x-client-secret")
     }
 }

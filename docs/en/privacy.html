@@ -144,13 +144,13 @@
         <span>BuddyStuddy</span>
       </div>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: June 5, 2026</p>
+      <p class="updated">Last updated: June 10, 2026</p>
     </header>
 
     <section>
       <h2>Overview</h2>
-      <p>BuddyStuddy is a free study app that uses your own OpenAI API key to generate study questions and grade answers. Core study features can be used without a separate app account. The app is designed to keep study records and settings local-first, and uses the backend where needed for AI routing, scheduling, synchronization, push delivery, and signed-in community features.</p>
-      <p>If you enable question visibility and create a question, signed-in users may see limited public information such as question text, topic, difficulty, creation time, and your public profile. Answers, hints, scores, feedback, explanations, OpenAI API keys, APNs tokens, and device credentials are not shown in public question lists.</p>
+      <p>BuddyStuddy is a free study app that uses your own OpenAI API key to generate study questions and grade answers. Core study features and public question browsing can be used without a separate app account. The app is designed to keep study records and settings local-first, and uses the backend where needed for AI routing, scheduling, synchronization, push delivery, and account-based community features.</p>
+      <p>If you enable question visibility and create a question, other users may see limited public information such as question text, topic, difficulty, creation time, like count, comment count, and your public profile. Public question details may also show public comments and commenter public profiles. Answer drafts, private answers, scores, feedback, explanations, OpenAI API keys, APNs tokens, and device credentials are not shown in public question lists.</p>
       <p>BuddyStuddy does not sell personal data and does not intentionally collect government identifiers or sensitive personal information.</p>
     </section>
 
@@ -162,14 +162,17 @@
         <li>Your OpenAI API key, if you enter one.</li>
         <li>Study questions, answer drafts, graded answers, scores, feedback, explanations, and topic statistics.</li>
         <li>Backend device ID, hashed client secret, APNs device token, platform, APNs environment, app language, and timezone when backend features are used.</li>
-        <li>If you use Google Login for community features: Google account subject, email, display name, avatar URL, and the public bio you enter.</li>
+        <li>If you sign in for community features: email address, password hash, email verification code and expiry, Google account subject, Google ID token verification result, sign-in method, display name, avatar URL or avatar character/color, public bio, and public page access settings.</li>
+        <li>Community activity such as question visibility, likes, public comment body, comment author, comment creation/deletion time, and public question engagement counts.</li>
         <li>If you report a community question: reported question ID, reason, optional message, reporter device ID, and submission time.</li>
+        <li>Internal operation and security logs such as request ID, request time, HTTP method, path, query, status code, duration, error code/reason, and limited request/response bodies. API keys, passwords, verification codes, ID tokens, access tokens, and client secrets are redacted from these logs.</li>
       </ul>
     </section>
 
     <section>
       <h2>Community Profiles And Reports</h2>
-      <p>Community questions are available only after Google Login. Your public profile may show your display name, avatar, and bio to other signed-in users when they view a question you chose to make public. Your email address and Google account identifier are used for account linking and are not shown in public question lists.</p>
+      <p>Public question browsing is available without signing in. Writing comments, liking questions, reporting questions, and managing a profile require email login or Google Login.</p>
+      <p>Your public profile may show your display name, avatar or character, and bio to other users when they view a question you chose to make public. Public question details may show public comments, commenter public profiles, like counts, and comment counts. Your email address and Google account identifier are used for account linking and are not shown in public question lists.</p>
       <p>When you report a community question, BuddyStuddy stores the report and may forward it to the operator email address for moderation. Reports are used only for abuse review and service operation.</p>
     </section>
 
@@ -200,19 +203,20 @@
 
     <section>
       <h2>Data Sharing</h2>
-      <p>BuddyStuddy does not sell your personal data. The app may send data to OpenAI when you use AI question generation or grading, may use Google Login for community identity, may use the BuddyStuddy backend for AI routing, settings/records sync, scheduled notification delivery, community profiles, public questions, and reports, and may use Amazon Web Services for backend infrastructure.</p>
-      <p>OpenAI, Apple Push Notification service, Google Login, and Amazon Web Services may process data in countries where they operate, including the United States. Transfers occur over encrypted connections when you use the relevant feature, and each provider's own terms and privacy practices apply.</p>
+      <p>BuddyStuddy does not sell your personal data. The app may send data to OpenAI when you use AI question generation or grading, may use Google Login or email login for community identity, may use Gmail SMTP for email verification codes and report forwarding, may use the BuddyStuddy backend for AI routing, settings/records sync, scheduled notification delivery, community profiles, public questions, comments, likes, reports, and operation logs, and may use Amazon Web Services for backend infrastructure.</p>
+      <p>OpenAI, Apple Push Notification service, Google Login, Gmail SMTP, and Amazon Web Services may process data in countries where they operate, including the United States. Transfers occur over encrypted connections when you use the relevant feature, and each provider's own terms and privacy practices apply.</p>
     </section>
 
     <section>
       <h2>Retention And Deletion</h2>
       <p>You can delete study records in the app. Deleted backend records are immediately removed together with related public-question and report references. Deleting the app removes local app data from the device according to iOS behavior.</p>
       <p>When you remove or change the OpenAI API key from app settings, the key is replaced, no longer used, or removed where it is no longer needed for service operation. Deleting your account immediately removes the community profile, sign-in mapping, public questions, and related study records for that account.</p>
+      <p>Internal operation and security logs are retained only as needed for service operation, security, abuse prevention, and troubleshooting.</p>
     </section>
 
     <section>
       <h2>Your Choices And Rights</h2>
-      <p>You can view and delete study records in the app, disable question visibility, change notification permission in iOS Settings, and change or remove your OpenAI API key in the app. For access, correction, deletion, suspension, public-question removal, or community profile deletion requests related to backend data, contact the developer by email.</p>
+      <p>You can view and delete study records in the app, disable question visibility, make a public question private, delete your account, change notification permission in iOS Settings, and change or remove your OpenAI API key in the app. For access, correction, deletion, suspension, public-question/comment removal, community profile deletion, or operation-log requests related to backend data, contact the developer by email.</p>
     </section>
 
     <section>

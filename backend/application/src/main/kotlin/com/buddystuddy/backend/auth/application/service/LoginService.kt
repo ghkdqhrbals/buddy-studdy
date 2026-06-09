@@ -9,6 +9,8 @@ import com.buddystuddy.auth.domain.AccountUser
 import com.buddystuddy.auth.domain.DeviceAttachment
 import com.buddystuddy.auth.domain.PushTokenUpdate
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationCodePort
+import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.LoginUseCase
@@ -32,6 +34,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.client.RestClient
 import java.time.Instant
+import java.time.Duration
+import java.security.SecureRandom
 
 @Service
 class LoginService(
@@ -41,8 +45,11 @@ class LoginService(
     private val tokenService: TokenProvider,
     private val sessions: AccountSessionManager,
     private val tokens: RandomTokenGenerator,
+    private val emailCodes: EmailVerificationCodePort,
+    private val emailSender: EmailVerificationSenderPort,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
+    private val secureRandom = SecureRandom()
 
     @Transactional
     override fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
@@ -114,8 +121,12 @@ class LoginService(
         val normalized = command.email.trim().lowercase()
         var user = users.findByEmailAndProvider(normalized, "EMAIL")
         if (user == null) {
-            if (command.verificationCode.isNullOrBlank()) {
-                throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_GOOGLE_REQUIRED, "Email verification code is required.")
+            val verificationCode = command.verificationCode
+            if (verificationCode.isNullOrBlank()) {
+                throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Email verification code is required.")
+            }
+            if (!emailCodes.consume(normalized, verificationCode)) {
+                throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Invalid or expired email verification code.")
             }
             user = users.save(
                 UserEntity(
@@ -140,7 +151,14 @@ class LoginService(
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
 
-    override fun emailCode(email: String) = EmailVerificationCodeResponse(email.trim().lowercase(), properties.email.verificationTtlSeconds)
+    override fun emailCode(email: String): EmailVerificationCodeResponse {
+        val normalized = email.trim().lowercase()
+        val ttl = Duration.ofSeconds(properties.email.verificationTtlSeconds)
+        val code = "%06d".format(secureRandom.nextInt(1_000_000))
+        emailCodes.save(normalized, code, ttl)
+        emailSender.send(normalized, code, ttl)
+        return EmailVerificationCodeResponse(normalized, ttl.seconds)
+    }
 
     @Transactional
     override fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {

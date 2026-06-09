@@ -1,10 +1,12 @@
 package com.buddystuddy.backend
 
 import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
+import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
-import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionStatsStreamListener
+import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionStatsStreamEventHandler
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import com.buddystuddy.community.domain.entity.QuestionLikeEntity
 import com.redisstream.consumer.ProducerRoutingShard
 import com.redisstream.producer.ProducerRoute
 import com.redisstream.producer.PublishedRedisStreamMessage
@@ -33,15 +35,16 @@ import java.util.stream.Stream
     ]
 )
 class QuestionStatsStreamListenerTest {
-    @Autowired lateinit var listener: QuestionStatsStreamListener
+    @Autowired lateinit var handler: QuestionStatsStreamEventHandler
     @Autowired lateinit var stats: QuestionStatsPort
+    @Autowired lateinit var likes: QuestionLikeRepository
 
     @Test
     fun `view events increment question view count`() {
         stats.save(QuestionStatsEntity(questionId = 101))
 
-        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
-        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
+        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
+        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
 
         assertThat(stats.findById(101).orElseThrow().viewCount).isEqualTo(2)
     }
@@ -49,14 +52,17 @@ class QuestionStatsStreamListenerTest {
     @Test
     fun `like and comment action events update stats counts`() {
         stats.save(QuestionStatsEntity(questionId = 202))
+        likes.save(QuestionLikeEntity(questionId = 202, userId = 1))
+        likes.save(QuestionLikeEntity(questionId = 202, userId = 2))
 
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "202"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "202"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "202"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "202"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "202"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "202"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "202"))
+        likes.findByQuestionIdAndUserId(202, 1)?.let { likes.delete(it) }
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "202"))
 
         val updated = stats.findById(202).orElseThrow()
-        assertThat(updated.likeCount).isEqualTo(0)
+        assertThat(updated.likeCount).isEqualTo(1)
         assertThat(updated.commentCount).isEqualTo(0)
     }
 
@@ -64,8 +70,8 @@ class QuestionStatsStreamListenerTest {
     fun `decrement action events never move stats counters below zero`() {
         stats.save(QuestionStatsEntity(questionId = 203))
 
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "203"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "203"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "203"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "203"))
 
         val updated = stats.findById(203).orElseThrow()
         assertThat(updated.likeCount).isZero()
@@ -78,6 +84,7 @@ class QuestionStatsStreamListenerTest {
         val viewPublisher = RecordingPublisher()
         val actionPublisher = RecordingPublisher()
         val publisher = reactionPublisher(viewPublisher, actionPublisher)
+        likes.save(QuestionLikeEntity(questionId = 606, userId = 11))
 
         assertThat(publisher.publishViewed(606, 10)).isTrue()
         assertThat(publisher.publishViewed(606, null)).isTrue()
@@ -86,8 +93,8 @@ class QuestionStatsStreamListenerTest {
         assertThat(publisher.publishUnliked(606, 10)).isTrue()
         assertThat(publisher.publishCommented(606, 11)).isTrue()
 
-        viewPublisher.requests.forEach { listener.processViewEvent(it.fields) }
-        actionPublisher.requests.forEach { listener.processActionEvent(it.fields) }
+        viewPublisher.requests.forEach { handler.processViewEvent(it.fields) }
+        actionPublisher.requests.forEach { handler.processActionEvent(it.fields) }
 
         val updated = stats.findById(606).orElseThrow()
         assertThat(updated.viewCount).isEqualTo(2)
@@ -97,13 +104,15 @@ class QuestionStatsStreamListenerTest {
 
     @Test
     fun `mixed stats events create missing row and converge to expected counts`() {
-        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "707"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "707"))
+        likes.save(QuestionLikeEntity(questionId = 707, userId = 20))
+
+        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_UNLIKED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENTED", "questionId" to "707"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_COMMENT_DELETED", "questionId" to "707"))
 
         val updated = stats.findById(707).orElseThrow()
         assertThat(updated.viewCount).isEqualTo(1)
@@ -113,7 +122,9 @@ class QuestionStatsStreamListenerTest {
 
     @Test
     fun `stream event creates stats row when stats row is missing`() {
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "303"))
+        likes.save(QuestionLikeEntity(questionId = 303, userId = 30))
+
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_LIKED", "questionId" to "303"))
 
         assertThat(stats.findById(303).orElseThrow().likeCount).isEqualTo(1)
     }
@@ -122,7 +133,7 @@ class QuestionStatsStreamListenerTest {
     fun `view event accepts record id fallback`() {
         stats.save(QuestionStatsEntity(questionId = 404))
 
-        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "recordId" to "404"))
+        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "recordId" to "404"))
 
         assertThat(stats.findById(404).orElseThrow().viewCount).isEqualTo(1)
     }
@@ -131,9 +142,9 @@ class QuestionStatsStreamListenerTest {
     fun `invalid ids and unknown action events are ignored`() {
         stats.save(QuestionStatsEntity(questionId = 505, likeCount = 2, commentCount = 3, viewCount = 4))
 
-        listener.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "not-a-number"))
-        listener.processActionEvent(mapOf("eventType" to "UNKNOWN", "questionId" to "505"))
-        listener.processActionEvent(mapOf("eventType" to "QUESTION_LIKED"))
+        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "not-a-number"))
+        handler.processActionEvent(mapOf("eventType" to "UNKNOWN", "questionId" to "505"))
+        handler.processActionEvent(mapOf("eventType" to "QUESTION_LIKED"))
 
         val updated = stats.findById(505).orElseThrow()
         assertThat(updated.likeCount).isEqualTo(2)

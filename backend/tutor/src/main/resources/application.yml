@@ -35,10 +35,10 @@ spring:
       ssl:
         enabled: ${REDIS_SSL:false}
   mail:
-    host: ${SMTP_HOST:}
-    port: ${SMTP_PORT:587}
-    username: ${SMTP_USERNAME:}
-    password: ${SMTP_PASSWORD:}
+    host: ${email.google.smtpHost:${SMTP_HOST:}}
+    port: ${email.google.smtpPort:${SMTP_PORT:587}}
+    username: ${email.google.smtpUsername:${SMTP_USERNAME:}}
+    password: ${email.google.smtpPassword:${SMTP_PASSWORD:}}
     properties:
       mail:
         smtp:
@@ -66,10 +66,10 @@ buddystuddy:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}
   apns:
-    team-id: ${APNS_TEAM_ID:}
-    key-id: ${APNS_KEY_ID:}
-    auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:}}
-    bundle-id: ${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}
+    team-id: ${notificatoin.push.apns.team-id:${APNS_TEAM_ID:}}
+    key-id: ${notificatoin.push.apns.key-id:${APNS_KEY_ID:}}
+    auth-key-p8: ${notificatoin.push.apns.private-key:${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:}}}
+    bundle-id: ${notificatoin.push.apns.bundle-id:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
     coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
@@ -81,7 +81,7 @@ buddystuddy:
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
-    from: ${SMTP_FROM:${SMTP_USERNAME:}}
+    from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

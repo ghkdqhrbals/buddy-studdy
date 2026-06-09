@@ -18,6 +18,11 @@ import com.buddystuddy.backend.auth.adapter.inbound.web.dto.PushTokenRequest
 import com.buddystuddy.backend.common.adapter.inbound.web.optionalPrincipal
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springframework.stereotype.Component
 import org.springframework.http.HttpStatus
@@ -32,18 +37,28 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1")
+@Tag(name = "Auth", description = "Device registration, access-token bootstrap, Google login, and email login APIs.")
 class AuthController(
     private val auth: AuthWebPort,
 ) {
+    @Operation(summary = "Register an iOS device", description = "Creates or refreshes an anonymous device session and returns device credentials plus an access token. This is the only app API call that cannot send X-Device-Id and X-Client-Secret because they do not exist yet.")
     @PostMapping("/devices/register")
     fun register(@Valid @RequestBody body: DeviceRegisterRequest) = auth.register(body)
 
+    @Operation(summary = "Issue an access token from device credentials", description = "Returns a fresh access token for a known device. iOS should send X-Device-Id and X-Client-Secret headers.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Access token issued."),
+        ApiResponse(responseCode = "401", description = "Invalid device credentials."),
+    )
     @PostMapping("/auth/token")
     fun token(
+        @Parameter(description = "Registered device id.", required = true)
         @RequestHeader("X-Device-Id") deviceId: String,
+        @Parameter(description = "Device client secret returned only at registration.", required = true)
         @RequestHeader("X-Client-Secret") clientSecret: String,
     ) = auth.token(deviceId, clientSecret)
 
+    @Operation(summary = "Sign in with Google", description = "Links the current device session to a Google account and returns a user profile plus a 90-day access token. Send device credentials on every login request; a stale bearer token is ignored on this public endpoint.")
     @PostMapping("/auth/google")
     fun google(
         @RequestBody body: GoogleLoginRequest,
@@ -52,6 +67,7 @@ class AuthController(
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
     ) = auth.google(body, authentication, deviceId, clientSecret)
 
+    @Operation(summary = "Request email verification code", description = "Sends a short-lived email verification code for sign-up or email login. Verification sessions are held in Redis with a short TTL.")
     @PostMapping("/auth/email/code")
     fun emailCode(
         @Valid @RequestBody body: EmailVerificationCodeRequest,
@@ -60,6 +76,7 @@ class AuthController(
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
     ): EmailVerificationCodeResponse = auth.emailCode(body, authentication, deviceId, clientSecret)
 
+    @Operation(summary = "Sign in with email", description = "Signs in with email/password and optional verification code, then links the authenticated account to the current device session.")
     @PostMapping("/auth/email")
     fun email(
         @Valid @RequestBody body: EmailLoginRequest,
@@ -68,7 +85,8 @@ class AuthController(
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
     ) = auth.email(body, authentication, deviceId, clientSecret)
 
-    @PutMapping("/me/push-token")
+    @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
+    @PutMapping("/push-token")
     fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
         auth.pushToken(body, authentication)
 }
@@ -115,8 +133,8 @@ class AuthWebAdapter(
                 if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) {
                     throw ApiException(
                         HttpStatus.UNAUTHORIZED,
-                        ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
-                        "Access token is required.",
+                        ApiErrorCode.AUTH_DEVICE_CREDENTIALS_REQUIRED,
+                        "Device credentials are required.",
                     )
                 }
                 issueDeviceToken.authenticateDevice(deviceId, clientSecret)

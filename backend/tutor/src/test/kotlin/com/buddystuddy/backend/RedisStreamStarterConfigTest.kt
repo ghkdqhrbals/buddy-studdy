@@ -18,24 +18,22 @@ class RedisStreamStarterConfigTest {
         )
 
     @Test
-    fun `producer routing bean is created when streams are enabled`() {
+    fun `streams enabled requires coordinator managed consumer`() {
         contextRunner
             .withPropertyValues("buddystuddy.streams.enabled=true")
             .run { context ->
-                assertThat(context).hasSingleBean(ProducerRoutingProperties::class.java)
-                val properties = context.getBean(ProducerRoutingProperties::class.java)
-                assertThat(properties.streamPrefix).isEqualTo("bs-test-push")
-                assertThat(properties.consumerGroupName).isEqualTo("bs-push-workers")
-                assertThat(properties.publishMaxAttempts).isEqualTo(2)
-                assertThat(properties.xadd.maxLen).isEqualTo(1234)
-                assertThat(properties.xadd.approximateTrimming).isTrue()
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure)
+                    .hasMessageContaining("coordinatorManagedConsumer")
             }
     }
 
     @Test
-    fun `producer routing bean is created by default`() {
+    fun `streams require coordinator managed consumer by default`() {
         contextRunner.run { context ->
-            assertThat(context).hasSingleBean(ProducerRoutingProperties::class.java)
+            assertThat(context).hasFailed()
+            assertThat(context.startupFailure)
+                .hasMessageContaining("coordinatorManagedConsumer")
         }
     }
 

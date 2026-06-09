@@ -10,7 +10,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
-import com.buddystuddy.backend.study.application.port.outbound.SchedulePort
+import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
@@ -21,7 +21,7 @@ import java.time.Instant
 @Component
 class QuestionScheduler(
     private val properties: BuddyStuddyProperties,
-    private val schedules: SchedulePort,
+    private val studies: StudyPort,
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
@@ -36,40 +36,42 @@ class QuestionScheduler(
     fun runScheduled() {
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
-        schedules.findDue(now, PageRequest.of(0, 50)).forEach { schedule ->
+        studies.findDue(now, PageRequest.of(0, 50)).forEach { study ->
             try {
-                val userId = schedule.userId
-                val user = userId?.let { users.findById(it).orElse(null) }
-                val pending = questions.countPendingForStudy(schedule.deviceId, userId, schedule.topic)
+                val userId = study.userId
+                val user = users.findById(userId).orElse(null)
+                val appLanguage = user?.appLanguage ?: "ko"
+                val pending = questions.countPendingForStudy(study.id)
                 if (pending >= properties.scheduler.maxPendingPerStudy) {
-                    schedule.lastError = "Pending question limit reached ($pending)."
-                    schedule.nextDueAt = now.plusSeconds(5 * 60)
-                    schedule.updatedAt = now
-                    log.info("scheduled_question_skipped_pending deviceId={} userId={} topic={} pending={}", schedule.deviceId, userId, schedule.topic, pending)
+                    study.lastError = "Pending question limit reached ($pending)."
+                    study.nextDueAt = now.plusSeconds(5 * 60)
+                    study.updatedAt = now
+                    log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} topic={} pending={}", study.deviceId, userId, study.id, study.topic, pending)
                     return@forEach
                 }
-                val apiKey = cipher.decrypt(user?.openaiApiKeyCipher) ?: cipher.decrypt(schedule.openaiApiKeyCipher) ?: properties.openai.apiKey
+                val apiKey = cipher.decrypt(user?.openaiApiKeyCipher) ?: properties.openai.apiKey
                 if (apiKey.isBlank()) {
-                    schedule.lastError = "No OpenAI API key configured for schedule."
-                    schedule.nextDueAt = now.plusSeconds(5 * 60)
-                    schedule.updatedAt = now
+                    study.lastError = "No OpenAI API key configured for study."
+                    study.nextDueAt = now.plusSeconds(5 * 60)
+                    study.updatedAt = now
                     return@forEach
                 }
-                val recent = questions.findVisibleByUser(userId ?: -1, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
-                val generated = openAI.generateQuestion(apiKey, schedule.openaiModel, schedule.topic, schedule.difficultyLevel, schedule.appLanguage, schedule.customPrompt, recent)
+                val recent = questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+                val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
                 val saved = questions.save(
                     QuestionEntity(
-                        deviceId = schedule.deviceId,
+                        deviceId = study.deviceId,
                         userId = userId,
+                        studyId = study.id,
                         question = generated.question,
                         hint = generated.hint,
-                        topic = schedule.topic,
-                        difficultyLevel = schedule.difficultyLevel,
-                        scheduledFor = schedule.nextDueAt ?: now,
+                        topic = study.topic,
+                        difficultyLevel = study.difficultyLevel,
+                        scheduledFor = study.nextDueAt ?: now,
                         sentAt = now,
                         status = "ungraded",
                         source = "scheduled",
-                        publicQuestion = schedule.questionPublic,
+                        publicQuestion = study.questionPublic,
                         createdAt = now,
                         updatedAt = now,
                     )
@@ -79,27 +81,27 @@ class QuestionScheduler(
                     QuestionPushRequest(
                         recordId = saved.id,
                         createdAt = now,
-                        deviceId = schedule.deviceId,
+                        deviceId = study.deviceId,
                         userId = userId,
                         question = generated.question,
                         expectedAnswerHint = generated.hint,
-                        topic = schedule.topic,
-                        difficultyLevel = schedule.difficultyLevel,
-                        language = schedule.appLanguage,
-                        sound = schedule.notificationSound,
-                        intervalMinutes = schedule.intervalMinutes,
+                        topic = study.topic,
+                        difficultyLevel = study.difficultyLevel,
+                        language = appLanguage,
+                        sound = study.notificationSound,
+                        intervalMinutes = study.intervalMinutes,
                     )
                 )
-                schedule.lastSentAt = now
-                schedule.nextDueAt = now.plusSeconds(schedule.intervalMinutes.toLong() * 60)
-                schedule.lastError = if (published) null else "Push stream publish failed."
-                schedule.updatedAt = now
-                log.info("scheduled_question_created deviceId={} userId={} topic={} questionId={} streamPublished={}", schedule.deviceId, userId, schedule.topic, saved.id, published)
+                study.lastSentAt = now
+                study.nextDueAt = now.plusSeconds(study.intervalMinutes.toLong() * 60)
+                study.lastError = if (published) null else "Push stream publish failed."
+                study.updatedAt = now
+                log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} streamPublished={}", study.deviceId, userId, study.id, study.topic, saved.id, published)
             } catch (error: Exception) {
-                schedule.lastError = error.message ?: error.javaClass.simpleName
-                schedule.nextDueAt = now.plusSeconds(5 * 60)
-                schedule.updatedAt = now
-                log.warn("scheduled_question_failed deviceId={} userId={} topic={} error={}", schedule.deviceId, schedule.userId, schedule.topic, error.message)
+                study.lastError = error.message ?: error.javaClass.simpleName
+                study.nextDueAt = now.plusSeconds(5 * 60)
+                study.updatedAt = now
+                log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
             }
         }
     }

@@ -12,19 +12,31 @@ struct HistoryView: View {
     @State private var isRefreshing = false
     @State private var isSearchVisible = false
     @State private var searchFocusTask: Task<Void, Never>?
+    @State private var recordSearchDebounceTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private let pageSize = 10
 
     private var orderedRecords: [StudyRecord] {
-        appState.studyRecords
+        recordsSource
             .filter { $0.gradingResult != nil }
             .sorted { sortDate(for: $0) > sortDate(for: $1) }
+    }
+
+    private var recordsSource: [StudyRecord] {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let searchResults = appState.recordSearchResults {
+            return searchResults
+        }
+        return appState.studyRecords
     }
 
     private var filteredRecords: [StudyRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else {
+            return orderedRecords
+        }
+        if appState.recordSearchResults != nil {
             return orderedRecords
         }
 
@@ -203,6 +215,7 @@ struct HistoryView: View {
         .onChange(of: searchText) {
             resetVisibleCount()
             selectedRecordID = nil
+            scheduleRecordSearchReload()
         }
         .onChange(of: appState.focusedRecordRequest) {
             showFocusedRecord()
@@ -222,6 +235,8 @@ struct HistoryView: View {
             closeRecordSearch(clearText: false)
         }
         .onDisappear {
+            recordSearchDebounceTask?.cancel()
+            recordSearchDebounceTask = nil
             searchFocusTask?.cancel()
             searchFocusTask = nil
         }
@@ -341,6 +356,7 @@ struct HistoryView: View {
 
         if clearText {
             searchText = ""
+            appState.clearBackendRecordSearchResults()
         }
 
         withAnimation(.smooth(duration: 0.22)) {
@@ -360,6 +376,24 @@ struct HistoryView: View {
         }
         if index >= max(visibleRecords.count - 2, 0) {
             visibleCount = min(visibleRecords.count + pageSize, filteredRecords.count)
+        }
+    }
+
+    private func scheduleRecordSearchReload() {
+        recordSearchDebounceTask?.cancel()
+        let query = searchText
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            appState.clearBackendRecordSearchResults()
+            return
+        }
+
+        recordSearchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+            await appState.searchBackendRecords(query: query)
+            resetVisibleCount()
         }
     }
 

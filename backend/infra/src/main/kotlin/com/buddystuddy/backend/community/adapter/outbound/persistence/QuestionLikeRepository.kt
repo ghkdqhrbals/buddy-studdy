@@ -8,4 +8,5 @@ interface QuestionLikeRepository : JpaRepository<QuestionLikeEntity, Long>, Ques
     fun findByQuestionIdAndUserId(questionId: Long, userId: Long): QuestionLikeEntity?
     override fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
     override fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
+    override fun countByQuestionId(questionId: Long): Long
 }

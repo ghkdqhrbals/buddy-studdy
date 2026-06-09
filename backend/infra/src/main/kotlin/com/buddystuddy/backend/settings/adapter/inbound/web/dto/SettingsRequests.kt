@@ -23,6 +23,6 @@ data class ScheduleRequest(
     val appLanguage: String = "ko",
     val openaiModel: String = "gpt-5.4",
     @field:Min(10) @field:Max(10_000) val maxHistoryCount: Int = 100,
-    val isQuestionPublic: Boolean = false,
+    val isQuestionPublic: Boolean = true,
     @field:Valid val schedules: List<ScheduleItemRequest>? = null,
 )

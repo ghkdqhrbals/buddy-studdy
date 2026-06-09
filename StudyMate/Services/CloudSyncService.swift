@@ -6,8 +6,8 @@ import Security
 
 @MainActor
 protocol CloudSyncServiceProtocol {
-    func fetchSnapshot() async throws -> CloudSyncSnapshot?
-    func saveSnapshot(_ snapshot: CloudSyncSnapshot) async throws
+    func fetchState() async throws -> CloudSyncState?
+    func saveState(_ state: CloudSyncState) async throws
     func ensureQuestionPushSubscription(language: AppLanguage, sound: NotificationSoundOption) async throws
     func saveQuestionPush(question: QuestionItem, settings: StudySettings) async throws
     func fetchQuestionPush(recordName: String) async throws -> CloudQuestionPush?
@@ -16,13 +16,13 @@ protocol CloudSyncServiceProtocol {
 @MainActor
 final class CloudSyncService: CloudSyncServiceProtocol {
     nonisolated static let defaultContainerIdentifier = "iCloud.io.github.ghkdqhrbals.StudyMate"
-    nonisolated static let snapshotRecordType = "StudyMateSnapshot"
+    nonisolated static let stateRecordType = "StudyMateState"
     nonisolated static let questionPushRecordType = "StudyMateQuestionPush"
     nonisolated static let questionPushSubscriptionID = "studymate-question-push-v1"
 
     private let container: CKContainer
     private let database: CKDatabase
-    private let recordID = CKRecord.ID(recordName: "private-study-snapshot")
+    private let recordID = CKRecord.ID(recordName: "private-study-state")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -54,27 +54,27 @@ final class CloudSyncService: CloudSyncServiceProtocol {
         #endif
     }
 
-    func fetchSnapshot() async throws -> CloudSyncSnapshot? {
+    func fetchState() async throws -> CloudSyncState? {
         do {
             let record = try await database.record(for: recordID)
-            return try snapshot(from: record)
+            return try state(from: record)
         } catch let error as CKError where error.code == .unknownItem {
             return nil
         }
     }
 
-    func saveSnapshot(_ snapshot: CloudSyncSnapshot) async throws {
+    func saveState(_ state: CloudSyncState) async throws {
         let record: CKRecord
 
         do {
             record = try await database.record(for: recordID)
         } catch let error as CKError where error.code == .unknownItem {
-            record = CKRecord(recordType: Self.snapshotRecordType, recordID: recordID)
+            record = CKRecord(recordType: Self.stateRecordType, recordID: recordID)
         }
 
-        let data = try encoder.encode(snapshot)
-        record["updatedAt"] = snapshot.updatedAt as NSDate
-        record["schemaVersion"] = snapshot.schemaVersion as NSNumber
+        let data = try encoder.encode(state)
+        record["updatedAt"] = state.updatedAt as NSDate
+        record["schemaVersion"] = state.schemaVersion as NSNumber
         record["payload"] = try makeAsset(data: data)
 
         _ = try await database.save(record)
@@ -135,15 +135,15 @@ final class CloudSyncService: CloudSyncServiceProtocol {
         return "question-\(milliseconds)"
     }
 
-    private func snapshot(from record: CKRecord) throws -> CloudSyncSnapshot? {
+    private func state(from record: CKRecord) throws -> CloudSyncState? {
         if let asset = record["payload"] as? CKAsset,
            let fileURL = asset.fileURL {
             let data = try Data(contentsOf: fileURL)
-            return try decoder.decode(CloudSyncSnapshot.self, from: data)
+            return try decoder.decode(CloudSyncState.self, from: data)
         }
 
         if let data = record["payloadData"] as? Data {
-            return try decoder.decode(CloudSyncSnapshot.self, from: data)
+            return try decoder.decode(CloudSyncState.self, from: data)
         }
 
         return nil
@@ -154,7 +154,7 @@ final class CloudSyncService: CloudSyncServiceProtocol {
             .appendingPathComponent("StudyMateCloudSync", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let fileURL = directory.appendingPathComponent("snapshot-\(UUID().uuidString).json")
+        let fileURL = directory.appendingPathComponent("state-\(UUID().uuidString).json")
         try data.write(to: fileURL, options: .atomic)
         return CKAsset(fileURL: fileURL)
     }

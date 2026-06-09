@@ -3,25 +3,30 @@ spring:
     activate:
       on-profile: dev
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/dev}
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystuddy}
-    username: ${DATABASE_USERNAME:buddystuddy}
-    password: ${DATABASE_PASSWORD:local-password}
   flyway:
-    enabled: ${FLYWAY_ENABLED:false}
+    enabled: false
   cloud:
     aws:
       region:
-        static: ${AWS_REGION:ap-northeast-2}
+        static: ap-northeast-2
       secretsmanager:
         enabled: true
-        region: ${AWS_REGION:ap-northeast-2}
+        region: ap-northeast-2
+
+springdoc:
+  api-docs:
+    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    path: /docs
+    url: /v3/api-docs
 
 buddystuddy:
   scheduler:
     enabled: ${SCHEDULER_ENABLED:false}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:false}
+    enabled: true
   openapi:
-    enabled: ${ENABLE_OPENAPI_DOCS:true}
+    enabled: true
     access-token: ${OPENAPI_ACCESS_TOKEN:dev-openapi}

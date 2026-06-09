@@ -48,6 +48,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by the stream starter and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystuddy/dev` for the `dev` profile and `buddystuddy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_STREAM_COORDINATOR_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
+  Spring property keys are also supported by Spring Cloud AWS, for example `spring.datasource.url`, `spring.datasource.username`, and `spring.datasource.password`. If one of these styles is used for the datasource URL, keep the matching username and password in the same style or provide them as environment variables.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -59,6 +60,8 @@ docker compose up --build
 ```
 
 Local runs use PostgreSQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=dev`.
+
+For iPhone testing against a backend running on this Mac, see [Local Backend Tunnel](../docs/LOCAL_BACKEND_TUNNEL.md).
 
 ## Runtime Profiles
 
@@ -94,21 +97,23 @@ See [API.md](API.md) for request/response examples.
 
 - `GET /health`
 - `POST /api/v1/devices/register`
-- `PUT /api/v1/me/push-token`
-- `PUT /api/v1/me/schedule`
-- `GET /api/v1/me/settings`
-- `PUT /api/v1/me/settings`
-- `GET /api/v1/me/profile`
-- `PATCH /api/v1/me/profile`
-- `DELETE /api/v1/me/profile`
-- `GET /api/v1/me/api`
-- `POST /api/v1/me/api/validate`
-- `GET /api/v1/me/snapshot`
-- `GET /api/v1/me/stats`
-- `POST /api/v1/me/questions`
-- `GET /api/v1/me/records`
-- `POST /api/v1/me/records/{record_id}/answer`
-- `DELETE /api/v1/me/records/{record_id}`
+- `PUT /api/v1/push-token`
+- `GET /api/v1/settings`
+- `PUT /api/v1/settings`
+- `POST /api/v1/test/push`
+- `GET /api/v1/studies/{study_id}/settings`
+- `PUT /api/v1/studies/{study_id}/settings`
+- `GET /api/v1/profile`
+- `PATCH /api/v1/profile`
+- `DELETE /api/v1/profile`
+- `GET /api/v1/api`
+- `POST /api/v1/api/validate`
+- `GET /api/v1/studies`
+- `GET /api/v1/stats`
+- `POST /api/v1/questions`
+- `GET /api/v1/records`
+- `POST /api/v1/records/{record_id}/answer`
+- `DELETE /api/v1/records/{record_id}`
 - `POST /api/v1/admin/scheduler/run-once`
 
 Protected endpoints require:
@@ -125,7 +130,7 @@ Spring Boot Actuator serves health checks at `/health` and `/api/v1/health`.
 - In deploy workflow, a logical backup is generated on each rollout as:
   `backups/buddystuddy-YYYYMMDDTHHMMSS.dump`.
 - Locally, `docker compose` also starts a dedicated backup service (`buddystuddy-db-backups`) that writes
-  daily snapshots to that same 14-day retention policy.
+  daily states to that same 14-day retention policy.
 
 Backup artifacts are written to the mounted backup volume:
 

@@ -95,7 +95,7 @@ The app must store the device credentials locally because the backend does not r
 ### Update Push Token
 
 ```http
-PUT /api/v1/me/push-token
+PUT /api/v1/push-token
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
@@ -110,6 +110,39 @@ Request:
 ```
 
 Use this after iOS returns an APNs token for an already registered backend device. This preserves the same backend identity instead of creating a second device.
+
+### Send Test Push
+
+```http
+POST /api/v1/test/push
+Content-Type: application/json
+Authorization: Bearer <accessToken>
+```
+
+Request body is optional. When omitted, the backend sends a default BuddyStuddy test notification to the authenticated device's saved APNs token.
+
+```json
+{
+  "title": "BuddyStuddy",
+  "body": "Test push",
+  "topic": "Test",
+  "recordId": "test",
+  "sound": "default",
+  "deepLink": "buddystuddy://test-push"
+}
+```
+
+Response:
+
+```json
+{
+  "sent": true,
+  "provider": "APNS",
+  "deviceId": "generated-device-id",
+  "topic": "Test",
+  "recordId": "test"
+}
+```
 
 ### Login And Profile
 
@@ -200,9 +233,9 @@ Response:
 Profile endpoints:
 
 ```http
-GET /api/v1/me/profile
-PATCH /api/v1/me/profile
-DELETE /api/v1/me/profile
+GET /api/v1/profile
+PATCH /api/v1/profile
+DELETE /api/v1/profile
 GET /api/v1/public/users/{userId}/profile
 ```
 
@@ -226,7 +259,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/me/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
+`DELETE /api/v1/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
 
 ### Report Public Question
 
@@ -247,11 +280,10 @@ Request:
 
 Reports are always stored in PostgreSQL. If `REPORT_EMAIL_TO` and SMTP settings are configured, the backend also forwards the report by email.
 
-### Upsert Study Settings And Schedule
+### Upsert Study Settings
 
 ```http
-PUT /api/v1/me/schedule
-PUT /api/v1/me/settings
+PUT /api/v1/settings
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
@@ -273,8 +305,6 @@ Request:
 }
 ```
 
-`/settings` is the clearer settings endpoint. `/schedule` remains as a backward-compatible alias.
-
 Fields:
 
 - `topic`: study topic, 1-120 characters.
@@ -284,7 +314,7 @@ Fields:
 - `openaiApiKey`: optional per-device OpenAI API key. If provided, it is encrypted at rest using `BACKEND_MASTER_KEY`.
 - `notificationSound`: optional APNs sound name.
 - `customPrompt`: optional tutor instruction.
-- `appLanguage`: `ko` or `en`. This also controls question/feedback language.
+- `appLanguage`: user-level app language, `ko` or `en`. It also controls generated question and feedback language.
 - `openaiModel`: selected model. Defaults to `gpt-5.4`.
 
 The `/api/v1/openai/models` endpoint returns all supported model IDs and metadata:
@@ -343,16 +373,24 @@ Response:
 ### Settings
 
 ```http
-GET /api/v1/me/settings
+GET /api/v1/settings
 Authorization: Bearer <accessToken>
 ```
 
-Returns the same backend settings object used in the startup snapshot.
+Returns the latest saved study settings. For editing one study room, prefer the study-scoped endpoint:
+
+```http
+GET /api/v1/studies/{studyId}/settings
+PUT /api/v1/studies/{studyId}/settings
+Authorization: Bearer <accessToken>
+```
+
+`studyId` is the database-generated id returned in each study settings response.
 
 ### API Status
 
 ```http
-GET /api/v1/me/api
+GET /api/v1/api
 Authorization: Bearer <accessToken>
 ```
 
@@ -361,7 +399,7 @@ Returns whether the device has an encrypted OpenAI API key configured, the selec
 ### Validate API Key
 
 ```http
-POST /api/v1/me/api/validate
+POST /api/v1/api/validate
 Authorization: Bearer <accessToken>
 ```
 
@@ -377,26 +415,25 @@ Validates the device's stored regular OpenAI API key through the backend and ret
 
 The iOS/macOS apps must not validate keys by calling OpenAI directly.
 
-### Snapshot
+### My Studies
 
 ```http
-GET /api/v1/me/snapshot?limit=500&offset=0
+GET /api/v1/studies?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Returns backend settings plus a paged record cache for app startup and pull-to-refresh.
-The snapshot also includes `api` and `stats` objects so clients can render API status and topic statistics without recomputing them locally.
+Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
 
 ### Records
 
 ```http
-GET /api/v1/me/records?limit=100&offset=0
-GET /api/v1/me/records/{recordId}
-PATCH /api/v1/me/records/{recordId}/answer
-POST /api/v1/me/records/{recordId}/answer
-POST /api/v1/me/records/{recordId}/skip
-DELETE /api/v1/me/records/{recordId}
-DELETE /api/v1/me/records
+GET /api/v1/records?limit=100&offset=0
+GET /api/v1/records/{recordId}
+PATCH /api/v1/records/{recordId}/answer
+POST /api/v1/records/{recordId}/answer
+POST /api/v1/records/{recordId}/skip
+DELETE /api/v1/records/{recordId}
+DELETE /api/v1/records
 ```
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
@@ -405,8 +442,8 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 ### Statistics
 
 ```http
-GET /api/v1/me/stats?period=all&sort=level&limit=8&offset=0
-GET /api/v1/me/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
+GET /api/v1/stats?period=all&sort=level&limit=8&offset=0
+GET /api/v1/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
 Authorization: Bearer <accessToken>
 ```
 
@@ -423,7 +460,7 @@ The response is topic-first and includes total response/topic counts, topic alia
 ### Manual Question
 
 ```http
-POST /api/v1/me/questions
+POST /api/v1/questions
 Authorization: Bearer <accessToken>
 ```
 
@@ -432,7 +469,7 @@ Generates one question using the device settings and stored OpenAI API key, stor
 ### Delete Device
 
 ```http
-DELETE /api/v1/me/device
+DELETE /api/v1/device
 Authorization: Bearer <accessToken>
 ```
 

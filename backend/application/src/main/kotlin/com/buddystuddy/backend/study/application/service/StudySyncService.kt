@@ -1,33 +1,92 @@
 package com.buddystuddy.backend.study.application.service
 
-import com.buddystuddy.backend.admin.application.port.inbound.AdminUseCase
-import com.buddystuddy.backend.study.application.model.BackendSyncResponse
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
-import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
-import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystuddy.backend.study.application.model.StudyPageResponse
+import com.buddystuddy.backend.study.application.model.StudyRoomResponse
+import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.study.domain.entity.StudyEntity
+import com.buddystuddy.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRecordState
+import com.buddystuddy.study.domain.StudyRecordStats
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 @Service
 class StudySyncService(
-    private val settingsUseCase: SettingsUseCase,
-    private val adminUseCase: AdminUseCase,
-    private val recordsUseCase: BrowseRecordsUseCase,
-    private val statsUseCase: GetStudyStatsUseCase,
+    private val studies: StudyPort,
+    private val questions: QuestionPort,
+    private val questionStats: QuestionStatsPort,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
-    override fun sync(principal: Principal, limit: Int, offset: Int): BackendSyncResponse {
-        val records = recordsUseCase.records(principal, limit, offset)
-        return BackendSyncResponse(
-            settings = settingsUseCase.settings(principal),
-            api = adminUseCase.apiStatus(principal),
-            records = records.records,
-            stats = statsUseCase.stats(principal, 8, 0),
-            totalCount = records.totalCount,
+    override fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val pageable = PageRequest.of(offset / limit, limit)
+        val page = if (search == null) {
+            studies.findByUserId(principal.userId, pageable)
+        } else {
+            studies.findByUserIdAndQuery(principal.userId, search, pageable)
+        }
+        return StudyPageResponse(
+            studies = page.content.map { it.toStudyRoomResponse() },
+            totalCount = page.totalElements,
+            limit = limit,
+            offset = offset,
             serverTime = Instant.now(),
         )
     }
+
+    private fun StudyEntity.toStudyRoomResponse(): StudyRoomResponse {
+        val pending = questions.findPendingByStudyId(id, PageRequest.of(0, 1))
+            .content
+            .firstOrNull()
+            ?.let { question ->
+                question.toStudyRecord(questionStats.findById(question.id).orElse(null)).toProjection().toRecordResponse()
+            }
+
+        return StudyRoomResponse(
+        id = id,
+        topic = topic,
+        difficultyLevel = difficultyLevel,
+        intervalMinutes = intervalMinutes,
+        enabled = enabled,
+        notificationSound = notificationSound,
+        customPrompt = customPrompt,
+        openaiModel = openaiModel,
+        maxHistoryCount = maxHistoryCount,
+        isQuestionPublic = questionPublic,
+        nextDueAt = nextDueAt,
+        lastSentAt = lastSentAt,
+        lastError = lastError,
+        pendingQuestion = pending,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )
+    }
+
+    private fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
+        StudyRecordState(
+            id = id,
+            question = question,
+            hint = hint,
+            createdAt = createdAt,
+            answer = answer,
+            score = score,
+            correct = correct,
+            feedback = feedback,
+            explanation = explanation,
+            topic = topic,
+            difficultyLevel = difficultyLevel,
+            answeredAt = answeredAt,
+            publicQuestion = publicQuestion,
+        ),
+        stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
+    )
 }

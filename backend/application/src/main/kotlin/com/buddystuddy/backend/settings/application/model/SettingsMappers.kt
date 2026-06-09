@@ -1,22 +1,26 @@
 package com.buddystuddy.backend.settings.application.model
 
-import com.buddystuddy.study.domain.entity.ScheduleEntity
 import com.buddystuddy.account.domain.entity.UserEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 
-fun ScheduleEntity?.toSettings(user: UserEntity?) = this?.let {
-    BackendSettingsResponse(
+fun StudyEntity?.toSettings(user: UserEntity?) = this?.let {
+    StudySettingsResponse(
+        id = it.id,
         topic = it.topic,
         difficultyLevel = it.difficultyLevel,
         intervalMinutes = it.intervalMinutes,
         enabled = it.enabled,
         notificationSound = it.notificationSound,
         customPrompt = it.customPrompt,
-        appLanguage = it.appLanguage,
+        appLanguage = user?.appLanguage ?: "ko",
         openaiModel = it.openaiModel,
         maxHistoryCount = it.maxHistoryCount,
         isQuestionPublic = it.questionPublic,
-        openaiKeyConfigured = !(user?.openaiApiKeyCipher ?: it.openaiApiKeyCipher).isNullOrBlank(),
+        openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
         nextDueAt = it.nextDueAt,
         lastError = it.lastError,
     )
-} ?: BackendSettingsResponse(openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank())
+} ?: StudySettingsResponse(
+    appLanguage = user?.appLanguage ?: "ko",
+    openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
+)

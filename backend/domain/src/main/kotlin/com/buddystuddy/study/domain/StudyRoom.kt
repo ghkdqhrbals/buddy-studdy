@@ -24,6 +24,7 @@ class StudyRoom private constructor(
         source: String,
         now: Instant = Instant.now(),
     ) = StudyRoomQuestionDraft(
+        studyId = schedule.id,
         deviceId = schedule.deviceId,
         userId = schedule.userId,
         question = question,
@@ -47,8 +48,9 @@ class StudyRoom private constructor(
 class StudyRoomPendingLimitExceeded(message: String) : RuntimeException(message)
 
 data class StudyRoomSchedule(
+    val id: Long,
     val deviceId: String,
-    val userId: Long?,
+    val userId: Long,
     val topic: String,
     val difficultyLevel: Int,
     val openaiModel: String,
@@ -58,8 +60,9 @@ data class StudyRoomSchedule(
 )
 
 data class StudyRoomQuestionDraft(
+    val studyId: Long,
     val deviceId: String,
-    val userId: Long?,
+    val userId: Long,
     val question: String,
     val hint: String?,
     val topic: String,

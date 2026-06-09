@@ -15,6 +15,7 @@ import com.buddystuddy.community.domain.entity.QuestionLikeEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.community.domain.entity.ReportEntity
 import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
+import com.buddystuddy.backend.community.application.model.CommunityCommentDeleteResponse
 import com.buddystuddy.backend.community.application.model.CommunityCommentsResponse
 import com.buddystuddy.backend.community.application.model.CommunityLikeResponse
 import com.buddystuddy.backend.community.application.model.CommunityQuestionResponse
@@ -35,6 +36,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 
 @Service
 class CommunityService(
@@ -47,13 +49,13 @@ class CommunityService(
     private val reactions: PublicQuestionReactionPublishPort,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override fun publicQuestions(principal: Principal?, topic: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override fun publicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
-        val normalizedTopic = topic?.takeIf { it.isNotBlank() }
-        val page = if (normalizedTopic == null) {
+        val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val page = if (search == null) {
             questions.findPublicAnswered(pageable)
         } else {
-            questions.findPublicAnsweredByTopic(normalizedTopic, pageable)
+            questions.findPublicAnsweredByQuery(search, pageable)
         }
         val rows = page.content.map { community(it, principal) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
@@ -69,21 +71,19 @@ class CommunityService(
     @Transactional
     override fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
         publicAnsweredQuestion(id)
-        var delta = 0
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
-                delta = 1
                 reactions.publishLiked(id, principal.userId)
             }
         } else {
             if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
-                delta = -1
                 reactions.publishUnliked(id, principal.userId)
             }
         }
-        val stats = questionStats.findById(id).orElse(QuestionStatsEntity(questionId = id))
-        return CommunityLikeResponse(id.toString(), (stats.likeCount + delta).coerceAtLeast(0), liked)
+        val likeCount = likes.countByQuestionId(id).toInt()
+        overwriteLikeCount(id, likeCount)
+        return CommunityLikeResponse(id.toString(), likeCount, liked)
     }
 
     @Transactional
@@ -92,6 +92,23 @@ class CommunityService(
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         reactions.publishCommented(id, principal.userId)
         return saved.toResponse(userProfile(principal.userId))
+    }
+
+    @Transactional
+    override fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse {
+        publicAnsweredQuestion(id)
+        val comment = comments.findByIdAndQuestionIdAndDeletedAtIsNull(commentId, id)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Comment not found.")
+        if (comment.userId != principal.userId) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Comment not found.")
+        }
+
+        val now = Instant.now()
+        comment.deletedAt = now
+        comment.updatedAt = now
+        comments.save(comment)
+        reactions.publishCommentDeleted(id, principal.userId)
+        return CommunityCommentDeleteResponse(comment.id.toString(), id.toString())
     }
 
     @Transactional(readOnly = true)
@@ -131,6 +148,13 @@ class CommunityService(
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =
         questions.findPublicAnsweredById(id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+
+    private fun overwriteLikeCount(questionId: Long, likeCount: Int) {
+        val now = Instant.now()
+        if (questionStats.setLikeCount(questionId, likeCount, now) == 0) {
+            questionStats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
+        }
+    }
 
     private fun userProfile(id: Long) = users.findById(id).orElseThrow {
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")

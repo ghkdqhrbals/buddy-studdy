@@ -4,7 +4,10 @@ import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceComma
 import com.buddystuddy.backend.auth.application.service.LoginService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.TestPropertySource
@@ -27,6 +30,7 @@ import java.net.http.HttpResponse
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
+@ExtendWith(OutputCaptureExtension::class)
 class SecurityIntegrationTest {
     @Autowired lateinit var login: LoginService
     @LocalServerPort var port: Int = 0
@@ -41,7 +45,7 @@ class SecurityIntegrationTest {
 
     @Test
     fun `protected endpoints return unified auth error without access token`() {
-        val response = get("/api/v1/me/profile")
+        val response = get("/api/v1/profile")
 
         assertThat(response.statusCode()).isEqualTo(401)
         assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
@@ -49,18 +53,81 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `invalid bearer token is rejected before controller execution`() {
-        val response = get("/api/v1/me/profile", "not-a-token")
+    fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput) {
+        val response = get("/api/v1/profile", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
         assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(output.out)
+            .contains("api_auth_failed")
+            .contains("path=/api/v1/profile")
+            .contains("status=401")
+            .contains("code=AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `invalid bearer token is ignored on public endpoints`() {
+        val response = get("/api/v1/public/questions", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `unknown non api scanner paths return not found without auth warning`(output: CapturedOutput) {
+        val response = get("/wp-su.php")
+
+        assertThat(response.statusCode()).isEqualTo(404)
+        assertThat(response.body()).doesNotContain("AUTH_ACCESS_TOKEN_REQUIRED")
+        assertThat(output.out)
+            .doesNotContain("api_auth_failed")
+            .doesNotContain("path=/wp-su.php")
+    }
+
+    @Test
+    fun `invalid bearer token on unknown non api path is ignored before not found`(output: CapturedOutput) {
+        val response = get("/ZSLeDE.php", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(404)
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(output.out)
+            .doesNotContain("api_auth_failed")
+            .doesNotContain("path=/ZSLeDE.php")
+    }
+
+    @Test
+    fun `invalid bearer token does not block login endpoints before controller handling`() {
+        val response = post("/api/v1/auth/google", """{"idToken":"invalid-google-token"}""", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_DEVICE_CREDENTIALS_REQUIRED")
+        assertThat(response.body()).contains("Device credentials are required.")
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `new email login without verification code returns email verification error`() {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+
+        val response = post(
+            path = "/api/v1/auth/email",
+            body = """{"email":"new-tester@example.com","password":"password123"}""",
+            headers = mapOf(
+                "X-Device-Id" to auth.deviceId,
+                "X-Client-Secret" to auth.clientSecret,
+            )
+        )
+
+        assertThat(response.statusCode()).isEqualTo(403)
+        assertThat(response.body()).contains("AUTH_EMAIL_VERIFICATION_REQUIRED")
+        assertThat(response.body()).contains("Email verification code is required.")
     }
 
     @Test
     fun `valid bearer token reaches protected endpoint with security principal`() {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
-        val response = get("/api/v1/me/profile", auth.accessToken)
+        val response = get("/api/v1/profile", auth.accessToken)
 
         assertThat(response.statusCode()).isEqualTo(200)
         assertThat(response.body()).contains("\"displayName\":\"Buddy\"")
@@ -71,6 +138,22 @@ class SecurityIntegrationTest {
         if (!bearerToken.isNullOrBlank()) {
             builder.header("Authorization", "Bearer $bearerToken")
         }
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
+    private fun post(
+        path: String,
+        body: String,
+        bearerToken: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+        if (!bearerToken.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $bearerToken")
+        }
+        headers.forEach { (key, value) -> builder.header(key, value) }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 }

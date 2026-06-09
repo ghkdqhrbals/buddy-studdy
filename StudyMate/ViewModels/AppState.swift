@@ -99,6 +99,8 @@ final class AppState: ObservableObject {
     @Published var apiTrafficLogs: [APITrafficLogEntry] = []
     @Published var isAPIDebugPanelPresented = false
     @Published var isDebuggingEnabled: Bool
+    @Published var debugBackendBaseURL: String
+    @Published var draftDebugBackendBaseURL: String
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var notificationLandingMessage: String?
@@ -112,6 +114,8 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
+    @Published var homeStudySearchResults: [StudyCategory]? = nil
+    @Published var recordSearchResults: [StudyRecord]? = nil
 
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
@@ -141,7 +145,8 @@ final class AppState: ObservableObject {
     @Published var profileAvatarColorSeed: String
 
     private let settingsStore: SettingsStore
-    private let remotePushBackendClient: RemotePushBackendClientProtocol
+    private var remotePushBackendClient: RemotePushBackendClientProtocol
+    private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
@@ -151,14 +156,14 @@ final class AppState: ObservableObject {
     private var didStart = false
     private var savedSettings: StudySettings
     private var savedAPIKey: String
+    private var savedDebugBackendBaseURL: String
     private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
-    private var didReceiveCloudSnapshotWhileEditing = false
-    private var didReceiveBackendSnapshotWhileEditing = false
-    private var pendingBackendSnapshotWhileEditing: BackendSnapshot?
+    private var didReceiveCloudStateWhileEditing = false
     private var backendStatsRequestID = UUID()
     private var communityQuestionLoadRequestID = UUID()
     private var apiTrafficLogCancellable: AnyCancellable?
+    private var backendUnauthorizedCancellable: AnyCancellable?
     private var lastAPIKeyUpdatedAt: Date?
     private var lastLocalSettingsMutationAt: Date?
 
@@ -183,7 +188,13 @@ final class AppState: ObservableObject {
         }
 
         return comparableActiveSettings != comparableSavedSettings ||
-            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) ||
+            Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing) != Self.normalizedDebugBackendBaseURL(savedDebugBackendBaseURL)
+    }
+
+    var isDraftDebugBackendBaseURLValid: Bool {
+        let normalizedURL = Self.normalizedDebugBackendBaseURL(draftDebugBackendBaseURL)
+        return normalizedURL.isEmpty || Self.resolvedDebugBackendURL(from: normalizedURL) != nil
     }
 
     var mobileVisibleTab: AppTab {
@@ -282,23 +293,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func canAccess(_ page: ProtectedAppPage) -> Bool {
-        guard isCommunitySignedIn else {
-            return false
-        }
-
-        guard let access = communityProfile?.pageAccess else {
-            return true
-        }
-
-        switch page {
-        case .records:
-            return access.records
-        case .statistics:
-            return access.statistics
-        case .studyDetail:
-            return access.studyDetail
-        }
+    private func canAccess(_: ProtectedAppPage) -> Bool {
+        isCommunitySignedIn
     }
 
     @discardableResult
@@ -356,6 +352,47 @@ final class AppState: ObservableObject {
 
     private var activeAPIKeyForEditing: String {
         (isEditingSettings ? draftAPIKey : apiKey).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var activeDebugBackendBaseURLForEditing: String {
+        isEditingSettings ? draftDebugBackendBaseURL : debugBackendBaseURL
+    }
+
+    private static func normalizedDebugBackendBaseURL(_ value: String) -> String {
+        BackendBaseURLConfiguration.normalizedDebugBackendBaseURL(value)
+    }
+
+    private static func makeRemotePushBackendClient(
+        isDebuggingEnabled: Bool,
+        debugBackendBaseURL: String
+    ) -> RemotePushBackendClient {
+        BackendBaseURLConfiguration(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        ).makeClient()
+    }
+
+    private static func resolvedDebugBackendURL(from value: String) -> URL? {
+        BackendBaseURLConfiguration.resolvedDebugBackendURL(from: value)
+    }
+
+    private var activeBackendBaseURLDescription: String {
+        BackendBaseURLConfiguration(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        ).displayBaseURL
+    }
+
+    private func refreshRemotePushBackendClient(reason: String) {
+        guard usesConfigurableRemotePushBackendClient else {
+            return
+        }
+
+        remotePushBackendClient = Self.makeRemotePushBackendClient(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        )
+        log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
     var pendingQuestionCount: Int {
@@ -435,7 +472,7 @@ final class AppState: ObservableObject {
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
-        remotePushBackendClient: RemotePushBackendClientProtocol = RemotePushBackendClient(),
+        remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
@@ -456,8 +493,10 @@ final class AppState: ObservableObject {
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
         let loadedLogPage = settingsStore.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedHasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
-        let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
+        let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
         let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
+        let loadedIsDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
+        let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(settingsStore.loadDebugBackendBaseURL())
 
         self.settingsStore = settingsStore
         self.settings = effectiveLoadedSettings
@@ -481,10 +520,13 @@ final class AppState: ObservableObject {
         self.lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
         self.savedSettings = effectiveLoadedSettings
         self.savedAPIKey = loadedAPIKey
+        self.savedDebugBackendBaseURL = loadedDebugBackendBaseURL
         self.appLogs = loadedLogPage.entries
         self.appLogTotalCount = loadedLogPage.totalCount
         self.appLogPage = loadedLogPage.page
-        self.isDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
+        self.isDebuggingEnabled = loadedIsDebuggingEnabled
+        self.debugBackendBaseURL = loadedDebugBackendBaseURL
+        self.draftDebugBackendBaseURL = loadedDebugBackendBaseURL
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
         self.isCloudSyncEnabled = cloudSyncService == nil ? false : settingsStore.loadIsCloudSyncEnabled()
         if cloudSyncService == nil {
@@ -505,7 +547,11 @@ final class AppState: ObservableObject {
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
-        self.remotePushBackendClient = remotePushBackendClient
+        self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
+        self.remotePushBackendClient = remotePushBackendClient ?? Self.makeRemotePushBackendClient(
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
+            debugBackendBaseURL: loadedDebugBackendBaseURL
+        )
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -516,6 +562,13 @@ final class AppState: ObservableObject {
         }
         .sink { [weak self] entry in
             self?.appendAPITrafficLog(entry)
+        }
+        self.backendUnauthorizedCancellable = NotificationCenter.default.publisher(
+            for: BackendAuthorizationNotification.didReceiveUnauthorized,
+            object: nil
+        )
+        .sink { [weak self] _ in
+            self?.clearStoredBackendAccessToken()
         }
 
         if shouldRecoverLegacyRunningState {
@@ -566,7 +619,7 @@ final class AppState: ObservableObject {
         }
 
         await loadOpenAIModelOptions()
-        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
         #if os(macOS)
@@ -582,7 +635,7 @@ final class AppState: ObservableObject {
 
         reloadPersistedState()
         await loadOpenAIModelOptions()
-        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -601,7 +654,7 @@ final class AppState: ObservableObject {
         }
 
         reloadPersistedState()
-        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -649,7 +702,7 @@ final class AppState: ObservableObject {
             }
 
             reloadPersistedState()
-            let didRefreshBackend = await refreshBackendSnapshotIfPossible()
+            let didRefreshBackend = await refreshBackendStudyIfPossible()
             if isCloudSyncEnabled {
                 await syncCloudNow()
             } else if !didRefreshBackend {
@@ -723,33 +776,177 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func refreshBackendSnapshotIfPossible(
+    private func refreshBackendStudyIfPossible(
         updateVisibleQuestion: Bool = true,
         preserveLocalSettings: Bool = true
     ) async -> Bool {
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "snapshot") else {
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "state") else {
             return false
         }
 
         do {
-            let snapshot = try await remotePushBackendClient.fetchSnapshot(
+            let recordsPage = try await remotePushBackendClient.fetchRecords(
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
-                offset: 0
+                offset: 0,
+                query: ""
             )
-            applyBackendSnapshot(
-                snapshot,
+            let studyPage = try await remotePushBackendClient.fetchStudy(
+                registration: registration,
+                limit: 100,
+                offset: 0,
+                query: ""
+            )
+            applyBackendStudyPage(studyPage)
+            let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
+            applyBackendRecordsPage(
+                recordsPage,
+                pendingRecords: pendingRecords,
                 updateVisibleQuestion: updateVisibleQuestion,
-                preserveLocalSettings: preserveLocalSettings
+                preserveLocalQuestionState: preserveLocalSettings
             )
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 학습 데이터를 동기화했습니다. records=\(snapshot.records.count)")
+            log(.info, "백엔드 기록 데이터를 동기화했습니다. records=\(recordsPage.records.count), pending=\(pendingRecords.count)")
             return true
         } catch {
-            log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
+            log(.warning, "백엔드 기록 데이터 동기화 실패: \(error.localizedDescription)")
             return false
         }
+    }
+
+    private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
+        guard !isEditingSettings, !studyPage.studies.isEmpty else {
+            return
+        }
+
+        let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
+            let key = Self.normalizedCategoryText(for: category.title)
+            if result[key] == nil {
+                result[key] = category
+            }
+        }
+        let selectedTopicKey = settings
+            .category(for: settings.selectedStudyCategoryID)
+            .map { Self.normalizedCategoryText(for: $0.title) }
+
+        let categories = studyPage.studies.map { room in
+            let topicKey = Self.normalizedCategoryText(for: room.topic)
+            let existing = existingCategoriesByTopic[topicKey]
+            return StudyCategory(
+                id: existing?.id ?? String(room.id),
+                title: room.topic,
+                difficulty: Difficulty(level: room.difficultyLevel),
+                customPrompt: room.customPrompt,
+                openAIModel: room.openAIModel,
+                createdAt: existing?.createdAt ?? room.createdAt
+            )
+        }
+
+        let selectedCategoryID = selectedTopicKey.flatMap { key in
+            categories.first { Self.normalizedCategoryText(for: $0.title) == key }?.id
+        } ?? categories.first(where: { $0.id == settings.selectedStudyCategoryID })?.id ?? categories.first?.id
+        let selectedCategory = categories.first { $0.id == selectedCategoryID } ?? categories.first
+
+        let nextSettings = normalizedSettings(
+            StudySettings(
+                topic: selectedCategory?.title ?? settings.topic,
+                difficulty: selectedCategory?.difficulty ?? settings.difficulty,
+                appLanguage: settings.appLanguage,
+                language: settings.appLanguage.studyLanguage,
+                openAIModel: selectedCategory?.openAIModel ?? settings.sanitizedOpenAIModel,
+                notificationSound: settings.notificationSound,
+                customPrompt: selectedCategory?.customPrompt ?? settings.customPrompt,
+                intervalMinutes: settings.sanitizedIntervalMinutes,
+                maxHistoryCount: settings.sanitizedMaxHistoryCount,
+                isQuestionPublic: settings.isQuestionPublic,
+                studyCategories: categories,
+                selectedStudyCategoryID: selectedCategoryID
+            )
+        )
+
+        settings = nextSettings
+        savedSettings = nextSettings
+        draftSettings = nextSettings
+        settingsStore.saveSettings(nextSettings)
+    }
+
+    func searchBackendStudies(query: String) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            homeStudySearchResults = nil
+            return
+        }
+
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "study-search") else {
+            homeStudySearchResults = []
+            return
+        }
+
+        do {
+            let page = try await remotePushBackendClient.fetchStudy(
+                registration: registration,
+                limit: 100,
+                offset: 0,
+                query: trimmedQuery
+            )
+            let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
+                let key = Self.normalizedCategoryText(for: category.title)
+                if result[key] == nil {
+                    result[key] = category
+                }
+            }
+            homeStudySearchResults = page.studies.map { room in
+                let existing = existingCategoriesByTopic[Self.normalizedCategoryText(for: room.topic)]
+                return StudyCategory(
+                    id: existing?.id ?? String(room.id),
+                    title: room.topic,
+                    difficulty: Difficulty(level: room.difficultyLevel),
+                    customPrompt: room.customPrompt,
+                    openAIModel: room.openAIModel,
+                    createdAt: existing?.createdAt ?? room.createdAt
+                )
+            }
+        } catch {
+            homeStudySearchResults = []
+            log(.warning, "학습 검색 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func clearBackendStudySearchResults() {
+        homeStudySearchResults = nil
+    }
+
+    func searchBackendRecords(query: String, limit: Int? = nil) async {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            recordSearchResults = nil
+            return
+        }
+
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
+            recordSearchResults = []
+            return
+        }
+
+        do {
+            let page = try await remotePushBackendClient.fetchRecords(
+                registration: registration,
+                limit: limit ?? settings.sanitizedMaxHistoryCount,
+                offset: 0,
+                query: trimmedQuery
+            )
+            recordSearchResults = page.records
+        } catch {
+            recordSearchResults = []
+            log(.warning, "기록 검색 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func clearBackendRecordSearchResults() {
+        recordSearchResults = nil
     }
 
     func fetchBackendStats(
@@ -847,7 +1044,7 @@ final class AppState: ObservableObject {
 
             let response = try await remotePushBackendClient.fetchPublicQuestions(
                 registration: registration,
-                topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
+                query: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
                 offset: normalizedOffset,
                 excludeDeviceID: nil
@@ -920,81 +1117,36 @@ final class AppState: ObservableObject {
         return currentCount < communityTotalCount
     }
 
-    private func applyBackendSnapshot(
-        _ snapshot: BackendSnapshot,
+    private func applyBackendRecordsPage(
+        _ recordsPage: BackendRecordsPage,
+        pendingRecords: [StudyRecord] = [],
         updateVisibleQuestion: Bool,
-        preserveLocalSettings: Bool = true
+        preserveLocalQuestionState: Bool = true
     ) {
         guard !isEditingSettings else {
-            didReceiveBackendSnapshotWhileEditing = true
-            if let currentPending = pendingBackendSnapshotWhileEditing,
-               currentPending.serverTime >= snapshot.serverTime {
-                return
-            }
-
-            pendingBackendSnapshotWhileEditing = snapshot
-            log(.info, "설정 편집 중이어서 백엔드 스냅샷 적용을 미뤘습니다.")
+            log(.info, "설정 편집 중이어서 백엔드 기록 페이지 적용을 건너뛰었습니다.")
             return
         }
 
-        let localSettings = synchronizedTopicCategories(for: settings)
-        let remoteSanitizedSettings = synchronizedTopicCategories(
-            for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
-            includeResolvedTopicCategory: true
-        )
-        let shouldPreserveLocal = preserveLocalSettings && shouldPreserveLocalSettings(
-            local: localSettings,
-            remote: remoteSanitizedSettings,
-            remoteUpdatedAt: snapshot.serverTime
-        )
-        var sanitizedSettings = shouldPreserveLocal ? localSettings : remoteSanitizedSettings
-        if !isCommunitySignedIn {
-            sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
-        }
         let localCurrentQuestion = currentQuestion
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
 
-        if shouldPreserveLocal {
-            log(.info, "백엔드 설정보다 로컬 저장 설정을 우선 적용했습니다.")
+        let mergedRecords = pendingRecords.reduce(recordsPage.records) { records, pendingRecord in
+            mergeBackendRecord(pendingRecord, into: records)
         }
-
-        settings = sanitizedSettings
-        if !isEditingSettings {
-            draftSettings = sanitizedSettings
-        }
-        savedSettings = sanitizedSettings
-
-        settingsStore.saveSettings(sanitizedSettings)
-        settingsStore.replaceStudyRecords(snapshot.records)
+        settingsStore.replaceStudyRecords(mergedRecords)
         studyRecords = settingsStore.loadStudyRecords()
-        backendStats = snapshot.stats
-
-        if snapshot.settings.enabled != isRunning {
-            log(.info, "백엔드 schedule enabled=\(snapshot.settings.enabled) 상태를 확인했습니다. 사용자 running 설정은 \(isRunning) 상태로 유지합니다.")
-        }
-
-        if snapshot.api?.openAIKeyConfigured == true || snapshot.settings.openAIKeyConfigured {
-            isBackendOpenAIKeyConfigured = true
-            hasAPIKeyError = false
-            if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               errorMessage == strings.apiKeyEmptyDetailed {
-                errorMessage = nil
-            }
-        } else if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            isBackendOpenAIKeyConfigured = false
-            hasAPIKeyError = true
-        } else {
-            isBackendOpenAIKeyConfigured = false
-        }
 
         guard updateVisibleQuestion else {
-            currentQuestion = localCurrentQuestion
-            lastAnswer = localLastAnswer
-            gradingResult = localGradingResult
-            settingsStore.saveQuestion(localCurrentQuestion)
-            settingsStore.saveLastAnswer(localLastAnswer)
-            settingsStore.saveGradingResult(localGradingResult)
+            if preserveLocalQuestionState {
+                currentQuestion = localCurrentQuestion
+                lastAnswer = localLastAnswer
+                gradingResult = localGradingResult
+                settingsStore.saveQuestion(localCurrentQuestion)
+                settingsStore.saveLastAnswer(localLastAnswer)
+                settingsStore.saveGradingResult(localGradingResult)
+            }
             restartTimer()
             return
         }
@@ -1033,7 +1185,7 @@ final class AppState: ObservableObject {
         lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
         hasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
         isCloudSyncEnabled = settingsStore.loadIsCloudSyncEnabled()
-        cloudLastSyncedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
+        cloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
         loadAppLogPage(appLogPage)
 
         if !isEditingSettings {
@@ -1114,9 +1266,8 @@ final class AppState: ObservableObject {
         settings = syncedSettings
         draftSettings = syncedSettings
         draftAPIKey = apiKey
-        didReceiveCloudSnapshotWhileEditing = false
-        didReceiveBackendSnapshotWhileEditing = false
-        pendingBackendSnapshotWhileEditing = nil
+        draftDebugBackendBaseURL = debugBackendBaseURL
+        didReceiveCloudStateWhileEditing = false
         isEditingSettings = true
     }
 
@@ -1125,24 +1276,15 @@ final class AppState: ObservableObject {
             return
         }
 
-        let shouldSyncAfterCancel = didReceiveCloudSnapshotWhileEditing && hasUnsavedSettingsChanges
-        let shouldApplyBackendSnapshotAfterCancel = {
-            guard !hasUnsavedSettingsChanges,
-                  let snapshot = pendingBackendSnapshotWhileEditing else {
-                return false
-            }
-
-            return shouldApplyPendingBackendSnapshot(snapshot)
-        }()
-        let pendingBackendSnapshot = pendingBackendSnapshotWhileEditing
+        let shouldSyncAfterCancel = didReceiveCloudStateWhileEditing && hasUnsavedSettingsChanges
         settings = savedSettings
         apiKey = savedAPIKey
+        debugBackendBaseURL = savedDebugBackendBaseURL
         draftSettings = savedSettings
         draftAPIKey = savedAPIKey
+        draftDebugBackendBaseURL = savedDebugBackendBaseURL
         isEditingSettings = false
-        didReceiveCloudSnapshotWhileEditing = false
-        didReceiveBackendSnapshotWhileEditing = false
-        pendingBackendSnapshotWhileEditing = nil
+        didReceiveCloudStateWhileEditing = false
 
         if shouldSyncAfterCancel {
             Task {
@@ -1150,9 +1292,6 @@ final class AppState: ObservableObject {
             }
         }
 
-        if shouldApplyBackendSnapshotAfterCancel, let snapshot = pendingBackendSnapshot {
-            applyBackendSnapshot(snapshot, updateVisibleQuestion: false)
-        }
     }
 
     func updateDraftAppLanguage(_ language: AppLanguage) {
@@ -1202,7 +1341,7 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            await refreshBackendSnapshotIfPossible(
+            await refreshBackendStudyIfPossible(
                 updateVisibleQuestion: true,
                 preserveLocalSettings: false
             )
@@ -1253,7 +1392,7 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            await refreshBackendSnapshotIfPossible(
+            await refreshBackendStudyIfPossible(
                 updateVisibleQuestion: true,
                 preserveLocalSettings: false
             )
@@ -1261,7 +1400,7 @@ final class AppState: ObservableObject {
             return .signedIn
         } catch {
             if let backendError = error as? RemotePushBackendError,
-               backendError.backendCode == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
+               backendError.requiresEmailVerification {
                 communityErrorMessage = strings.emailVerificationRequired
                 log(.info, "Email 로그인에 인증코드가 필요합니다.")
                 return .verificationRequired
@@ -1446,10 +1585,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async {
+    func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
+        guard isCommunitySignedIn else {
+            return nil
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
             communityErrorMessage = strings.communityRequestFailed
-            return
+            return nil
         }
 
         let previous = communityQuestions.first(where: { $0.id == question.id })
@@ -1462,12 +1605,14 @@ final class AppState: ObservableObject {
                 isLiked: isLiked
             )
             updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+            return state
         } catch {
             if let previous {
                 updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
             }
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
+            return nil
         }
     }
 
@@ -1514,6 +1659,10 @@ final class AppState: ObservableObject {
     }
 
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
+        guard isCommunitySignedIn else {
+            return nil
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
             communityErrorMessage = strings.communityRequestFailed
             return nil
@@ -1533,6 +1682,33 @@ final class AppState: ObservableObject {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    func deleteCommunityQuestionComment(questionID: String, commentID: String) async -> Bool {
+        guard isCommunitySignedIn else {
+            return false
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-delete") else {
+            communityErrorMessage = strings.communityRequestFailed
+            return false
+        }
+
+        do {
+            try await remotePushBackendClient.deleteCommunityQuestionComment(
+                registration: registration,
+                questionID: questionID,
+                commentID: commentID
+            )
+            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
+            }
+            return true
+        } catch {
+            communityErrorMessage = communityErrorMessage(for: error)
+            log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -2165,11 +2341,13 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
-    func openStudyCategory(_ categoryID: String) {
+    func openStudyCategory(_ categoryID: String) async {
         let categories = synchronizedTopicCategories(for: settings).studyCategories
         guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
             return
         }
+
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
 
         if settings.selectedStudyCategoryID != targetCategory.id {
             persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
@@ -2375,6 +2553,7 @@ final class AppState: ObservableObject {
             sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
         }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing)
         let now = Date()
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
         if didAPIKeyChange {
@@ -2389,16 +2568,18 @@ final class AppState: ObservableObject {
 
         settings = sanitizedSettings
         apiKey = trimmedAPIKey
+        debugBackendBaseURL = normalizedDebugBackendBaseURL
         draftSettings = sanitizedSettings
         draftAPIKey = trimmedAPIKey
-        didReceiveCloudSnapshotWhileEditing = false
-        didReceiveBackendSnapshotWhileEditing = false
-        pendingBackendSnapshotWhileEditing = nil
+        draftDebugBackendBaseURL = normalizedDebugBackendBaseURL
+        didReceiveCloudStateWhileEditing = false
 
         settingsStore.saveSettings(sanitizedSettings)
         settingsStore.saveAPIKey(trimmedAPIKey)
+        settingsStore.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
+        savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
         studyRecords = settingsStore.loadStudyRecords()
         if trimmedAPIKey.isEmpty {
             hasAPIKeyError = true
@@ -2415,6 +2596,7 @@ final class AppState: ObservableObject {
         StudyNotificationDelegate.shared.register(language: sanitizedSettings.appLanguage)
         log(.info, "설정을 저장했습니다. interval=\(sanitizedSettings.sanitizedIntervalMinutes), maxHistory=\(sanitizedSettings.sanitizedMaxHistoryCount)")
         markCloudDataChanged()
+        refreshRemotePushBackendClient(reason: "settings")
 
         restartTimer()
 
@@ -2671,7 +2853,7 @@ final class AppState: ObservableObject {
         }
 
         await syncRemotePushScheduleIfPossible(reason: reason)
-        await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         log(.info, "백엔드 스케줄러가 예약 질문을 담당하므로 로컬 OpenAI 생성을 수행하지 않았습니다. reason=\(reason), deviceID=\(registration.deviceID)")
         return false
     }
@@ -3008,7 +3190,7 @@ final class AppState: ObservableObject {
             Task {
                 do {
                     _ = try await remotePushBackendClient.skipRecord(registration: registration, recordID: record.id)
-                    await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
                 } catch {
                     if self.handlePageAccessError(error, page: .studyDetail) {
@@ -3423,7 +3605,7 @@ final class AppState: ObservableObject {
                 }
                 do {
                     try await remotePushBackendClient.deleteRecord(registration: tokenRegistration, recordID: record.id)
-                    await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "delete-record")
                 } catch {
                     log(.warning, "백엔드 학습 기록 삭제 실패: \(error.localizedDescription)")
@@ -3519,6 +3701,7 @@ final class AppState: ObservableObject {
     func setDebuggingEnabled(_ isEnabled: Bool) {
         isDebuggingEnabled = isEnabled
         settingsStore.saveIsDebuggingEnabled(isEnabled)
+        refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }
 
@@ -3570,67 +3753,67 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let storedLocalUpdatedAt = settingsStore.loadCloudSyncSnapshotUpdatedAt()
+            let storedLocalUpdatedAt = settingsStore.loadCloudSyncStateUpdatedAt()
             let localUpdatedAt = storedLocalUpdatedAt ?? .distantPast
-            let fetchedRemoteSnapshot = try await cloudSyncService.fetchSnapshot()
+            let fetchedRemoteState = try await cloudSyncService.fetchState()
 
-            if let fetchedRemoteSnapshot {
-                let apiKeyMerge = remoteSnapshotByFillingMissingAPIKey(fetchedRemoteSnapshot)
-                let remoteSnapshot = apiKeyMerge.snapshot
+            if let fetchedRemoteState {
+                let apiKeyMerge = remoteStateByFillingMissingAPIKey(fetchedRemoteState)
+                let remoteState = apiKeyMerge.state
                 if storedLocalUpdatedAt == nil {
-                    let firstSync = firstSyncSnapshot(from: remoteSnapshot)
-                    applyCloudSnapshot(firstSync.snapshot, updateVisibleQuestion: updateVisibleQuestion)
+                    let firstSync = firstSyncState(from: remoteState)
+                    applyCloudState(firstSync.state, updateVisibleQuestion: updateVisibleQuestion)
 
-                    if firstSync.shouldPushMergedSnapshot {
-                        try await cloudSyncService.saveSnapshot(firstSync.snapshot)
-                        settingsStore.saveCloudSyncSnapshotUpdatedAt(firstSync.snapshot.updatedAt)
-                        cloudLastSyncedAt = firstSync.snapshot.updatedAt
+                    if firstSync.shouldPushMergedState {
+                        try await cloudSyncService.saveState(firstSync.state)
+                        settingsStore.saveCloudSyncStateUpdatedAt(firstSync.state.updatedAt)
+                        cloudLastSyncedAt = firstSync.state.updatedAt
                         cloudSyncMessage = strings.syncMergedRemote
                         log(.info, "iCloud 데이터를 불러오고 이 기기의 기록을 병합했습니다.")
                     } else {
                         cloudSyncMessage = strings.syncPulledRemote
                         log(.info, "첫 iCloud 동기화에서 원격 학습 데이터를 불러왔습니다.")
                     }
-                } else if remoteSnapshot.updatedAt > localUpdatedAt {
-                    var mergedRemoteSnapshot = incomingSnapshotMergingLocalData(remoteSnapshot)
+                } else if remoteState.updatedAt > localUpdatedAt {
+                    var mergedRemoteState = incomingStateMergingLocalData(remoteState)
                     let shouldPushMergedRemote = apiKeyMerge.shouldPush ||
-                        cloudSnapshotContentDiffers(mergedRemoteSnapshot, remoteSnapshot)
+                        cloudStateContentDiffers(mergedRemoteState, remoteState)
 
                     if shouldPushMergedRemote {
-                        mergedRemoteSnapshot.updatedAt = max(Date(), remoteSnapshot.updatedAt, localUpdatedAt)
-                        try await cloudSyncService.saveSnapshot(mergedRemoteSnapshot)
-                        applyCloudSnapshot(mergedRemoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
-                        settingsStore.saveCloudSyncSnapshotUpdatedAt(mergedRemoteSnapshot.updatedAt)
-                        cloudLastSyncedAt = mergedRemoteSnapshot.updatedAt
+                        mergedRemoteState.updatedAt = max(Date(), remoteState.updatedAt, localUpdatedAt)
+                        try await cloudSyncService.saveState(mergedRemoteState)
+                        applyCloudState(mergedRemoteState, updateVisibleQuestion: updateVisibleQuestion)
+                        settingsStore.saveCloudSyncStateUpdatedAt(mergedRemoteState.updatedAt)
+                        cloudLastSyncedAt = mergedRemoteState.updatedAt
                         cloudSyncMessage = strings.syncMergedRemote
                         log(.info, "iCloud 최신 데이터에 이 기기의 로컬 변경사항을 병합했습니다.")
                     } else {
-                        applyCloudSnapshot(remoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
+                        applyCloudState(remoteState, updateVisibleQuestion: updateVisibleQuestion)
                         cloudSyncMessage = strings.syncPulledRemote
                         log(.info, "iCloud에서 최신 학습 데이터를 불러왔습니다.")
                     }
                 } else {
-                    let mergedSnapshot = outgoingSnapshotMergingRemoteData(
-                        makeCloudSnapshot(updatedAt: localUpdatedAt),
-                        remoteSnapshot: remoteSnapshot
+                    let mergedState = outgoingStateMergingRemoteData(
+                        makeCloudState(updatedAt: localUpdatedAt),
+                        remoteState: remoteState
                     )
-                    if cloudSnapshotContentDiffers(mergedSnapshot, remoteSnapshot) {
-                        var snapshot = mergedSnapshot
-                        snapshot.updatedAt = max(localUpdatedAt, remoteSnapshot.updatedAt, Date())
-                        try await cloudSyncService.saveSnapshot(snapshot)
-                        applyCloudSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
+                    if cloudStateContentDiffers(mergedState, remoteState) {
+                        var state = mergedState
+                        state.updatedAt = max(localUpdatedAt, remoteState.updatedAt, Date())
+                        try await cloudSyncService.saveState(state)
+                        applyCloudState(state, updateVisibleQuestion: updateVisibleQuestion)
                         cloudSyncMessage = strings.syncPushedLocal
                         log(.info, "학습 데이터를 iCloud에 저장했습니다.")
                     } else {
-                        applyCloudSnapshot(remoteSnapshot, updateVisibleQuestion: updateVisibleQuestion)
+                        applyCloudState(remoteState, updateVisibleQuestion: updateVisibleQuestion)
                         cloudSyncMessage = strings.syncAlreadyCurrent
                     }
                 }
             } else {
                 let updatedAt = max(localUpdatedAt, Date())
-                let snapshot = makeCloudSnapshot(updatedAt: updatedAt)
-                try await cloudSyncService.saveSnapshot(snapshot)
-                applyCloudSnapshot(snapshot, updateVisibleQuestion: updateVisibleQuestion)
+                let state = makeCloudState(updatedAt: updatedAt)
+                try await cloudSyncService.saveState(state)
+                applyCloudState(state, updateVisibleQuestion: updateVisibleQuestion)
                 cloudSyncMessage = strings.syncPushedLocal
                 log(.info, "학습 데이터를 iCloud에 저장했습니다.")
             }
@@ -3827,20 +4010,11 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let registration = try await remotePushBackendClient.registerDevice(
+            return try await registerFreshBackendDevice(
                 apnsToken: nil,
-                language: settings.appLanguage,
-                timezone: TimeZone.current.identifier,
-                apnsEnvironment: Self.backendAPNSEnvironment
-            )
-            settingsStore.saveRemotePushRegistration(registration)
-            log(.info, "OpenAI 요청용 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
-            try await updateBackendSettings(
-                registration: registration,
                 reason: reason,
                 includeAPIKey: true
             )
-            return registration
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
             return nil
@@ -3861,9 +4035,55 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
+            if Self.isBackendDeviceNotFound(error) {
+                do {
+                    log(.warning, "저장된 백엔드 기기를 찾을 수 없어 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID)")
+                    return try await registerFreshBackendDevice(
+                        apnsToken: registration.apnsToken.isEmpty ? nil : registration.apnsToken,
+                        reason: "\(reason)-device-recovery",
+                        includeAPIKey: true
+                    )
+                } catch {
+                    log(.warning, "백엔드 기기 재등록 실패: \(error.localizedDescription)")
+                    return nil
+                }
+            }
             log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func registerFreshBackendDevice(
+        apnsToken: String?,
+        reason: String,
+        includeAPIKey: Bool
+    ) async throws -> RemotePushRegistration {
+        let registration = try await remotePushBackendClient.registerDevice(
+            apnsToken: apnsToken,
+            language: settings.appLanguage,
+            timezone: TimeZone.current.identifier,
+            apnsEnvironment: Self.backendAPNSEnvironment
+        )
+        settingsStore.saveRemotePushRegistration(registration)
+        log(.info, "새 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
+        try await updateBackendSettings(
+            registration: registration,
+            reason: reason,
+            includeAPIKey: includeAPIKey
+        )
+        return registration
+    }
+
+    private func clearStoredBackendAccessToken() {
+        guard var registration = settingsStore.loadRemotePushRegistration(),
+              registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
+            return
+        }
+
+        registration.accessToken = nil
+        registration.accessTokenExpiresAt = nil
+        settingsStore.saveRemotePushRegistration(registration)
+        log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
     private func updateBackendSettings(
@@ -3936,7 +4156,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "device-token"
             )
-            await refreshBackendSnapshotIfPossible(updateVisibleQuestion: false)
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         } catch {
             log(.warning, "서버 push 백엔드 등록 실패: \(error.localizedDescription)")
         }
@@ -4077,7 +4297,7 @@ final class AppState: ObservableObject {
         }
 
         let updatedAt = Date()
-        settingsStore.saveCloudSyncSnapshotUpdatedAt(updatedAt)
+        settingsStore.saveCloudSyncStateUpdatedAt(updatedAt)
         cloudLastSyncedAt = updatedAt
     }
 
@@ -4103,8 +4323,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func makeCloudSnapshot(updatedAt: Date) -> CloudSyncSnapshot {
-        CloudSyncSnapshot(
+    private func makeCloudState(updatedAt: Date) -> CloudSyncState {
+        CloudSyncState(
             updatedAt: updatedAt,
             apiKey: Self.trimmedOptional(apiKey),
             apiKeyUpdatedAt: lastAPIKeyUpdatedAt,
@@ -4121,98 +4341,98 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func remoteSnapshotByFillingMissingAPIKey(_ snapshot: CloudSyncSnapshot) -> (snapshot: CloudSyncSnapshot, shouldPush: Bool) {
+    private func remoteStateByFillingMissingAPIKey(_ state: CloudSyncState) -> (state: CloudSyncState, shouldPush: Bool) {
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
-            remoteAPIKey: snapshot.apiKey,
-            remoteAPIKeyUpdatedAt: snapshot.apiKeyUpdatedAt
+            remoteAPIKey: state.apiKey,
+            remoteAPIKeyUpdatedAt: state.apiKeyUpdatedAt
         )
 
-        let currentRemoteAPIKey = Self.trimmedOptional(snapshot.apiKey ?? "")
+        let currentRemoteAPIKey = Self.trimmedOptional(state.apiKey ?? "")
         guard let selectedKey = resolvedAPIKey.key,
               selectedKey != currentRemoteAPIKey else {
-            return (snapshot, false)
+            return (state, false)
         }
 
-        var mergedSnapshot = snapshot
-        mergedSnapshot.apiKey = resolvedAPIKey.key
-        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
-        mergedSnapshot.updatedAt = max(snapshot.updatedAt, Date())
+        var mergedState = state
+        mergedState.apiKey = resolvedAPIKey.key
+        mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+        mergedState.updatedAt = max(state.updatedAt, Date())
 
         if resolvedAPIKey.updatedAt == nil {
-            mergedSnapshot.apiKeyUpdatedAt = lastAPIKeyUpdatedAt
+            mergedState.apiKeyUpdatedAt = lastAPIKeyUpdatedAt
         }
 
         if resolvedAPIKey.updatedAt == nil,
            let localUpdatedAt = lastAPIKeyUpdatedAt {
-            mergedSnapshot.apiKeyUpdatedAt = localUpdatedAt
+            mergedState.apiKeyUpdatedAt = localUpdatedAt
         }
 
-        return (mergedSnapshot, true)
+        return (mergedState, true)
     }
 
-    private func incomingSnapshotMergingLocalData(_ remoteSnapshot: CloudSyncSnapshot) -> CloudSyncSnapshot {
-        var mergedSnapshot = remoteSnapshot
+    private func incomingStateMergingLocalData(_ remoteState: CloudSyncState) -> CloudSyncState {
+        var mergedState = remoteState
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
-            remoteAPIKey: remoteSnapshot.apiKey,
-            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+            remoteAPIKey: remoteState.apiKey,
+            remoteAPIKeyUpdatedAt: remoteState.apiKeyUpdatedAt
         )
-        mergedSnapshot.apiKey = resolvedAPIKey.key
-        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+        mergedState.apiKey = resolvedAPIKey.key
+        mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
 
         let maxHistoryCount = max(
-            remoteSnapshot.settings.sanitizedMaxHistoryCount,
+            remoteState.settings.sanitizedMaxHistoryCount,
             settings.sanitizedMaxHistoryCount
         )
         let deletedMarkers = mergedDeletedStudyRecordMarkers(
-            remote: remoteSnapshot.deletedStudyRecordMarkers,
+            remote: remoteState.deletedStudyRecordMarkers,
             local: settingsStore.loadDeletedStudyRecordMarkers()
         )
         let recordsClearedAt = mergedStudyRecordsClearedAt(
-            remote: remoteSnapshot.studyRecordsClearedAt,
+            remote: remoteState.studyRecordsClearedAt,
             local: settingsStore.loadStudyRecordsClearedAt()
         )
         let mergedRecords = mergedStudyRecords(
-            remote: remoteSnapshot.studyRecords,
+            remote: remoteState.studyRecords,
             local: studyRecords,
             deletedMarkers: deletedMarkers,
             recordsClearedAt: recordsClearedAt,
             maxCount: maxHistoryCount
         )
 
-        mergedSnapshot.deletedStudyRecordMarkers = deletedMarkers
-        mergedSnapshot.studyRecordsClearedAt = recordsClearedAt
-        mergedSnapshot.studyRecords = mergedRecords
-        mergedSnapshot.questionHistory = mergedQuestionHistory(
-            remote: remoteSnapshot.questionHistory,
+        mergedState.deletedStudyRecordMarkers = deletedMarkers
+        mergedState.studyRecordsClearedAt = recordsClearedAt
+        mergedState.studyRecords = mergedRecords
+        mergedState.questionHistory = mergedQuestionHistory(
+            remote: remoteState.questionHistory,
             local: settingsStore.loadQuestionHistory()
         )
 
         if let currentQuestion = preferredCurrentQuestion(
             local: currentQuestion,
-            remote: remoteSnapshot.currentQuestion,
+            remote: remoteState.currentQuestion,
             mergedRecords: mergedRecords
         ) {
-            mergedSnapshot.currentQuestion = currentQuestion
+            mergedState.currentQuestion = currentQuestion
             if let currentRecord = mergedRecords.last(where: {
                 studyRecordMatches($0, question: currentQuestion)
             }) {
-                mergedSnapshot.lastAnswer = currentRecord.answer ?? ""
-                mergedSnapshot.gradingResult = currentRecord.gradingResult
+                mergedState.lastAnswer = currentRecord.answer ?? ""
+                mergedState.gradingResult = currentRecord.gradingResult
             }
         } else {
-            mergedSnapshot.currentQuestion = nil
-            mergedSnapshot.lastAnswer = ""
-            mergedSnapshot.gradingResult = nil
+            mergedState.currentQuestion = nil
+            mergedState.lastAnswer = ""
+            mergedState.gradingResult = nil
         }
 
-        return mergedSnapshot
+        return mergedState
     }
 
-    private func cloudSnapshotContentDiffers(_ lhs: CloudSyncSnapshot, _ rhs: CloudSyncSnapshot) -> Bool {
+    private func cloudStateContentDiffers(_ lhs: CloudSyncState, _ rhs: CloudSyncState) -> Bool {
         var normalizedLHS = lhs
         var normalizedRHS = rhs
         normalizedLHS.updatedAt = .distantPast
@@ -4220,24 +4440,24 @@ final class AppState: ObservableObject {
         return normalizedLHS != normalizedRHS
     }
 
-    private func outgoingSnapshotMergingRemoteData(
-        _ snapshot: CloudSyncSnapshot,
-        remoteSnapshot: CloudSyncSnapshot
-    ) -> CloudSyncSnapshot {
-        var mergedSnapshot = snapshot
+    private func outgoingStateMergingRemoteData(
+        _ state: CloudSyncState,
+        remoteState: CloudSyncState
+    ) -> CloudSyncState {
+        var mergedState = state
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
-            remoteAPIKey: remoteSnapshot.apiKey,
-            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+            remoteAPIKey: remoteState.apiKey,
+            remoteAPIKeyUpdatedAt: remoteState.apiKeyUpdatedAt
         )
-        let previousAPIKey = mergedSnapshot.apiKey
-        mergedSnapshot.apiKey = resolvedAPIKey.key
-        mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+        let previousAPIKey = mergedState.apiKey
+        mergedState.apiKey = resolvedAPIKey.key
+        mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
 
         let maxHistoryCount = max(
-            snapshot.settings.sanitizedMaxHistoryCount,
-            remoteSnapshot.settings.sanitizedMaxHistoryCount
+            state.settings.sanitizedMaxHistoryCount,
+            remoteState.settings.sanitizedMaxHistoryCount
         )
 
         if previousAPIKey != resolvedAPIKey.key {
@@ -4271,53 +4491,53 @@ final class AppState: ObservableObject {
             hasAPIKeyError = resolvedAPIKey.key == nil
         }
 
-        mergedSnapshot.hasCompletedOnboarding = snapshot.hasCompletedOnboarding || remoteSnapshot.hasCompletedOnboarding
+        mergedState.hasCompletedOnboarding = state.hasCompletedOnboarding || remoteState.hasCompletedOnboarding
         let deletedMarkers = mergedDeletedStudyRecordMarkers(
-            remote: remoteSnapshot.deletedStudyRecordMarkers,
-            local: snapshot.deletedStudyRecordMarkers
+            remote: remoteState.deletedStudyRecordMarkers,
+            local: state.deletedStudyRecordMarkers
         )
         let recordsClearedAt = mergedStudyRecordsClearedAt(
-            remote: remoteSnapshot.studyRecordsClearedAt,
-            local: snapshot.studyRecordsClearedAt
+            remote: remoteState.studyRecordsClearedAt,
+            local: state.studyRecordsClearedAt
         )
         let mergedRecords = mergedStudyRecords(
-            remote: remoteSnapshot.studyRecords,
-            local: snapshot.studyRecords,
+            remote: remoteState.studyRecords,
+            local: state.studyRecords,
             deletedMarkers: deletedMarkers,
             recordsClearedAt: recordsClearedAt,
             maxCount: maxHistoryCount
         )
         let currentCandidate = preferredCurrentQuestion(
-            local: snapshot.currentQuestion,
-            remote: remoteSnapshot.currentQuestion,
+            local: state.currentQuestion,
+            remote: remoteState.currentQuestion,
             mergedRecords: mergedRecords
         )
-        mergedSnapshot.studyRecords = mergedRecords
-        mergedSnapshot.deletedStudyRecordMarkers = deletedMarkers
-        mergedSnapshot.studyRecordsClearedAt = recordsClearedAt
-        mergedSnapshot.questionHistory = mergedQuestionHistory(
-            remote: remoteSnapshot.questionHistory,
-            local: snapshot.questionHistory
+        mergedState.studyRecords = mergedRecords
+        mergedState.deletedStudyRecordMarkers = deletedMarkers
+        mergedState.studyRecordsClearedAt = recordsClearedAt
+        mergedState.questionHistory = mergedQuestionHistory(
+            remote: remoteState.questionHistory,
+            local: state.questionHistory
         )
 
         if let preferredCurrentQuestion = currentCandidate,
-           mergedSnapshot.studyRecords.contains(where: {
+           mergedState.studyRecords.contains(where: {
                studyRecordMatches($0, question: preferredCurrentQuestion)
            }) {
-            mergedSnapshot.currentQuestion = preferredCurrentQuestion
-            if let currentRecord = mergedSnapshot.studyRecords.last(where: {
+            mergedState.currentQuestion = preferredCurrentQuestion
+            if let currentRecord = mergedState.studyRecords.last(where: {
                 studyRecordMatches($0, question: preferredCurrentQuestion)
             }) {
-                mergedSnapshot.lastAnswer = currentRecord.answer ?? ""
-                mergedSnapshot.gradingResult = currentRecord.gradingResult
+                mergedState.lastAnswer = currentRecord.answer ?? ""
+                mergedState.gradingResult = currentRecord.gradingResult
             }
         } else {
-            mergedSnapshot.currentQuestion = nil
-            mergedSnapshot.lastAnswer = ""
-            mergedSnapshot.gradingResult = nil
+            mergedState.currentQuestion = nil
+            mergedState.lastAnswer = ""
+            mergedState.gradingResult = nil
         }
 
-        return mergedSnapshot
+        return mergedState
     }
 
     private func shouldPreserveLocalAPIKeyDuringSync(
@@ -4434,73 +4654,73 @@ final class AppState: ObservableObject {
             .max { $0.createdAt < $1.createdAt }
     }
 
-    private func firstSyncSnapshot(from remoteSnapshot: CloudSyncSnapshot) -> (snapshot: CloudSyncSnapshot, shouldPushMergedSnapshot: Bool) {
+    private func firstSyncState(from remoteState: CloudSyncState) -> (state: CloudSyncState, shouldPushMergedState: Bool) {
         guard hasMeaningfulLocalCloudData else {
-            return (remoteSnapshot, false)
+            return (remoteState, false)
         }
 
-        var mergedSnapshot = remoteSnapshot
-        mergedSnapshot.updatedAt = Date()
+        var mergedState = remoteState
+        mergedState.updatedAt = Date()
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
-            remoteAPIKey: remoteSnapshot.apiKey,
-            remoteAPIKeyUpdatedAt: remoteSnapshot.apiKeyUpdatedAt
+            remoteAPIKey: remoteState.apiKey,
+            remoteAPIKeyUpdatedAt: remoteState.apiKeyUpdatedAt
         )
 
         if resolvedAPIKey.key != nil {
-            mergedSnapshot.apiKey = resolvedAPIKey.key
-            mergedSnapshot.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
+            mergedState.apiKey = resolvedAPIKey.key
+            mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
         }
 
-        if mergedSnapshot.settings.studyCategories.isEmpty {
-            mergedSnapshot.settings = synchronizedTopicCategories(
-                for: mergedSnapshot.settings,
+        if mergedState.settings.studyCategories.isEmpty {
+            mergedState.settings = synchronizedTopicCategories(
+                for: mergedState.settings,
                 includeResolvedTopicCategory: true
             )
         }
 
-        if mergedSnapshot.settings.selectedStudyCategoryID == nil {
-            mergedSnapshot.settings = synchronizedTopicCategories(
-                for: mergedSnapshot.settings,
+        if mergedState.settings.selectedStudyCategoryID == nil {
+            mergedState.settings = synchronizedTopicCategories(
+                for: mergedState.settings,
                 includeResolvedTopicCategory: true
             )
         }
-        mergedSnapshot.hasCompletedOnboarding = remoteSnapshot.hasCompletedOnboarding || hasCompletedOnboarding
-        mergedSnapshot.deletedStudyRecordMarkers = mergedDeletedStudyRecordMarkers(
-            remote: remoteSnapshot.deletedStudyRecordMarkers,
+        mergedState.hasCompletedOnboarding = remoteState.hasCompletedOnboarding || hasCompletedOnboarding
+        mergedState.deletedStudyRecordMarkers = mergedDeletedStudyRecordMarkers(
+            remote: remoteState.deletedStudyRecordMarkers,
             local: settingsStore.loadDeletedStudyRecordMarkers()
         )
-        mergedSnapshot.studyRecordsClearedAt = mergedStudyRecordsClearedAt(
-            remote: remoteSnapshot.studyRecordsClearedAt,
+        mergedState.studyRecordsClearedAt = mergedStudyRecordsClearedAt(
+            remote: remoteState.studyRecordsClearedAt,
             local: settingsStore.loadStudyRecordsClearedAt()
         )
-        mergedSnapshot.studyRecords = mergedStudyRecords(
-            remote: remoteSnapshot.studyRecords,
+        mergedState.studyRecords = mergedStudyRecords(
+            remote: remoteState.studyRecords,
             local: studyRecords,
-            deletedMarkers: mergedSnapshot.deletedStudyRecordMarkers,
-            recordsClearedAt: mergedSnapshot.studyRecordsClearedAt,
+            deletedMarkers: mergedState.deletedStudyRecordMarkers,
+            recordsClearedAt: mergedState.studyRecordsClearedAt,
             maxCount: max(
-                remoteSnapshot.settings.sanitizedMaxHistoryCount,
+                remoteState.settings.sanitizedMaxHistoryCount,
                 settings.sanitizedMaxHistoryCount
             )
         )
-        mergedSnapshot.questionHistory = mergedQuestionHistory(
-            remote: remoteSnapshot.questionHistory,
+        mergedState.questionHistory = mergedQuestionHistory(
+            remote: remoteState.questionHistory,
             local: settingsStore.loadQuestionHistory()
         )
 
-        if mergedSnapshot.currentQuestion == nil {
-            mergedSnapshot.currentQuestion = currentQuestion
+        if mergedState.currentQuestion == nil {
+            mergedState.currentQuestion = currentQuestion
         }
-        if mergedSnapshot.lastAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            mergedSnapshot.lastAnswer = lastAnswer
+        if mergedState.lastAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            mergedState.lastAnswer = lastAnswer
         }
-        if mergedSnapshot.gradingResult == nil {
-            mergedSnapshot.gradingResult = gradingResult
+        if mergedState.gradingResult == nil {
+            mergedState.gradingResult = gradingResult
         }
 
-        return (mergedSnapshot, true)
+        return (mergedState, true)
     }
 
     private var hasMeaningfulLocalCloudData: Bool {
@@ -4686,28 +4906,28 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func applyCloudSnapshot(_ snapshot: CloudSyncSnapshot, updateVisibleQuestion: Bool = true) {
+    private func applyCloudState(_ state: CloudSyncState, updateVisibleQuestion: Bool = true) {
         let preservedCloudSyncEnabled = isCloudSyncEnabled
 
         if isEditingSettings {
-            didReceiveCloudSnapshotWhileEditing = true
-            settingsStore.saveCloudSyncSnapshotUpdatedAt(snapshot.updatedAt)
-            if cloudLastSyncedAt == nil || snapshot.updatedAt > cloudLastSyncedAt! {
-                cloudLastSyncedAt = snapshot.updatedAt
+            didReceiveCloudStateWhileEditing = true
+            settingsStore.saveCloudSyncStateUpdatedAt(state.updatedAt)
+            if cloudLastSyncedAt == nil || state.updatedAt > cloudLastSyncedAt! {
+                cloudLastSyncedAt = state.updatedAt
             }
-            log(.info, "설정 편집 중이어서 iCloud 스냅샷 적용을 미뤘습니다.")
+            log(.info, "설정 편집 중이어서 iCloud 상태 적용을 미뤘습니다.")
             return
         }
 
         let localSynchronizedSettings = synchronizedTopicCategories(for: settings)
         let sanitizedSettings = synchronizedTopicCategories(
-            for: normalizedSettings(snapshot.settings),
+            for: normalizedSettings(state.settings),
             includeResolvedTopicCategory: true
         )
         let effectiveSettings = shouldPreserveLocalSettings(
             local: localSynchronizedSettings,
             remote: sanitizedSettings,
-            remoteUpdatedAt: snapshot.updatedAt
+            remoteUpdatedAt: state.updatedAt
         )
             ? localSynchronizedSettings
             : sanitizedSettings
@@ -4715,7 +4935,7 @@ final class AppState: ObservableObject {
             localSynchronizedSettings.sanitizedMaxHistoryCount,
             sanitizedSettings.sanitizedMaxHistoryCount
         )
-        let mergedHasCompletedOnboarding = hasCompletedOnboarding || snapshot.hasCompletedOnboarding
+        let mergedHasCompletedOnboarding = hasCompletedOnboarding || state.hasCompletedOnboarding
         let localCurrentQuestion = currentQuestion
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
@@ -4724,28 +4944,28 @@ final class AppState: ObservableObject {
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
-            remoteAPIKey: snapshot.apiKey,
-            remoteAPIKeyUpdatedAt: snapshot.apiKeyUpdatedAt
+            remoteAPIKey: state.apiKey,
+            remoteAPIKeyUpdatedAt: state.apiKeyUpdatedAt
         )
         let previousAPIKey = Self.trimmedOptional(apiKey)
-        let shouldPreserveActiveQuestion = shouldPreserveActiveQuestion(whenApplying: snapshot)
+        let shouldPreserveActiveQuestion = shouldPreserveActiveQuestion(whenApplying: state)
         let mergedDeletedMarkers = mergedDeletedStudyRecordMarkers(
-            remote: snapshot.deletedStudyRecordMarkers,
+            remote: state.deletedStudyRecordMarkers,
             local: settingsStore.loadDeletedStudyRecordMarkers()
         )
         let mergedRecordsClearedAt = mergedStudyRecordsClearedAt(
-            remote: snapshot.studyRecordsClearedAt,
+            remote: state.studyRecordsClearedAt,
             local: settingsStore.loadStudyRecordsClearedAt()
         )
         let mergedRecords = mergedStudyRecords(
-            remote: snapshot.studyRecords,
+            remote: state.studyRecords,
             local: localStudyRecords,
             deletedMarkers: mergedDeletedMarkers,
             recordsClearedAt: mergedRecordsClearedAt,
             maxCount: mergedMaxHistoryCount
         )
         let mergedHistory = mergedQuestionHistory(
-            remote: snapshot.questionHistory,
+            remote: state.questionHistory,
             local: localQuestionHistory
         )
         let appliedCurrentQuestion: QuestionItem?
@@ -4757,7 +4977,7 @@ final class AppState: ObservableObject {
             draftSettings = effectiveSettings
             savedSettings = effectiveSettings
             if effectiveSettings != sanitizedSettings {
-                log(.info, "로컬 설정이 원격 설정보다 최신이라 iCloud 스냅샷의 카테고리/주제 반영을 보류했습니다.")
+                log(.info, "로컬 설정이 원격 설정보다 최신이라 iCloud 상태의 카테고리/주제 반영을 보류했습니다.")
             }
         }
 
@@ -4826,12 +5046,12 @@ final class AppState: ObservableObject {
             appliedGradingResult = activeRecord?.gradingResult ?? localGradingResult
             log(.info, "iCloud 동기화 중 작성 중인 미제출 질문을 유지했습니다.")
         } else {
-            let snapshotQuestion = snapshot.currentQuestion
-            if let snapshotQuestion,
-               mergedRecords.contains(where: { studyRecordMatches($0, question: snapshotQuestion) }) {
-                appliedCurrentQuestion = snapshotQuestion
-                appliedLastAnswer = snapshot.lastAnswer
-                appliedGradingResult = snapshot.gradingResult
+            let stateQuestion = state.currentQuestion
+            if let stateQuestion,
+               mergedRecords.contains(where: { studyRecordMatches($0, question: stateQuestion) }) {
+                appliedCurrentQuestion = stateQuestion
+                appliedLastAnswer = state.lastAnswer
+                appliedGradingResult = state.gradingResult
             } else {
                 appliedCurrentQuestion = nil
                 appliedLastAnswer = ""
@@ -4842,7 +5062,7 @@ final class AppState: ObservableObject {
         currentQuestion = appliedCurrentQuestion
         lastAnswer = appliedLastAnswer
         gradingResult = appliedGradingResult
-        isRunning = snapshot.isRunning
+        isRunning = state.isRunning
         hasCompletedOnboarding = mergedHasCompletedOnboarding
         isCloudSyncEnabled = preservedCloudSyncEnabled
 
@@ -4851,18 +5071,18 @@ final class AppState: ObservableObject {
         settingsStore.saveQuestionHistory(mergedHistory)
         settingsStore.saveLastAnswer(appliedLastAnswer)
         settingsStore.saveGradingResult(appliedGradingResult)
-        settingsStore.saveIsRunning(snapshot.isRunning)
+        settingsStore.saveIsRunning(state.isRunning)
         settingsStore.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
         settingsStore.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
         settingsStore.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
         settingsStore.saveStudyRecordsClearedAt(mergedRecordsClearedAt)
         settingsStore.replaceStudyRecords(mergedRecords)
         let nextCloudSyncTimestamp = max(
-            snapshot.updatedAt,
-            cloudLastSyncedAt ?? snapshot.updatedAt,
+            state.updatedAt,
+            cloudLastSyncedAt ?? state.updatedAt,
             lastLocalSettingsMutationAt ?? .distantPast
         )
-        settingsStore.saveCloudSyncSnapshotUpdatedAt(nextCloudSyncTimestamp)
+        settingsStore.saveCloudSyncStateUpdatedAt(nextCloudSyncTimestamp)
 
         studyRecords = settingsStore.loadStudyRecords()
         savedSettings = effectiveSettings
@@ -4899,30 +5119,6 @@ final class AppState: ObservableObject {
         return true
     }
 
-    private func shouldApplyPendingBackendSnapshot(_ snapshot: BackendSnapshot) -> Bool {
-        let synchronizedLocalSettings = synchronizedTopicCategories(for: settings)
-        let synchronizedRemoteSettings = synchronizedTopicCategories(
-            for: normalizedSettings(snapshot.settings.studySettings(fallback: settings)),
-            includeResolvedTopicCategory: true
-        )
-
-        if synchronizedLocalSettings == synchronizedRemoteSettings,
-           snapshot.records.count == studyRecords.count {
-            return false
-        }
-
-        if let lastLocalSettingsMutationAt,
-           snapshot.serverTime <= lastLocalSettingsMutationAt {
-            return false
-        }
-
-        return !shouldPreserveLocalSettings(
-            local: synchronizedLocalSettings,
-            remote: synchronizedRemoteSettings,
-            remoteUpdatedAt: snapshot.serverTime
-        )
-    }
-
     private func hasUserDefinedCategory(in settings: StudySettings) -> Bool {
         let fallback = Self.normalizedCategoryLookup(for: StudySettings.fallbackTopic(for: settings.appLanguage))
         return settings.studyCategories.contains { category in
@@ -4946,12 +5142,12 @@ final class AppState: ObservableObject {
             .joined()
     }
 
-    private func shouldPreserveActiveQuestion(whenApplying snapshot: CloudSyncSnapshot) -> Bool {
+    private func shouldPreserveActiveQuestion(whenApplying state: CloudSyncState) -> Bool {
         guard let currentQuestion else {
             return false
         }
 
-        if let remoteCurrentQuestion = snapshot.currentQuestion,
+        if let remoteCurrentQuestion = state.currentQuestion,
            Self.questionsMatch(remoteCurrentQuestion, currentQuestion) {
             return false
         }
@@ -5283,6 +5479,14 @@ final class AppState: ObservableObject {
         }
 
         return false
+    }
+
+    nonisolated private static func isBackendDeviceNotFound(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        return backendError.backendCode == "DEVICE_NOT_FOUND"
     }
 
     nonisolated private static func trimmedOptional(_ value: String) -> String? {

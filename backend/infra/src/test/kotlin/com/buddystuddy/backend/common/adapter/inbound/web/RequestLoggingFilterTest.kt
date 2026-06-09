@@ -5,15 +5,19 @@ import jakarta.servlet.ServletResponse
 import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 
+@ExtendWith(OutputCaptureExtension::class)
 class RequestLoggingFilterTest {
     private val filter = RequestLoggingFilter()
 
     @Test
     fun `response body is preserved after content caching logging`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/me/snapshot")
+        val request = MockHttpServletRequest("GET", "/api/v1/studies")
         val response = MockHttpServletResponse()
         val chain = FilterChain { _, servletResponse ->
             servletResponse.contentType = "application/json"
@@ -28,7 +32,7 @@ class RequestLoggingFilterTest {
 
     @Test
     fun `request body is still available to downstream handlers`() {
-        val request = MockHttpServletRequest("PUT", "/api/v1/me/schedule")
+        val request = MockHttpServletRequest("PUT", "/api/v1/settings")
         request.contentType = "application/json"
         request.setContent(
             """
@@ -45,6 +49,78 @@ class RequestLoggingFilterTest {
         filter.doFilter(request, response, chain)
 
         assertThat(response.contentAsString).isEqualTo("""{"saved":true}""")
+    }
+
+    @Test
+    fun `api request and response are logged in a single exchange line`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("POST", "/api/v1/auth/google")
+        request.contentType = "application/json"
+        request.addHeader("Authorization", "Bearer access-token")
+        request.setContent("""{"idToken":"google-id-token"}""".toByteArray())
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { servletRequest, servletResponse ->
+            servletRequest.inputStream.readBytes()
+            servletResponse.contentType = "application/json"
+            servletResponse.writer.write("""{"accessToken":"app-token"}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("api_exchange")
+        assertThat(output.out).contains("\"request\":{")
+        assertThat(output.out).contains("\"response\":{")
+        assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).doesNotContain("Bearer access-token")
+        assertThat(output.out).contains("\"body\":{\"idToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"body\":{\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).doesNotContain("api_request")
+        assertThat(output.out).doesNotContain("api_response {\"requestId\"")
+    }
+
+    @Test
+    fun `json response body without charset is logged as utf8`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/studies")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.contentType = "application/json"
+            servletResponse.outputStream.write("""{"customPrompt":"짧고 명확하게"}""".toByteArray(Charsets.UTF_8))
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(response.contentAsByteArray.decodeToString()).contains("짧고 명확하게")
+        assertThat(output.out).contains("짧고 명확하게")
+        assertThat(output.out).doesNotContain("ì§§")
+    }
+
+    @Test
+    fun `json response body is logged as nested json without escaped quotes`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.contentType = "application/json"
+            servletResponse.writer.write("""{"records":[{"id":1,"question":"Swift?"}]}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1,\"question\":\"Swift?\"}]}")
+        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+    }
+
+    @Test
+    fun `json-like response body without content type is logged as nested json`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.writer.write("""{"records":[{"id":1}]}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1}]}")
+        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
     }
 
     private fun interface FilterChain : jakarta.servlet.FilterChain {

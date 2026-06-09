@@ -10,9 +10,13 @@ import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import java.util.stream.Stream
 
+@ExtendWith(OutputCaptureExtension::class)
 class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
     fun `publish methods return false when streams are disabled`() {
@@ -23,15 +27,18 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `publish methods return false when publisher beans are absent`() {
-        val service = service(enabled = true)
+    fun `enabled streams require publisher beans`() {
+        assertThatThrownBy { service(enabled = true) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("viewStreamPublisher bean is required")
 
-        assertThat(service.publishViewed(1, 2)).isFalse()
-        assertThat(service.publishLiked(1, 2)).isFalse()
+        assertThatThrownBy { service(enabled = true, viewPublisher = RecordingPublisher()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("actionStreamPublisher bean is required")
     }
 
     @Test
-    fun `view and action events publish typed field maps`() {
+    fun `view and action events publish typed field maps`(output: CapturedOutput) {
         val viewPublisher = RecordingPublisher()
         val actionPublisher = RecordingPublisher()
         val service = service(enabled = true, viewPublisher = viewPublisher, actionPublisher = actionPublisher)
@@ -49,20 +56,26 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_COMMENTED")
         assertThat(actionPublisher.requests[0].fields).containsEntry("userId", "40")
         assertThat(actionPublisher.requests[1].fields).containsEntry("eventType", "QUESTION_UNLIKED")
+        assertThat(output.out)
+            .contains("redis_stream_publish_started")
+            .contains("redis_stream_publish_succeeded")
+            .contains("eventType=CONTENT_VIEWED")
+            .contains("eventType=QUESTION_COMMENTED")
     }
 
     @Test
     fun `reaction publishers emit distinct stats action event types`() {
         val actionPublisher = RecordingPublisher()
-        val service = service(enabled = true, actionPublisher = actionPublisher)
+        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = actionPublisher)
 
         assertThat(service.publishLiked(41, 100)).isTrue()
         assertThat(service.publishUnliked(41, 100)).isTrue()
         assertThat(service.publishCommented(41, 100)).isTrue()
+        assertThat(service.publishCommentDeleted(41, 100)).isTrue()
 
-        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41", "41")
+        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41", "41", "41")
         assertThat(actionPublisher.requests.map { it.fields["eventType"] })
-            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED", "QUESTION_COMMENTED")
+            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED", "QUESTION_COMMENTED", "QUESTION_COMMENT_DELETED")
         assertThat(actionPublisher.requests)
             .allSatisfy { request ->
                 assertThat(request.fields).containsEntry("questionId", "41")
@@ -84,7 +97,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
 
     @Test
     fun `string action publisher rejects unknown event type`() {
-        val service = service(enabled = true, actionPublisher = RecordingPublisher())
+        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = RecordingPublisher())
 
         assertThatThrownBy { service.publishAction(1, "UNKNOWN", 2) }
             .isInstanceOf(IllegalArgumentException::class.java)
