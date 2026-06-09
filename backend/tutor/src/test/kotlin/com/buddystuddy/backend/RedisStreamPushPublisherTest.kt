@@ -9,6 +9,7 @@ import com.redisstream.producer.PublishedRedisStreamMessage
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.ObjectProvider
@@ -27,10 +28,10 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `publish methods return false when publisher beans are absent`() {
-        val service = service(enabled = true)
-
-        assertThat(service.publishPush(pushEvent())).isFalse()
+    fun `enabled streams require push publisher bean`() {
+        assertThatThrownBy { service(enabled = true) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("pushStreamPublisher bean is required")
     }
 
     @Test

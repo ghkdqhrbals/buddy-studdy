@@ -19,6 +19,12 @@ class RedisStreamPushPublisher(
     private val logger = LoggerFactory.getLogger(javaClass)
     private val pushPublisher: RedisStreamPublisher? = pushPublisherProvider.ifAvailable
 
+    init {
+        if (properties.streams.enabled) {
+            requireNotNull(pushPublisher) { "pushStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
+        }
+    }
+
     override fun publishPush(request: QuestionPushRequest): Boolean {
         if (!properties.streams.enabled) {
             logger.info(
@@ -31,15 +37,7 @@ class RedisStreamPushPublisher(
             return false
         }
         val publisher = pushPublisher ?: run {
-            logger.warn(
-                "redis_stream_publish_skipped reason=publisher_missing eventType={} prefix={} recordId={} deviceId={} userId={}",
-                "QUESTION_PUSH_REQUESTED",
-                properties.streams.pushPrefix,
-                request.recordId,
-                request.deviceId,
-                request.userId,
-            )
-            return false
+            error("pushStreamPublisher bean is required when buddystuddy.streams.enabled=true")
         }
         val event = QuestionPushRequestedEvent(
             recordId = request.recordId,

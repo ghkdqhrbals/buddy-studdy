@@ -3,11 +3,6 @@ spring:
     activate:
       on-profile: dev
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/dev}
-  autoconfigure:
-    exclude:
-      - com.redisstream.RedisStreamCoordinatorAutoConfiguration
-      - com.redisstream.producer.ProducerRoutingAutoConfiguration
-      - com.redisstream.consumer.CoordinatorConsumerAutoConfiguration
   flyway:
     enabled: false
   cloud:
@@ -31,7 +26,7 @@ buddystuddy:
   scheduler:
     enabled: ${SCHEDULER_ENABLED:false}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:false}
+    enabled: true
   openapi:
     enabled: true
     access-token: ${OPENAPI_ACCESS_TOKEN:dev-openapi}

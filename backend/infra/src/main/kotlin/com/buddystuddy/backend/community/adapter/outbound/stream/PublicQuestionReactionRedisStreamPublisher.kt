@@ -21,14 +21,20 @@ class PublicQuestionReactionRedisStreamPublisher(
     private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
     private val actionPublisher: RedisStreamPublisher? = actionPublisherProvider.ifAvailable
 
+    init {
+        if (properties.streams.enabled) {
+            requireNotNull(viewPublisher) { "viewStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
+            requireNotNull(actionPublisher) { "actionStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
+        }
+    }
+
     override fun publishViewed(questionId: Long, userId: Long?): Boolean {
         if (!properties.streams.enabled) {
             logPublishSkipped("streams_disabled", properties.streams.viewPrefix, "CONTENT_VIEWED", questionId, userId)
             return false
         }
         val publisher = viewPublisher ?: run {
-            logPublishSkipped("publisher_missing", properties.streams.viewPrefix, "CONTENT_VIEWED", questionId, userId)
-            return false
+            error("viewStreamPublisher bean is required when buddystuddy.streams.enabled=true")
         }
         val fields = PublicQuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
         return publish(publisher, properties.streams.viewPrefix, questionId, fields)
@@ -52,8 +58,7 @@ class PublicQuestionReactionRedisStreamPublisher(
             return false
         }
         val publisher = actionPublisher ?: run {
-            logPublishSkipped("publisher_missing", properties.streams.actionPrefix, eventType.name, questionId, userId)
-            return false
+            error("actionStreamPublisher bean is required when buddystuddy.streams.enabled=true")
         }
         val fields = PublicQuestionActionEvent(questionId = questionId, eventType = eventType, userId = userId).toStringMapWithoutNull()
         return publish(publisher, properties.streams.actionPrefix, questionId, fields)

@@ -27,11 +27,14 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `publish methods return false when publisher beans are absent`() {
-        val service = service(enabled = true)
+    fun `enabled streams require publisher beans`() {
+        assertThatThrownBy { service(enabled = true) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("viewStreamPublisher bean is required")
 
-        assertThat(service.publishViewed(1, 2)).isFalse()
-        assertThat(service.publishLiked(1, 2)).isFalse()
+        assertThatThrownBy { service(enabled = true, viewPublisher = RecordingPublisher()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("actionStreamPublisher bean is required")
     }
 
     @Test
@@ -63,7 +66,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
     fun `reaction publishers emit distinct stats action event types`() {
         val actionPublisher = RecordingPublisher()
-        val service = service(enabled = true, actionPublisher = actionPublisher)
+        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = actionPublisher)
 
         assertThat(service.publishLiked(41, 100)).isTrue()
         assertThat(service.publishUnliked(41, 100)).isTrue()
@@ -93,7 +96,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
 
     @Test
     fun `string action publisher rejects unknown event type`() {
-        val service = service(enabled = true, actionPublisher = RecordingPublisher())
+        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = RecordingPublisher())
 
         assertThatThrownBy { service.publishAction(1, "UNKNOWN", 2) }
             .isInstanceOf(IllegalArgumentException::class.java)
