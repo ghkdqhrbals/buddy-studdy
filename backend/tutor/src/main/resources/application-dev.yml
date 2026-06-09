@@ -3,9 +3,6 @@ spring:
     activate:
       on-profile: dev
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/dev}
-  datasource:
-    username: ${DATABASE_USERNAME:buddystuddy}
-    password: ${DATABASE_PASSWORD:local-password}
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
   cloud:
