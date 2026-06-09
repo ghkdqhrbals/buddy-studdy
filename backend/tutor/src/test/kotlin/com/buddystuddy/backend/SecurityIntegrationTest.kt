@@ -66,6 +66,27 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    fun `invalid bearer token is ignored on public endpoints`(output: CapturedOutput) {
+        val response = get("/api/v1/public/questions", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(output.out)
+            .contains("api_auth_ignored")
+            .contains("path=/api/v1/public/questions")
+            .contains("code=AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `invalid bearer token does not block login endpoints before controller handling`() {
+        val response = post("/api/v1/auth/google", """{"idToken":"invalid-google-token"}""", "not-a-token")
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+        assertThat(response.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
     fun `valid bearer token reaches protected endpoint with security principal`() {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
@@ -77,6 +98,16 @@ class SecurityIntegrationTest {
 
     private fun get(path: String, bearerToken: String? = null): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET()
+        if (!bearerToken.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $bearerToken")
+        }
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
+    private fun post(path: String, body: String, bearerToken: String? = null): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
         if (!bearerToken.isNullOrBlank()) {
             builder.header("Authorization", "Bearer $bearerToken")
         }

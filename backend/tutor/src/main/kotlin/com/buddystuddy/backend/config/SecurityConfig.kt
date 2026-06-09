@@ -87,7 +87,13 @@ class BearerTokenFilter(
             authenticate(request)
             filterChain.doFilter(request, response)
         } catch (error: ApiException) {
-            writeSecurityError(objectMapper, request, response, error.status, error.code, error.message)
+            if (allowsAnonymousAccess(request)) {
+                SecurityContextHolder.clearContext()
+                logIgnoredAuthenticationFailure(request, error)
+                filterChain.doFilter(request, response)
+            } else {
+                writeSecurityError(objectMapper, request, response, error.status, error.code, error.message)
+            }
         } finally {
             SecurityContextHolder.clearContext()
         }
@@ -117,6 +123,31 @@ class BearerTokenFilter(
         )
     }
 
+    private fun allowsAnonymousAccess(request: HttpServletRequest): Boolean {
+        val path = request.requestURI
+        val method = request.method
+        return path == "/health" ||
+            path == "/api/v1/health" ||
+            path.startsWith("/actuator/") ||
+            path.startsWith("/api/v1/auth/") ||
+            (method == HttpMethod.POST.name() && path == "/api/v1/devices/register") ||
+            (method == HttpMethod.GET.name() && path == "/api/v1/openai/models") ||
+            (method == HttpMethod.GET.name() && path.startsWith("/api/v1/public/"))
+    }
+
+}
+
+private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
+    val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+    securityLog.warn(
+        "api_auth_ignored requestId={} method={} path={} status={} code={} message={}",
+        requestId,
+        request.method,
+        request.requestURI,
+        error.status.value(),
+        error.code.name,
+        error.message,
+    )
 }
 
 private fun writeSecurityError(
