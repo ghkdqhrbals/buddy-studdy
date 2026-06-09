@@ -754,7 +754,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             throw RemotePushBackendError.invalidResponse
         }
 
-        var request = URLRequest(url: url)
+        var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(CommunityCommentsResponse.self, from: data)
@@ -1049,6 +1049,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func authenticatedRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
         var request = URLRequest(url: url)
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         if registration.hasAccessToken,
            let accessToken = registration.accessToken,
            !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1058,10 +1060,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private func loginRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
-        var request = authenticatedRequest(registration: registration, url: url)
-        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
-        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
-        return request
+        authenticatedRequest(registration: registration, url: url)
     }
 
     private static let dateFormatter = ISO8601DateFormatter()
