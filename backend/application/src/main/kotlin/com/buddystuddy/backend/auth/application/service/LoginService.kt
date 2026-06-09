@@ -115,7 +115,7 @@ class LoginService(
         var user = users.findByEmailAndProvider(normalized, "EMAIL")
         if (user == null) {
             if (command.verificationCode.isNullOrBlank()) {
-                throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_GOOGLE_REQUIRED, "Email verification code is required.")
+                throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Email verification code is required.")
             }
             user = users.save(
                 UserEntity(

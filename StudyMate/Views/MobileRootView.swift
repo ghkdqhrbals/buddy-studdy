@@ -1554,7 +1554,14 @@ private struct EmailSignInSheet: View {
     @State private var isSendingCode = false
     @State private var didSendCode = false
     @State private var requiresVerification = false
+    @FocusState private var focusedField: Field?
     var onSignedIn: () -> Void
+
+    private enum Field {
+        case email
+        case password
+        case verificationCode
+    }
 
     private var strings: AppStrings {
         appState.strings
@@ -1582,16 +1589,19 @@ private struct EmailSignInSheet: View {
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
                         .submitLabel(.next)
+                        .focused($focusedField, equals: .email)
 
                     SecureField(strings.password, text: $password)
                         .textContentType(.password)
                         .submitLabel(.done)
+                        .focused($focusedField, equals: .password)
 
                     if requiresVerification {
                         TextField(strings.emailVerificationCode, text: $verificationCode)
                             .textContentType(.oneTimeCode)
                             .keyboardType(.numberPad)
                             .submitLabel(.done)
+                            .focused($focusedField, equals: .verificationCode)
                     }
                 } footer: {
                     if requiresVerification {
@@ -1673,8 +1683,11 @@ private struct EmailSignInSheet: View {
                             case .signedIn:
                                 onSignedIn()
                             case .verificationRequired:
-                                requiresVerification = true
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    requiresVerification = true
+                                }
                                 didSendCode = false
+                                focusedField = .verificationCode
                             case .failed:
                                 break
                             }

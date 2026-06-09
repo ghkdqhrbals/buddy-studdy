@@ -1733,6 +1733,24 @@ enum RemotePushBackendError: LocalizedError {
         }
     }
 
+    var requiresEmailVerification: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            guard let apiError else {
+                return false
+            }
+
+            if apiError.code == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
+                return true
+            }
+
+            return apiError.code == "AUTH_GOOGLE_REQUIRED"
+                && apiError.message.localizedCaseInsensitiveContains("verification code")
+        case .invalidResponse:
+            return false
+        }
+    }
+
     var responseBody: String? {
         switch self {
         case .httpStatus(_, let body, _):

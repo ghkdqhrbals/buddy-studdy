@@ -84,6 +84,24 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    fun `new email login without verification code returns email verification error`() {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+
+        val response = post(
+            path = "/api/v1/auth/email",
+            body = """{"email":"new-tester@example.com","password":"password123"}""",
+            headers = mapOf(
+                "X-Device-Id" to auth.deviceId,
+                "X-Client-Secret" to auth.clientSecret,
+            )
+        )
+
+        assertThat(response.statusCode()).isEqualTo(403)
+        assertThat(response.body()).contains("AUTH_EMAIL_VERIFICATION_REQUIRED")
+        assertThat(response.body()).contains("Email verification code is required.")
+    }
+
+    @Test
     fun `valid bearer token reaches protected endpoint with security principal`() {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
@@ -101,13 +119,19 @@ class SecurityIntegrationTest {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
-    private fun post(path: String, body: String, bearerToken: String? = null): HttpResponse<String> {
+    private fun post(
+        path: String,
+        body: String,
+        bearerToken: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path"))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
         if (!bearerToken.isNullOrBlank()) {
             builder.header("Authorization", "Bearer $bearerToken")
         }
+        headers.forEach { (key, value) -> builder.header(key, value) }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 }

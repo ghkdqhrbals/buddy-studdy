@@ -1318,7 +1318,7 @@ final class AppState: ObservableObject {
             return .signedIn
         } catch {
             if let backendError = error as? RemotePushBackendError,
-               backendError.backendCode == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
+               backendError.requiresEmailVerification {
                 communityErrorMessage = strings.emailVerificationRequired
                 log(.info, "Email 로그인에 인증코드가 필요합니다.")
                 return .verificationRequired
