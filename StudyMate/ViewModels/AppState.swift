@@ -373,47 +373,28 @@ final class AppState: ObservableObject {
     }
 
     private static func normalizedDebugBackendBaseURL(_ value: String) -> String {
-        let trimmedURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedURL.count > 1 else {
-            return trimmedURL
-        }
-
-        return String(trimmedURL.drop { $0 == "/" })
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        BackendBaseURLConfiguration.normalizedDebugBackendBaseURL(value)
     }
 
     private static func makeRemotePushBackendClient(
         isDebuggingEnabled: Bool,
         debugBackendBaseURL: String
     ) -> RemotePushBackendClient {
-        guard isDebuggingEnabled,
-              let debugURL = resolvedDebugBackendURL(from: debugBackendBaseURL) else {
-            return RemotePushBackendClient()
-        }
-
-        return RemotePushBackendClient(baseURL: debugURL)
+        BackendBaseURLConfiguration(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        ).makeClient()
     }
 
     private static func resolvedDebugBackendURL(from value: String) -> URL? {
-        let normalizedURL = normalizedDebugBackendBaseURL(value)
-        guard !normalizedURL.isEmpty,
-              let url = URL(string: normalizedURL),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http",
-              url.host != nil else {
-            return nil
-        }
-
-        return url
+        BackendBaseURLConfiguration.resolvedDebugBackendURL(from: value)
     }
 
     private var activeBackendBaseURLDescription: String {
-        guard isDebuggingEnabled,
-              let debugURL = Self.resolvedDebugBackendURL(from: debugBackendBaseURL) else {
-            return RemotePushBackendClient.defaultBaseURL.absoluteString
-        }
-
-        return debugURL.absoluteString
+        BackendBaseURLConfiguration(
+            isDebuggingEnabled: isDebuggingEnabled,
+            debugBackendBaseURL: debugBackendBaseURL
+        ).displayBaseURL
     }
 
     private func refreshRemotePushBackendClient(reason: String) {

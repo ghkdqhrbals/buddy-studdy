@@ -72,6 +72,64 @@ struct EmailVerificationCodeResult: Equatable {
 }
 
 @MainActor
+struct BackendBaseURLConfiguration: Equatable {
+    var isDebuggingEnabled: Bool
+    var debugBackendBaseURL: String
+
+    var normalizedDebugBackendBaseURL: String {
+        Self.normalizedDebugBackendBaseURL(debugBackendBaseURL)
+    }
+
+    var debugBackendURL: URL? {
+        Self.resolvedDebugBackendURL(from: normalizedDebugBackendBaseURL)
+    }
+
+    var effectiveBaseURL: URL {
+        guard isDebuggingEnabled,
+              let debugBackendURL else {
+            return RemotePushBackendClient.defaultBaseURL
+        }
+
+        return debugBackendURL
+    }
+
+    var displayBaseURL: String {
+        effectiveBaseURL.absoluteString
+    }
+
+    var isDebugBackendBaseURLValid: Bool {
+        normalizedDebugBackendBaseURL.isEmpty || debugBackendURL != nil
+    }
+
+    func makeClient() -> RemotePushBackendClient {
+        RemotePushBackendClient(baseURL: effectiveBaseURL)
+    }
+
+    static func normalizedDebugBackendBaseURL(_ value: String) -> String {
+        let trimmedURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedURL.count > 1 else {
+            return trimmedURL
+        }
+
+        return String(trimmedURL.drop { $0 == "/" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    static func resolvedDebugBackendURL(from value: String) -> URL? {
+        let normalizedURL = normalizedDebugBackendBaseURL(value)
+        guard !normalizedURL.isEmpty,
+              let url = URL(string: normalizedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              url.host != nil else {
+            return nil
+        }
+
+        return url
+    }
+}
+
+@MainActor
 protocol RemotePushBackendClientProtocol {
     func registerDevice(
         apnsToken: String?,
