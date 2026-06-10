@@ -73,11 +73,15 @@ enum StudyNotificationPayload {
     }
 
     private static func appRouteFromDeepLink(in dictionary: [AnyHashable: Any]) -> AppRoute? {
-        guard let value = stringValue(dictionary["deepLink"]),
-              let url = URL(string: value) else {
-            return nil
+        for key in ["deepLink", "url", "landingUrl"] {
+            if let value = stringValue(dictionary[key]),
+               let url = URL(string: value),
+               let route = AppRoute(url: url) {
+                return route
+            }
         }
-        return AppRoute(url: url)
+
+        return nil
     }
 
     static func backendRecordID(from userInfo: [AnyHashable: Any]) -> String? {
@@ -760,14 +764,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
                applicationState: UIApplication.shared.applicationState
            ) {
             Task { @MainActor in
-                if StudyNotificationPayload.backendRecordID(from: userInfo) != nil {
+                if let route = StudyNotificationPayload.appRoute(from: userInfo) {
+                    StudyNotificationDelegate.shared.enqueueAppRoute(route)
+                } else if StudyNotificationPayload.backendRecordID(from: userInfo) != nil {
                     StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
                         userInfo: userInfo,
                         actionIdentifier: actionIdentifier,
                         replyText: replyText
                     )
-                } else if let route = StudyNotificationPayload.appRoute(from: userInfo) {
-                    StudyNotificationDelegate.shared.enqueueAppRoute(route)
                 }
             }
             completionHandler()

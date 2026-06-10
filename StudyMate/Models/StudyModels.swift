@@ -256,6 +256,15 @@ enum AppRoute: Equatable, Hashable {
             return nil
         }
 
+        let queryParams = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .reduce(into: [String: String]()) { result, item in
+                result[item.name] = item.value
+            } ?? [:]
+        func queryValue(_ keys: String...) -> String? {
+            keys.lazy.compactMap { queryParams[$0] }.first
+        }
+
         let components = [url.host, url.path]
             .compactMap { $0 }
             .flatMap { $0.split(separator: "/") }
@@ -269,13 +278,22 @@ enum AppRoute: Equatable, Hashable {
         let normalized = components.map { $0.lowercased() }
         if normalized == ["home"] {
             self = .home
+        } else if normalized == ["test-push"] {
+            self = .home
+        } else if normalized == ["study"] || normalized == ["studies"],
+                  let categoryID = queryValue("categoryId", "studyId", "id") {
+            self = .studyRoom(categoryID: categoryID)
         } else if normalized == ["study"] || normalized == ["studies"] {
             self = .studyList
         } else if normalized.count == 2,
                   normalized[0] == "study" || normalized[0] == "studies" {
             self = .studyRoom(categoryID: components[safe: 1])
         } else if normalized == ["records"] || normalized == ["history"] {
-            self = .records
+            if let recordID = queryValue("recordId", "recordID", "id") {
+                self = .recordDetail(recordID: recordID)
+            } else {
+                self = .records
+            }
         } else if normalized.count == 2,
                   normalized[0] == "record" || normalized[0] == "records" || normalized[0] == "history",
                   let recordID = components[safe: 1] {
@@ -289,7 +307,11 @@ enum AppRoute: Equatable, Hashable {
         } else if normalized == ["profile"] {
             self = .profile
         } else if normalized == ["public"] || normalized == ["public", "questions"] {
-            self = .publicQuestions
+            if let questionID = queryValue("questionId", "questionID", "id") {
+                self = .publicQuestion(id: questionID)
+            } else {
+                self = .publicQuestions
+            }
         } else if normalized.count == 3,
                   normalized[0] == "public",
                   normalized[1] == "question" || normalized[1] == "questions",

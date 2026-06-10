@@ -1464,6 +1464,37 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(StudyNotificationPayload.cloudQuestionPushRecordName(from: userInfo))
     }
 
+    func testDeepLinksResolveToAppRoutes() throws {
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records/123"))),
+            .recordDetail(recordID: "123")
+        )
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records?id=456"))),
+            .recordDetail(recordID: "456")
+        )
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://public/questions?id=789"))),
+            .publicQuestion(id: "789")
+        )
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://test-push"))),
+            .home
+        )
+    }
+
+    func testNotificationPayloadPrefersDeepLinkRoute() {
+        let userInfo: [AnyHashable: Any] = [
+            "deepLink": "buddystuddy://records/123"
+        ]
+
+        XCTAssertEqual(
+            StudyNotificationPayload.appRoute(from: userInfo),
+            .recordDetail(recordID: "123")
+        )
+        XCTAssertEqual(StudyNotificationPayload.backendRecordID(from: userInfo), "123")
+    }
+
     func testNotificationRoutingOnlyOpensBackgroundDefaultTap() {
         XCTAssertTrue(
             StudyNotificationRouting.shouldOpenStudyImmediately(
