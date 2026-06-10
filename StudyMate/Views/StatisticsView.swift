@@ -1184,6 +1184,7 @@ private struct StatsHeroMetric: View {
 
 private struct StatsActivityGrid: View {
     var records: [StudyRecord]
+    @State private var selectedDay: ActivityDay?
 
     private var days: [ActivityDay] {
         let calendar = Calendar.current
@@ -1202,12 +1203,35 @@ private struct StatsActivityGrid: View {
     var body: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
 
-        LazyVGrid(columns: columns, spacing: 5) {
-            ForEach(days) { day in
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(color(for: day.count))
-                    .frame(height: 20)
-                    .accessibilityLabel("\(day.count)")
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(days) { day in
+                    Button {
+                        withAnimation(.smooth(duration: 0.18)) {
+                            selectedDay = day
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(color(for: day.count))
+                            .frame(height: 20)
+                            .overlay {
+                                if selectedDay?.id == day.id {
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .stroke(Color.primary.opacity(0.72), lineWidth: 1.5)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Self.accessibilityText(for: day))
+                }
+            }
+
+            if let selectedDay {
+                Text(Self.displayText(for: selectedDay))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }
@@ -1226,6 +1250,20 @@ private struct StatsActivityGrid: View {
             return Color.secondary.opacity(0.13)
         }
     }
+
+    private static func displayText(for day: ActivityDay) -> String {
+        "\(dateFormatter.string(from: day.date)) · \(day.count)"
+    }
+
+    private static func accessibilityText(for day: ActivityDay) -> String {
+        "\(dateFormatter.string(from: day.date)), \(day.count)"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return formatter
+    }()
 }
 
 private struct ActivityDay: Identifiable {
