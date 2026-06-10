@@ -48,6 +48,21 @@ struct StatisticsView: View {
         Array(topicStats.dropFirst(topicPageStartIndex).prefix(Self.topicPageSize))
     }
 
+    private var visibleStatRecords: [StudyRecord] {
+        var seenIDs: Set<String> = []
+        return topicStats
+            .flatMap(\.records)
+            .sorted { Self.statsDate(for: $0) > Self.statsDate(for: $1) }
+            .filter { record in
+                let id = record.id
+                guard !seenIDs.contains(id) else {
+                    return false
+                }
+                seenIDs.insert(id)
+                return true
+            }
+    }
+
     var body: some View {
         let strings = appState.strings
         let count = responseCount
@@ -89,6 +104,13 @@ struct StatisticsView: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 280)
                     } else {
+                        StatsOverviewSection(
+                            totalResponses: count,
+                            totalTopics: totalTopicCount,
+                            records: visibleStatRecords,
+                            strings: strings
+                        )
+
                         TopicBrowserSection(
                             stats: pagedTopicStats,
                             currentPage: boundedTopicPage,
@@ -357,6 +379,10 @@ struct StatisticsView: View {
 
     private func resetTopicPaging() {
         topicPage = 0
+    }
+
+    private static func statsDate(for record: StudyRecord) -> Date {
+        record.answeredAt ?? record.question.createdAt
     }
 }
 
@@ -1089,6 +1115,126 @@ private extension TopicLevelRange {
     }
 }
 
+private struct StatsOverviewSection: View {
+    var totalResponses: Int
+    var totalTopics: Int
+    var records: [StudyRecord]
+    var strings: AppStrings
+
+    private var latestRecordDate: Date? {
+        records.map(Self.statsDate(for:)).max()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                StatsHeroMetric(value: "\(totalResponses)", label: strings.responses)
+                StatsHeroMetric(value: "\(totalTopics)", label: strings.activeTopics)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(strings.recentActivity)
+                        .font(.headline.weight(.semibold))
+                    Spacer()
+                    if let latestRecordDate {
+                        Text(latestRecordDate, formatter: Self.relativeDateFormatter)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                StatsActivityGrid(records: records)
+            }
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private static func statsDate(for record: StudyRecord) -> Date {
+        record.answeredAt ?? record.question.createdAt
+    }
+
+    private static let relativeDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return formatter
+    }()
+}
+
+private struct StatsHeroMetric: View {
+    var value: String
+    var label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StatsActivityGrid: View {
+    var records: [StudyRecord]
+
+    private var days: [ActivityDay] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let counts = Dictionary(grouping: records) { record in
+            calendar.startOfDay(for: record.answeredAt ?? record.question.createdAt)
+        }
+        .mapValues(\.count)
+
+        return (0..<35).reversed().map { offset in
+            let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
+            return ActivityDay(date: date, count: counts[date] ?? 0)
+        }
+    }
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+
+        LazyVGrid(columns: columns, spacing: 5) {
+            ForEach(days) { day in
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color(for: day.count))
+                    .frame(height: 20)
+                    .accessibilityLabel("\(day.count)")
+            }
+        }
+    }
+
+    private func color(for count: Int) -> Color {
+        switch count {
+        case 4...:
+            return .accentColor
+        case 3:
+            return .accentColor.opacity(0.78)
+        case 2:
+            return .accentColor.opacity(0.54)
+        case 1:
+            return .accentColor.opacity(0.28)
+        default:
+            return Color.secondary.opacity(0.13)
+        }
+    }
+}
+
+private struct ActivityDay: Identifiable {
+    var date: Date
+    var count: Int
+
+    var id: Date { date }
+}
+
 private struct TopicBrowserSection: View {
     var stats: [TopicStat]
     var currentPage: Int
@@ -1098,7 +1244,7 @@ private struct TopicBrowserSection: View {
     var onNextPage: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if stats.isEmpty {
                 ContentUnavailableView(
                     strings.noMatchingTopics,
@@ -1107,7 +1253,7 @@ private struct TopicBrowserSection: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 180)
             } else {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     ForEach(stats) { stat in
                         TopicStatRow(stat: stat, strings: strings)
                     }
@@ -1150,53 +1296,54 @@ private struct TopicStatRow: View {
     var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(stat.topic)
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(.title3.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("\(strings.level) \(stat.levelRange.compactRangeText)")
+                        Text("·")
+                        Text(stat.latestDate, formatter: Self.dateFormatter)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 0) {
                     Text("\(stat.count)")
-                        .font(.title3.weight(.semibold))
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                     Text(strings.responsesShort)
-                        .font(.caption2)
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .frame(width: 58, alignment: .trailing)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(stat.levelRange.compactRangeText)
-                        .font(.title3.weight(.semibold))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                    Text(strings.level)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(width: 64, alignment: .trailing)
             }
 
             CompactLevelRangeBar(range: stat.levelRange)
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 12)
-        .background(Color.secondary.opacity(0.045))
+        .padding(14)
+        .background(Color.secondary.opacity(0.052))
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return formatter
+    }()
 }
 
 private struct CompactLevelRangeBar: View {
@@ -1207,18 +1354,18 @@ private struct CompactLevelRangeBar: View {
             ZStack(alignment: .leading) {
                 HStack(spacing: 2) {
                     ForEach(Difficulty.allCases) { difficulty in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(difficulty == range.level ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.12))
+                        Capsule()
+                            .fill(difficulty == range.level ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.14))
                     }
                 }
 
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.accentColor.opacity(0.72))
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.82))
                     .frame(width: max(4, proxy.size.width * (range.upperBound - range.lowerBound)))
                     .offset(x: proxy.size.width * range.lowerBound)
             }
         }
-        .frame(height: 8)
+        .frame(height: 10)
     }
 }
 

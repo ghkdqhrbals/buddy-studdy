@@ -1916,6 +1916,9 @@ struct AppStrings {
     var topicTrend: String { text("주제 레벨 추세", "Topic Level Trend") }
     var topicSummary: String { text("주제 통합 현황", "Topic Summary") }
     var topicCount: String { text("주제", "Topics") }
+    var activeTopics: String { text("활동 주제", "Active Topics") }
+    var recentActivity: String { text("최근 활동", "Recent Activity") }
+    var activity: String { text("활동", "Activity") }
     var level: String { text("레벨", "Level") }
     var range: String { text("범위", "Range") }
     var sortTopics: String { text("정렬", "Sort") }
