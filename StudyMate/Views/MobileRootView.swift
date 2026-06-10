@@ -444,9 +444,7 @@ private struct MobileHomeView: View {
             )
         } else {
             Button {
-                Task {
-                    await appState.openStudyCategory(category.id)
-                }
+                appState.openStudyCategory(category.id)
             } label: {
                 MobileHomeCategoryRow(
                     category: category,

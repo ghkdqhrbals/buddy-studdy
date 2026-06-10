@@ -2460,7 +2460,7 @@ final class AppState: ObservableObject {
         statusMessage = nil
     }
 
-    func openStudyCategory(_ categoryID: String) async {
+    func openStudyCategory(_ categoryID: String) {
         let categories = synchronizedTopicCategories(for: settings).studyCategories
         guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
             return
@@ -2473,12 +2473,18 @@ final class AppState: ObservableObject {
         applyPreferredPendingRecord(for: targetCategory)
         showStudyScreen(categoryID: targetCategory.id)
 
-        let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-        guard didRefresh,
-              homeStudyRoute?.categoryID == targetCategory.id else {
-            return
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            guard didRefresh,
+                  homeStudyRoute?.categoryID == targetCategory.id else {
+                return
+            }
+            applyPreferredPendingRecord(for: targetCategory)
         }
-        applyPreferredPendingRecord(for: targetCategory)
     }
 
     func deleteStudyCategory(id: String) {
