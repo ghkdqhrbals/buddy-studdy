@@ -225,6 +225,9 @@ struct HistoryView: View {
             if appState.focusedRecordRequest != nil {
                 showFocusedRecord()
             }
+            Task {
+                await refreshRecords()
+            }
         }
         .onChange(of: isSearchFocused) { _, isFocused in
             guard !isFocused,
