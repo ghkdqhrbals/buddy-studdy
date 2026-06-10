@@ -11,7 +11,7 @@ class StudyRoomTest {
     fun `room allows question creation while pending count is below the per-study limit`() {
         val room = StudyRoom.of(schedule(), pendingCount = 0)
 
-        room.assertCanCreateQuestion(maxPendingPerStudy = 1)
+        room.canCreateQuestion(maxPendingPerStudy = 1)
     }
 
     @Test
@@ -19,7 +19,7 @@ class StudyRoomTest {
         val room = StudyRoom.of(schedule(), pendingCount = 1)
 
         val error = assertFailsWith<StudyRoomPendingLimitExceeded> {
-            room.assertCanCreateQuestion(maxPendingPerStudy = 1)
+            room.canCreateQuestion(maxPendingPerStudy = 1)
         }
         assertEquals("A pending question already exists for this study.", error.message)
     }

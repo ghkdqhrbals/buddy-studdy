@@ -12,7 +12,7 @@ class StudyRoom private constructor(
     val appLanguage: String get() = schedule.appLanguage
     val customPrompt: String get() = schedule.customPrompt
 
-    fun assertCanCreateQuestion(maxPendingPerStudy: Int) {
+    fun canCreateQuestion(maxPendingPerStudy: Int) {
         if (pendingCount >= maxPendingPerStudy) {
             throw StudyRoomPendingLimitExceeded("A pending question already exists for this study.")
         }

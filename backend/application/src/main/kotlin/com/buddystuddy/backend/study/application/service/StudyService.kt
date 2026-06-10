@@ -1,19 +1,24 @@
 package com.buddystuddy.backend.study.application.service
 
 import com.buddystuddy.backend.auth.Principal
+import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.study.domain.StudyRoom
 import com.buddystuddy.study.domain.StudyRoomPendingLimitExceeded
+import com.buddystuddy.study.domain.entity.StudyEntity
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import org.springframework.data.domain.PageRequest
@@ -29,33 +34,51 @@ class StudyService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
-    private val context: StudyContextProvider,
+    private val users: UserPort,
+    private val cipher: KeyCipher,
+    private val pushPublisher: QuestionPushPublishPort,
 ) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse {
-        val study = context.studyFor(principal, studyId)
-        val appLanguage = context.appLanguageFor(principal)
+        val study = studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val appLanguage = appLanguageFor(principal)
         val room = StudyRoom.of(
             study.toStudyRoomSchedule(appLanguage),
             questions.countPendingForStudy(study.id),
         )
         try {
-            room.assertCanCreateQuestion(properties.scheduler.maxPendingPerStudy)
+            room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
         } catch (error: StudyRoomPendingLimitExceeded) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
         val generated = openAI.generateQuestion(
-            context.apiKeyFor(principal, study),
-            context.openAIModelFor(study),
+            apiKeyFor(principal),
+            study.openaiModel.ifBlank { properties.openai.model },
             room.topic,
             room.difficultyLevel,
             room.appLanguage,
             room.customPrompt,
-            context.recentQuestions(principal),
+            recentQuestions(principal),
         )
         val now = Instant.now()
         val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity())
         questionStats.save(QuestionStatsEntity(questionId = question.id))
+        pushPublisher.publishPush(
+            QuestionPushRequest(
+                recordId = question.id,
+                createdAt = now,
+                deviceId = study.deviceId,
+                userId = principal.userId,
+                question = generated.question,
+                expectedAnswerHint = generated.hint,
+                topic = study.topic,
+                difficultyLevel = study.difficultyLevel,
+                language = appLanguage,
+                sound = study.notificationSound,
+                intervalMinutes = study.intervalMinutes,
+            )
+        )
         return question.toStudyRecord().toProjection().toRecordResponse()
     }
 
@@ -70,13 +93,13 @@ class StudyService(
                 ?: studies.findByUserIdAndTopic(principal.userId, q.topic)
                 ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             val graded = openAI.grade(
-                context.apiKeyFor(principal, study),
-                context.openAIModelFor(study),
+                apiKeyFor(principal),
+                openAIModelFor(study),
                 q.question,
                 answer,
                 q.topic,
                 q.difficultyLevel,
-                context.appLanguageFor(principal),
+                appLanguageFor(principal),
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
@@ -129,4 +152,19 @@ class StudyService(
         q.apply(record.restrictPublicity(isPublic))
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
+
+    private fun apiKeyFor(principal: Principal): String {
+        val user = users.findById(principal.userId).orElse(null)
+        return cipher.decrypt(user?.openaiApiKeyCipher)
+            ?: properties.openai.apiKey.takeIf { it.isNotBlank() }
+            ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
+    }
+
+    private fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model
+
+    private fun appLanguageFor(principal: Principal): String =
+        users.findById(principal.userId).orElse(null)?.appLanguage ?: "ko"
+
+    private fun recentQuestions(principal: Principal): List<String> =
+        questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
 }
