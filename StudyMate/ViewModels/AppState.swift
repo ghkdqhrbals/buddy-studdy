@@ -31,6 +31,23 @@ private enum ProtectedAppPage {
     case studyDetail
     case profile
 
+    var accessLogName: String {
+        switch self {
+        case .publicQuestions:
+            return "public-questions"
+        case .myStudies:
+            return "my-studies"
+        case .records:
+            return "records"
+        case .statistics:
+            return "statistics"
+        case .studyDetail:
+            return "study-detail"
+        case .profile:
+            return "profile"
+        }
+    }
+
     func title(strings: AppStrings) -> String {
         switch self {
         case .publicQuestions:
@@ -176,6 +193,7 @@ final class AppState: ObservableObject {
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var backendHealthCheckTask: Task<Void, Never>?
+    private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -250,13 +268,49 @@ final class AppState: ObservableObject {
 
         if let protectedPage = protectedPage(for: nextTab),
            !canAccess(protectedPage) {
+            if shouldRefreshPageAccessBeforeDenying() {
+                refreshPageAccessThenOpen(nextTab, protectedPage: protectedPage)
+                return
+            }
             redirectToPageAccessGuide(for: protectedPage)
             return
         }
 
+        applySelectedTab(nextTab)
+    }
+
+    private func applySelectedTab(_ nextTab: AppTab) {
         selectedTab = nextTab
         if nextTab == .home {
             homeStudyRoute = nil
+        }
+    }
+
+    private func shouldRefreshPageAccessBeforeDenying() -> Bool {
+        if isCommunitySignedIn {
+            return true
+        }
+
+        return settingsStore.loadRemotePushRegistration()?.hasAccessToken == true
+    }
+
+    private func refreshPageAccessThenOpen(_ nextTab: AppTab, protectedPage: ProtectedAppPage) {
+        protectedPageAccessRefreshTask?.cancel()
+        protectedPageAccessRefreshTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await refreshPageAccess(reason: "protected-tab-\(protectedPage.accessLogName)")
+            guard !Task.isCancelled else {
+                return
+            }
+
+            if canAccess(protectedPage) {
+                applySelectedTab(nextTab)
+            } else {
+                redirectToPageAccessGuide(for: protectedPage)
+            }
         }
     }
 
@@ -700,12 +754,14 @@ final class AppState: ObservableObject {
             let cloudSyncTask = cloudSyncTask
             let answerDraftSaveTask = answerDraftSaveTask
             let backendHealthCheckTask = backendHealthCheckTask
+            let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
             let apiTrafficLogCancellable = apiTrafficLogCancellable
 
             timerTask?.cancel()
             cloudSyncTask?.cancel()
             answerDraftSaveTask?.cancel()
             backendHealthCheckTask?.cancel()
+            protectedPageAccessRefreshTask?.cancel()
             apiTrafficLogCancellable?.cancel()
         }
     }
