@@ -1332,6 +1332,7 @@ private struct MobileProfileSettingsSheet: View {
     @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
+    @State private var isShowingAvatarCustomization = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
 
@@ -1351,9 +1352,13 @@ private struct MobileProfileSettingsSheet: View {
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
+        let currentAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
+        let currentAvatarColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
 
         return trimmedProfileDisplayName != currentDisplayName
             || allowPublicQuestionsAccess != currentPublicQuestions
+            || draftAvatarSymbolName != currentAvatarSymbolName
+            || draftAvatarColorSeed != currentAvatarColorSeed
     }
 
     private var canSaveProfile: Bool {
@@ -1430,6 +1435,74 @@ private struct MobileProfileSettingsSheet: View {
                         .padding(.vertical, 8)
                     }
                     .listRowBackground(Color.clear)
+
+                    Section {
+                        DisclosureGroup(isExpanded: $isShowingAvatarCustomization) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(strings.profileCharacter)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+
+                                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
+                                        ForEach(ProfileAvatarOption.all, id: \.self) { option in
+                                            Button {
+                                                draftAvatarSymbolName = option
+                                            } label: {
+                                                avatarChoice(
+                                                    symbolName: option,
+                                                    colorSeed: draftAvatarColorSeed,
+                                                    isSelected: draftAvatarSymbolName == option
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(strings.profileColor)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+
+                                    HStack(spacing: 10) {
+                                        ForEach(ProfileAvatarColorOption.all) { option in
+                                            Button {
+                                                draftAvatarColorSeed = option.id
+                                            } label: {
+                                                colorChoice(
+                                                    color: option.color,
+                                                    isSelected: draftAvatarColorSeed == option.id
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+
+                                        Button {
+                                            isShowingCustomColorEditor = true
+                                        } label: {
+                                            customColorChoice(isSelected: ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            HStack(spacing: 12) {
+                                HomeProfileAvatar(
+                                    symbolName: draftAvatarSymbolName,
+                                    displayName: profileDisplayName,
+                                    imageData: nil,
+                                    colorSeed: draftAvatarColorSeed,
+                                    usesNeutralColor: false,
+                                    size: 36
+                                )
+                                Text(strings.profileAvatar)
+                                    .font(.body.weight(.semibold))
+                            }
+                        }
+                    }
 
                     Section {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
@@ -1623,6 +1696,51 @@ private struct MobileProfileSettingsSheet: View {
         }
 
         return strings.save
+    }
+
+    private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
+        HomeProfileAvatar(
+            symbolName: symbolName,
+            displayName: nil,
+            imageData: nil,
+            colorSeed: colorSeed,
+            usesNeutralColor: false,
+            size: 42
+        )
+        .padding(4)
+        .background(isSelected ? Color.primary.opacity(0.10) : Color.clear, in: Circle())
+        .overlay {
+            Circle()
+                .stroke(isSelected ? Color.primary.opacity(0.55) : Color.clear, lineWidth: 1)
+        }
+    }
+
+    private func colorChoice(color: Color, isSelected: Bool) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 28, height: 28)
+            .overlay {
+                Circle()
+                    .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+            }
+            .padding(2)
+    }
+
+    private func customColorChoice(isSelected: Bool) -> some View {
+        Circle()
+            .fill(
+                AngularGradient(
+                    colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red],
+                    center: .center
+                )
+            )
+            .frame(width: 28, height: 28)
+            .overlay {
+                Circle()
+                    .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+            }
+            .padding(2)
+            .accessibilityLabel(strings.customProfileColor)
     }
 
 }
