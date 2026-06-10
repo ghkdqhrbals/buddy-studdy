@@ -205,6 +205,7 @@ final class AppState: ObservableObject {
     private var didReceiveCloudStateWhileEditing = false
     private var backendStatsRequestID = UUID()
     private var communityQuestionLoadRequestID = UUID()
+    private var backendHealthConsecutiveFailureCount = 0
 
     private struct PendingAnswerDraft {
         var question: QuestionItem?
@@ -538,16 +539,18 @@ final class AppState: ObservableObject {
     private func checkBackendHealthOnce() async -> Bool {
         do {
             try await remotePushBackendClient.checkHealth()
+            backendHealthConsecutiveFailureCount = 0
             if isBackendUnderMaintenance {
                 log(.info, "백엔드 점검 상태가 해제되었습니다.")
             }
             isBackendUnderMaintenance = false
             return true
         } catch {
+            backendHealthConsecutiveFailureCount += 1
             if !isBackendUnderMaintenance {
                 log(.warning, "백엔드 health check 실패: \(error.localizedDescription)")
             }
-            isBackendUnderMaintenance = true
+            isBackendUnderMaintenance = backendHealthConsecutiveFailureCount >= 2
             return false
         }
     }

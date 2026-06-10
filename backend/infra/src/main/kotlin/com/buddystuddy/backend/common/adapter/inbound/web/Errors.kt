@@ -5,6 +5,7 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -49,23 +50,34 @@ class ErrorHandler {
             error.code.name,
             error.message,
         )
-        return ResponseEntity.status(error.status).body(body)
+        return json(error.status, body)
     }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-            .body(envelope(ApiErrorCode.VALIDATION_ERROR, "Invalid request.", HttpStatus.UNPROCESSABLE_ENTITY, request))
+        json(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            envelope(ApiErrorCode.VALIDATION_ERROR, "Invalid request.", HttpStatus.UNPROCESSABLE_ENTITY, request),
+        )
 
     @ExceptionHandler(NoResourceFoundException::class, NoHandlerFoundException::class)
     fun notFound(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(envelope(ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found.", HttpStatus.NOT_FOUND, request))
+        json(
+            HttpStatus.NOT_FOUND,
+            envelope(ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found.", HttpStatus.NOT_FOUND, request),
+        )
 
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-            .body(envelope(ApiErrorCode.INTERNAL_SERVER_ERROR, "Internal backend error.", HttpStatus.INTERNAL_SERVER_ERROR, request, error.toReason()))
+        json(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            envelope(ApiErrorCode.INTERNAL_SERVER_ERROR, "Internal backend error.", HttpStatus.INTERNAL_SERVER_ERROR, request, error.toReason()),
+        )
+
+    private fun json(status: HttpStatus, body: ApiErrorEnvelope): ResponseEntity<ApiErrorEnvelope> =
+        ResponseEntity.status(status)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
 
     private fun envelope(
         code: ApiErrorCode,
