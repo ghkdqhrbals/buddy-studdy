@@ -61,22 +61,14 @@ struct StudyMateiOSApp: App {
 private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
-    @State private var bootstrapError: String?
-    @State private var isShowingStartupSplash = true
 
     var body: some View {
-        ZStack {
+        Group {
             if let appState {
                 MobileRootView()
                     .environmentObject(appState)
             } else {
                 Color(.systemBackground)
-            }
-
-            if isShowingStartupSplash {
-                BuddyStuddyStartupSplashView(message: bootstrapError)
-                    .transition(.opacity)
-                    .zIndex(1)
             }
         }
         .background(Color(.systemBackground))
@@ -86,109 +78,14 @@ private struct StudyMateiOSBootstrapView: View {
             }
 
             didBootstrap = true
-            let minimumSplashTask = Task {
-                try? await Task.sleep(for: .milliseconds(3_000))
-            }
-
-            bootstrapError = "Preparing BuddyStuddy..."
-            bootstrapError = "Loading settings..."
             let state = AppState()
-            bootstrapError = "Preparing notifications..."
             StudyNotificationDelegate.shared.configure(appState: state)
             StudyRemoteNotificationBridge.shared.configure(appState: state)
             StudyMateBackgroundRefreshBridge.shared.configure(appState: state)
             appState = state
-            bootstrapError = nil
             await state.start()
-            await minimumSplashTask.value
-
-            withAnimation(.easeOut(duration: 0.28)) {
-                isShowingStartupSplash = false
-            }
         }
     }
-}
-
-private struct BuddyStuddyStartupSplashView: View {
-    var message: String?
-    @State private var sceneIndex = 0
-
-    private let sceneDuration: Duration = .milliseconds(500)
-    private let transitionDuration = 0.3
-
-    var body: some View {
-        GeometryReader { geometry in
-            let scene = FoxStartupScene.scenes[sceneIndex]
-            let iconSize = min(max(geometry.size.width * 0.34, 132), 188)
-
-            ZStack {
-                Color(red: 1.0, green: 0.992, blue: 0.972)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 18) {
-                    Spacer()
-
-                    ZStack {
-                        BuddyStuddyStartupSceneView(scene: scene, iconSize: iconSize)
-                            .id(sceneIndex)
-                            .transition(.opacity)
-                    }
-                    .frame(height: iconSize + 36)
-                    .animation(.easeInOut(duration: transitionDuration), value: sceneIndex)
-
-                    if let message {
-                        Text(message)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.opacity)
-                    }
-
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 24)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .task {
-            try? await Task.sleep(for: .milliseconds(80))
-
-            while !Task.isCancelled {
-                withAnimation(.easeInOut(duration: transitionDuration)) {
-                    sceneIndex = (sceneIndex + 1) % FoxStartupScene.scenes.count
-                }
-
-                try? await Task.sleep(for: sceneDuration)
-            }
-        }
-    }
-}
-
-private struct BuddyStuddyStartupSceneView: View {
-    var scene: FoxStartupScene
-    var iconSize: CGFloat
-
-    var body: some View {
-        Image(scene.imageName)
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
-            .frame(width: iconSize, height: iconSize)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct FoxStartupScene {
-    var imageName: String
-
-    static let scenes = [
-        FoxStartupScene(imageName: "SplashFoxWalk1"),
-        FoxStartupScene(imageName: "SplashFoxWalk2"),
-        FoxStartupScene(imageName: "SplashFoxWalk3"),
-        FoxStartupScene(imageName: "SplashFoxWalk4"),
-        FoxStartupScene(imageName: "SplashFoxWalk5"),
-        FoxStartupScene(imageName: "SplashFoxWalk6"),
-    ]
 }
 
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
