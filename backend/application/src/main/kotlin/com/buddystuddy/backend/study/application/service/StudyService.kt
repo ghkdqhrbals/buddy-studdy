@@ -21,6 +21,11 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPubli
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -38,48 +43,69 @@ class StudyService(
     private val cipher: KeyCipher,
     private val pushPublisher: QuestionPushPublishPort,
 ) : StudyUseCase, BrowseRecordsUseCase {
-    @Transactional
-    override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse {
-        val study = studies.findByIdAndUserId(studyId, principal.userId)
+    override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
+        createQuestionAsync(principal, studyId)
+    }
+
+    private suspend fun createQuestionAsync(principal: Principal, studyId: Long): StudyRecordResponse = coroutineScope {
+        val studyDeferred = async(Dispatchers.IO) {
+            studies.findByIdAndUserId(studyId, principal.userId)
+        }
+        val userDeferred = async(Dispatchers.IO) {
+            users.findById(principal.userId).orElse(null)
+        }
+        val recentQuestionsDeferred = async(Dispatchers.IO) {
+            recentQuestions(principal)
+        }
+
+        val study = studyDeferred.await()
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
-        val appLanguage = appLanguageFor(principal)
-        val room = StudyRoom.of(
-            study.toStudyRoomSchedule(appLanguage),
-            questions.countPendingForStudy(study.id),
-        )
+        val user = userDeferred.await()
+        val appLanguage = user?.appLanguage ?: "ko"
+        val pendingCountDeferred = async(Dispatchers.IO) {
+            questions.countPendingForStudy(study.id)
+        }
+        val room = StudyRoom.of(study.toStudyRoomSchedule(appLanguage), pendingCountDeferred.await())
         try {
             room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
         } catch (error: StudyRoomPendingLimitExceeded) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
-        val generated = openAI.generateQuestion(
-            apiKeyFor(principal),
-            study.openaiModel.ifBlank { properties.openai.model },
-            room.topic,
-            room.difficultyLevel,
-            room.appLanguage,
-            room.customPrompt,
-            recentQuestions(principal),
-        )
-        val now = Instant.now()
-        val question = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity())
-        questionStats.save(QuestionStatsEntity(questionId = question.id))
-        pushPublisher.publishPush(
-            QuestionPushRequest(
-                recordId = question.id,
-                createdAt = now,
-                deviceId = study.deviceId,
-                userId = principal.userId,
-                question = generated.question,
-                expectedAnswerHint = generated.hint,
-                topic = study.topic,
-                difficultyLevel = study.difficultyLevel,
-                language = appLanguage,
-                sound = study.notificationSound,
-                intervalMinutes = study.intervalMinutes,
+        val generated = withContext(Dispatchers.IO) {
+            openAI.generateQuestion(
+                apiKeyFor(user),
+                study.openaiModel.ifBlank { properties.openai.model },
+                room.topic,
+                room.difficultyLevel,
+                room.appLanguage,
+                room.customPrompt,
+                recentQuestionsDeferred.await(),
             )
-        )
-        return question.toStudyRecord().toProjection().toRecordResponse()
+        }
+        val now = Instant.now()
+        val question = withContext(Dispatchers.IO) {
+            val savedQuestion = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity())
+            questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id))
+            savedQuestion
+        }
+        withContext(Dispatchers.IO) {
+            pushPublisher.publishPush(
+                QuestionPushRequest(
+                    recordId = question.id,
+                    createdAt = now,
+                    deviceId = study.deviceId,
+                    userId = principal.userId,
+                    question = generated.question,
+                    expectedAnswerHint = generated.hint,
+                    topic = study.topic,
+                    difficultyLevel = study.difficultyLevel,
+                    language = appLanguage,
+                    sound = study.notificationSound,
+                    intervalMinutes = study.intervalMinutes,
+                )
+            )
+        }
+        question.toStudyRecord().toProjection().toRecordResponse()
     }
 
     @Transactional
@@ -153,8 +179,10 @@ class StudyService(
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
-    private fun apiKeyFor(principal: Principal): String {
-        val user = users.findById(principal.userId).orElse(null)
+    private fun apiKeyFor(principal: Principal): String =
+        apiKeyFor(users.findById(principal.userId).orElse(null))
+
+    private fun apiKeyFor(user: com.buddystuddy.account.domain.entity.UserEntity?): String {
         return cipher.decrypt(user?.openaiApiKeyCipher)
             ?: properties.openai.apiKey.takeIf { it.isNotBlank() }
             ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")

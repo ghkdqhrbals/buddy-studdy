@@ -25,6 +25,7 @@ dependencies {
     api("org.springframework.boot:spring-boot")
     api("org.springframework.data:spring-data-commons")
     api("io.jsonwebtoken:jjwt-api:0.12.6")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core")
 
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")

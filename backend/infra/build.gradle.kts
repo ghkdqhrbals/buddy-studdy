@@ -33,6 +33,7 @@ dependencies {
     implementation("io.github.ghkdqhrbals:redisstream-spring-boot-starter:0.2.0")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
