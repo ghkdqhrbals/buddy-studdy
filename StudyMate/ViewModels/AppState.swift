@@ -2881,10 +2881,6 @@ final class AppState: ObservableObject {
         log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
 
         do {
-            try await updateBackendSettings(
-                registration: registration,
-                reason: manual ? "manual-question-before-create" : "scheduled-question-before-create"
-            )
             guard let activeCategory = settings.activeCategory,
                   let studyID = Int(activeCategory.id) else {
                 await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -2911,7 +2907,6 @@ final class AppState: ObservableObject {
             hasAPIKeyError = false
             statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
             log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
-            await syncRemotePushScheduleIfPossible(reason: "manual-question")
         } catch {
             if handlePageAccessError(error, page: .studyDetail) {
                 return
