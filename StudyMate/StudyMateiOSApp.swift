@@ -62,35 +62,34 @@ private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
     @State private var bootstrapError: String?
+    @State private var isShowingStartupSplash = true
 
     var body: some View {
-        Group {
+        ZStack {
             if let appState {
                 MobileRootView()
                     .environmentObject(appState)
             } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("BuddyStuddy")
-                        .font(.headline)
-                    if let bootstrapError {
-                        Text(bootstrapError)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground))
+                Color(.systemBackground)
+            }
+
+            if isShowingStartupSplash {
+                BuddyStuddyStartupSplashView(message: bootstrapError)
+                    .transition(.opacity)
+                    .zIndex(1)
             }
         }
+        .background(Color(.systemBackground))
         .task {
             guard !didBootstrap else {
                 return
             }
 
             didBootstrap = true
+            let minimumSplashTask = Task {
+                try? await Task.sleep(for: .milliseconds(1_450))
+            }
+
             bootstrapError = "Preparing BuddyStuddy..."
             bootstrapError = "Loading settings..."
             let state = AppState()
@@ -101,6 +100,68 @@ private struct StudyMateiOSBootstrapView: View {
             appState = state
             bootstrapError = nil
             await state.start()
+            await minimumSplashTask.value
+
+            withAnimation(.easeOut(duration: 0.28)) {
+                isShowingStartupSplash = false
+            }
+        }
+    }
+}
+
+private struct BuddyStuddyStartupSplashView: View {
+    var message: String?
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            GeometryReader { geometry in
+                let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                let progress = elapsed.truncatingRemainder(dividingBy: 1.85) / 1.85
+                let width = geometry.size.width
+                let iconSize = min(max(width * 0.34, 132), 188)
+                let travel = width * 0.54
+                let x = -travel / 2 + travel * progress
+                let step = sin(progress * .pi * 2)
+                let lift = abs(step) * 9
+
+                ZStack {
+                    Color(red: 1.0, green: 0.992, blue: 0.972)
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 18) {
+                        Spacer()
+
+                        ZStack(alignment: .bottom) {
+                            Capsule()
+                                .fill(.black.opacity(0.10))
+                                .frame(width: iconSize * (0.52 + abs(step) * 0.06), height: 13)
+                                .blur(radius: 2)
+                                .offset(x: x, y: iconSize * 0.43)
+
+                            Image("SplashFox")
+                                .resizable()
+                                .interpolation(.none)
+                                .scaledToFit()
+                                .frame(width: iconSize, height: iconSize)
+                                .rotationEffect(.degrees(step * 2.8))
+                                .offset(x: x, y: -lift)
+                        }
+                        .frame(height: iconSize + 36)
+
+                        if let message {
+                            Text(message)
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.opacity)
+                        }
+
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }
