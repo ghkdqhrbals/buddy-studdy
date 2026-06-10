@@ -1578,7 +1578,14 @@ final class AppState: ObservableObject {
             let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
             applyCommunityProfile(profile)
         } catch {
+            if Self.isUnauthorizedBackendError(error) {
+                clearStoredBackendAccessToken()
+                communityProfile = nil
+                communityErrorMessage = nil
+                return
+            }
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
+            communityErrorMessage = communityErrorMessage(for: error)
         }
     }
 
@@ -4235,6 +4242,7 @@ final class AppState: ObservableObject {
         settingsStore.saveRemotePushRegistration(registration)
         backendAccessState = .signedOut
         isCommunitySignedIn = false
+        communityProfile = nil
         settingsStore.saveIsCommunitySignedIn(false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }

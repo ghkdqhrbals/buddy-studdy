@@ -1390,7 +1390,46 @@ private struct MobileProfileSettingsSheet: View {
 
         NavigationStack {
             Form {
-                if appState.isCommunitySignedIn {
+                if appState.isCommunitySignedIn, appState.communityProfile == nil {
+                    Section {
+                        VStack(spacing: 14) {
+                            if isLoadingProfileDraft {
+                                ProgressView()
+                                    .controlSize(.regular)
+                                Text(strings.loading)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                HomeProfileAvatar(
+                                    symbolName: ProfileAvatarOption.defaultSymbolName,
+                                    displayName: nil,
+                                    imageData: nil,
+                                    colorSeed: nil,
+                                    usesNeutralColor: true,
+                                    size: 58
+                                )
+                                Text(strings.profileRequestFailed)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                Button {
+                                    Task {
+                                        isLoadingProfileDraft = true
+                                        await appState.loadCommunityProfile()
+                                        resetDraftProfile()
+                                        isLoadingProfileDraft = false
+                                    }
+                                } label: {
+                                    Text(strings.retry)
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+                } else if appState.isCommunitySignedIn {
                     Section {
                         VStack(alignment: .leading, spacing: 14) {
                             HomeProfileAvatar(
