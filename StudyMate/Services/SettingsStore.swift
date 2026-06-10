@@ -222,6 +222,12 @@ final class SettingsStore {
         recordStore.replaceAll(Array(filteredRecords.suffix(loadSettings().sanitizedMaxHistoryCount)))
     }
 
+    func replaceBackendStudyRecords(_ records: [StudyRecord]) {
+        saveDeletedStudyRecordMarkers([])
+        saveStudyRecordsClearedAt(nil)
+        recordStore.replaceAll(Array(records.suffix(loadSettings().sanitizedMaxHistoryCount)))
+    }
+
     func loadDeletedStudyRecordMarkers() -> [DeletedStudyRecordMarker] {
         guard let data = defaults.data(forKey: Keys.deletedStudyRecordMarkers),
               let markers = try? decoder.decode([DeletedStudyRecordMarker].self, from: data) else {

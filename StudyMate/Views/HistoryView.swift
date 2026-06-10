@@ -462,7 +462,7 @@ struct HistoryView: View {
             isRefreshing = true
         }
 
-        await appState.refreshVisibleData()
+        await appState.refreshBackendRecords()
 
         await MainActor.run {
             reconcileVisibleCount()

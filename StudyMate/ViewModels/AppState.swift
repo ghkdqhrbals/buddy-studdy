@@ -775,6 +775,36 @@ final class AppState: ObservableObject {
         visibleDataRefreshTask = nil
     }
 
+    func refreshBackendRecords() async {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "records") else {
+            log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
+            return
+        }
+
+        do {
+            let recordsPage = try await remotePushBackendClient.fetchRecords(
+                registration: registration,
+                limit: settings.sanitizedMaxHistoryCount,
+                offset: 0,
+                query: ""
+            )
+            let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
+            applyBackendRecordsPage(
+                recordsPage,
+                pendingRecords: pendingRecords,
+                updateVisibleQuestion: false,
+                preserveLocalQuestionState: true
+            )
+            log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
+        } catch {
+            if handlePageAccessError(error, page: .records) {
+                return
+            }
+            log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
+        }
+    }
+
     private func loadOpenAIModelOptions() async {
         do {
             let fetchedOptions = try await remotePushBackendClient.fetchOpenAIModelOptions()
@@ -1199,7 +1229,7 @@ final class AppState: ObservableObject {
         let mergedRecords = pendingRecords.reduce(recordsPage.records) { records, pendingRecord in
             mergeBackendRecord(pendingRecord, into: records)
         }
-        settingsStore.replaceStudyRecords(mergedRecords)
+        settingsStore.replaceBackendStudyRecords(mergedRecords)
         studyRecords = settingsStore.loadStudyRecords()
 
         guard updateVisibleQuestion else {
