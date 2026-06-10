@@ -87,7 +87,7 @@ private struct StudyMateiOSBootstrapView: View {
 
             didBootstrap = true
             let minimumSplashTask = Task {
-                try? await Task.sleep(for: .milliseconds(1_450))
+                try? await Task.sleep(for: .milliseconds(3_000))
             }
 
             bootstrapError = "Preparing BuddyStuddy..."
@@ -116,7 +116,7 @@ private struct BuddyStuddyStartupSplashView: View {
         TimelineView(.animation) { timeline in
             GeometryReader { geometry in
                 let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                let progress = elapsed.truncatingRemainder(dividingBy: 1.85) / 1.85
+                let progress = elapsed.truncatingRemainder(dividingBy: 3.0) / 3.0
                 let width = geometry.size.width
                 let iconSize = min(max(width * 0.34, 132), 188)
                 let travel = width * 0.54
