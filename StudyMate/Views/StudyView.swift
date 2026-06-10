@@ -253,7 +253,7 @@ struct StudyView: View {
         }
 
         Task {
-            await appState.generateQuestion()
+            await appState.generateQuestion(studyCategoryID: preferredCategoryID ?? selectedCategory?.id)
         }
     }
 

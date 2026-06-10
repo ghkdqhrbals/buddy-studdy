@@ -893,7 +893,7 @@ final class AppState: ObservableObject {
             let topicKey = Self.normalizedCategoryText(for: room.topic)
             let existing = existingCategoriesByTopic[topicKey]
             return StudyCategory(
-                id: existing?.id ?? String(room.id),
+                id: String(room.id),
                 title: room.topic,
                 difficulty: Difficulty(level: room.difficultyLevel),
                 customPrompt: room.customPrompt,
@@ -2836,7 +2836,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    func generateQuestion(manual: Bool = true) async {
+    func generateQuestion(manual: Bool = true, studyCategoryID: String? = nil) async {
         notificationLandingMessage = nil
 
         if !manual && !isRunning {
@@ -2861,10 +2861,10 @@ final class AppState: ObservableObject {
             return
         }
 
-        await generateBackendQuestion(registration: registration, manual: manual)
+        await generateBackendQuestion(registration: registration, manual: manual, studyCategoryID: studyCategoryID)
     }
 
-    private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool) async {
+    private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool, studyCategoryID: String?) async {
         guard requirePageAccess(.studyDetail) else {
             return
         }
@@ -2881,9 +2881,7 @@ final class AppState: ObservableObject {
         log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
 
         do {
-            guard let activeCategory = settings.activeCategory,
-                  let studyID = Int(activeCategory.id) else {
-                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            guard let studyID = await backendStudyID(for: studyCategoryID) else {
                 throw AppStateError.backendStudyMissing
             }
             let record = try await remotePushBackendClient.createQuestion(
@@ -2915,6 +2913,33 @@ final class AppState: ObservableObject {
             statusMessage = nil
             log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
         }
+    }
+
+    private func backendStudyID(for categoryID: String?) async -> Int? {
+        if let categoryID,
+           let studyID = Int(categoryID) {
+            return studyID
+        }
+
+        if let activeCategory = settings.activeCategory,
+           categoryID == nil,
+           let studyID = Int(activeCategory.id) {
+            return studyID
+        }
+
+        let requestedTopicKey = categoryID
+            .flatMap { settings.category(for: $0)?.title }
+            .map { Self.normalizedCategoryText(for: $0) }
+
+        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+
+        if let requestedTopicKey,
+           let matched = settings.studyCategories.first(where: { Self.normalizedCategoryText(for: $0.title) == requestedTopicKey }),
+           let studyID = Int(matched.id) {
+            return studyID
+        }
+
+        return settings.activeCategory.flatMap { Int($0.id) }
     }
 
     @discardableResult
