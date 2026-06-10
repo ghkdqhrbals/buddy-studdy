@@ -1350,13 +1350,9 @@ private struct MobileProfileSettingsSheet: View {
 
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let currentSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
-        let currentColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
         let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
 
         return trimmedProfileDisplayName != currentDisplayName
-            || ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) != currentSymbolName
-            || draftAvatarColorSeed != currentColorSeed
             || allowPublicQuestionsAccess != currentPublicQuestions
     }
 
@@ -1365,6 +1361,23 @@ private struct MobileProfileSettingsSheet: View {
             && !appState.isUpdatingCommunityProfile
             && !trimmedProfileDisplayName.isEmpty
             && hasProfileChanges
+    }
+
+    private var profileAccountText: String {
+        guard let profile = appState.communityProfile else {
+            return ""
+        }
+
+        switch profile.provider.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "EMAIL":
+            let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+            return email.isEmpty ? "Email" : email
+        case "GOOGLE":
+            return "Google"
+        default:
+            let provider = profile.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+            return provider.isEmpty ? profile.displayName : provider.capitalized
+        }
     }
 
     var body: some View {
@@ -1392,97 +1405,31 @@ private struct MobileProfileSettingsSheet: View {
                                 .padding(.vertical, 10)
                                 .padding(.horizontal, 12)
                                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                            if !profileAccountText.isEmpty {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.crop.circle.badge.checkmark")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(strings.profileAccount)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text(profileAccountText)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
                         }
                         .padding(.vertical, 8)
                     }
                     .listRowBackground(Color.clear)
-
-                    Section(strings.profileCharacter) {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                            ForEach(ProfileAvatarOption.all, id: \.self) { option in
-                                Button {
-                                    draftAvatarSymbolName = option
-                                } label: {
-                                    HomeProfileAvatar(
-                                        symbolName: option,
-                                        displayName: profileDisplayName,
-                                        imageData: nil,
-                                        colorSeed: draftAvatarColorSeed,
-                                        usesNeutralColor: false,
-                                        size: 50
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color.secondary.opacity(ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? 0.16 : 0.06))
-                                    )
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(
-                                                ProfileAvatarOption.canonicalName(for: draftAvatarSymbolName) == option ? Color.primary.opacity(0.32) : Color.secondary.opacity(0.08),
-                                                lineWidth: 1
-                                            )
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-
-                    Section(strings.profileColor) {
-                        HStack(spacing: 12) {
-                            ForEach(ProfileAvatarColorOption.all) { option in
-                                Button {
-                                    draftAvatarColorSeed = option.id
-                                } label: {
-                                    Circle()
-                                        .fill(option.color)
-                                        .frame(width: 28, height: 28)
-                                        .overlay {
-                                            if draftAvatarColorSeed == option.id {
-                                                Image(systemName: "checkmark")
-                                                    .font(.caption.weight(.bold))
-                                                    .foregroundStyle(.white)
-                                            }
-                                        }
-                                        .overlay {
-                                            Circle()
-                                                .stroke(Color.primary.opacity(draftAvatarColorSeed == option.id ? 0.42 : 0.10), lineWidth: 1)
-                                        }
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            Button {
-                                isShowingCustomColorEditor = true
-                            } label: {
-                                Circle()
-                                    .fill(
-                                        AngularGradient(
-                                            colors: [.red, .orange, .yellow, .green, .blue, .purple, .red],
-                                            center: .center
-                                        )
-                                    )
-                                    .frame(width: 28, height: 28)
-                                    .overlay {
-                                        if ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil {
-                                            Image(systemName: "slider.horizontal.3")
-                                                .font(.caption2.weight(.bold))
-                                                .foregroundStyle(.white)
-                                        }
-                                    }
-                                    .overlay {
-                                        Circle()
-                                            .stroke(Color.primary.opacity(ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil ? 0.42 : 0.10), lineWidth: 1)
-                                    }
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(strings.customProfileColor)
-                        }
-                        .padding(.vertical, 6)
-                    }
 
                     Section {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)

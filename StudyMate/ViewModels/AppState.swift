@@ -1532,6 +1532,8 @@ final class AppState: ObservableObject {
             ? CommunityUserProfile(
                 id: profile.id,
                 displayName: cachedDisplayName,
+                provider: profile.provider,
+                email: profile.email,
                 bio: profile.bio,
                 avatarURL: profile.avatarURL,
                 avatarSymbolName: profile.avatarSymbolName,

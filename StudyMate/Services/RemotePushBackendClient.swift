@@ -1545,6 +1545,8 @@ struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
 struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var id: Int
     var displayName: String
+    var provider: String
+    var email: String
     var bio: String
     var avatarURL: URL?
     var avatarSymbolName: String
@@ -1554,6 +1556,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case displayName
+        case provider
+        case email
         case bio
         case avatarURL = "avatarUrl"
         case avatarSymbolName
@@ -1564,6 +1568,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     init(
         id: Int,
         displayName: String,
+        provider: String = "ANONYMOUS",
+        email: String = "",
         bio: String,
         avatarURL: URL?,
         avatarSymbolName: String = "pixel-buddy",
@@ -1572,6 +1578,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     ) {
         self.id = id
         self.displayName = displayName
+        self.provider = provider
+        self.email = email
         self.bio = bio
         self.avatarURL = avatarURL
         self.avatarSymbolName = avatarSymbolName
@@ -1583,6 +1591,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         displayName = try container.decode(String.self, forKey: .displayName)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "ANONYMOUS"
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
         bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
         avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
         avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-buddy"

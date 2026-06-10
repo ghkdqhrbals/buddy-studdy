@@ -1810,6 +1810,7 @@ struct AppStrings {
     var communityUnavailable: String { text("다른 사용자 질문 기능을 현재 사용할 수 없습니다.", "Community questions are currently unavailable.") }
     var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
     var profile: String { text("프로필", "Profile") }
+    var profileAccount: String { text("로그인 계정", "Signed in as") }
     var profileDisplayName: String { text("이름", "Name") }
     var profileAvatar: String { text("프로필 사진", "Profile Picture") }
     var profileCharacter: String { text("프로필 캐릭터", "Profile Character") }

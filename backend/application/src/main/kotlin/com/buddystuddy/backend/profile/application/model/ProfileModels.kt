@@ -10,6 +10,8 @@ data class CommunityPageAccess(
 data class UserProfileResponse(
     val id: Long,
     val displayName: String,
+    val provider: String = "ANONYMOUS",
+    val email: String = "",
     val bio: String = "",
     val avatarUrl: String? = null,
     val avatarSymbolName: String = "pixel-buddy",
