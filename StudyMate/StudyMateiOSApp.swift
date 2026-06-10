@@ -170,40 +170,23 @@ private struct BuddyStuddyStartupSceneView: View {
     var iconSize: CGFloat
 
     var body: some View {
-        GeometryReader { _ in
-            ZStack(alignment: .bottom) {
-                Capsule()
-                    .fill(.black.opacity(0.10))
-                    .frame(
-                        width: iconSize * scene.shadowWidthRatio,
-                        height: 13
-                    )
-                    .blur(radius: 2)
-                    .offset(y: iconSize * 0.43)
-
-                Image("SplashFox")
-                    .resizable()
-                    .interpolation(.none)
-                    .scaledToFit()
-                    .frame(width: iconSize, height: iconSize)
-                    .rotationEffect(.degrees(scene.rotationDegrees))
-                    .offset(y: -scene.lift)
-            }
+        Image(scene.imageName)
+            .resizable()
+            .interpolation(.none)
+            .scaledToFit()
+            .frame(width: iconSize, height: iconSize)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
     }
 }
 
 private struct FoxStartupScene {
-    var lift: CGFloat
-    var rotationDegrees: Double
-    var shadowWidthRatio: CGFloat
+    var imageName: String
 
     static let scenes = [
-        FoxStartupScene(lift: 0, rotationDegrees: -2.4, shadowWidthRatio: 0.55),
-        FoxStartupScene(lift: 10, rotationDegrees: 2.8, shadowWidthRatio: 0.61),
-        FoxStartupScene(lift: 0, rotationDegrees: -1.8, shadowWidthRatio: 0.55),
-        FoxStartupScene(lift: 10, rotationDegrees: 2.2, shadowWidthRatio: 0.61),
+        FoxStartupScene(imageName: "SplashFoxWalk1"),
+        FoxStartupScene(imageName: "SplashFoxWalk2"),
+        FoxStartupScene(imageName: "SplashFoxWalk3"),
+        FoxStartupScene(imageName: "SplashFoxWalk4"),
     ]
 }
 
