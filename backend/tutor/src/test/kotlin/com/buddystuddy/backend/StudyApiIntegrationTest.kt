@@ -3,6 +3,9 @@ package com.buddystuddy.backend
 import com.buddystuddy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystuddy.backend.auth.application.permission.Roles
 import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
+import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
+import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
+import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
@@ -15,7 +18,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
 import org.springframework.test.context.TestPropertySource
 import java.net.URI
 import java.net.http.HttpClient
@@ -34,6 +40,7 @@ import java.time.Instant
         "buddystuddy.streams.enabled=false",
         "buddystuddy.crypto.master-key=test-master-key",
         "buddystuddy.auth.jwt-secret=test-jwt-secret",
+        "buddystuddy.openai.api-key=test-openai-key",
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
@@ -321,6 +328,48 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(studyPage["studies"]).hasSize(1)
         assertThat(studyPage["studies"][0]["id"].asLong()).isEqualTo(created["id"].asLong())
+
+        val question = postJson(
+            "/api/v1/studies/${created["id"].asLong()}/questions",
+            "",
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(question["topic"].asText()).isEqualTo("Kotlin Architecture")
+        assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Architecture")
+
+        val pendingQuestionCount = questions.countPendingForStudy(created["id"].asLong())
+        assertThat(pendingQuestionCount).isEqualTo(1)
+    }
+
+    @TestConfiguration
+    class OpenAITestConfig {
+        @Bean
+        @Primary
+        fun openAIPort(): OpenAIPort = object : OpenAIPort {
+            override fun validate(apiKey: String) = Unit
+
+            override fun generateQuestion(
+                apiKey: String,
+                model: String,
+                topic: String,
+                level: Int,
+                language: String,
+                customPrompt: String,
+                recent: List<String>,
+            ) = GeneratedQuestion("Generated question for $topic", "Generated hint")
+
+            override fun grade(
+                apiKey: String,
+                model: String,
+                question: String,
+                answer: String,
+                topic: String,
+                level: Int,
+                language: String,
+            ) = GradedAnswer(90, true, "Good", "Explanation")
+        }
     }
 
     @Test

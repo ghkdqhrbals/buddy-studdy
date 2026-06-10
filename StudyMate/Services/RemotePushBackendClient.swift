@@ -270,7 +270,7 @@ protocol RemotePushBackendClientProtocol {
         commentID: String
     ) async throws
 
-    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord
+    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord
 
     func gradeRecord(
         registration: RemotePushRegistration,
@@ -875,14 +875,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
-    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
+    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "questions")
+            url: endpoint("api", "v1", "studies", String(studyID), "questions")
         )
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(CreateQuestionRequest(topic: topic))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -1268,10 +1266,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case maxHistoryCount
             case isQuestionPublic
         }
-    }
-
-    private struct CreateQuestionRequest: Encodable {
-        var topic: String?
     }
 
     private struct AnswerRequest: Encodable {

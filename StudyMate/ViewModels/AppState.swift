@@ -12,6 +12,17 @@ private enum QuestionGenerationSkip: Error {
     case duplicateQuestion
 }
 
+private enum AppStateError: LocalizedError {
+    case backendStudyMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .backendStudyMissing:
+            return "학습 정보를 동기화한 뒤 다시 시도하세요."
+        }
+    }
+}
+
 private enum ProtectedAppPage {
     case publicQuestions
     case myStudies
@@ -2874,9 +2885,14 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: manual ? "manual-question-before-create" : "scheduled-question-before-create"
             )
+            guard let activeCategory = settings.activeCategory,
+                  let studyID = Int(activeCategory.id) else {
+                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                throw AppStateError.backendStudyMissing
+            }
             let record = try await remotePushBackendClient.createQuestion(
                 registration: registration,
-                topic: settings.activeCategory?.normalizedTitle ?? settings.effectiveTopic
+                studyID: studyID
             )
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))

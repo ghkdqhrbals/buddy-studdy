@@ -38,6 +38,10 @@ class StudyContextProvider(
             ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
 
+    fun studyFor(principal: Principal, studyId: Long): StudyEntity =
+        studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+
     fun recentQuestions(principal: Principal): List<String> =
         questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
 }

@@ -3,7 +3,6 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
-import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
@@ -54,8 +53,8 @@ class StudyWebAdapter(
     override fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication) =
         statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
 
-    override fun createQuestion(body: CreateQuestionRequest, authentication: Authentication) =
-        studyUseCase.createQuestion(authentication.principalOrThrow(), body.topic)
+    override fun createQuestion(studyId: Long, authentication: Authentication) =
+        studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)
 
     override fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
         studySyncUseCase.createStudy(

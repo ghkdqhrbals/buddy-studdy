@@ -32,8 +32,8 @@ class StudyService(
     private val context: StudyContextProvider,
 ) : StudyUseCase, BrowseRecordsUseCase {
     @Transactional
-    override fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse {
-        val study = context.studyFor(principal, topic)
+    override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse {
+        val study = context.studyFor(principal, studyId)
         val appLanguage = context.appLanguageFor(principal)
         val room = StudyRoom.of(
             study.toStudyRoomSchedule(appLanguage),

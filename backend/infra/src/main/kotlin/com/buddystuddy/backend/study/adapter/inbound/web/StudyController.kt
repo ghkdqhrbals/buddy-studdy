@@ -3,7 +3,6 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 import com.buddystuddy.backend.auth.application.permission.Permissions
 import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
-import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import io.swagger.v3.oas.annotations.Operation
@@ -185,12 +184,13 @@ class StudyController(
     ) =
         study.stats(limit, offset, query, authentication)
 
-    @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
-    @PostMapping("/questions")
+    @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
+    @PostMapping("/studies/{studyId}/questions")
     @RequirePermission(Permissions.STUDY_CREATE)
     fun createQuestion(
-        @RequestBody body: CreateQuestionRequest,
+        @Parameter(description = "Study room id.", example = "42")
+        @PathVariable studyId: Long,
         authentication: Authentication,
     ) =
-        study.createQuestion(body, authentication)
+        study.createQuestion(studyId, authentication)
 }

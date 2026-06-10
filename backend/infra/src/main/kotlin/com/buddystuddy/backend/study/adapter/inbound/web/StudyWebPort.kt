@@ -1,7 +1,6 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
-import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import org.springframework.http.ResponseEntity
@@ -18,6 +17,6 @@ interface StudyWebPort {
     fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
     fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): Any
     fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
-    fun createQuestion(body: CreateQuestionRequest, authentication: Authentication): Any
+    fun createQuestion(studyId: Long, authentication: Authentication): Any
     fun createStudy(body: CreateStudyRequest, authentication: Authentication): Any
 }

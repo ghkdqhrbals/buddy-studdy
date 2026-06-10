@@ -16,6 +16,5 @@ data class CreateStudyRequest(
     val isQuestionPublic: Boolean = true,
 )
 
-data class CreateQuestionRequest(val topic: String? = null)
 data class AnswerRequest(val answer: String)
 data class RecordPublicityRequest(val isPublic: Boolean)

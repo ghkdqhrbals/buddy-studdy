@@ -19,7 +19,7 @@ data class CreateStudyCommand(
 )
 
 interface StudyUseCase {
-    fun createQuestion(principal: Principal, topic: String?): StudyRecordResponse
+    fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
     fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
     fun skip(principal: Principal, id: Long): StudyRecordResponse
     fun delete(principal: Principal, id: Long)
