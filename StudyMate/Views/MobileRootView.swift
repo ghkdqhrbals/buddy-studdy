@@ -9,67 +9,78 @@ struct MobileRootView: View {
     var body: some View {
         let strings = appState.strings
 
-        if !appState.hasCompletedOnboarding {
-            MobileOnboardingView()
-        } else {
-            TabView(selection: selectedMobileTab) {
-                NavigationStack {
-                    MobileHomeView()
-                        .padding(.horizontal, 16)
-                        .navigationDestination(item: $appState.homeStudyRoute) { route in
-                            StudyView(preferredCategoryID: route.categoryID)
-                                .padding(.horizontal, 16)
-                                .mobileTabTitle(studyScreenTitle(for: route))
-                        }
-                }
-                .tabItem {
-                    Label(strings.tabHome, systemImage: "house.fill")
-                }
-                .tag(AppTab.home)
-
-                NavigationStack {
-                    HistoryView()
-                        .padding(.horizontal, 16)
-                }
-                .tabItem {
-                    Label(strings.tabRecords, systemImage: "clock.arrow.circlepath")
-                }
-                .tag(AppTab.records)
-
-                NavigationStack {
-                    StatisticsView()
-                        .padding(.horizontal, 16)
-                }
-                .tabItem {
-                    Label(strings.tabStatistics, systemImage: "chart.xyaxis.line")
-                }
-                .tag(AppTab.statistics)
-
-                NavigationStack {
-                    MobileSettingsView()
-                }
-                .tabItem {
-                    Label(strings.tabSettings, systemImage: "gearshape.fill")
-                }
-                .tag(AppTab.settings)
-            }
-            .background(Color(.systemBackground))
-            .alert(item: $appState.pageAccessPrompt) { prompt in
-                Alert(
-                    title: Text(prompt.title),
-                    message: Text(prompt.message),
-                    primaryButton: .default(Text(strings.signInWithGoogle)) {
-                        appState.dismissPageAccessPrompt()
-                        appState.signInToCommunity()
-                    },
-                    secondaryButton: .cancel(Text(strings.cancel)) {
-                        appState.dismissPageAccessPrompt()
+        Group {
+            if !appState.hasCompletedOnboarding {
+                MobileOnboardingView()
+            } else {
+                TabView(selection: selectedMobileTab) {
+                    NavigationStack {
+                        MobileHomeView()
+                            .padding(.horizontal, 16)
+                            .navigationDestination(item: $appState.homeStudyRoute) { route in
+                                StudyView(preferredCategoryID: route.categoryID)
+                                    .padding(.horizontal, 16)
+                                    .mobileTabTitle(studyScreenTitle(for: route))
+                            }
                     }
-                )
+                    .tabItem {
+                        Label(strings.tabHome, systemImage: "house.fill")
+                    }
+                    .tag(AppTab.home)
+
+                    NavigationStack {
+                        HistoryView()
+                            .padding(.horizontal, 16)
+                    }
+                    .tabItem {
+                        Label(strings.tabRecords, systemImage: "clock.arrow.circlepath")
+                    }
+                    .tag(AppTab.records)
+
+                    NavigationStack {
+                        StatisticsView()
+                            .padding(.horizontal, 16)
+                    }
+                    .tabItem {
+                        Label(strings.tabStatistics, systemImage: "chart.xyaxis.line")
+                    }
+                    .tag(AppTab.statistics)
+
+                    NavigationStack {
+                        MobileSettingsView()
+                    }
+                    .tabItem {
+                        Label(strings.tabSettings, systemImage: "gearshape.fill")
+                    }
+                    .tag(AppTab.settings)
+                }
+                .background(Color(.systemBackground))
+                .alert(item: $appState.pageAccessPrompt) { prompt in
+                    Alert(
+                        title: Text(prompt.title),
+                        message: Text(prompt.message),
+                        primaryButton: .default(Text(strings.signInWithGoogle)) {
+                            appState.dismissPageAccessPrompt()
+                            appState.signInToCommunity()
+                        },
+                        secondaryButton: .cancel(Text(strings.cancel)) {
+                            appState.dismissPageAccessPrompt()
+                        }
+                    )
+                }
+                .onAppear {
+                    appState.normalizeSelectedTabForMobile()
+                }
             }
-            .onAppear {
-                appState.normalizeSelectedTabForMobile()
-            }
+        }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { appState.isBackendUnderMaintenance },
+                set: { _ in }
+            )
+        ) {
+            BackendMaintenanceView(strings: strings)
+                .interactiveDismissDisabled(true)
         }
     }
 
@@ -89,6 +100,46 @@ struct MobileRootView: View {
         }
 
         return appState.strings.tabStudy
+    }
+}
+
+private struct BackendMaintenanceView: View {
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer()
+
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 8) {
+                Text(strings.backendMaintenanceTitle)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(strings.backendMaintenanceMessage)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(strings.backendMaintenanceChecking)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 8)
+
+            Spacer()
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 

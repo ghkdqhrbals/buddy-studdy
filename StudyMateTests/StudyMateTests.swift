@@ -3529,6 +3529,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var gradeRecordResult: StudyRecord?
     var validateCallCount = 0
 
+    func checkHealth() async throws {}
+
     func registerDevice(
         apnsToken: String?,
         language: AppLanguage,

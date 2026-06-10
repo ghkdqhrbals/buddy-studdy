@@ -149,6 +149,7 @@ final class AppState: ObservableObject {
     }
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
+    @Published var isBackendUnderMaintenance = false
     @Published var cloudLastSyncedAt: Date?
     @Published var isBackendOpenAIKeyConfigured = false
     @Published var communityQuestions: [CommunityQuestion] = []
@@ -174,6 +175,7 @@ final class AppState: ObservableObject {
     private var cloudSyncTask: Task<Void, Never>?
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var answerDraftSaveTask: Task<Void, Never>?
+    private var backendHealthCheckTask: Task<Void, Never>?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -457,6 +459,43 @@ final class AppState: ObservableObject {
             debugBackendBaseURL: debugBackendBaseURL
         )
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
+        startBackendHealthMonitoring()
+    }
+
+    private func startBackendHealthMonitoring() {
+        backendHealthCheckTask?.cancel()
+        backendHealthCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else {
+                    return
+                }
+
+                let isHealthy = await checkBackendHealthOnce()
+                let delaySeconds: UInt64 = isHealthy ? 15 : 5
+                do {
+                    try await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func checkBackendHealthOnce() async -> Bool {
+        do {
+            try await remotePushBackendClient.checkHealth()
+            if isBackendUnderMaintenance {
+                log(.info, "백엔드 점검 상태가 해제되었습니다.")
+            }
+            isBackendUnderMaintenance = false
+            return true
+        } catch {
+            if !isBackendUnderMaintenance {
+                log(.warning, "백엔드 health check 실패: \(error.localizedDescription)")
+            }
+            isBackendUnderMaintenance = true
+            return false
+        }
     }
 
     var pendingQuestionCount: Int {
@@ -652,6 +691,7 @@ final class AppState: ObservableObject {
         }
 
         restartTimer()
+        startBackendHealthMonitoring()
     }
 
     deinit {
@@ -659,11 +699,13 @@ final class AppState: ObservableObject {
             let timerTask = timerTask
             let cloudSyncTask = cloudSyncTask
             let answerDraftSaveTask = answerDraftSaveTask
+            let backendHealthCheckTask = backendHealthCheckTask
             let apiTrafficLogCancellable = apiTrafficLogCancellable
 
             timerTask?.cancel()
             cloudSyncTask?.cancel()
             answerDraftSaveTask?.cancel()
+            backendHealthCheckTask?.cancel()
             apiTrafficLogCancellable?.cancel()
         }
     }
