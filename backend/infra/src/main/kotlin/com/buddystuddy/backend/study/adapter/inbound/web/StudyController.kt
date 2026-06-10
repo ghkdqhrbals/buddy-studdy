@@ -1,21 +1,14 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
-import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
-import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
-import com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand
-import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
-import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
-import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.springframework.stereotype.Component
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -28,8 +21,6 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import jakarta.validation.Valid
-import kotlin.math.max
-import kotlin.math.min
 
 @RestController
 @RequestMapping("/api/v1")
@@ -188,77 +179,4 @@ class StudyController(
         authentication: Authentication,
     ) =
         study.createQuestion(body, authentication)
-}
-
-interface StudyWebPort {
-    fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
-    fun records(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
-    fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
-    fun record(id: Long, authentication: Authentication): Any
-    fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): Any
-    fun grade(id: Long, body: AnswerRequest, authentication: Authentication): Any
-    fun skip(id: Long, authentication: Authentication): Any
-    fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
-    fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): Any
-    fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication): Any
-    fun createQuestion(body: CreateQuestionRequest, authentication: Authentication): Any
-    fun createStudy(body: CreateStudyRequest, authentication: Authentication): Any
-}
-
-@Component
-class StudyWebAdapter(
-    private val studyUseCase: StudyUseCase,
-    private val recordsUseCase: BrowseRecordsUseCase,
-    private val statsUseCase: GetStudyStatsUseCase,
-    private val studySyncUseCase: StudySyncUseCase,
-) : StudyWebPort {
-    override fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
-
-    override fun records(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query)
-
-    override fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
-
-    override fun record(id: Long, authentication: Authentication) = recordsUseCase.record(authentication.principalOrThrow(), id)
-
-    override fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
-        studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = false)
-
-    override fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
-        studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = true)
-
-    override fun skip(id: Long, authentication: Authentication) = studyUseCase.skip(authentication.principalOrThrow(), id)
-
-    override fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit> {
-        studyUseCase.delete(authentication.principalOrThrow(), id)
-        return ResponseEntity.noContent().build()
-    }
-
-    override fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication) =
-        studyUseCase.publicity(authentication.principalOrThrow(), id, body.isPublic)
-
-    override fun stats(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
-
-    override fun createQuestion(body: CreateQuestionRequest, authentication: Authentication) =
-        studyUseCase.createQuestion(authentication.principalOrThrow(), body.topic)
-
-    override fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
-        studySyncUseCase.createStudy(
-            authentication.principalOrThrow(),
-            CreateStudyCommand(
-                topic = body.topic,
-                difficultyLevel = body.difficultyLevel,
-                intervalMinutes = body.intervalMinutes,
-                enabled = body.enabled,
-                notificationSound = body.notificationSound,
-                customPrompt = body.customPrompt,
-                openaiModel = body.openaiModel,
-                maxHistoryCount = body.maxHistoryCount,
-                isQuestionPublic = body.isQuestionPublic,
-            )
-        )
-
-    private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }
