@@ -2527,6 +2527,7 @@ private struct CommunityQuestionDetailView: View {
     @State private var commentDraft = ""
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
+    @FocusState private var isCommentInputFocused: Bool
 
     init(question: CommunityQuestion) {
         self.question = question
@@ -2587,8 +2588,17 @@ private struct CommunityQuestionDetailView: View {
             }
             .padding(16)
         }
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(strings.done) {
+                    isCommentInputFocused = false
+                }
+            }
+        }
         .task(id: displayQuestion.id) {
             await loadQuestionDetail()
             await loadComments()
@@ -2677,18 +2687,23 @@ private struct CommunityQuestionDetailView: View {
                     .lineLimit(1...4)
                     .padding(.vertical, 8)
                     .disabled(!canWriteCommunityReaction)
+                    .focused($isCommentInputFocused)
 
                 Button {
                     sendComment()
                 } label: {
-                    if isSendingComment {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.hierarchical)
+                    ZStack {
+                        if isSendingComment {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 30, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                        }
                     }
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canWriteCommunityReaction || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
@@ -2703,11 +2718,11 @@ private struct CommunityQuestionDetailView: View {
 
     private func canDeleteComment(_ comment: CommunityQuestionComment) -> Bool {
         guard canWriteCommunityReaction,
-              let profile = appState.communityProfile else {
+              appState.isCurrentCommunityUser(id: comment.author.id) else {
             return false
         }
 
-        return comment.author.id == profile.id
+        return true
     }
 
     private func toggleLike() {
@@ -2782,6 +2797,7 @@ private struct CommunityQuestionDetailView: View {
                 commentsTotalCount += 1
                 displayQuestion.commentCount = commentsTotalCount
                 commentDraft = ""
+                isCommentInputFocused = false
             }
         }
     }

@@ -420,6 +420,15 @@ final class AppState: ObservableObject {
         pageAccessPrompt = nil
     }
 
+    func isCurrentCommunityUser(id userID: Int) -> Bool {
+        if let profile = communityProfile,
+           profile.id == userID {
+            return true
+        }
+
+        return backendAccessState.user.id == Int64(userID)
+    }
+
     func refreshPageAccess(reason: String = "manual") async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "page-access-\(reason)") else {
             backendAccessState = .signedOut
