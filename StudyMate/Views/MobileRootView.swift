@@ -3045,7 +3045,7 @@ private struct MobileOnboardingView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
-                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/settings/organization/api-keys")!)
+                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/api-keys")!)
                                 .font(.caption)
                         }
                     }
@@ -3211,7 +3211,7 @@ private struct MobileSettingsView: View {
                 } header: {
                     HStack(spacing: 6) {
                         Text("OpenAI")
-                        Link("settings", destination: URL(string: "https://platform.openai.com/")!)
+                        Link("settings", destination: URL(string: "https://platform.openai.com/api-keys")!)
                             .font(.caption)
                             .textCase(nil)
                     }

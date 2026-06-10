@@ -350,7 +350,7 @@ private struct OnboardingView: View {
                             Text(strings.onboardingCreateAPIKeyHelp)
                                 .font(.caption)
 
-                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/settings/organization/api-keys")!)
+                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/api-keys")!)
                                 .font(.caption)
                         }
                     }
