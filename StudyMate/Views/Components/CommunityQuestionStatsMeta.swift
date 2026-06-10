@@ -51,6 +51,9 @@ struct CommunityQuestionStatsMeta: View {
         HStack(spacing: 8) {
             metric(systemImage: question.isLikedByMe ? "heart.fill" : "heart", value: question.likeCount)
                 .foregroundStyle(question.isLikedByMe ? .red : .secondary)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
             metric(systemImage: "bubble.right", value: question.commentCount)
             metric(systemImage: "eye", value: question.viewCount)
 

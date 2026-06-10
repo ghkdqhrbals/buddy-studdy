@@ -2498,6 +2498,9 @@ private struct CommunityQuestionDetailView: View {
             .disabled(!canWriteCommunityReaction)
             .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
             .opacity(canWriteCommunityReaction ? 1 : 0.45)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
 
             Label("\(commentsTotalCount)", systemImage: "bubble.right")
                 .font(.subheadline.weight(.semibold))
@@ -2581,15 +2584,23 @@ private struct CommunityQuestionDetailView: View {
 
         let next = !displayQuestion.isLikedByMe
         let previous = displayQuestion
-        displayQuestion.isLikedByMe = next
-        displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            displayQuestion.isLikedByMe = next
+            displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
+        }
 
         Task {
             if let state = await appState.setCommunityQuestionLike(displayQuestion, isLiked: next) {
-                displayQuestion.isLikedByMe = state.isLikedByMe
-                displayQuestion.likeCount = state.likeCount
+                withTransaction(transaction) {
+                    displayQuestion.isLikedByMe = state.isLikedByMe
+                    displayQuestion.likeCount = state.likeCount
+                }
             } else {
-                displayQuestion = previous
+                withTransaction(transaction) {
+                    displayQuestion = previous
+                }
             }
         }
     }
