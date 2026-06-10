@@ -316,11 +316,116 @@ class StudyApiIntegrationTest {
         assertThat(studyPage["studies"][0]["id"].asLong()).isEqualTo(created["id"].asLong())
     }
 
+    @Test
+    fun `study and records endpoints clamp pagination and isolate authenticated users`() {
+        val first = registerDevice("pagination-owner")
+        val second = registerDevice("pagination-other")
+
+        val firstStudy = createStudy(first, "Pagination Redis")
+        val secondStudy = createStudy(first, "Pagination Swift")
+        createStudy(second, "Pagination Other User")
+
+        val ownGraded = questions.save(
+            gradedQuestion(
+                deviceId = first.deviceId,
+                userId = firstStudy.userId,
+                studyId = firstStudy.id,
+                topic = "Pagination Redis",
+                question = "Visible own graded record",
+                createdAt = Instant.parse("2026-06-09T04:00:00Z"),
+            )
+        )
+        val ownPending = questions.save(
+            pendingQuestion(
+                deviceId = first.deviceId,
+                userId = firstStudy.userId,
+                studyId = secondStudy.id,
+                topic = "Pagination Swift",
+                question = "Hidden pending record",
+                createdAt = Instant.parse("2026-06-09T04:01:00Z"),
+            )
+        )
+        val otherStudy = studies.findAll().first { it.deviceId == second.deviceId && it.topic == "Pagination Other User" }
+        val otherGraded = questions.save(
+            gradedQuestion(
+                deviceId = second.deviceId,
+                userId = otherStudy.userId,
+                studyId = otherStudy.id,
+                topic = "Pagination Other User",
+                question = "Other user's record",
+                createdAt = Instant.parse("2026-06-09T04:02:00Z"),
+            )
+        )
+
+        val studyPage = getJson("/api/v1/studies?limit=0&offset=-50", first.accessToken, first.deviceId, first.clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(studyPage["limit"].asInt()).isEqualTo(1)
+        assertThat(studyPage["offset"].asInt()).isZero()
+        assertThat(studyPage["totalCount"].asLong()).isEqualTo(2)
+        assertThat(studyPage["studies"]).hasSize(1)
+        assertThat(studyPage["studies"].map { it["topic"].asText() }).doesNotContain("Pagination Other User")
+
+        val records = getJson("/api/v1/records?limit=0&offset=-50", first.accessToken, first.deviceId, first.clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(records["limit"].asInt()).isEqualTo(1)
+        assertThat(records["offset"].asInt()).isZero()
+        assertThat(records["totalCount"].asLong()).isEqualTo(1)
+        assertThat(records["records"]).hasSize(1)
+        assertThat(records["records"][0]["id"].asText()).isEqualTo(ownGraded.id.toString())
+        assertThat(records["records"].map { it["id"].asText() }).doesNotContain(ownPending.id.toString(), otherGraded.id.toString())
+    }
+
+    @Test
+    fun `public questions are readable anonymously but reactions comments and reports require authentication`() {
+        val owner = registerDevice("public-boundary-owner")
+        val study = createStudy(owner, "Public Boundary")
+        val publicQuestion = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Public Boundary",
+                question = "Public boundary question",
+                createdAt = Instant.parse("2026-06-09T05:00:00Z"),
+                publicQuestion = true,
+            )
+        )
+        stats.save(QuestionStatsEntity(questionId = publicQuestion.id, likeCount = 9, commentCount = 3, viewCount = 14))
+
+        val list = get("/api/v1/public/questions?query=boundary")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(list["questions"]).hasSize(1)
+        val listed = list["questions"][0]
+        assertThat(listed["id"].asText()).isEqualTo(publicQuestion.id.toString())
+        assertThat(listed["answer"].asText()).isEqualTo("Answer for Public Boundary")
+        assertThat(listed["gradingResult"]["score"].asInt()).isEqualTo(87)
+        assertThat(listed["author"]["displayName"].asText()).isEqualTo("Buddy")
+        assertThat(listed["likeCount"].asInt()).isEqualTo(9)
+        assertThat(listed["commentCount"].asInt()).isEqualTo(3)
+        assertThat(listed["viewCount"].asInt()).isEqualTo(14)
+
+        val detail = get("/api/v1/public/questions/${publicQuestion.id}")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(detail["id"].asText()).isEqualTo(publicQuestion.id.toString())
+        assertThat(detail["isLikedByMe"].asBoolean()).isFalse()
+
+        assertAuthRequired(putJson("/api/v1/public/questions/${publicQuestion.id}/like", ""))
+        assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/comments", """{"body":"hello"}"""))
+        assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/report", """{"reason":"spam"}"""))
+    }
+
     private fun postJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("POST", path, body, bearerToken, deviceId, clientSecret)
 
-    private fun putJson(path: String, body: String, bearerToken: String, deviceId: String, clientSecret: String): HttpResponse<String> =
+    private fun putJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("PUT", path, body, bearerToken, deviceId, clientSecret)
+
+    private fun get(path: String): HttpResponse<String> =
+        client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET().build(), HttpResponse.BodyHandlers.ofString())
 
     private fun getJson(path: String, bearerToken: String, deviceId: String, clientSecret: String): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET()
@@ -348,5 +453,113 @@ class StudyApiIntegrationTest {
         }
     }
 
+    private fun registerDevice(label: String): AuthHeaders {
+        val registration = postJson(
+            "/api/v1/devices/register",
+            """
+            {
+              "apnsToken": "test-token-$label",
+              "platform": "ios",
+              "apnsEnvironment": "development",
+              "language": "ko",
+              "timezone": "Asia/Seoul"
+            }
+            """.trimIndent(),
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        return AuthHeaders(
+            deviceId = registration["deviceId"].asText(),
+            clientSecret = registration["clientSecret"].asText(),
+            accessToken = registration["accessToken"].asText(),
+        )
+    }
+
+    private fun createStudy(auth: AuthHeaders, topic: String): StudyEntity {
+        val response = postJson(
+            "/api/v1/study",
+            """
+            {
+              "topic": "$topic",
+              "difficultyLevel": 3,
+              "intervalMinutes": 20,
+              "customPrompt": "Ask one concise question.",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "isQuestionPublic": true
+            }
+            """.trimIndent(),
+            auth.accessToken,
+            auth.deviceId,
+            auth.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        return studies.findById(response["id"].asLong()).orElseThrow()
+    }
+
+    private fun gradedQuestion(
+        deviceId: String,
+        userId: Long,
+        studyId: Long,
+        topic: String,
+        question: String,
+        createdAt: Instant,
+        publicQuestion: Boolean = true,
+    ) = QuestionEntity(
+        deviceId = deviceId,
+        userId = userId,
+        studyId = studyId,
+        question = question,
+        hint = "Hint for $topic",
+        topic = topic,
+        difficultyLevel = 3,
+        scheduledFor = createdAt,
+        sentAt = createdAt,
+        status = "graded",
+        answer = "Answer for $topic",
+        score = 87,
+        correct = true,
+        feedback = "Good",
+        explanation = "Because",
+        answeredAt = createdAt.plusSeconds(30),
+        gradedAt = createdAt.plusSeconds(40),
+        source = "manual",
+        publicQuestion = publicQuestion,
+        createdAt = createdAt,
+        updatedAt = createdAt,
+    )
+
+    private fun pendingQuestion(
+        deviceId: String,
+        userId: Long,
+        studyId: Long,
+        topic: String,
+        question: String,
+        createdAt: Instant,
+    ) = QuestionEntity(
+        deviceId = deviceId,
+        userId = userId,
+        studyId = studyId,
+        question = question,
+        hint = "Hint for $topic",
+        topic = topic,
+        difficultyLevel = 3,
+        scheduledFor = createdAt,
+        sentAt = createdAt,
+        status = "ungraded",
+        source = "scheduled",
+        publicQuestion = true,
+        createdAt = createdAt,
+        updatedAt = createdAt,
+    )
+
+    private fun assertAuthRequired(response: HttpResponse<String>) {
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+    }
+
     private fun HttpResponse<String>.json(): JsonNode = mapper.readTree(body())
+
+    private data class AuthHeaders(
+        val deviceId: String,
+        val clientSecret: String,
+        val accessToken: String,
+    )
 }
