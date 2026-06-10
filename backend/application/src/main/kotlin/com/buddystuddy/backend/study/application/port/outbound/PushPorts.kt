@@ -20,6 +20,38 @@ interface QuestionPushPublishPort {
     fun publishPush(request: QuestionPushRequest): Boolean
 }
 
+data class QuestionPushOutboxCommand(
+    val deviceId: String,
+    val userId: Long?,
+    val question: String,
+    val expectedAnswerHint: String?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val language: String,
+    val sound: String?,
+    val intervalMinutes: Int,
+    val createdAt: Instant = Instant.now(),
+) {
+    fun toRequest(recordId: Long): QuestionPushRequest =
+        QuestionPushRequest(
+            recordId = recordId,
+            createdAt = createdAt,
+            deviceId = deviceId,
+            userId = userId,
+            question = question,
+            expectedAnswerHint = expectedAnswerHint,
+            topic = topic,
+            difficultyLevel = difficultyLevel,
+            language = language,
+            sound = sound,
+            intervalMinutes = intervalMinutes,
+        )
+}
+
+interface QuestionPushOutboxPort {
+    fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now())
+}
+
 enum class PushMessageType {
     APNS,
     FCM,

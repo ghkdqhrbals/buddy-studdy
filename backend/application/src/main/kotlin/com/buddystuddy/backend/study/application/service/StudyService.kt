@@ -6,7 +6,6 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
@@ -17,8 +16,7 @@ import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCa
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxCommand
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +38,7 @@ class StudyService(
     private val openAI: OpenAIPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
-    private val pushPublisher: QuestionPushPublishPort,
+    private val questionWriter: QuestionCreationWriteManager,
 ) : StudyUseCase, BrowseRecordsUseCase {
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
         createQuestionAsync(principal, studyId)
@@ -80,16 +78,9 @@ class StudyService(
         val now = Instant.now()
 
         val questionDeferred = async(Dispatchers.IO) {
-            val savedQuestion = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity())
-            questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id))
-            savedQuestion
-        }
-
-        val question = questionDeferred.await()
-        val pushPublishDeferred = async(Dispatchers.IO) {
-            pushPublisher.publishPush(
-                QuestionPushRequest(
-                    recordId = question.id,
+            questionWriter.saveQuestionWithOutbox(
+                room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
+                QuestionPushOutboxCommand(
                     createdAt = now,
                     deviceId = study.deviceId,
                     userId = principal.userId,
@@ -100,11 +91,12 @@ class StudyService(
                     language = appLanguage,
                     sound = study.notificationSound,
                     intervalMinutes = study.intervalMinutes,
-                )
+                ),
+                now,
             )
         }
-        pushPublishDeferred.await()
 
+        val question = questionDeferred.await()
         question.toStudyRecord().toProjection().toRecordResponse()
     }
 

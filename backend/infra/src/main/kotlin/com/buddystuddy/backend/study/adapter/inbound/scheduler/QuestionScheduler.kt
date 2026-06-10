@@ -7,7 +7,7 @@ import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
@@ -27,7 +27,7 @@ class QuestionScheduler(
     private val questionStats: QuestionStatsPort,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
-    private val streams: QuestionPushPublishPort,
+    private val pushOutbox: QuestionPushOutboxPort,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -77,7 +77,7 @@ class QuestionScheduler(
                     )
                 )
                 questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
-                val published = streams.publishPush(
+                pushOutbox.enqueue(
                     QuestionPushRequest(
                         recordId = saved.id,
                         createdAt = now,
@@ -90,13 +90,14 @@ class QuestionScheduler(
                         language = appLanguage,
                         sound = study.notificationSound,
                         intervalMinutes = study.intervalMinutes,
-                    )
+                    ),
+                    now,
                 )
                 study.lastSentAt = now
                 study.nextDueAt = now.plusSeconds(study.intervalMinutes.toLong() * 60)
-                study.lastError = if (published) null else "Push stream publish failed."
+                study.lastError = null
                 study.updatedAt = now
-                log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} streamPublished={}", study.deviceId, userId, study.id, study.topic, saved.id, published)
+                log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, study.topic, saved.id)
             } catch (error: Exception) {
                 study.lastError = error.message ?: error.javaClass.simpleName
                 study.nextDueAt = now.plusSeconds(5 * 60)
