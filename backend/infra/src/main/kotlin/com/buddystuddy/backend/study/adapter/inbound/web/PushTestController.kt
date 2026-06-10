@@ -5,6 +5,7 @@ import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.PushTestRequest
 import com.buddystuddy.backend.study.application.model.PushTestCommand
+import com.buddystuddy.backend.study.application.model.PushTestResponse
 import com.buddystuddy.backend.study.application.port.inbound.SendTestPushUseCase
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
@@ -37,11 +38,11 @@ class PushTestController(
     fun send(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
-    ) = pushTest.send(body ?: PushTestRequest(), authentication)
+    ): PushTestResponse = pushTest.send(body ?: PushTestRequest(), authentication)
 }
 
 interface PushTestWebPort {
-    fun send(body: PushTestRequest, authentication: Authentication): Any
+    fun send(body: PushTestRequest, authentication: Authentication): PushTestResponse
 }
 
 @Component

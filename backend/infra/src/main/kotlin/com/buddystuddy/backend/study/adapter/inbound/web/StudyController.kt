@@ -2,9 +2,14 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.application.permission.Permissions
 import com.buddystuddy.backend.auth.application.permission.RequirePermission
+import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
+import com.buddystuddy.backend.study.application.model.RecordsPageResponse
+import com.buddystuddy.backend.study.application.model.StudyPageResponse
+import com.buddystuddy.backend.study.application.model.StudyRecordResponse
+import com.buddystuddy.backend.study.application.model.StudyRoomResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
@@ -47,7 +52,7 @@ class StudyController(
         @Parameter(description = "Optional DB-backed study search query.", example = "Swift")
         @RequestParam(required = false) query: String?,
         authentication: Authentication,
-    ) = study.study(limit, offset, query, authentication)
+    ): StudyPageResponse = study.study(limit, offset, query, authentication)
 
     @Operation(
         summary = "Create a study",
@@ -63,7 +68,7 @@ class StudyController(
     fun createStudy(
         @Valid @RequestBody body: CreateStudyRequest,
         authentication: Authentication,
-    ) = study.createStudy(body, authentication)
+    ): StudyRoomResponse = study.createStudy(body, authentication)
 
     @Operation(
         summary = "List my graded records",
@@ -83,7 +88,7 @@ class StudyController(
         @Parameter(description = "Optional DB-backed record search query.", example = "actor")
         @RequestParam(required = false) query: String?,
         authentication: Authentication,
-    ) =
+    ): RecordsPageResponse =
         study.records(limit, offset, query, authentication)
 
     @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
@@ -107,7 +112,7 @@ class StudyController(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         authentication: Authentication,
-    ) = study.record(id, authentication)
+    ): StudyRecordResponse = study.record(id, authentication)
 
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/records/{id}/answer")
@@ -117,7 +122,7 @@ class StudyController(
         @PathVariable id: Long,
         @RequestBody body: AnswerRequest,
         authentication: Authentication,
-    ) =
+    ): StudyRecordResponse =
         study.saveAnswer(id, body, authentication)
 
     @Operation(summary = "Submit an answer for grading", description = "Submits the answer, asks the tutor model to grade it, and returns the updated record with score, correctness, feedback, and explanation.")
@@ -133,7 +138,7 @@ class StudyController(
         @PathVariable id: Long,
         @RequestBody body: AnswerRequest,
         authentication: Authentication,
-    ) =
+    ): StudyRecordResponse =
         study.grade(id, body, authentication)
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
@@ -143,7 +148,7 @@ class StudyController(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         authentication: Authentication,
-    ) = study.skip(id, authentication)
+    ): StudyRecordResponse = study.skip(id, authentication)
 
     @Operation(summary = "Delete one record", description = "Immediately deletes a record owned by the authenticated user.")
     @ApiResponses(
@@ -167,7 +172,7 @@ class StudyController(
         @PathVariable id: Long,
         @RequestBody body: RecordPublicityRequest,
         authentication: Authentication,
-    ) =
+    ): StudyRecordResponse =
         study.publicity(id, body, authentication)
 
     @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
@@ -181,7 +186,7 @@ class StudyController(
         @Parameter(description = "Optional DB-backed topic stat search query.", example = "Swift")
         @RequestParam(required = false) query: String?,
         authentication: Authentication,
-    ) =
+    ): StatsResponse =
         study.stats(limit, offset, query, authentication)
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
@@ -191,6 +196,6 @@ class StudyController(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
         authentication: Authentication,
-    ) =
+    ): StudyRecordResponse =
         study.createQuestion(studyId, authentication)
 }

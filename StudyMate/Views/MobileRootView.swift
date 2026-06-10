@@ -159,8 +159,7 @@ private struct MobileHomeView: View {
     @State private var isPullRefreshing = false
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
-    @State private var communitySearchDebounceTask: Task<Void, Never>?
-    @State private var homeStudySearchDebounceTask: Task<Void, Never>?
+    @State private var submittedHomeStudySearchText = ""
     @State private var searchFocusTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
@@ -194,6 +193,7 @@ private struct MobileHomeView: View {
     private var filteredStudyCategories: [StudyCategory] {
         let query = trimmedHomeStudySearchText
         if !query.isEmpty,
+           query == submittedHomeStudySearchText,
            let searchResults = appState.homeStudySearchResults {
             return searchResults
         }
@@ -317,15 +317,12 @@ private struct MobileHomeView: View {
                 await loadCommunityQuestionsIfNeeded(userInitiated: false)
             }
         }
-        .onChange(of: appState.communitySearchText) {
-            scheduleCommunitySearchReload()
-        }
         .onChange(of: homeStudySearchText) {
-            scheduleHomeStudySearchReload()
+            if trimmedHomeStudySearchText != submittedHomeStudySearchText {
+                appState.clearBackendStudySearchResults()
+            }
         }
         .onDisappear {
-            communitySearchDebounceTask?.cancel()
-            homeStudySearchDebounceTask?.cancel()
             searchFocusTask?.cancel()
             searchFocusTask = nil
             if activeTrimmedSearchText.isEmpty {
@@ -640,13 +637,7 @@ private struct MobileHomeView: View {
             width: min(UIScreen.main.bounds.width - 32, 430),
             collapsedWidth: 34,
             onSubmit: {
-                guard selectedHomeScope == .all else {
-                    return
-                }
-
-                Task {
-                    await appState.loadCommunityQuestions(reset: true, userInitiated: true)
-                }
+                submitHomeSearch()
             },
             onClose: {
                 closeHomeSearch(clearText: true)
@@ -730,6 +721,7 @@ private struct MobileHomeView: View {
 
         if clearText {
             setActiveSearchText("")
+            submittedHomeStudySearchText = ""
             if selectedHomeScope == .my {
                 appState.clearBackendStudySearchResults()
             }
@@ -780,39 +772,24 @@ private struct MobileHomeView: View {
     }
 
     @MainActor
-    private func scheduleCommunitySearchReload() {
-        communitySearchDebounceTask?.cancel()
-        guard selectedHomeScope == .all else {
-            return
-        }
-
-        communitySearchDebounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled else {
-                return
-            }
-
+    private func submitHomeSearch() {
+        switch selectedHomeScope {
+        case .all:
             hasLoadedCommunityQuestions = true
-            await appState.loadCommunityQuestions(reset: true, userInitiated: false)
-        }
-    }
-
-    @MainActor
-    private func scheduleHomeStudySearchReload() {
-        homeStudySearchDebounceTask?.cancel()
-        let query = trimmedHomeStudySearchText
-        guard !query.isEmpty else {
-            appState.clearBackendStudySearchResults()
-            return
-        }
-
-        homeStudySearchDebounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else {
+            Task {
+                await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+            }
+        case .my:
+            let query = trimmedHomeStudySearchText
+            submittedHomeStudySearchText = query
+            guard !query.isEmpty else {
+                appState.clearBackendStudySearchResults()
                 return
             }
 
-            await appState.searchBackendStudies(query: query)
+            Task {
+                await appState.searchBackendStudies(query: query)
+            }
         }
     }
 }
