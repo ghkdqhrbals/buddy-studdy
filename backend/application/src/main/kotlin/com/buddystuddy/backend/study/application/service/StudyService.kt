@@ -25,7 +25,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -48,30 +47,24 @@ class StudyService(
     }
 
     private suspend fun createQuestionAsync(principal: Principal, studyId: Long): StudyRecordResponse = coroutineScope {
-        val studyDeferred = async(Dispatchers.IO) {
-            studies.findByIdAndUserId(studyId, principal.userId)
-        }
-        val userDeferred = async(Dispatchers.IO) {
-            users.findById(principal.userId).orElse(null)
-        }
-        val recentQuestionsDeferred = async(Dispatchers.IO) {
-            recentQuestions(principal)
-        }
+        val studyDeferred = async(Dispatchers.IO) { studies.findByIdAndUserId(studyId, principal.userId) }
+        val userDeferred = async(Dispatchers.IO) { users.findById(principal.userId).orElse(null) }
+        val recentQuestionsDeferred = async(Dispatchers.IO) { recentQuestions(principal) }
 
         val study = studyDeferred.await()
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         val user = userDeferred.await()
         val appLanguage = user?.appLanguage ?: "ko"
-        val pendingCountDeferred = async(Dispatchers.IO) {
-            questions.countPendingForStudy(study.id)
-        }
+
+        val pendingCountDeferred = async(Dispatchers.IO) { questions.countPendingForStudy(study.id) }
         val room = StudyRoom.of(study.toStudyRoomSchedule(appLanguage), pendingCountDeferred.await())
         try {
             room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
         } catch (error: StudyRoomPendingLimitExceeded) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
-        val generated = withContext(Dispatchers.IO) {
+
+        val generatedQuestionDeferred = async(Dispatchers.IO) {
             openAI.generateQuestion(
                 apiKeyFor(user),
                 study.openaiModel.ifBlank { properties.openai.model },
@@ -82,13 +75,18 @@ class StudyService(
                 recentQuestionsDeferred.await(),
             )
         }
+
+        val generated = generatedQuestionDeferred.await()
         val now = Instant.now()
-        val question = withContext(Dispatchers.IO) {
+
+        val questionDeferred = async(Dispatchers.IO) {
             val savedQuestion = questions.save(room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity())
             questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id))
             savedQuestion
         }
-        withContext(Dispatchers.IO) {
+
+        val question = questionDeferred.await()
+        val pushPublishDeferred = async(Dispatchers.IO) {
             pushPublisher.publishPush(
                 QuestionPushRequest(
                     recordId = question.id,
@@ -105,6 +103,8 @@ class StudyService(
                 )
             )
         }
+        pushPublishDeferred.await()
+
         question.toStudyRecord().toProjection().toRecordResponse()
     }
 
