@@ -167,6 +167,7 @@ final class AppState: ObservableObject {
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var isBackendUnderMaintenance = false
+    @Published var isLoadingBackendSettingsForEditing = false
     @Published var cloudLastSyncedAt: Date?
     @Published var isBackendOpenAIKeyConfigured = false
     @Published var communityQuestions: [CommunityQuestion] = []
@@ -1473,6 +1474,67 @@ final class AppState: ObservableObject {
         draftDebugBackendBaseURL = debugBackendBaseURL
         didReceiveCloudStateWhileEditing = false
         isEditingSettings = true
+    }
+
+    func loadBackendSettingsForEditing() async {
+        if !isEditingSettings {
+            beginSettingsEditing()
+        }
+
+        guard isEditingSettings, !isLoadingBackendSettingsForEditing else {
+            return
+        }
+
+        guard !hasUnsavedSettingsChanges else {
+            log(.info, "수정 중인 설정이 있어 백엔드 설정 로드를 건너뛰었습니다.")
+            return
+        }
+
+        isLoadingBackendSettingsForEditing = true
+        defer {
+            isLoadingBackendSettingsForEditing = false
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "settings-load") else {
+            log(.warning, "백엔드 등록이 없어 설정 로드를 건너뛰었습니다.")
+            return
+        }
+
+        do {
+            let backendSettings = try await remotePushBackendClient.fetchSettings(registration: registration)
+
+            guard isEditingSettings else {
+                return
+            }
+
+            guard !hasUnsavedSettingsChanges else {
+                log(.info, "백엔드 설정 로드 중 사용자가 설정을 수정해 응답 반영을 건너뛰었습니다.")
+                return
+            }
+
+            var nextSettings = backendSettings.studySettings(fallback: settings)
+            nextSettings = synchronizedTopicCategories(for: nextSettings)
+            if !isCommunitySignedIn {
+                nextSettings = nextSettings.withQuestionPrivacy(false)
+            }
+            let normalizedNextSettings = normalizedSettings(nextSettings)
+
+            settings = normalizedNextSettings
+            draftSettings = normalizedNextSettings
+            savedSettings = normalizedNextSettings
+            isRunning = backendSettings.enabled
+            isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
+            didReceiveCloudStateWhileEditing = false
+
+            settingsStore.saveSettings(normalizedNextSettings)
+            settingsStore.saveIsRunning(backendSettings.enabled)
+            log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
+        } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return
+            }
+            log(.warning, "백엔드 설정 로드 실패: \(error.localizedDescription)")
+        }
     }
 
     func cancelSettingsEditing() {

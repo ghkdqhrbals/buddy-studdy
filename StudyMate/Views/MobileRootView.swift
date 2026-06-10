@@ -3300,7 +3300,12 @@ private struct MobileSettingsView: View {
         .toolbar {
             #if os(iOS)
             ToolbarItem(placement: .topBarTrailing) {
-                settingsSaveToolbarButton(strings: strings)
+                if appState.isLoadingBackendSettingsForEditing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    settingsSaveToolbarButton(strings: strings)
+                }
             }
             #else
             ToolbarItem(placement: .confirmationAction) {
@@ -3332,8 +3337,12 @@ private struct MobileSettingsView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: appState.isAPIDebugPanelPresented)
+        .disabled(appState.isLoadingBackendSettingsForEditing)
         .onAppear {
             appState.beginSettingsEditing()
+            Task {
+                await appState.loadBackendSettingsForEditing()
+            }
         }
         .onDisappear {
             appState.cancelSettingsEditing()

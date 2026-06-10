@@ -1687,6 +1687,36 @@ struct BackendStudySettings: Decodable, Equatable {
     var nextDueAt: Date?
     var lastError: String?
 
+    init(
+        topic: String,
+        difficultyLevel: Int,
+        intervalMinutes: Int,
+        enabled: Bool,
+        notificationSound: String?,
+        customPrompt: String,
+        appLanguage: String,
+        openAIModel: String,
+        maxHistoryCount: Int,
+        isQuestionPublic: Bool,
+        openAIKeyConfigured: Bool,
+        nextDueAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.topic = topic
+        self.difficultyLevel = difficultyLevel
+        self.intervalMinutes = intervalMinutes
+        self.enabled = enabled
+        self.notificationSound = notificationSound
+        self.customPrompt = customPrompt
+        self.appLanguage = appLanguage
+        self.openAIModel = openAIModel
+        self.maxHistoryCount = maxHistoryCount
+        self.isQuestionPublic = isQuestionPublic
+        self.openAIKeyConfigured = openAIKeyConfigured
+        self.nextDueAt = nextDueAt
+        self.lastError = lastError
+    }
+
     enum CodingKeys: String, CodingKey {
         case topic
         case difficultyLevel

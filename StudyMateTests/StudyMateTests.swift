@@ -1953,6 +1953,55 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsEditingLoadsBackendSettingsBeforeEditing() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "device-test",
+                clientSecret: "secret-test",
+                apnsToken: "",
+                accessToken: "access-token",
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        let backendClient = FakeRemotePushBackendClient()
+        backendClient.fetchedSettings = BackendStudySettings(
+            topic: "Backend Swift",
+            difficultyLevel: 8,
+            intervalMinutes: 25,
+            enabled: true,
+            notificationSound: "default",
+            customPrompt: "Ask precisely",
+            appLanguage: "en",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 80,
+            isQuestionPublic: true,
+            openAIKeyConfigured: true
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backendClient)
+
+        appState.beginSettingsEditing()
+        await appState.loadBackendSettingsForEditing()
+
+        XCTAssertEqual(backendClient.fetchSettingsCallCount, 1)
+        XCTAssertEqual(appState.draftSettings.topic, "Backend Swift")
+        XCTAssertEqual(appState.draftSettings.difficulty.level, 8)
+        XCTAssertEqual(appState.draftSettings.intervalMinutes, 25)
+        XCTAssertEqual(appState.draftSettings.appLanguage, .english)
+        XCTAssertEqual(appState.draftSettings.customPrompt, "Ask precisely")
+        XCTAssertEqual(appState.draftSettings.maxHistoryCount, 80)
+        XCTAssertTrue(appState.isRunning)
+        XCTAssertTrue(appState.isBackendOpenAIKeyConfigured)
+        XCTAssertFalse(appState.hasUnsavedSettingsChanges)
+    }
+
+    @MainActor
     func testSaveSettingsEditingCommitsDraftChanges() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3528,6 +3577,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var gradedAnswers: [String] = []
     var gradeRecordResult: StudyRecord?
     var validateCallCount = 0
+    var fetchSettingsCallCount = 0
+    var fetchedSettings: BackendStudySettings?
 
     func checkHealth() async throws {}
 
@@ -3639,6 +3690,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
+        fetchSettingsCallCount += 1
+        if let fetchedSettings {
+            return fetchedSettings
+        }
         throw RemotePushBackendError.invalidResponse
     }
 
