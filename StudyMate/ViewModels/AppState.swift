@@ -2457,23 +2457,19 @@ final class AppState: ObservableObject {
             return
         }
 
-        await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-
         if settings.selectedStudyCategoryID != targetCategory.id {
             persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
         }
 
-        if let record = preferredPendingRecord(for: targetCategory) {
-            notificationLandingMessage = nil
-            currentQuestion = record.question
-            lastAnswer = record.answer ?? ""
-            gradingResult = record.gradingResult
-            settingsStore.saveQuestion(record.question)
-            settingsStore.saveLastAnswer(record.answer ?? "")
-            settingsStore.saveGradingResult(record.gradingResult)
-        }
-
+        applyPreferredPendingRecord(for: targetCategory)
         showStudyScreen(categoryID: targetCategory.id)
+
+        let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        guard didRefresh,
+              homeStudyRoute?.categoryID == targetCategory.id else {
+            return
+        }
+        applyPreferredPendingRecord(for: targetCategory)
     }
 
     func deleteStudyCategory(id: String) {
@@ -3148,6 +3144,20 @@ final class AppState: ObservableObject {
         }
 
         return records.max { $0.question.createdAt < $1.question.createdAt }
+    }
+
+    private func applyPreferredPendingRecord(for category: StudyCategory) {
+        guard let record = preferredPendingRecord(for: category) else {
+            return
+        }
+
+        notificationLandingMessage = nil
+        currentQuestion = record.question
+        lastAnswer = record.answer ?? ""
+        gradingResult = record.gradingResult
+        settingsStore.saveQuestion(record.question)
+        settingsStore.saveLastAnswer(record.answer ?? "")
+        settingsStore.saveGradingResult(record.gradingResult)
     }
 
     func gradeCurrentAnswer(answer submittedAnswer: String? = nil) async {
