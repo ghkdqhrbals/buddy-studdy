@@ -76,6 +76,9 @@ struct StudyView: View {
         .onAppear {
             draftAnswer = appState.lastAnswer
         }
+        .onDisappear {
+            appState.flushPendingAnswerDraftSave()
+        }
         .onChange(of: draftAnswer) {
             if draftAnswer != appState.lastAnswer {
                 appState.updateAnswer(draftAnswer)

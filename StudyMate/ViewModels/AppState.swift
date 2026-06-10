@@ -173,6 +173,8 @@ final class AppState: ObservableObject {
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
     private var visibleDataRefreshTask: Task<Void, Never>?
+    private var answerDraftSaveTask: Task<Void, Never>?
+    private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
     private var savedSettings: StudySettings
@@ -183,6 +185,11 @@ final class AppState: ObservableObject {
     private var didReceiveCloudStateWhileEditing = false
     private var backendStatsRequestID = UUID()
     private var communityQuestionLoadRequestID = UUID()
+
+    private struct PendingAnswerDraft {
+        var question: QuestionItem?
+        var answer: String
+    }
     private var apiTrafficLogCancellable: AnyCancellable?
     private var backendUnauthorizedCancellable: AnyCancellable?
     private var lastAPIKeyUpdatedAt: Date?
@@ -651,10 +658,12 @@ final class AppState: ObservableObject {
         MainActor.assumeIsolated {
             let timerTask = timerTask
             let cloudSyncTask = cloudSyncTask
+            let answerDraftSaveTask = answerDraftSaveTask
             let apiTrafficLogCancellable = apiTrafficLogCancellable
 
             timerTask?.cancel()
             cloudSyncTask?.cancel()
+            answerDraftSaveTask?.cancel()
             apiTrafficLogCancellable?.cancel()
         }
     }
@@ -3166,6 +3175,8 @@ final class AppState: ObservableObject {
             return
         }
 
+        flushPendingAnswerDraftSave()
+
         let answerToGrade = submittedAnswer ?? lastAnswer
         let trimmedAnswer = answerToGrade.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAnswer.isEmpty else {
@@ -3363,13 +3374,62 @@ final class AppState: ObservableObject {
     }
 
     func updateAnswer(_ answer: String) {
-        lastAnswer = answer
-        settingsStore.saveLastAnswer(answer)
-        if let currentQuestion {
-            settingsStore.updateStudyRecordAnswer(question: currentQuestion, answer: answer, onlyIfUngraded: true)
-            studyRecords = settingsStore.loadStudyRecords()
-            markCloudDataChanged(syncDelaySeconds: 4)
+        pendingAnswerDraft = PendingAnswerDraft(question: currentQuestion, answer: answer)
+        answerDraftSaveTask?.cancel()
+        answerDraftSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 450_000_000)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                self?.persistPendingAnswerDraft()
+            }
         }
+    }
+
+    func flushPendingAnswerDraftSave() {
+        answerDraftSaveTask?.cancel()
+        answerDraftSaveTask = nil
+        persistPendingAnswerDraft()
+    }
+
+    private func persistPendingAnswerDraft() {
+        guard let draft = pendingAnswerDraft else {
+            return
+        }
+
+        pendingAnswerDraft = nil
+        answerDraftSaveTask = nil
+        persistAnswerDraft(draft)
+    }
+
+    private func persistAnswerDraft(_ draft: PendingAnswerDraft) {
+        guard let question = draft.question else {
+            lastAnswer = draft.answer
+            settingsStore.saveLastAnswer(draft.answer)
+            return
+        }
+
+        settingsStore.updateStudyRecordAnswer(question: question, answer: draft.answer, onlyIfUngraded: true)
+        updateLoadedStudyRecordAnswer(question: question, answer: draft.answer)
+
+        if let currentQuestion,
+           Self.questionsMatch(currentQuestion, question) {
+            lastAnswer = draft.answer
+            settingsStore.saveLastAnswer(draft.answer)
+        }
+
+        markCloudDataChanged(syncDelaySeconds: 4)
+    }
+
+    private func updateLoadedStudyRecordAnswer(question: QuestionItem, answer: String) {
+        guard let index = studyRecords.lastIndex(where: { studyRecordMatches($0, question: question) }),
+              studyRecords[index].gradingResult == nil else {
+            return
+        }
+
+        studyRecords[index].answer = answer
     }
 
     func selectStudyRecord(_ record: StudyRecord) {
@@ -3377,6 +3437,7 @@ final class AppState: ObservableObject {
             return
         }
 
+        flushPendingAnswerDraftSave()
         notificationLandingMessage = nil
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
