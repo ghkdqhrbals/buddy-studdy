@@ -113,7 +113,7 @@ private struct BuddyStuddyStartupSplashView: View {
     var message: String?
     @State private var sceneIndex = 0
 
-    private let sceneDuration: Duration = .milliseconds(750)
+    private let sceneDuration: Duration = .milliseconds(500)
     private let transitionDuration = 0.3
 
     var body: some View {
@@ -187,6 +187,8 @@ private struct FoxStartupScene {
         FoxStartupScene(imageName: "SplashFoxWalk2"),
         FoxStartupScene(imageName: "SplashFoxWalk3"),
         FoxStartupScene(imageName: "SplashFoxWalk4"),
+        FoxStartupScene(imageName: "SplashFoxWalk5"),
+        FoxStartupScene(imageName: "SplashFoxWalk6"),
     ]
 }
 
