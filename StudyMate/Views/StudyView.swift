@@ -41,7 +41,8 @@ struct StudyView: View {
                             answerEditor: {
                                 answerEditor()
                             },
-                            onSubmit: submitCurrentAnswer
+                            onSubmit: submitCurrentAnswer,
+                            onSkip: appState.skipCurrentQuestion
                         )
                     } else {
                         noQuestionView(strings: strings)
@@ -328,6 +329,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var strings: AppStrings
     @ViewBuilder var answerEditor: () -> AnswerEditorContent
     var onSubmit: () -> Void
+    var onSkip: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -352,6 +354,16 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         onSubmit: onSubmit
                     )
                 }
+
+                Button {
+                    onSkip()
+                } label: {
+                    Label(strings.skipQuestion, systemImage: "forward")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 StudyChatBubble(role: .learnerAnswer) {
                     Text(draftAnswer)
