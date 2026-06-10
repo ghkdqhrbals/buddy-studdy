@@ -131,10 +131,7 @@ private struct BuddyStuddyStartupSplashView: View {
                     ZStack {
                         BuddyStuddyStartupSceneView(scene: scene, iconSize: iconSize)
                             .id(sceneIndex)
-                            .transition(
-                                .opacity
-                                    .combined(with: .scale(scale: 0.985))
-                            )
+                            .transition(.opacity)
                     }
                     .frame(height: iconSize + 36)
                     .animation(.easeInOut(duration: transitionDuration), value: sceneIndex)
@@ -173,10 +170,7 @@ private struct BuddyStuddyStartupSceneView: View {
     var iconSize: CGFloat
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let x = width * scene.xRatio
-
+        GeometryReader { _ in
             ZStack(alignment: .bottom) {
                 Capsule()
                     .fill(.black.opacity(0.10))
@@ -185,7 +179,7 @@ private struct BuddyStuddyStartupSceneView: View {
                         height: 13
                     )
                     .blur(radius: 2)
-                    .offset(x: x, y: iconSize * 0.43)
+                    .offset(y: iconSize * 0.43)
 
                 Image("SplashFox")
                     .resizable()
@@ -193,7 +187,7 @@ private struct BuddyStuddyStartupSceneView: View {
                     .scaledToFit()
                     .frame(width: iconSize, height: iconSize)
                     .rotationEffect(.degrees(scene.rotationDegrees))
-                    .offset(x: x, y: -scene.lift)
+                    .offset(y: -scene.lift)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -201,16 +195,15 @@ private struct BuddyStuddyStartupSceneView: View {
 }
 
 private struct FoxStartupScene {
-    var xRatio: CGFloat
     var lift: CGFloat
     var rotationDegrees: Double
     var shadowWidthRatio: CGFloat
 
     static let scenes = [
-        FoxStartupScene(xRatio: -0.27, lift: 0, rotationDegrees: -2.4, shadowWidthRatio: 0.55),
-        FoxStartupScene(xRatio: -0.09, lift: 10, rotationDegrees: 2.8, shadowWidthRatio: 0.61),
-        FoxStartupScene(xRatio: 0.09, lift: 0, rotationDegrees: -1.8, shadowWidthRatio: 0.55),
-        FoxStartupScene(xRatio: 0.27, lift: 10, rotationDegrees: 2.2, shadowWidthRatio: 0.61),
+        FoxStartupScene(lift: 0, rotationDegrees: -2.4, shadowWidthRatio: 0.55),
+        FoxStartupScene(lift: 10, rotationDegrees: 2.8, shadowWidthRatio: 0.61),
+        FoxStartupScene(lift: 0, rotationDegrees: -1.8, shadowWidthRatio: 0.55),
+        FoxStartupScene(lift: 10, rotationDegrees: 2.2, shadowWidthRatio: 0.61),
     ]
 }
 
