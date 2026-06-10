@@ -24,7 +24,7 @@ springdoc:
 
 buddystuddy:
   scheduler:
-    enabled: ${SCHEDULER_ENABLED:false}
+    enabled: true
   streams:
     enabled: true
   openapi:

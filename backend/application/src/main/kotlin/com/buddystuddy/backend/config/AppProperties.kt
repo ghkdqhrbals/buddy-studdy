@@ -26,9 +26,6 @@ data class BuddyStuddyProperties(
     )
     data class Streams(
         var enabled: Boolean = true,
-        var coordinatorBaseUrl: String = "https://coordinator.ghkdqhrbals.org",
-        var coordinatorUsername: String = "admin",
-        var coordinatorPassword: String = "",
         var pushPrefix: String = "bs-push-v1",
         var viewPrefix: String = "bs-view-content-v1",
         var actionPrefix: String = "bs-question-action-v1",

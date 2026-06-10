@@ -72,9 +72,6 @@ buddystuddy:
     bundle-id: ${notificatoin.push.apns.bundle-id:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
-    coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
-    coordinator-username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
-    coordinator-password: ${REACTION_STREAM_COORDINATOR_PASSWORD:}
     push-prefix: ${PUSH_STREAM_PREFIX:bs-push-v1}
     view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
     action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
@@ -89,4 +86,4 @@ buddystuddy:
 redis-stream-coordinator:
   coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
   username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
-  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:${REDIS_STREAM_COORDINATOR_PASSWORD:}}
+#  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:${REDIS_STREAM_COORDINATOR_PASSWORD:}}

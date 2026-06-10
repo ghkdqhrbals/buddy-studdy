@@ -151,15 +151,14 @@ private struct BuddyStuddyStartupSplashView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: sceneDuration)
-                guard !Task.isCancelled else {
-                    return
-                }
+            try? await Task.sleep(for: .milliseconds(80))
 
+            while !Task.isCancelled {
                 withAnimation(.easeInOut(duration: transitionDuration)) {
                     sceneIndex = (sceneIndex + 1) % FoxStartupScene.scenes.count
                 }
+
+                try? await Task.sleep(for: sceneDuration)
             }
         }
     }
