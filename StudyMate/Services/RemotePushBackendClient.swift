@@ -453,7 +453,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "schedule")
+            url: endpoint("api", "v1", "settings")
         )
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
