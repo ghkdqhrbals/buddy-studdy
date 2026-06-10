@@ -35,7 +35,7 @@ class StudyRoom private constructor(
         sentAt = now,
         status = "ungraded",
         source = source,
-        publicQuestion = schedule.questionPublic,
+        publicQuestion = true,
         createdAt = now,
         updatedAt = now,
     )
@@ -56,7 +56,6 @@ data class StudyRoomSchedule(
     val openaiModel: String,
     val appLanguage: String,
     val customPrompt: String,
-    val questionPublic: Boolean,
 )
 
 data class StudyRoomQuestionDraft(

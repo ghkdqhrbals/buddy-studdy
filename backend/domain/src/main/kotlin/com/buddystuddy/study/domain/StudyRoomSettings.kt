@@ -15,7 +15,6 @@ class StudyRoomSettings private constructor(
             customPrompt = command.customPrompt,
             openaiModel = command.openaiModel,
             maxHistoryCount = command.maxHistoryCount,
-            questionPublic = command.questionPublic && !anonymous,
             nextDueAt = schedule.nextDueAt ?: now.plusSeconds(command.intervalMinutes.toLong() * 60),
             updatedAt = now,
         )
@@ -39,7 +38,6 @@ data class StudyRoomSettingsUpdate(
     val customPrompt: String,
     val openaiModel: String,
     val maxHistoryCount: Int,
-    val questionPublic: Boolean,
     val nextDueAt: Instant,
     val updatedAt: Instant,
 )
@@ -52,5 +50,4 @@ data class StudyRoomSettingsCommand(
     val customPrompt: String,
     val openaiModel: String,
     val maxHistoryCount: Int,
-    val questionPublic: Boolean,
 )

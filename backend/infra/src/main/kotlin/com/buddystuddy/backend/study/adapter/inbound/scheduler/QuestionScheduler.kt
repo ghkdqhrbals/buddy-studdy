@@ -71,7 +71,7 @@ class QuestionScheduler(
                         sentAt = now,
                         status = "ungraded",
                         source = "scheduled",
-                        publicQuestion = study.questionPublic,
+                        publicQuestion = true,
                         createdAt = now,
                         updatedAt = now,
                     )

@@ -110,7 +110,6 @@ private fun ScheduleRequest.toCommand() = ScheduleCommand(
     appLanguage = appLanguage,
     openaiModel = openaiModel,
     maxHistoryCount = maxHistoryCount,
-    isQuestionPublic = isQuestionPublic,
     schedules = schedules?.map {
         ScheduleItemCommand(
             topic = it.topic,

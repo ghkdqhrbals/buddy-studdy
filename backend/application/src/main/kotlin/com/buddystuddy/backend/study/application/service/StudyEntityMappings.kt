@@ -22,7 +22,6 @@ internal fun StudyEntity.toStudyRoomSchedule(appLanguage: String) = StudyRoomSch
     openaiModel = openaiModel,
     appLanguage = appLanguage,
     customPrompt = customPrompt,
-    questionPublic = questionPublic,
 )
 
 internal fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(

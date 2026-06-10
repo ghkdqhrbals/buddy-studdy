@@ -31,7 +31,6 @@ data class StudyRoomResponse(
     val customPrompt: String,
     val openaiModel: String,
     val maxHistoryCount: Int,
-    val isQuestionPublic: Boolean,
     val nextDueAt: Instant?,
     val lastSentAt: Instant?,
     val lastError: String?,

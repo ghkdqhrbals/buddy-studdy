@@ -89,7 +89,6 @@ class StudyApiIntegrationTest {
               "appLanguage": "ko",
               "openaiModel": "gpt-5.4",
               "maxHistoryCount": 100,
-              "isQuestionPublic": true,
               "schedules": [
                 {
                   "topic": "Redis",
@@ -309,8 +308,7 @@ class StudyApiIntegrationTest {
               "intervalMinutes": 30,
               "customPrompt": "Ask practical backend architecture questions.",
               "openaiModel": "gpt-5.4",
-              "maxHistoryCount": 300,
-              "isQuestionPublic": true
+              "maxHistoryCount": 300
             }
             """.trimIndent(),
             accessToken,
@@ -332,8 +330,7 @@ class StudyApiIntegrationTest {
               "intervalMinutes": 45,
               "customPrompt": "Focus on production scale-in and scale-out tradeoffs.",
               "openaiModel": "gpt-5.4",
-              "maxHistoryCount": 500,
-              "isQuestionPublic": false
+              "maxHistoryCount": 500
             }
             """.trimIndent(),
             accessToken,
@@ -345,7 +342,7 @@ class StudyApiIntegrationTest {
         assertThat(updated["difficultyLevel"].asInt()).isEqualTo(8)
         assertThat(updated["intervalMinutes"].asInt()).isEqualTo(45)
         assertThat(updated["customPrompt"].asText()).isEqualTo("Focus on production scale-in and scale-out tradeoffs.")
-        assertThat(updated["isQuestionPublic"].asBoolean()).isFalse()
+        assertThat(updated.has("isQuestionPublic")).isFalse()
 
         val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -578,8 +575,7 @@ class StudyApiIntegrationTest {
               "intervalMinutes": 20,
               "customPrompt": "Ask one concise question.",
               "openaiModel": "gpt-5.4",
-              "maxHistoryCount": 100,
-              "isQuestionPublic": true
+              "maxHistoryCount": 100
             }
             """.trimIndent(),
             auth.accessToken,

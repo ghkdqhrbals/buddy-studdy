@@ -15,7 +15,6 @@ data class CreateStudyCommand(
     val customPrompt: String = "",
     val openaiModel: String = "gpt-5.4",
     val maxHistoryCount: Int = 100,
-    val isQuestionPublic: Boolean = true,
 )
 
 interface StudyUseCase {

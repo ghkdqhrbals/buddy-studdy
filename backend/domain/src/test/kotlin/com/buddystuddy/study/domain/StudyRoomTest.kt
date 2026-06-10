@@ -4,7 +4,7 @@ import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class StudyRoomTest {
     @Test
@@ -27,7 +27,7 @@ class StudyRoomTest {
     @Test
     fun `created question draft preserves room settings and starts ungraded`() {
         val now = Instant.parse("2026-06-10T08:00:00Z")
-        val room = StudyRoom.of(schedule(questionPublic = false), pendingCount = 0)
+        val room = StudyRoom.of(schedule(), pendingCount = 0)
 
         val draft = room.createQuestion(
             question = "What is backpressure?",
@@ -45,14 +45,14 @@ class StudyRoomTest {
         assertEquals(7, draft.difficultyLevel)
         assertEquals("ungraded", draft.status)
         assertEquals("scheduled", draft.source)
-        assertFalse(draft.publicQuestion)
+        assertTrue(draft.publicQuestion)
         assertEquals(now, draft.scheduledFor)
         assertEquals(now, draft.sentAt)
         assertEquals(now, draft.createdAt)
         assertEquals(now, draft.updatedAt)
     }
 
-    private fun schedule(questionPublic: Boolean = true) = StudyRoomSchedule(
+    private fun schedule() = StudyRoomSchedule(
         id = 10,
         deviceId = "device-1",
         userId = 20,
@@ -61,6 +61,5 @@ class StudyRoomTest {
         openaiModel = "gpt-5.4",
         appLanguage = "ko",
         customPrompt = "Ask practical production questions.",
-        questionPublic = questionPublic,
     )
 }

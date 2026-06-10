@@ -68,7 +68,6 @@ class StudyWebAdapter(
                 customPrompt = body.customPrompt,
                 openaiModel = body.openaiModel,
                 maxHistoryCount = body.maxHistoryCount,
-                isQuestionPublic = body.isQuestionPublic,
             ),
         )
 

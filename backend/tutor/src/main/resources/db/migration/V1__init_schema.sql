@@ -68,7 +68,6 @@ create table if not exists schedules (
     app_language varchar(16) not null,
     openai_model varchar(64) not null,
     max_history_count integer not null,
-    is_question_public boolean not null,
     openai_api_key_cipher text,
     next_due_at timestamp with time zone,
     last_sent_at timestamp with time zone,

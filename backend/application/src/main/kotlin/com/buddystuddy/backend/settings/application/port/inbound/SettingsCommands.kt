@@ -18,6 +18,5 @@ data class ScheduleCommand(
     val appLanguage: String = "ko",
     val openaiModel: String = "gpt-5.4",
     val maxHistoryCount: Int = 100,
-    val isQuestionPublic: Boolean = true,
     val schedules: List<ScheduleItemCommand>? = null,
 )

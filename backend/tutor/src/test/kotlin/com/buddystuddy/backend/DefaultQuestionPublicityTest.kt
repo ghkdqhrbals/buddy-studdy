@@ -1,20 +1,27 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
-import com.buddystuddy.backend.settings.application.model.StudySettingsResponse
-import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
-import com.buddystuddy.study.domain.entity.ScheduleEntity
-import com.buddystuddy.study.domain.entity.StudyEntity
+import com.buddystuddy.study.domain.StudyRoom
+import com.buddystuddy.study.domain.StudyRoomSchedule
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class DefaultQuestionPublicityTest {
     @Test
-    fun `new settings default questions to public`() {
-        assertThat(ScheduleRequest().isQuestionPublic).isTrue()
-        assertThat(ScheduleCommand().isQuestionPublic).isTrue()
-        assertThat(StudySettingsResponse().isQuestionPublic).isTrue()
-        assertThat(ScheduleEntity().questionPublic).isTrue()
-        assertThat(StudyEntity().questionPublic).isTrue()
+    fun `new questions default to public without study visibility settings`() {
+        val room = StudyRoom.of(
+            StudyRoomSchedule(
+                id = 1,
+                deviceId = "device-1",
+                userId = 2,
+                topic = "SwiftUI",
+                difficultyLevel = 5,
+                openaiModel = "gpt-5.4",
+                appLanguage = "ko",
+                customPrompt = "",
+            ),
+            pendingCount = 0,
+        )
+
+        assertThat(room.createQuestion("Question?", null, "manual").publicQuestion).isTrue()
     }
 }

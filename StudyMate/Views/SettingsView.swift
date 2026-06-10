@@ -580,17 +580,6 @@ private struct StudySettingsSection: View {
                 Text(strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes))
             }
 
-            if appState.isCommunitySignedIn {
-                Toggle(
-                    strings.questionVisibility,
-                    isOn: Binding(
-                        get: { appState.draftSettings.isQuestionPublic },
-                        set: { appState.setDraftQuestionPublicity($0) }
-                    )
-                )
-
-            }
-
             Menu {
                 ForEach(RecommendedPrompt.allCases) { prompt in
                     Button(prompt.title(language: appState.draftSettings.appLanguage)) {

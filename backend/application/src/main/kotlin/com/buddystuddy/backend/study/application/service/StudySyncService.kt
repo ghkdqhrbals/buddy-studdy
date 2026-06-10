@@ -79,7 +79,6 @@ class StudySyncService(
                     customPrompt = command.customPrompt,
                     openaiModel = command.openaiModel.ifBlank { study.openaiModel.ifBlank { "gpt-5.4" } },
                     maxHistoryCount = command.maxHistoryCount.coerceIn(10, 10_000),
-                    questionPublic = command.isQuestionPublic,
                 ),
                 encryptedOpenAIKey = null,
                 anonymous = principal.anonymous,
@@ -108,7 +107,6 @@ class StudySyncService(
         customPrompt = customPrompt,
         openaiModel = openaiModel,
         maxHistoryCount = maxHistoryCount,
-        isQuestionPublic = questionPublic,
         nextDueAt = nextDueAt,
         lastSentAt = lastSentAt,
         lastError = lastError,
@@ -131,7 +129,6 @@ class StudySyncService(
         customPrompt = update.customPrompt
         openaiModel = update.openaiModel
         maxHistoryCount = update.maxHistoryCount
-        questionPublic = update.questionPublic
         nextDueAt = update.nextDueAt
         updatedAt = update.updatedAt
     }

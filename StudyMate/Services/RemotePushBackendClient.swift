@@ -448,7 +448,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: settings.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            isQuestionPublic: settings.isQuestionPublic,
             schedules: scheduleItems
         )
         var request = authenticatedRequest(
@@ -500,8 +499,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             notificationSound: settings.notificationSound.backendSoundName,
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            isQuestionPublic: settings.isQuestionPublic
+            maxHistoryCount: settings.sanitizedMaxHistoryCount
         )
         var request = authenticatedRequest(
             registration: registration,
@@ -1211,7 +1209,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var appLanguage: String
         var openAIModel: String
         var maxHistoryCount: Int
-        var isQuestionPublic: Bool
         var schedules: [ScheduleItemRequest]
 
         enum CodingKeys: String, CodingKey {
@@ -1225,7 +1222,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case appLanguage
             case openAIModel = "openaiModel"
             case maxHistoryCount
-            case isQuestionPublic = "isQuestionPublic"
             case schedules
         }
     }
@@ -1253,7 +1249,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var customPrompt: String
         var openAIModel: String
         var maxHistoryCount: Int
-        var isQuestionPublic: Bool
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -1264,7 +1259,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case customPrompt
             case openAIModel = "openaiModel"
             case maxHistoryCount
-            case isQuestionPublic
         }
     }
 
@@ -1343,7 +1337,6 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var customPrompt: String
     var openAIModel: String
     var maxHistoryCount: Int
-    var isQuestionPublic: Bool
     var nextDueAt: Date?
     var lastSentAt: Date?
     var lastError: String?
@@ -1361,7 +1354,6 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case customPrompt
         case openAIModel = "openaiModel"
         case maxHistoryCount
-        case isQuestionPublic
         case nextDueAt
         case lastSentAt
         case lastError

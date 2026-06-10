@@ -3144,16 +3144,6 @@ private struct MobileSettingsView: View {
                         in: 1...240
                     )
 
-                    if appState.isCommunitySignedIn {
-                        Toggle(
-                            strings.questionVisibility,
-                            isOn: Binding(
-                                get: { appState.draftSettings.isQuestionPublic },
-                                set: { appState.setDraftQuestionPublicity($0) }
-                            )
-                        )
-
-                    }
                 }
 
                 Section {

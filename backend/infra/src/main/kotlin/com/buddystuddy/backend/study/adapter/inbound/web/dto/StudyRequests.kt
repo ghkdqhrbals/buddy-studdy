@@ -13,7 +13,6 @@ data class CreateStudyRequest(
     val customPrompt: String = "",
     val openaiModel: String = "gpt-5.4",
     @field:Min(10) @field:Max(10_000) val maxHistoryCount: Int = 100,
-    val isQuestionPublic: Boolean = true,
 )
 
 data class AnswerRequest(val answer: String)

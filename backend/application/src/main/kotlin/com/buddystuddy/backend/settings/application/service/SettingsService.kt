@@ -57,7 +57,6 @@ class SettingsService(
                     customPrompt = item.customPrompt,
                     openaiModel = item.openaiModel.ifBlank { command.openaiModel },
                     maxHistoryCount = command.maxHistoryCount,
-                    questionPublic = command.isQuestionPublic,
                 ),
                 encryptedOpenAIKey = null,
                 anonymous = principal.anonymous,
@@ -106,7 +105,6 @@ class SettingsService(
                 customPrompt = command.customPrompt,
                 openaiModel = command.openaiModel.ifBlank { study.openaiModel },
                 maxHistoryCount = command.maxHistoryCount,
-                questionPublic = command.isQuestionPublic,
             ),
             encryptedOpenAIKey = null,
             anonymous = principal.anonymous,
@@ -131,7 +129,6 @@ class SettingsService(
         customPrompt = update.customPrompt
         openaiModel = update.openaiModel
         maxHistoryCount = update.maxHistoryCount
-        questionPublic = update.questionPublic
         nextDueAt = update.nextDueAt
         updatedAt = update.updatedAt
     }

@@ -43,8 +43,6 @@ class StudyEntity(
     var openaiModel: String = "gpt-5.4",
     @Column(name = "max_history_count", nullable = false)
     var maxHistoryCount: Int = 100,
-    @Column(name = "is_question_public", nullable = false)
-    var questionPublic: Boolean = true,
     @Column(name = "next_due_at")
     var nextDueAt: Instant? = null,
     @Column(name = "last_sent_at")
