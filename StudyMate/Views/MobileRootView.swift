@@ -2610,9 +2610,7 @@ private struct CommunityQuestionDetailView: View {
                 TextField(canWriteCommunityReaction ? strings.writeComment : strings.signInToComment, text: $commentDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...4)
-                    .padding(.vertical, 9)
-                    .padding(.horizontal, 12)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.vertical, 8)
                     .disabled(!canWriteCommunityReaction)
 
                 Button {
@@ -2623,13 +2621,18 @@ private struct CommunityQuestionDetailView: View {
                             .controlSize(.small)
                     } else {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
                     }
                 }
                 .buttonStyle(.plain)
                 .disabled(!canWriteCommunityReaction || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
                 .opacity(canWriteCommunityReaction ? 1 : 0.45)
             }
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
         }
     }
 

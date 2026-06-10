@@ -143,10 +143,14 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override fun record(principal: Principal, id: Long): StudyRecordResponse =
-        (questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found."))
-            .let { it.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse() }
+    override fun record(principal: Principal, id: Long): StudyRecordResponse {
+        val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        if (question.skippedAt != null) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        }
+        return question.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
+    }
 
     @Transactional
     override fun skip(principal: Principal, id: Long): StudyRecordResponse {

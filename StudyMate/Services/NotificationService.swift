@@ -54,12 +54,8 @@ enum StudyNotificationPayload {
         let dictionaries = cloudKitDictionaries(from: userInfo)
 
         for dictionary in dictionaries {
-            for key in ["deepLink", "deeplink", "url", "landingUrl", "landingURL"] {
-                if let value = stringValue(dictionary[key]),
-                   let url = URL(string: value),
-                   let route = AppRoute(url: url) {
-                    return route
-                }
+            if let route = appRouteFromDeepLink(in: dictionary) {
+                return route
             }
         }
 
@@ -74,6 +70,14 @@ enum StudyNotificationPayload {
         }
 
         return nil
+    }
+
+    private static func appRouteFromDeepLink(in dictionary: [AnyHashable: Any]) -> AppRoute? {
+        guard let value = stringValue(dictionary["deepLink"]),
+              let url = URL(string: value) else {
+            return nil
+        }
+        return AppRoute(url: url)
     }
 
     static func backendRecordID(from userInfo: [AnyHashable: Any]) -> String? {
@@ -96,6 +100,10 @@ enum StudyNotificationPayload {
                     return value
                 }
             }
+        }
+
+        if case .recordDetail(let recordID) = appRoute(from: userInfo) {
+            return recordID
         }
 
         return nil
@@ -750,10 +758,17 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
            StudyNotificationRouting.shouldOpenStudyImmediately(
                actionIdentifier: actionIdentifier,
                applicationState: UIApplication.shared.applicationState
-           ),
-           let route = StudyNotificationPayload.appRoute(from: userInfo) {
+           ) {
             Task { @MainActor in
-                StudyNotificationDelegate.shared.enqueueAppRoute(route)
+                if StudyNotificationPayload.backendRecordID(from: userInfo) != nil {
+                    StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
+                        userInfo: userInfo,
+                        actionIdentifier: actionIdentifier,
+                        replyText: replyText
+                    )
+                } else if let route = StudyNotificationPayload.appRoute(from: userInfo) {
+                    StudyNotificationDelegate.shared.enqueueAppRoute(route)
+                }
             }
             completionHandler()
             return

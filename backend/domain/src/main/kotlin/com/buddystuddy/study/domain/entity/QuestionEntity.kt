@@ -65,7 +65,7 @@ class QuestionEntity(
     @Column(nullable = false, length = 64)
     var source: String = "scheduled",
     @Column(name = "is_public", nullable = false)
-    var publicQuestion: Boolean = false,
+    var publicQuestion: Boolean = true,
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)

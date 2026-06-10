@@ -164,6 +164,25 @@ class StudyApiIntegrationTest {
                 updatedAt = Instant.parse("2026-06-09T01:01:10Z"),
             )
         )
+        val skipped = questions.save(
+            QuestionEntity(
+                deviceId = deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                question = "Redis Pub/Sub과 Stream 차이를 설명하세요.",
+                hint = "delivery guarantee",
+                topic = "Redis",
+                difficultyLevel = 2,
+                scheduledFor = Instant.parse("2026-06-09T01:30:00Z"),
+                sentAt = Instant.parse("2026-06-09T01:30:00Z"),
+                status = "skipped",
+                skippedAt = Instant.parse("2026-06-09T01:31:00Z"),
+                source = "manual",
+                publicQuestion = true,
+                createdAt = Instant.parse("2026-06-09T01:30:00Z"),
+                updatedAt = Instant.parse("2026-06-09T01:31:00Z"),
+            )
+        )
         val swiftGraded = questions.save(
             QuestionEntity(
                 deviceId = deviceId,
@@ -210,7 +229,7 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(records["records"]).hasSize(2)
         assertThat(records["records"].map { it["id"].asText() }).contains(graded.id.toString(), swiftGraded.id.toString())
-        assertThat(records["records"].map { it["id"].asText() }).doesNotContain(pending.id.toString())
+        assertThat(records["records"].map { it["id"].asText() }).doesNotContain(pending.id.toString(), skipped.id.toString())
         val redisRecordNode = records["records"].first { it["id"].asText() == graded.id.toString() }
         assertThat(redisRecordNode["likeCount"].asInt()).isEqualTo(2)
         assertThat(redisRecordNode["commentCount"].asInt()).isEqualTo(1)
@@ -225,6 +244,8 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(recordDetail["id"].asText()).isEqualTo(graded.id.toString())
+        getJson("/api/v1/records/${skipped.id}", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(404) }
 
         val settings = getJson("/api/v1/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -257,6 +278,7 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(publicQuestions["questions"]).hasSize(1)
         assertThat(publicQuestions["questions"][0]["id"].asText()).isEqualTo(graded.id.toString())
+        assertThat(publicQuestions["questions"].map { it["id"].asText() }).doesNotContain(skipped.id.toString())
     }
 
     @Test
