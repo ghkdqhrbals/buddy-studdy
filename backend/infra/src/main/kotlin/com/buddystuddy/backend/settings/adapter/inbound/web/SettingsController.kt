@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.settings.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Settings", description = "Authenticated study settings and schedule configuration APIs.")
+@RequirePermission(Permissions.PROFILE_READ)
 class SettingsController(
     private val settings: SettingsWebPort,
 ) {
@@ -34,6 +37,7 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @PutMapping("/settings")
+    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
         settings.schedule(body, authentication)
 
@@ -64,6 +68,7 @@ class SettingsController(
         ApiResponse(responseCode = "404", description = "Study settings not found."),
     )
     @PutMapping("/studies/{studyId}/settings")
+    @RequirePermission(Permissions.STUDY_UPDATE)
     fun saveStudySettings(
         @PathVariable studyId: Long,
         @Valid @RequestBody body: ScheduleRequest,

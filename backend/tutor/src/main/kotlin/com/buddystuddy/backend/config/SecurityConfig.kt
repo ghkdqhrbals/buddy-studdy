@@ -89,7 +89,16 @@ class BearerTokenFilter(
                 logIgnoredAuthenticationFailure(request, error)
                 filterChain.doFilter(request, response)
             } else {
-                writeSecurityError(objectMapper, request, response, error.status, error.code, error.message)
+                writeSecurityError(
+                    objectMapper,
+                    request,
+                    response,
+                    error.status,
+                    error.code,
+                    error.message,
+                    requiredPermissions = error.requiredPermissions,
+                    loginRequired = error.loginRequired,
+                )
             }
         } finally {
             SecurityContextHolder.clearContext()
@@ -192,6 +201,8 @@ private fun writeSecurityError(
     status: HttpStatus,
     code: ApiErrorCode,
     message: String,
+    requiredPermissions: List<String>? = null,
+    loginRequired: Boolean? = null,
 ) {
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
@@ -206,7 +217,10 @@ private fun writeSecurityError(
     )
     response.status = status.value()
     response.contentType = "application/json"
-    objectMapper.writeValue(response.outputStream, ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value())))
+    objectMapper.writeValue(
+        response.outputStream,
+        ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), requiredPermissions = requiredPermissions, loginRequired = loginRequired)),
+    )
 }
 
 private val securityLog = LoggerFactory.getLogger("com.buddystuddy.backend.security")

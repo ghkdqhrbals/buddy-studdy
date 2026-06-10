@@ -133,6 +133,41 @@ class SecurityIntegrationTest {
         assertThat(response.body()).contains("\"displayName\":\"Buddy\"")
     }
 
+    @Test
+    fun `page access returns backend computed permissions for anonymous token`() {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+
+        val response = get("/api/v1/me/access", auth.accessToken)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).contains("\"status\":\"ANONYMOUS\"")
+        assertThat(response.body()).contains("\"publicQuestions\":true")
+        assertThat(response.body()).contains("\"myStudies\":false")
+        assertThat(response.body()).contains("\"records\":false")
+        assertThat(response.body()).contains("\"stats\":false")
+    }
+
+    @Test
+    fun `permission denied response includes required permissions for protected mutation`() {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+
+        val response = post(
+            path = "/api/v1/study",
+            body = """{"topic":"Auth","difficultyLevel":3,"intervalMinutes":20}""",
+            bearerToken = auth.accessToken,
+            headers = mapOf(
+                "X-Device-Id" to auth.deviceId,
+                "X-Client-Secret" to auth.clientSecret,
+            )
+        )
+
+        assertThat(response.statusCode()).isEqualTo(403)
+        assertThat(response.body()).contains("PERMISSION_DENIED")
+        assertThat(response.body()).contains("study:read")
+        assertThat(response.body()).contains("study:create")
+        assertThat(response.body()).contains("\"loginRequired\":true")
+    }
+
     private fun get(path: String, bearerToken: String? = null): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET()
         if (!bearerToken.isNullOrBlank()) {

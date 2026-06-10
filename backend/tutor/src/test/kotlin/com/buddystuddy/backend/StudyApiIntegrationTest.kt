@@ -1,5 +1,8 @@
 package com.buddystuddy.backend
 
+import com.buddystuddy.backend.auth.adapter.outbound.persistence.UserRepository
+import com.buddystuddy.backend.auth.application.permission.Roles
+import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
@@ -39,6 +42,8 @@ class StudyApiIntegrationTest {
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var stats: QuestionStatsRepository
+    @Autowired lateinit var users: UserRepository
+    @Autowired lateinit var roles: RoleAssignmentPort
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -60,6 +65,7 @@ class StudyApiIntegrationTest {
         val deviceId = registration["deviceId"].asText()
         val clientSecret = registration["clientSecret"].asText()
         val accessToken = registration["accessToken"].asText()
+        activateRegisteredUser(deviceId)
 
         val schedule = putJson(
             "/api/v1/settings",
@@ -261,6 +267,7 @@ class StudyApiIntegrationTest {
         val deviceId = registration["deviceId"].asText()
         val clientSecret = registration["clientSecret"].asText()
         val accessToken = registration["accessToken"].asText()
+        activateRegisteredUser(deviceId)
 
         val created = postJson(
             "/api/v1/study",
@@ -318,8 +325,8 @@ class StudyApiIntegrationTest {
 
     @Test
     fun `study and records endpoints clamp pagination and isolate authenticated users`() {
-        val first = registerDevice("pagination-owner")
-        val second = registerDevice("pagination-other")
+        val first = registerActiveUser("pagination-owner")
+        val second = registerActiveUser("pagination-other")
 
         val firstStudy = createStudy(first, "Pagination Redis")
         val secondStudy = createStudy(first, "Pagination Swift")
@@ -379,7 +386,7 @@ class StudyApiIntegrationTest {
 
     @Test
     fun `public questions are readable anonymously but reactions comments and reports require authentication`() {
-        val owner = registerDevice("public-boundary-owner")
+        val owner = registerActiveUser("public-boundary-owner")
         val study = createStudy(owner, "Public Boundary")
         val publicQuestion = questions.save(
             gradedQuestion(
@@ -471,6 +478,16 @@ class StudyApiIntegrationTest {
             clientSecret = registration["clientSecret"].asText(),
             accessToken = registration["accessToken"].asText(),
         )
+    }
+
+    private fun registerActiveUser(label: String): AuthHeaders =
+        registerDevice(label).also { activateRegisteredUser(it.deviceId) }
+
+    private fun activateRegisteredUser(deviceId: String) {
+        val user = users.findByProviderAndProviderId("ANONYMOUS", deviceId) ?: return
+        user.status = "ACTIVE"
+        users.save(user)
+        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
     }
 
     private fun createStudy(auth: AuthHeaders, topic: String): StudyEntity {

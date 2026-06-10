@@ -14,6 +14,8 @@ enum class ApiErrorCode {
     EMAIL_DELIVERY_FAILED,
     OPENAI_API_KEY_INVALID,
     OPENAI_API_KEY_MISSING,
+    ACCOUNT_FORBIDDEN,
+    PERMISSION_DENIED,
     RECORD_NOT_FOUND,
     RESOURCE_NOT_FOUND,
     STUDY_SETTINGS_MISSING,
@@ -25,4 +27,6 @@ class ApiException(
     val status: HttpStatus,
     val code: ApiErrorCode,
     override val message: String,
+    val requiredPermissions: List<String>? = null,
+    val loginRequired: Boolean? = null,
 ) : RuntimeException(message)

@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateQuestionRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
@@ -25,6 +27,7 @@ import jakarta.validation.Valid
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Study", description = "Authenticated study-room, question, record, and topic-stat APIs.")
+@RequirePermission(Permissions.STUDY_READ)
 class StudyController(
     private val study: StudyWebPort,
 ) {
@@ -57,6 +60,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @PostMapping("/study")
+    @RequirePermission(Permissions.STUDY_CREATE)
     fun createStudy(
         @Valid @RequestBody body: CreateStudyRequest,
         authentication: Authentication,
@@ -71,6 +75,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/records")
+    @RequirePermission(Permissions.RECORD_READ)
     fun records(
         @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
         @RequestParam(defaultValue = "100") limit: Int,
@@ -88,6 +93,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @DeleteMapping("/records")
+    @RequirePermission(Permissions.RECORD_DELETE)
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = study.clearRecords(authentication)
 
     @Operation(summary = "Fetch one record", description = "Returns one study record owned by the authenticated user.")
@@ -97,6 +103,7 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @GetMapping("/records/{id}")
+    @RequirePermission(Permissions.RECORD_READ)
     fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -105,6 +112,7 @@ class StudyController(
 
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/records/{id}/answer")
+    @RequirePermission(Permissions.RECORD_UPDATE)
     fun saveAnswer(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -120,6 +128,7 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @PostMapping("/records/{id}/answer")
+    @RequirePermission(Permissions.RECORD_UPDATE)
     fun grade(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -130,6 +139,7 @@ class StudyController(
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
     @PostMapping("/records/{id}/skip")
+    @RequirePermission(Permissions.RECORD_UPDATE)
     fun skip(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -143,6 +153,7 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @DeleteMapping("/records/{id}")
+    @RequirePermission(Permissions.RECORD_DELETE)
     fun delete(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -151,6 +162,7 @@ class StudyController(
 
     @Operation(summary = "Update record visibility", description = "Sets whether a completed record can be included in public questions. The user's global public-question setting must also allow public sharing.")
     @PatchMapping("/records/{id}/publicity")
+    @RequirePermission(Permissions.RECORD_PUBLISH)
     fun publicity(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -161,6 +173,7 @@ class StudyController(
 
     @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
     @GetMapping("/stats")
+    @RequirePermission(Permissions.STATS_READ)
     fun stats(
         @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
         @RequestParam(defaultValue = "8") limit: Int,
@@ -174,6 +187,7 @@ class StudyController(
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for a specific study topic. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/questions")
+    @RequirePermission(Permissions.STUDY_CREATE)
     fun createQuestion(
         @RequestBody body: CreateQuestionRequest,
         authentication: Authentication,

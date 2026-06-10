@@ -8,6 +8,7 @@ import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceComma
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationSenderPort
+import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.auth.application.service.AccountSessionManager
@@ -28,6 +29,7 @@ class LoginServiceEmailVerificationTest {
     private val userDevices = InMemoryUserDevicePort()
     private val emailCodes = CapturingEmailCodePort()
     private val emailSender = CapturingEmailSender()
+    private val roles = InMemoryRoleAssignmentPort()
     private val properties = BuddyStuddyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
         email.verificationTtlSeconds = 180
@@ -41,6 +43,7 @@ class LoginServiceEmailVerificationTest {
         tokens = RandomTokenGenerator(),
         emailCodes = emailCodes,
         emailSender = emailSender,
+        roles = roles,
     )
 
     @Test
@@ -178,5 +181,16 @@ class LoginServiceEmailVerificationTest {
 
         override fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
             sessions[id]?.takeIf { it.userId == userId }
+    }
+
+    private class InMemoryRoleAssignmentPort : RoleAssignmentPort {
+        private val roles = mutableSetOf<Pair<Long, String>>()
+
+        override fun grantRoleIfMissing(userId: Long, roleCode: String) {
+            roles += userId to roleCode
+        }
+
+        override fun countUserRoles(userId: Long, roleCode: String): Long =
+            if (userId to roleCode in roles) 1 else 0
     }
 }

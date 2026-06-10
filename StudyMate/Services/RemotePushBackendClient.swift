@@ -147,6 +147,8 @@ protocol RemotePushBackendClientProtocol {
 
     func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
+    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState
+
     func updateSchedule(
         registration: RemotePushRegistration,
         settings: StudySettings,
@@ -401,6 +403,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             accessToken: response.accessToken,
             accessTokenExpiresAt: response.accessTokenExpiresAt
         )
+    }
+
+    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "access")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendAccessState.self, from: data)
     }
 
     func updateSchedule(
@@ -1761,17 +1772,61 @@ struct BackendAPIErrorResponse: Decodable {
     var error: BackendAPIError
 }
 
+struct BackendAccessState: Codable, Equatable {
+    var user: BackendAccessUser
+    var pageAccess: BackendPageAccess
+
+    static let signedOut = BackendAccessState(
+        user: BackendAccessUser(id: 0, status: "ANONYMOUS", displayName: "Buddy"),
+        pageAccess: .signedOut
+    )
+}
+
+struct BackendAccessUser: Codable, Equatable {
+    var id: Int64
+    var status: String
+    var displayName: String
+}
+
+struct BackendPageAccess: Codable, Equatable {
+    var home: Bool
+    var publicQuestions: Bool
+    var myStudies: Bool
+    var studyRoom: Bool
+    var records: Bool
+    var stats: Bool
+    var profile: Bool
+    var developer: Bool
+    var admin: Bool
+
+    static let signedOut = BackendPageAccess(
+        home: true,
+        publicQuestions: true,
+        myStudies: false,
+        studyRoom: false,
+        records: false,
+        stats: false,
+        profile: false,
+        developer: false,
+        admin: false
+    )
+}
+
 struct BackendAPIError: Decodable, Equatable {
     var code: String
     var message: String
     var requestID: String?
     var status: Int?
+    var requiredPermissions: [String]?
+    var loginRequired: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case code
         case message
         case requestID = "requestId"
         case status
+        case requiredPermissions
+        case loginRequired
     }
 }
 
@@ -1820,7 +1875,12 @@ enum RemotePushBackendError: LocalizedError {
     var isPageAccessDenied: Bool {
         switch self {
         case .httpStatus(_, _, let apiError):
-            return apiError?.code == "PAGE_ACCESS_DENIED" || apiError?.code == "AUTH_GOOGLE_REQUIRED"
+            return apiError?.code == "PAGE_ACCESS_DENIED"
+                || apiError?.code == "AUTH_GOOGLE_REQUIRED"
+                || apiError?.code == "PERMISSION_DENIED"
+                || apiError?.code == "ACCOUNT_FORBIDDEN"
+                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
+                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
         case .invalidResponse:
             return false
         }

@@ -11,7 +11,7 @@ class TokenProviderTest {
     @Test
     fun `validate returns true for a signed non expired token`() {
         val provider = tokenProvider()
-        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false).first
+        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
 
         assertThat(provider.validate(token)).isTrue()
     }
@@ -26,7 +26,7 @@ class TokenProviderTest {
     @Test
     fun `parse returns principal from a valid token`() {
         val provider = tokenProvider()
-        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false).first
+        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
 
         assertThat(provider.parse(token)).isEqualTo(
             Principal(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false),

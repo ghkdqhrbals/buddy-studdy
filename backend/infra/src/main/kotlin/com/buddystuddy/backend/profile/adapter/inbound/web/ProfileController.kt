@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.profile.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest
 import com.buddystuddy.backend.profile.application.port.inbound.ProfileUpdateCommand
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Profile", description = "Authenticated user profile and public-question preference APIs.")
+@RequirePermission(Permissions.PROFILE_READ)
 class ProfileController(
     private val profiles: ProfileWebPort,
 ) {
@@ -32,6 +35,7 @@ class ProfileController(
 
     @Operation(summary = "Update my profile", description = "Updates editable profile fields such as display name, avatar choice/color, and public-question preference.")
     @PatchMapping("/profile")
+    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(body, authentication)
 }

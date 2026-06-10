@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.community.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.common.adapter.inbound.web.optionalPrincipal
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
@@ -60,11 +62,13 @@ class CommunityController(
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
     fun like(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
         community.like(id, authentication)
 
     @Operation(summary = "Unlike a public question", description = "Removes the authenticated user's like. Like counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/like")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
     fun unlike(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
         community.unlike(id, authentication)
 
@@ -82,6 +86,7 @@ class CommunityController(
 
     @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_COMMENT)
     fun comment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
@@ -92,6 +97,7 @@ class CommunityController(
 
     @Operation(summary = "Delete a comment", description = "Soft-deletes the authenticated user's own comment on a public question. Comment counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/comments/{commentId}")
+    @RequirePermission(Permissions.COMMENT_DELETE)
     fun deleteComment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
@@ -103,6 +109,7 @@ class CommunityController(
 
     @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_REPORT)
     fun report(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,

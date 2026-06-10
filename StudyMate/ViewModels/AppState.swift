@@ -13,18 +13,27 @@ private enum QuestionGenerationSkip: Error {
 }
 
 private enum ProtectedAppPage {
+    case publicQuestions
+    case myStudies
     case records
     case statistics
     case studyDetail
+    case profile
 
     func title(strings: AppStrings) -> String {
         switch self {
+        case .publicQuestions:
+            return strings.homeScopeAll
+        case .myStudies:
+            return strings.homeScopeMy
         case .records:
             return strings.tabRecords
         case .statistics:
             return strings.tabStatistics
         case .studyDetail:
             return strings.tabStudy
+        case .profile:
+            return strings.profile
         }
     }
 }
@@ -114,6 +123,7 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
+    @Published var backendAccessState: BackendAccessState = .signedOut
     @Published var homeStudySearchResults: [StudyCategory]? = nil
     @Published var recordSearchResults: [StudyRecord]? = nil
 
@@ -293,8 +303,21 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func canAccess(_: ProtectedAppPage) -> Bool {
-        isCommunitySignedIn
+    private func canAccess(_ page: ProtectedAppPage) -> Bool {
+        switch page {
+        case .publicQuestions:
+            return backendAccessState.pageAccess.publicQuestions
+        case .myStudies:
+            return backendAccessState.pageAccess.myStudies
+        case .records:
+            return backendAccessState.pageAccess.records
+        case .statistics:
+            return backendAccessState.pageAccess.stats
+        case .studyDetail:
+            return backendAccessState.pageAccess.studyRoom
+        case .profile:
+            return backendAccessState.pageAccess.profile
+        }
     }
 
     @discardableResult
@@ -308,7 +331,6 @@ final class AppState: ObservableObject {
     }
 
     private func redirectToPageAccessGuide(for page: ProtectedAppPage) {
-        selectedTab = .home
         homeStudyRoute = nil
         focusedRecordRequest = nil
         let message = strings.pageAccessDenied(page.title(strings: strings))
@@ -320,6 +342,30 @@ final class AppState: ObservableObject {
 
     func dismissPageAccessPrompt() {
         pageAccessPrompt = nil
+    }
+
+    func refreshPageAccess(reason: String = "manual") async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "page-access-\(reason)") else {
+            backendAccessState = .signedOut
+            isCommunitySignedIn = false
+            settingsStore.saveIsCommunitySignedIn(false)
+            return
+        }
+
+        do {
+            let state = try await remotePushBackendClient.fetchAccess(registration: registration)
+            backendAccessState = state
+            isCommunitySignedIn = state.user.status != "ANONYMOUS"
+            settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+        } catch {
+            if Self.isUnauthorizedBackendError(error) {
+                clearStoredBackendAccessToken()
+                backendAccessState = .signedOut
+                isCommunitySignedIn = false
+                settingsStore.saveIsCommunitySignedIn(false)
+            }
+            log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+        }
     }
 
     @discardableResult
@@ -619,6 +665,7 @@ final class AppState: ObservableObject {
         }
 
         await loadOpenAIModelOptions()
+        await refreshPageAccess(reason: "startup")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
@@ -635,6 +682,7 @@ final class AppState: ObservableObject {
 
         reloadPersistedState()
         await loadOpenAIModelOptions()
+        await refreshPageAccess(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -1346,6 +1394,7 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
+            await refreshPageAccess(reason: "google-login")
             await refreshBackendStudyIfPossible(
                 updateVisibleQuestion: true,
                 preserveLocalSettings: false
@@ -1397,6 +1446,7 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
+            await refreshPageAccess(reason: "email-login")
             await refreshBackendStudyIfPossible(
                 updateVisibleQuestion: true,
                 preserveLocalSettings: false
@@ -1424,6 +1474,7 @@ final class AppState: ObservableObject {
         communityOffset = 0
         communityTotalCount = 0
         communityErrorMessage = nil
+        backendAccessState = .signedOut
         if settings.isQuestionPublic || draftSettings.isQuestionPublic {
             settings = settings.withQuestionPrivacy(false)
             draftSettings = draftSettings.withQuestionPrivacy(false)
@@ -1431,6 +1482,7 @@ final class AppState: ObservableObject {
             savedSettings = normalizedSettings(settings)
             Task {
                 await syncRemotePushScheduleIfPossible(reason: "community-logout")
+                await refreshPageAccess(reason: "community-logout")
             }
         }
         statusMessage = strings.communitySignedOut
@@ -4115,6 +4167,9 @@ final class AppState: ObservableObject {
         registration.accessToken = nil
         registration.accessTokenExpiresAt = nil
         settingsStore.saveRemotePushRegistration(registration)
+        backendAccessState = .signedOut
+        isCommunitySignedIn = false
+        settingsStore.saveIsCommunitySignedIn(false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
@@ -5519,6 +5574,21 @@ final class AppState: ObservableObject {
         }
 
         return backendError.backendCode == "DEVICE_NOT_FOUND"
+    }
+
+    nonisolated private static func isUnauthorizedBackendError(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            return status == 401
+                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
+                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
+        case .invalidResponse:
+            return false
+        }
     }
 
     nonisolated private static func isCancellationLikeError(_ error: Error) -> Bool {

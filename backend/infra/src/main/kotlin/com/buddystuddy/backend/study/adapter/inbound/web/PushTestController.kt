@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.study.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.PushTestRequest
 import com.buddystuddy.backend.study.application.model.PushTestCommand
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Test", description = "Authenticated development/test utilities.")
+@RequirePermission(Permissions.TEST_PUSH_SEND)
 class PushTestController(
     private val pushTest: PushTestWebPort,
 ) {

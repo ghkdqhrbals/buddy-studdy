@@ -16,7 +16,15 @@ import java.util.UUID
 
 data class ApiErrorEnvelope(val error: ApiError)
 @JsonInclude(JsonInclude.Include.NON_NULL)
-data class ApiError(val code: String, val message: String, val requestId: String, val status: Int, val reason: String? = null)
+data class ApiError(
+    val code: String,
+    val message: String,
+    val requestId: String,
+    val status: Int,
+    val reason: String? = null,
+    val requiredPermissions: List<String>? = null,
+    val loginRequired: Boolean? = null,
+)
 
 @RestControllerAdvice
 class ErrorHandler {
@@ -24,7 +32,14 @@ class ErrorHandler {
 
     @ExceptionHandler(ApiException::class)
     fun api(error: ApiException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
-        val body = envelope(error.code, error.message, error.status, request)
+        val body = envelope(
+            error.code,
+            error.message,
+            error.status,
+            request,
+            requiredPermissions = error.requiredPermissions,
+            loginRequired = error.loginRequired,
+        )
         log.warn(
             "api_error requestId={} method={} path={} status={} code={} message={}",
             body.error.requestId,
@@ -58,9 +73,11 @@ class ErrorHandler {
         status: HttpStatus,
         request: HttpServletRequest,
         reason: String? = null,
+        requiredPermissions: List<String>? = null,
+        loginRequired: Boolean? = null,
     ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
-        return ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), reason))
+        return ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), reason, requiredPermissions, loginRequired))
     }
 
     private fun Exception.toReason(): String {

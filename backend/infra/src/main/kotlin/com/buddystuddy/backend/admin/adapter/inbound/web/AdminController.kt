@@ -1,5 +1,7 @@
 package com.buddystuddy.backend.admin.adapter.inbound.web
 
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.admin.application.port.inbound.AdminUseCase
 import com.buddystuddy.backend.common.adapter.inbound.web.principalOrThrow
 import io.swagger.v3.oas.annotations.Operation
@@ -29,10 +31,12 @@ class AdminController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/api")
+    @RequirePermission(Permissions.PROFILE_READ)
     fun api(authentication: Authentication) = admin.api(authentication)
 
     @Operation(summary = "Validate saved OpenAI API key", description = "Tests the authenticated user's saved OpenAI API key and returns the current validation result.")
     @PostMapping("/api/validate")
+    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun validateApi(authentication: Authentication) = admin.validateApi(authentication)
 }
 

@@ -11,6 +11,7 @@ import com.buddystuddy.auth.domain.PushTokenUpdate
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationSenderPort
+import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.LoginUseCase
@@ -19,6 +20,7 @@ import com.buddystuddy.backend.auth.application.port.inbound.UpdatePushTokenUseC
 import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystuddy.backend.auth.application.port.inbound.PushTokenCommand
+import com.buddystuddy.backend.auth.application.permission.Roles
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
@@ -47,6 +49,7 @@ class LoginService(
     private val tokens: RandomTokenGenerator,
     private val emailCodes: EmailVerificationCodePort,
     private val emailSender: EmailVerificationSenderPort,
+    private val roles: RoleAssignmentPort,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
     private val secureRandom = SecureRandom()
@@ -83,15 +86,17 @@ class LoginService(
                 lastSeenAt = now,
             )
         )
+        roles.grantRoleIfMissing(user.id, Roles.ANONYMOUS_USER)
         val session = sessions.saveSession(user.id, device.deviceId, now, null)
-        val token = tokenService.create(user.id, device.deviceId, session.id, true)
+        val token = tokenService.create(user.id, device.deviceId, session.id, true, user.status)
         return DeviceRegisterResponse(device.deviceId, secret, token.first, token.second)
     }
 
     @Transactional
     override fun token(deviceId: String, clientSecret: String): AccessTokenResponse {
         val principal = authenticateDevice(deviceId, clientSecret)
-        val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous)
+        val user = users.findById(principal.userId).orElseThrow()
+        val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous, user.status)
         return AccessTokenResponse(token.first, token.second)
     }
 
@@ -101,11 +106,12 @@ class LoginService(
         if (device.clientSecretHash != sha256(clientSecret)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid device credentials.")
         }
-        val userId = device.userId ?: sessions.ensureAnonymousUser(device).id
-        val user = users.findById(userId).orElseThrow()
+        val user = device.userId
+            ?.let { users.findById(it).orElseThrow() }
+            ?: sessions.ensureAnonymousUser(device).also { roles.grantRoleIfMissing(it.id, Roles.ANONYMOUS_USER) }
         val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
         val session = sessions.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
-        return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS")
+        return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS", user.status)
     }
 
     @Transactional
@@ -141,13 +147,15 @@ class LoginService(
                     updatedAt = now,
                 )
             )
+            roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         } else if (user.passwordHash != sha256(command.password)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
+        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         val device = sessions.device(principal.deviceId)
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
-        val token = tokenService.create(user.id, device.deviceId, session.id, false)
+        val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
 
@@ -184,10 +192,11 @@ class LoginService(
                 updatedAt = now,
             )
         )
+        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         val device = sessions.device(principal.deviceId)
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
-        val token = tokenService.create(user.id, device.deviceId, session.id, false)
+        val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
 

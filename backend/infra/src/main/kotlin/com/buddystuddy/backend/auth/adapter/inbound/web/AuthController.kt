@@ -1,6 +1,8 @@
 package com.buddystuddy.backend.auth.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.Principal
+import com.buddystuddy.backend.auth.application.permission.Permissions
+import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystuddy.backend.auth.application.port.inbound.LoginUseCase
@@ -87,6 +89,7 @@ class AuthController(
 
     @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
     @PutMapping("/push-token")
+    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
         auth.pushToken(body, authentication)
 }

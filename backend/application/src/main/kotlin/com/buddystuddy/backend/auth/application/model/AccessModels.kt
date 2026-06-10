@@ -1,0 +1,24 @@
+package com.buddystuddy.backend.auth.application.model
+
+data class AccessUserResponse(
+    val id: Long,
+    val status: String,
+    val displayName: String,
+)
+
+data class PageAccessResponse(
+    val home: Boolean,
+    val publicQuestions: Boolean,
+    val myStudies: Boolean,
+    val studyRoom: Boolean,
+    val records: Boolean,
+    val stats: Boolean,
+    val profile: Boolean,
+    val developer: Boolean,
+    val admin: Boolean,
+)
+
+data class AccessResponse(
+    val user: AccessUserResponse,
+    val pageAccess: PageAccessResponse,
+)
