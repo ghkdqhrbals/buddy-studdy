@@ -111,59 +111,107 @@ private struct StudyMateiOSBootstrapView: View {
 
 private struct BuddyStuddyStartupSplashView: View {
     var message: String?
+    @State private var sceneIndex = 0
+
+    private let sceneDuration: Duration = .milliseconds(750)
+    private let transitionDuration = 0.3
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            GeometryReader { geometry in
-                let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                let progress = elapsed.truncatingRemainder(dividingBy: 3.0) / 3.0
-                let width = geometry.size.width
-                let iconSize = min(max(width * 0.34, 132), 188)
-                let travel = width * 0.54
-                let x = -travel / 2 + travel * progress
-                let step = sin(progress * .pi * 2)
-                let lift = abs(step) * 9
+        GeometryReader { geometry in
+            let scene = FoxStartupScene.scenes[sceneIndex]
+            let iconSize = min(max(geometry.size.width * 0.34, 132), 188)
 
-                ZStack {
-                    Color(red: 1.0, green: 0.992, blue: 0.972)
-                        .ignoresSafeArea()
+            ZStack {
+                Color(red: 1.0, green: 0.992, blue: 0.972)
+                    .ignoresSafeArea()
 
-                    VStack(spacing: 18) {
-                        Spacer()
+                VStack(spacing: 18) {
+                    Spacer()
 
-                        ZStack(alignment: .bottom) {
-                            Capsule()
-                                .fill(.black.opacity(0.10))
-                                .frame(width: iconSize * (0.52 + abs(step) * 0.06), height: 13)
-                                .blur(radius: 2)
-                                .offset(x: x, y: iconSize * 0.43)
-
-                            Image("SplashFox")
-                                .resizable()
-                                .interpolation(.none)
-                                .scaledToFit()
-                                .frame(width: iconSize, height: iconSize)
-                                .rotationEffect(.degrees(step * 2.8))
-                                .offset(x: x, y: -lift)
-                        }
-                        .frame(height: iconSize + 36)
-
-                        if let message {
-                            Text(message)
-                                .font(.footnote.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .contentTransition(.opacity)
-                        }
-
-                        Spacer()
+                    ZStack {
+                        BuddyStuddyStartupSceneView(scene: scene, iconSize: iconSize)
+                            .id(sceneIndex)
+                            .transition(
+                                .opacity
+                                    .combined(with: .scale(scale: 0.985))
+                            )
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 24)
+                    .frame(height: iconSize + 36)
+                    .animation(.easeInOut(duration: transitionDuration), value: sceneIndex)
+
+                    if let message {
+                        Text(message)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.opacity)
+                    }
+
+                    Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: sceneDuration)
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                withAnimation(.easeInOut(duration: transitionDuration)) {
+                    sceneIndex = (sceneIndex + 1) % FoxStartupScene.scenes.count
+                }
             }
         }
     }
+}
+
+private struct BuddyStuddyStartupSceneView: View {
+    var scene: FoxStartupScene
+    var iconSize: CGFloat
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let x = width * scene.xRatio
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(.black.opacity(0.10))
+                    .frame(
+                        width: iconSize * scene.shadowWidthRatio,
+                        height: 13
+                    )
+                    .blur(radius: 2)
+                    .offset(x: x, y: iconSize * 0.43)
+
+                Image("SplashFox")
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: iconSize, height: iconSize)
+                    .rotationEffect(.degrees(scene.rotationDegrees))
+                    .offset(x: x, y: -scene.lift)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct FoxStartupScene {
+    var xRatio: CGFloat
+    var lift: CGFloat
+    var rotationDegrees: Double
+    var shadowWidthRatio: CGFloat
+
+    static let scenes = [
+        FoxStartupScene(xRatio: -0.27, lift: 0, rotationDegrees: -2.4, shadowWidthRatio: 0.55),
+        FoxStartupScene(xRatio: -0.09, lift: 10, rotationDegrees: 2.8, shadowWidthRatio: 0.61),
+        FoxStartupScene(xRatio: 0.09, lift: 0, rotationDegrees: -1.8, shadowWidthRatio: 0.55),
+        FoxStartupScene(xRatio: 0.27, lift: 10, rotationDegrees: 2.2, shadowWidthRatio: 0.61),
+    ]
 }
 
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
