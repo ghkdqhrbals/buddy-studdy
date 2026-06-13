@@ -108,6 +108,7 @@ struct StatisticsView: View {
                             totalResponses: count,
                             totalTopics: totalTopicCount,
                             records: visibleStatRecords,
+                            activityDateRange: activityDateRange,
                             strings: strings
                         )
 
@@ -288,6 +289,51 @@ struct StatisticsView: View {
 
     private var selectedPeriodEndAt: Date? {
         periodBounds(for: selectedPeriod).endAt
+    }
+
+    private var activityDateRange: ClosedRange<Date> {
+        Self.activityDateRange(
+            for: selectedPeriod,
+            customStartDate: customStartDate,
+            customEndDate: customEndDate,
+            records: visibleStatRecords
+        )
+    }
+
+    private static func activityDateRange(
+        for period: StatisticsPeriod,
+        customStartDate: Date,
+        customEndDate: Date,
+        records: [StudyRecord]
+    ) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        func rangeFrom(daysIncludingToday dayCount: Int) -> ClosedRange<Date> {
+            let start = calendar.date(byAdding: .day, value: -(max(dayCount, 1) - 1), to: today) ?? today
+            return start...today
+        }
+
+        switch period {
+        case .today:
+            return today...today
+        case .last7Days:
+            return rangeFrom(daysIncludingToday: 7)
+        case .last30Days:
+            return rangeFrom(daysIncludingToday: 30)
+        case .last90Days:
+            return rangeFrom(daysIncludingToday: 90)
+        case .custom:
+            let start = calendar.startOfDay(for: min(customStartDate, customEndDate))
+            let end = calendar.startOfDay(for: max(customStartDate, customEndDate))
+            return start...end
+        case .all:
+            let recordDates = records.map { calendar.startOfDay(for: statsDate(for: $0)) }
+            guard let earliest = recordDates.min(), let latest = recordDates.max() else {
+                return rangeFrom(daysIncludingToday: 35)
+            }
+            return earliest...max(latest, today)
+        }
     }
 
     private func periodBounds(for period: StatisticsPeriod) -> (startAt: Date?, endAt: Date?) {
@@ -1119,6 +1165,7 @@ private struct StatsOverviewSection: View {
     var totalResponses: Int
     var totalTopics: Int
     var records: [StudyRecord]
+    var activityDateRange: ClosedRange<Date>
     var strings: AppStrings
 
     private var latestRecordDate: Date? {
@@ -1144,7 +1191,7 @@ private struct StatsOverviewSection: View {
                     }
                 }
 
-                StatsActivityGrid(records: records)
+                StatsActivityGrid(records: records, dateRange: activityDateRange)
             }
         }
         .padding(14)
@@ -1184,18 +1231,21 @@ private struct StatsHeroMetric: View {
 
 private struct StatsActivityGrid: View {
     var records: [StudyRecord]
+    var dateRange: ClosedRange<Date>
     @State private var selectedDay: ActivityDay?
 
     private var days: [ActivityDay] {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let startDate = calendar.startOfDay(for: dateRange.lowerBound)
+        let endDate = calendar.startOfDay(for: max(dateRange.upperBound, dateRange.lowerBound))
+        let dayCount = max(calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0, 0)
         let counts = Dictionary(grouping: records) { record in
             calendar.startOfDay(for: record.answeredAt ?? record.question.createdAt)
         }
         .mapValues(\.count)
 
-        return (0..<35).reversed().map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
+        return (0...dayCount).map { offset in
+            let date = calendar.date(byAdding: .day, value: offset, to: startDate) ?? startDate
             return ActivityDay(date: date, count: counts[date] ?? 0)
         }
     }
