@@ -642,16 +642,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         offset: Int = 0,
         excludeDeviceID: String? = nil
     ) async throws -> CommunityQuestionsResponse {
+        let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let apiVersion = normalizedQuery.isEmpty ? "v1" : "v2"
+        let path = normalizedQuery.isEmpty ? ["api", apiVersion, "public", "questions"] : ["api", apiVersion, "public", "questions", "search"]
         var components = URLComponents(
-            url: endpoint("api", "v1", "public", "questions"),
+            url: endpoint(path),
             resolvingAgainstBaseURL: false
         )
         var queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))")
         ]
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            queryItems.append(URLQueryItem(name: "query", value: query))
+        if !normalizedQuery.isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
         }
         if let excludeDeviceID,
            !excludeDeviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1158,6 +1161,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private func endpoint(_ components: String...) -> URL {
+        endpoint(components)
+    }
+
+    private func endpoint(_ components: [String]) -> URL {
         components.reduce(baseURL) { partialURL, component in
             partialURL.appendingPathComponent(component)
         }

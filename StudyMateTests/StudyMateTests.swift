@@ -154,6 +154,50 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testPublicQuestionSearchUsesV2EndpointWhenQueryIsPresent() async throws {
+        let recorder = HTTPRequestRecorder()
+        let client = makeBackendClient(recorder: recorder)
+        let registration = RemotePushRegistration(deviceID: "device-1", clientSecret: "secret-1", apnsToken: "")
+
+        _ = try await client.fetchPublicQuestions(
+            registration: registration,
+            query: " Swift concurrency ",
+            limit: 150,
+            offset: -4,
+            excludeDeviceID: nil
+        )
+
+        let request = try XCTUnwrap(recorder.requests.single)
+        XCTAssertEqual(request.url?.path, "/api/v2/public/questions/search")
+        let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItemValue("query"), "Swift concurrency")
+        XCTAssertEqual(components.queryItemValue("limit"), "100")
+        XCTAssertEqual(components.queryItemValue("offset"), "0")
+    }
+
+    @MainActor
+    func testPublicQuestionListKeepsV1EndpointWhenQueryIsBlank() async throws {
+        let recorder = HTTPRequestRecorder()
+        let client = makeBackendClient(recorder: recorder)
+        let registration = RemotePushRegistration(deviceID: "device-1", clientSecret: "secret-1", apnsToken: "")
+
+        _ = try await client.fetchPublicQuestions(
+            registration: registration,
+            query: "   ",
+            limit: 15,
+            offset: 20,
+            excludeDeviceID: nil
+        )
+
+        let request = try XCTUnwrap(recorder.requests.single)
+        XCTAssertEqual(request.url?.path, "/api/v1/public/questions")
+        let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+        XCTAssertNil(components.queryItemValue("query"))
+        XCTAssertEqual(components.queryItemValue("limit"), "15")
+        XCTAssertEqual(components.queryItemValue("offset"), "20")
+    }
+
+    @MainActor
     func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3947,6 +3991,82 @@ private final class URLRequestRecorder: @unchecked Sendable {
         lock.lock()
         values.append(value)
         lock.unlock()
+    }
+}
+
+private final class HTTPRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequests: [URLRequest] = []
+
+    var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequests
+    }
+
+    func append(_ request: URLRequest) {
+        lock.lock()
+        storedRequests.append(request)
+        lock.unlock()
+    }
+}
+
+@MainActor
+private func makeBackendClient(recorder: HTTPRequestRecorder) -> RemotePushBackendClient {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [BackendClientTestURLProtocol.self]
+    BackendClientTestURLProtocol.requestHandler = { request in
+        recorder.append(request)
+        let url = request.url ?? URL(string: "https://example.test")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        let body = #"{"questions":[],"totalCount":0,"limit":20,"offset":0}"#.data(using: .utf8)!
+        return (response, body)
+    }
+    return RemotePushBackendClient(
+        baseURL: URL(string: "https://example.test")!,
+        session: URLSession(configuration: configuration)
+    )
+}
+
+private final class BackendClientTestURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: RemotePushBackendError.invalidResponse)
+            return
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private extension Array {
+    var single: Element? {
+        count == 1 ? first : nil
+    }
+}
+
+private extension URLComponents {
+    func queryItemValue(_ name: String) -> String? {
+        queryItems?.first { $0.name == name }?.value
     }
 }
 
