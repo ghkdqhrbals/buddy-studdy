@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.study.application.model
 
+import com.buddystuddy.backend.common.application.model.PageResponse
 import java.time.Instant
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)
@@ -19,7 +20,12 @@ data class StudyRecordResponse(
     val viewCount: Int = 0,
 )
 
-data class RecordsPageResponse(val records: List<StudyRecordResponse>, val totalCount: Long, val limit: Int, val offset: Int)
+data class RecordsPageResponse(
+    val records: List<StudyRecordResponse>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse
 
 data class StudyRoomResponse(
     val id: Long,
@@ -41,8 +47,8 @@ data class StudyRoomResponse(
 
 data class StudyPageResponse(
     val studies: List<StudyRoomResponse>,
-    val totalCount: Long,
-    val limit: Int,
-    val offset: Int,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
     val serverTime: Instant,
-)
+) : PageResponse

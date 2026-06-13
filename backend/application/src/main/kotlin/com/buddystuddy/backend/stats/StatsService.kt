@@ -44,6 +44,7 @@ class StatsService(
             totalResponses = page.content.size,
             totalTopics = grouped.size,
             topics = topics,
+            totalCount = grouped.size.toLong(),
             limit = limit,
             offset = offset,
             generatedAt = Instant.now(),

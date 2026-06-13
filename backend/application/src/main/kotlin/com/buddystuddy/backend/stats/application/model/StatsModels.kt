@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.stats.application.model
 
+import com.buddystuddy.backend.common.application.model.PageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import java.time.Instant
 
@@ -29,7 +30,8 @@ data class StatsResponse(
     val totalResponses: Int,
     val totalTopics: Int,
     val topics: List<TopicStatsResponse>,
-    val limit: Int,
-    val offset: Int,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
     val generatedAt: Instant,
-)
+) : PageResponse

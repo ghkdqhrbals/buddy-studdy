@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.community.application.model
 
+import com.buddystuddy.backend.common.application.model.PageResponse
 import com.buddystuddy.backend.profile.application.model.UserProfileResponse
 import com.buddystuddy.backend.study.application.model.GradingResultResponse
 import java.time.Instant
@@ -24,8 +25,18 @@ data class CommunityQuestionResponse(
     val isLikedByMe: Boolean = false,
 )
 
-data class CommunityQuestionsResponse(val questions: List<CommunityQuestionResponse>, val totalCount: Long, val limit: Int, val offset: Int)
+data class CommunityQuestionsResponse(
+    val questions: List<CommunityQuestionResponse>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse
 data class CommunityLikeResponse(val questionId: String, val likeCount: Int, val isLikedByMe: Boolean)
 data class CommunityCommentResponse(val id: String, val questionId: String, val body: String, val createdAt: Instant, val author: UserProfileResponse)
 data class CommunityCommentDeleteResponse(val id: String, val questionId: String, val ok: Boolean = true)
-data class CommunityCommentsResponse(val comments: List<CommunityCommentResponse>, val totalCount: Long, val limit: Int, val offset: Int)
+data class CommunityCommentsResponse(
+    val comments: List<CommunityCommentResponse>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse
