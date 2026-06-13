@@ -2706,7 +2706,8 @@ private struct CommunityQuestionDetailView: View {
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!canWriteCommunityReaction || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingComment)
+                .foregroundStyle(canSendComment ? Color.accentColor : Color.secondary.opacity(0.45))
+                .disabled(!canSendComment)
                 .opacity(canWriteCommunityReaction ? 1 : 0.45)
             }
             .padding(.leading, 12)
@@ -2714,6 +2715,10 @@ private struct CommunityQuestionDetailView: View {
             .padding(.vertical, 4)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
         }
+    }
+
+    private var canSendComment: Bool {
+        canWriteCommunityReaction && !commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSendingComment
     }
 
     private func canDeleteComment(_ comment: CommunityQuestionComment) -> Bool {
