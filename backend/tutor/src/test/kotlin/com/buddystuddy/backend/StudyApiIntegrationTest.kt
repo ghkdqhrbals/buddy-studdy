@@ -6,6 +6,7 @@ import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
@@ -53,6 +54,7 @@ class StudyApiIntegrationTest {
     @Autowired lateinit var stats: QuestionStatsRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var roles: RoleAssignmentPort
+    @Autowired lateinit var refreshUserStats: RefreshUserStatsUseCase
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -261,6 +263,8 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isFalse()
+
+        refreshUserStats.refreshAll(Instant.parse("2026-06-09T03:00:00Z"))
 
         val statsPage = getJson("/api/v1/stats?limit=10&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }

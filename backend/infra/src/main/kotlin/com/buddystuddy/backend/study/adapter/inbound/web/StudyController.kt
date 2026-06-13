@@ -2,6 +2,7 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 
 import com.buddystuddy.backend.auth.application.permission.Permissions
 import com.buddystuddy.backend.auth.application.permission.RequirePermission
+import com.buddystuddy.backend.stats.application.model.StatsQuery
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import jakarta.validation.Valid
+import java.time.Instant
 
 @RestController
 @RequestMapping("/api/v1")
@@ -185,9 +187,15 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed topic stat search query.", example = "Swift")
         @RequestParam(required = false) query: String?,
+        @Parameter(description = "Optional preset period: all, today, last7, last30, last90.", example = "last30")
+        @RequestParam(required = false) period: String?,
+        @Parameter(description = "Optional inclusive UTC start timestamp for custom period.", example = "2026-06-01T00:00:00Z")
+        @RequestParam(required = false) startAt: Instant?,
+        @Parameter(description = "Optional exclusive UTC end timestamp for custom period.", example = "2026-06-13T00:00:00Z")
+        @RequestParam(required = false) endAt: Instant?,
         authentication: Authentication,
     ): StatsResponse =
-        study.stats(limit, offset, query, authentication)
+        study.stats(limit, offset, StatsQuery(search = query, period = period, startAt = startAt, endAt = endAt), authentication)
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/studies/{studyId}/questions")

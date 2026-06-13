@@ -2,46 +2,48 @@ package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.backend.stats.application.model.StatsQuery
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
 import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystuddy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
+import com.buddystuddy.backend.stats.application.port.outbound.UserStatsPort
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.study.domain.StudyRecord
 import com.buddystuddy.study.domain.StudyRecordState
 import com.buddystuddy.study.domain.StudyRecordStats
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.stats.domain.entity.UserStatsEntity
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import java.text.Normalizer
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlin.math.max
-import kotlin.math.min
 
 @Service
 class StatsService(
+    private val userStats: UserStatsPort,
     private val questions: QuestionPort,
     private val stats: QuestionStatsPort,
 ) : GetStudyStatsUseCase {
-    override fun stats(principal: Principal, limit: Int, offset: Int, query: String?): StatsResponse =
+    override fun stats(principal: Principal, limit: Int, offset: Int, query: StatsQuery): StatsResponse =
         stats(principal.userId, limit, offset, query)
 
-    private fun stats(userId: Long, limit: Int, offset: Int, query: String?): StatsResponse {
-        val search = query?.trim()?.takeIf { it.isNotEmpty() }
-        val page = if (search == null) {
-            questions.findGradedByUser(userId, PageRequest.of(0, 10_000))
-        } else {
-            questions.findGradedByUserAndQuery(userId, search, PageRequest.of(0, 10_000))
-        }
-        val grouped = page.content.groupBy { normalizedTopic(it.topic) }
+    private fun stats(userId: Long, limit: Int, offset: Int, query: StatsQuery): StatsResponse {
+        val bounds = query.dateBounds()
+        val rows = userStats.findByUser(userId, bounds.startDate, bounds.endDate, query.search?.trim()?.takeIf { it.isNotEmpty() })
+        val grouped = rows.groupBy { it.topicKey }
         val topics = grouped.values
-            .sortedByDescending { it.size }
+            .sortedWith(compareByDescending<List<UserStatsEntity>> { it.sumOf(UserStatsEntity::responseCount) }.thenBy { it.first().topicKey })
             .drop(offset)
             .take(limit)
             .map { rows -> topicStats(rows) }
         return StatsResponse(
-            totalResponses = page.content.size,
+            totalResponses = rows.sumOf { it.responseCount },
             totalTopics = grouped.size,
             topics = topics,
             totalCount = grouped.size.toLong(),
@@ -51,38 +53,44 @@ class StatsService(
         )
     }
 
-    private fun topicStats(rows: List<QuestionEntity>): TopicStatsResponse {
-        val scored = rows.filter { it.score != null }
-        val avg = scored.mapNotNull { it.score }.average().takeIf { !it.isNaN() }?.toInt() ?: 0
-        val best = scored.mapNotNull { it.score }.maxOrNull() ?: 0
-        val correctRate = if (scored.isEmpty()) 0 else (scored.count { it.correct == true || (it.score ?: 0) >= 70 } * 100 / scored.size)
-        val byLevel = scored.groupBy { it.difficultyLevel }.maxByOrNull { it.value.size }
+    private fun topicStats(rows: List<UserStatsEntity>): TopicStatsResponse {
+        val responseCount = rows.sumOf { it.responseCount }
+        val scoreCount = rows.sumOf { it.scoreCount }
+        val scoreSum = rows.sumOf { it.scoreSum }
+        val avg = if (scoreCount == 0) 0 else scoreSum / scoreCount
+        val best = rows.maxOfOrNull { it.bestScore } ?: 0
+        val correctRate = if (scoreCount == 0) 0 else rows.sumOf { it.correctCount } * 100 / scoreCount
+        val byLevel = rows.groupBy { it.difficultyLevel }.maxByOrNull { it.value.sumOf(UserStatsEntity::responseCount) }
         val level = byLevel?.key ?: rows.first().difficultyLevel
         val center = level + ((avg - 50) / 100.0)
-        val uncertainty = 1.6 / max(1.0, scored.size.toDouble()).coerceAtMost(4.0)
+        val uncertainty = 1.6 / max(1.0, scoreCount.toDouble()).coerceAtMost(4.0)
+        val topicRows = rows.sortedByDescending { it.responseCount }
+        val aliases = topicRows.map { it.topic }.distinct()
         return TopicStatsResponse(
-            topicKey = normalizedTopic(rows.first().topic),
-            topic = rows.first().topic,
-            topicAliases = rows.map { it.topic }.distinct(),
-            count = rows.size,
+            topicKey = rows.first().topicKey,
+            topic = aliases.firstOrNull() ?: rows.first().topic,
+            topicAliases = aliases,
+            count = responseCount,
             average = avg,
             best = best,
             correctRate = correctRate,
             levelRange = TopicLevelRangeResponse(
                 level = level,
                 average = avg,
-                sampleCount = scored.size,
+                sampleCount = scoreCount,
                 centerLevel = center.coerceIn(1.0, 10.0),
                 lowerBound = (center - uncertainty).coerceIn(1.0, 10.0),
                 upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
             ),
-            latestAt = rows.maxOf { it.createdAt },
-            records = rows.take(20).map { it.toStudyRecord().toProjection().toRecordResponse() },
+            latestAt = rows.maxOf { it.latestAt },
+            records = latestRecords(rows.first().userId, aliases),
         )
     }
 
-    private fun normalizedTopic(value: String): String =
-        Normalizer.normalize(value.trim().lowercase(), Normalizer.Form.NFKC).replace(Regex("\\s+"), " ")
+    private fun latestRecords(userId: Long, topics: List<String>) =
+        questions.findGradedByUserAndTopics(userId, topics, PageRequest.of(0, 20))
+            .content
+            .map { it.toStudyRecord().toProjection().toRecordResponse() }
 
     private fun QuestionEntity.toStudyRecord() = StudyRecord.of(
         StudyRecordState(
@@ -102,4 +110,72 @@ class StatsService(
         ),
         stats.findById(id).orElse(null)?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )
+
+}
+
+@Service
+class StatsRefreshService(
+    private val questions: QuestionPort,
+    private val userStats: UserStatsPort,
+) : RefreshUserStatsUseCase {
+    override fun refreshAll(now: Instant) {
+        val rows = questions.findAllGradedForStats(PageRequest.of(0, MAX_REFRESH_QUESTIONS)).content
+            .filter { it.userId != null && it.deletedAt == null && it.score != null }
+            .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
+            .map { (key, questions) -> key.toEntity(questions, now) }
+        userStats.replaceAll(rows)
+    }
+
+    private fun StatsBucketKey.toEntity(rows: List<QuestionEntity>, now: Instant): UserStatsEntity {
+        val scores = rows.mapNotNull { it.score }
+        return UserStatsEntity(
+            userId = userId,
+            statDate = statDate,
+            topicKey = topicKey,
+            topic = rows.groupingBy { it.topic }.eachCount().maxByOrNull { it.value }?.key ?: rows.first().topic,
+            difficultyLevel = difficultyLevel,
+            responseCount = rows.size,
+            scoreCount = scores.size,
+            scoreSum = scores.sum(),
+            bestScore = scores.maxOrNull() ?: 0,
+            correctCount = rows.count { it.correct == true || (it.score ?: 0) >= 70 },
+            latestAt = rows.maxOf { it.answeredAt ?: it.createdAt },
+            createdAt = now,
+            updatedAt = now,
+        )
+    }
+
+    private data class StatsBucketKey(
+        val userId: Long,
+        val statDate: LocalDate,
+        val topicKey: String,
+        val difficultyLevel: Int,
+    )
+
+    private companion object {
+        private const val MAX_REFRESH_QUESTIONS = 500_000
+    }
+}
+
+internal fun normalizedTopic(value: String): String =
+    Normalizer.normalize(value.trim().lowercase(), Normalizer.Form.NFKC).replace(Regex("\\s+"), " ")
+
+private fun statsDate(question: QuestionEntity): LocalDate =
+    (question.answeredAt ?: question.createdAt).atZone(ZoneOffset.UTC).toLocalDate()
+
+private data class DateBounds(val startDate: LocalDate?, val endDate: LocalDate?)
+
+private fun StatsQuery.dateBounds(today: LocalDate = LocalDate.now(ZoneOffset.UTC)): DateBounds {
+    val explicitStart = startAt?.atZone(ZoneOffset.UTC)?.toLocalDate()
+    val explicitEnd = endAt?.atZone(ZoneOffset.UTC)?.toLocalDate()
+    if (explicitStart != null || explicitEnd != null) {
+        return DateBounds(explicitStart, explicitEnd)
+    }
+    return when (period?.lowercase()) {
+        "today" -> DateBounds(today, today.plusDays(1))
+        "last7" -> DateBounds(today.minusDays(6), today.plusDays(1))
+        "last30" -> DateBounds(today.minusDays(29), today.plusDays(1))
+        "last90" -> DateBounds(today.minusDays(89), today.plusDays(1))
+        else -> DateBounds(null, null)
+    }
 }

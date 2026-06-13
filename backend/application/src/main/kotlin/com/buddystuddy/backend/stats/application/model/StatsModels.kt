@@ -4,6 +4,13 @@ import com.buddystuddy.backend.common.application.model.PageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import java.time.Instant
 
+data class StatsQuery(
+    val search: String? = null,
+    val period: String? = null,
+    val startAt: Instant? = null,
+    val endAt: Instant? = null,
+)
+
 data class TopicLevelRangeResponse(
     val level: Int,
     val average: Int,

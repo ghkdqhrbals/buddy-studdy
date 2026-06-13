@@ -39,6 +39,25 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
         pageable: Pageable,
     ): Page<QuestionEntity>
 
+    @Query(
+        """
+        select q from QuestionEntity q
+        where q.userId = :userId
+          and q.deletedAt is null
+          and q.score is not null
+          and q.topic in :topics
+        order by q.createdAt desc
+        """
+    )
+    override fun findGradedByUserAndTopics(
+        @Param("userId") userId: Long,
+        @Param("topics") topics: Collection<String>,
+        pageable: Pageable,
+    ): Page<QuestionEntity>
+
+    @Query("select q from QuestionEntity q where q.deletedAt is null and q.score is not null order by q.answeredAt desc, q.createdAt desc")
+    override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity>
+
     @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and q.score is null and q.skippedAt is null order by q.createdAt desc")
     override fun findPendingByUser(@Param("userId") userId: Long, pageable: Pageable): Page<QuestionEntity>
 
