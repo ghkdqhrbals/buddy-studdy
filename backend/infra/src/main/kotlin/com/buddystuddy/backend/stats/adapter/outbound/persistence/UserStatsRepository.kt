@@ -17,18 +17,31 @@ interface UserStatsJpaRepository : JpaRepository<UserStatsEntity, Long> {
         where s.userId = :userId
           and (:startDate is null or s.statDate >= :startDate)
           and (:endDate is null or s.statDate < :endDate)
-          and (
-            :query is null
-            or lower(s.topic) like concat('%', lower(:query), '%')
-            or lower(s.topicKey) like concat('%', lower(:query), '%')
-          )
         """
     )
     fun findStatsRows(
         @Param("userId") userId: Long,
         @Param("startDate") startDate: LocalDate?,
         @Param("endDate") endDate: LocalDate?,
-        @Param("query") query: String?,
+    ): List<UserStatsEntity>
+
+    @Query(
+        """
+        select s from UserStatsEntity s
+        where s.userId = :userId
+          and (:startDate is null or s.statDate >= :startDate)
+          and (:endDate is null or s.statDate < :endDate)
+          and (
+            lower(s.topic) like concat('%', lower(:query), '%')
+            or lower(s.topicKey) like concat('%', lower(:query), '%')
+          )
+        """
+    )
+    fun findStatsRowsByQuery(
+        @Param("userId") userId: Long,
+        @Param("startDate") startDate: LocalDate?,
+        @Param("endDate") endDate: LocalDate?,
+        @Param("query") query: String,
     ): List<UserStatsEntity>
 }
 
@@ -42,6 +55,12 @@ class UserStatsRepository(
         jpa.saveAll(rows)
     }
 
-    override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> =
-        jpa.findStatsRows(userId, startDate, endDate, query?.trim()?.takeIf { it.isNotEmpty() })
+    override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> {
+        val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+        return if (normalizedQuery == null) {
+            jpa.findStatsRows(userId, startDate, endDate)
+        } else {
+            jpa.findStatsRowsByQuery(userId, startDate, endDate, normalizedQuery)
+        }
+    }
 }
