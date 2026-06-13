@@ -276,6 +276,9 @@ class StudyApiIntegrationTest {
             .json()
         assertThat(emptyQueryStatsPage.toString()).contains("Redis")
 
+        getJson("/api/v1/stats?period=today&query=&sort=count&limit=8&offset=0", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+
         val searchedStatsPage = getJson("/api/v1/stats?limit=10&offset=0&query=swift", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
