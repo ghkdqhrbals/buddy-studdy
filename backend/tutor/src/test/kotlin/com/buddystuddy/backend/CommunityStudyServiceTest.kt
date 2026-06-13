@@ -80,7 +80,7 @@ class CommunityStudyServiceTest {
         answeredPublicQuestion(hiddenAuthor, "SwiftUI", createdAt = now.plusSeconds(1))
         answeredPublicQuestion(author, "SwiftUI", createdAt = now, deletedAt = now.plusSeconds(10))
 
-        val response = community.publicQuestions(null, "swift", limit = 10, offset = 0)
+        val response = community.getPublicQuestions(null, "swift", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(1)
         val result = response.questions.single()
@@ -96,7 +96,7 @@ class CommunityStudyServiceTest {
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
 
-        val response = community.publicQuestions(null, null, limit = 10, offset = 0)
+        val response = community.getPublicQuestions(null, null, limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
@@ -111,7 +111,7 @@ class CommunityStudyServiceTest {
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden", createdAt = now.plusSeconds(5))
         listOf(newest, older, private, pending, hidden).forEach { questionSearch.syncQuestion(it) }
 
-        val response = community.publicQuestionsV2(principal = null, query = null, limit = 10, offset = 0)
+        val response = community.getPublicQuestionsV2(principal = null, query = null, limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
@@ -123,7 +123,7 @@ class CommunityStudyServiceTest {
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 7, commentCount = 2, viewCount = 11))
         likes.save(QuestionLikeEntity(questionId = q.id, userId = viewer.id))
 
-        val response = community.publicQuestion(principal, q.id)
+        val response = community.getPublicQuestion(principal, q.id)
 
         assertThat(response.id).isEqualTo(q.id.toString())
         assertThat(response.author?.displayName).isEqualTo("Author")
@@ -141,7 +141,7 @@ class CommunityStudyServiceTest {
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden")
 
         listOf(privateQuestion, pending, deleted, hidden).forEach {
-            assertRecordNotFound { community.publicQuestion(principal, it.id) }
+            assertRecordNotFound { community.getPublicQuestion(principal, it.id) }
         }
     }
 
@@ -176,8 +176,8 @@ class CommunityStudyServiceTest {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val longBody = "x".repeat(1_050)
 
-        val saved = community.comment(principal, q.id, longBody)
-        val page = community.comments(q.id, limit = 20, offset = 0)
+        val saved = community.createComment(principal, q.id, longBody)
+        val page = community.getComments(q.id, limit = 20, offset = 0)
 
         assertThat(saved.body).hasSize(1_000)
         assertThat(saved.author.displayName).isEqualTo("Viewer")
@@ -191,10 +191,10 @@ class CommunityStudyServiceTest {
     @Test
     fun `comment owner can delete comment and deleted comments are hidden`() {
         val q = answeredPublicQuestion(author, "SwiftUI")
-        val saved = community.comment(principal, q.id, "delete me")
+        val saved = community.createComment(principal, q.id, "delete me")
 
         val response = community.deleteComment(principal, q.id, saved.id.toLong())
-        val page = community.comments(q.id, limit = 20, offset = 0)
+        val page = community.getComments(q.id, limit = 20, offset = 0)
 
         assertThat(response.ok).isTrue()
         assertThat(response.id).isEqualTo(saved.id)
@@ -206,7 +206,7 @@ class CommunityStudyServiceTest {
     @Test
     fun `comment delete rejects other users and missing comments`() {
         val q = answeredPublicQuestion(author, "SwiftUI")
-        val saved = community.comment(principal, q.id, "not yours")
+        val saved = community.createComment(principal, q.id, "not yours")
         val otherPrincipal = Principal(userId = author.id, deviceId = "device-author", sessionId = 2, anonymous = false)
 
         assertRecordNotFound { community.deleteComment(otherPrincipal, q.id, saved.id.toLong()) }
@@ -218,9 +218,9 @@ class CommunityStudyServiceTest {
     fun `comment and comments reject non public answered records`() {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
-        assertRecordNotFound { community.comment(principal, q.id, "body") }
+        assertRecordNotFound { community.createComment(principal, q.id, "body") }
         assertRecordNotFound { community.deleteComment(principal, q.id, 1) }
-        assertRecordNotFound { community.comments(q.id, limit = 10, offset = 0) }
+        assertRecordNotFound { community.getComments(q.id, limit = 10, offset = 0) }
     }
 
     @Test
@@ -228,8 +228,8 @@ class CommunityStudyServiceTest {
         val publicQuestion = answeredPublicQuestion(author, "SwiftUI")
         val privateQuestion = answeredPublicQuestion(author, "Private", publicQuestion = false)
 
-        community.report(principal, publicQuestion.id, ReportQuestionCommand(reason = "spam", message = "bad"))
-        assertRecordNotFound { community.report(principal, privateQuestion.id, ReportQuestionCommand(reason = "spam")) }
+        community.reportQuestion(principal, publicQuestion.id, ReportQuestionCommand(reason = "spam", message = "bad"))
+        assertRecordNotFound { community.reportQuestion(principal, privateQuestion.id, ReportQuestionCommand(reason = "spam")) }
 
         val result = reports.findAll().single()
         assertThat(result.questionId).isEqualTo(publicQuestion.id)

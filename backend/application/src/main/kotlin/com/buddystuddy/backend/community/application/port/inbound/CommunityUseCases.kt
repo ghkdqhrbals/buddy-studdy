@@ -9,12 +9,12 @@ import com.buddystuddy.backend.community.application.model.CommunityQuestionResp
 import com.buddystuddy.backend.community.application.model.CommunityQuestionsResponse
 
 interface CommunityUseCase {
-    fun publicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse
-    fun publicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse
-    fun publicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse
+    fun getPublicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse
+    fun getPublicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse
+    fun getPublicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse
     fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse
-    fun comments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse
-    fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse
+    fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse
+    fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse
     fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse
-    fun report(principal: Principal, id: Long, command: ReportQuestionCommand)
+    fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand)
 }

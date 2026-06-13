@@ -51,7 +51,7 @@ class CommunityService(
     private val search: QuestionSearchPort,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override fun publicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override fun getPublicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val page = if (search == null) {
@@ -64,7 +64,7 @@ class CommunityService(
     }
 
     @Transactional(readOnly = true)
-    override fun publicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override fun getPublicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
         val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, limit, offset)
         if (result.questionIds.isEmpty()) {
             return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
@@ -75,7 +75,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun publicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
+    override fun getPublicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
         reactions.publishViewed(id, principal?.userId)
         return community(q, principal)
@@ -100,7 +100,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
+    override fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
         publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         incrementCommentCount(id, 1)
@@ -125,7 +125,7 @@ class CommunityService(
     }
 
     @Transactional(readOnly = true)
-    override fun comments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
+    override fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(id, PageRequest.of(offset / limit, limit))
         val profiles = users.findAllById(page.content.map { it.userId }).associateBy { it.id }
@@ -138,7 +138,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun report(principal: Principal, id: Long, command: ReportQuestionCommand) {
+    override fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand) {
         publicAnsweredQuestion(id)
         reports.save(
             ReportEntity(

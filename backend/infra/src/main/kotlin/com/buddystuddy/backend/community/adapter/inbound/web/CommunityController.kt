@@ -40,7 +40,7 @@ class CommunityController(
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned."))
     @GetMapping("/public/questions")
-    fun publicQuestions(
+    fun getPublicQuestions(
         @Parameter(description = "Optional topic keyword filter.", example = "Swift")
         @RequestParam(required = false) topic: String?,
         @Parameter(description = "Optional DB-backed public question search query. Searches topic, question, answer, feedback, explanation, and author.", example = "Swift")
@@ -50,31 +50,31 @@ class CommunityController(
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication?,
-    ) = community.publicQuestions(query ?: topic, limit, offset, authentication)
+    ) = community.getPublicQuestions(query ?: topic, limit, offset, authentication)
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
-    fun publicQuestion(
+    fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         authentication: Authentication?,
-    ) = community.publicQuestion(id, authentication)
+    ) = community.getPublicQuestion(id, authentication)
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    fun like(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
-        community.like(id, authentication)
+    fun likePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
+        community.likePublicQuestion(id, authentication)
 
     @Operation(summary = "Unlike a public question", description = "Removes the authenticated user's like. Like counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    fun unlike(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
-        community.unlike(id, authentication)
+    fun unlikePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
+        community.unlikePublicQuestion(id, authentication)
 
     @Operation(summary = "List public question comments", description = "Returns paginated comments for a public question.")
     @GetMapping("/public/questions/{id}/comments")
-    fun comments(
+    fun getComments(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @Parameter(description = "Maximum number of comments to return. Server clamps this to 1..100.", example = "30")
@@ -82,18 +82,18 @@ class CommunityController(
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
     ) =
-        community.comments(id, limit, offset)
+        community.getComments(id, limit, offset)
 
     @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
     @RequirePermission(Permissions.PUBLIC_QUESTION_COMMENT)
-    fun comment(
+    fun createComment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: CommunityCommentRequest,
         authentication: Authentication,
     ) =
-        community.comment(id, body, authentication)
+        community.createComment(id, body, authentication)
 
     @Operation(summary = "Delete a comment", description = "Soft-deletes the authenticated user's own comment on a public question. Comment counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/comments/{commentId}")
@@ -110,13 +110,13 @@ class CommunityController(
     @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
     @RequirePermission(Permissions.PUBLIC_QUESTION_REPORT)
-    fun report(
+    fun reportQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: ReportQuestionRequest,
         authentication: Authentication,
     ): ReportQuestionResponse =
-        community.report(id, body, authentication)
+        community.reportQuestion(id, body, authentication)
 }
 
 @RestController
@@ -131,7 +131,7 @@ class CommunitySearchV2Controller(
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned from search v2."))
     @GetMapping("/public/questions/search")
-    fun publicQuestionsSearchV2(
+    fun getPublicQuestionsV2(
         @Parameter(description = "Full-text search query.", example = "Swift state management")
         @RequestParam(required = false) query: String?,
         @Parameter(description = "Maximum number of items to return. Server clamps this to 1..100.", example = "20")
@@ -139,48 +139,48 @@ class CommunitySearchV2Controller(
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication?,
-    ) = community.publicQuestionsV2(query, limit, offset, authentication)
+    ) = community.getPublicQuestionsV2(query, limit, offset, authentication)
 }
 
 interface CommunityWebPort {
-    fun publicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun publicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun publicQuestion(id: Long, authentication: Authentication?): Any
-    fun like(id: Long, authentication: Authentication): Any
-    fun unlike(id: Long, authentication: Authentication): Any
-    fun comments(id: Long, limit: Int, offset: Int): Any
-    fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
+    fun getPublicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun getPublicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun getPublicQuestion(id: Long, authentication: Authentication?): Any
+    fun likePublicQuestion(id: Long, authentication: Authentication): Any
+    fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
+    fun getComments(id: Long, limit: Int, offset: Int): Any
+    fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
-    fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
+    fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
 }
 
 @Component
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
 ) : CommunityWebPort {
-    override fun publicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
-        community.publicQuestions(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
+    override fun getPublicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestions(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
 
-    override fun publicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
-        community.publicQuestionsV2(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
+    override fun getPublicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
 
-    override fun publicQuestion(id: Long, authentication: Authentication?) = community.publicQuestion(authentication.optionalPrincipal(), id)
+    override fun getPublicQuestion(id: Long, authentication: Authentication?) = community.getPublicQuestion(authentication.optionalPrincipal(), id)
 
-    override fun like(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
+    override fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 
-    override fun unlike(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
+    override fun unlikePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
 
-    override fun comments(id: Long, limit: Int, offset: Int) =
-        community.comments(id, safeLimit(limit, 100), max(0, offset))
+    override fun getComments(id: Long, limit: Int, offset: Int) =
+        community.getComments(id, safeLimit(limit, 100), max(0, offset))
 
-    override fun comment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
-        community.comment(authentication.principalOrThrow(), id, body.body)
+    override fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
+        community.createComment(authentication.principalOrThrow(), id, body.body)
 
     override fun deleteComment(id: Long, commentId: Long, authentication: Authentication) =
         community.deleteComment(authentication.principalOrThrow(), id, commentId)
 
-    override fun report(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
-        community.report(authentication.principalOrThrow(), id, body.toCommand())
+    override fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
+        community.reportQuestion(authentication.principalOrThrow(), id, body.toCommand())
         return ReportQuestionResponse()
     }
 
