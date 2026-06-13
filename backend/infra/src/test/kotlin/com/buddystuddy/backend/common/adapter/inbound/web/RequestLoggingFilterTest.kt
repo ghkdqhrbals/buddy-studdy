@@ -139,6 +139,24 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"clientIp\":\"198.51.100.7\"")
     }
 
+    @Test
+    fun `server error api exchanges are logged at error level`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/stats")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            val httpResponse = servletResponse as HttpServletResponse
+            httpResponse.status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR
+            httpResponse.contentType = "application/json"
+            httpResponse.writer.write("""{"error":{"code":"INTERNAL_SERVER_ERROR"}}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.all).contains("ERROR")
+        assertThat(output.all).contains("api_exchange")
+        assertThat(output.all).contains("\"status\":500")
+    }
+
     private fun interface FilterChain : jakarta.servlet.FilterChain {
         fun doFilterInternal(request: ServletRequest, response: ServletResponse)
 

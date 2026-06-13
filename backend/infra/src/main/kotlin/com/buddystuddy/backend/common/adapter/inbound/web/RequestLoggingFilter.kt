@@ -29,17 +29,27 @@ class RequestLoggingFilter(
         } finally {
             val durationMs = (System.nanoTime() - started) / 1_000_000.0
             if (requestWrapper.requestURI.startsWith("/api/")) {
-                log.info(
-                    "api_exchange {}",
-                    formatter.apiExchangeJson(requestId, requestWrapper, responseWrapper, durationMs),
-                )
+                logApiExchange(formatter.apiExchangeJson(requestId, requestWrapper, responseWrapper, durationMs), responseWrapper.status)
             } else {
-                log.info(
-                    "api_response {}",
-                    formatter.apiResponseJson(requestId, requestWrapper, responseWrapper, durationMs, includeBody = false),
-                )
+                logApiResponse(formatter.apiResponseJson(requestId, requestWrapper, responseWrapper, durationMs, includeBody = false), responseWrapper.status)
             }
             responseWrapper.copyBodyToResponse()
+        }
+    }
+
+    private fun logApiExchange(message: String, status: Int) {
+        when {
+            status >= 500 -> log.error("api_exchange {}", message)
+            status >= 400 -> log.warn("api_exchange {}", message)
+            else -> log.info("api_exchange {}", message)
+        }
+    }
+
+    private fun logApiResponse(message: String, status: Int) {
+        when {
+            status >= 500 -> log.error("api_response {}", message)
+            status >= 400 -> log.warn("api_response {}", message)
+            else -> log.info("api_response {}", message)
         }
     }
 
