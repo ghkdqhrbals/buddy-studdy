@@ -56,6 +56,7 @@ class RequestLoggingFilterTest {
         val request = MockHttpServletRequest("POST", "/api/v1/auth/google")
         request.contentType = "application/json"
         request.addHeader("Authorization", "Bearer access-token")
+        request.addHeader("CF-Connecting-IP", "203.0.113.10")
         request.setContent("""{"idToken":"google-id-token"}""".toByteArray())
         val response = MockHttpServletResponse()
         val chain = FilterChain { servletRequest, servletResponse ->
@@ -69,6 +70,7 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("api_exchange")
         assertThat(output.out).contains("\"request\":{")
         assertThat(output.out).contains("\"response\":{")
+        assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
         assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
         assertThat(output.out).doesNotContain("Bearer access-token")
@@ -121,6 +123,20 @@ class RequestLoggingFilterTest {
 
         assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1}]}")
         assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+    }
+
+    @Test
+    fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        request.addHeader("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.writer.write("""{"ok":true}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"clientIp\":\"198.51.100.7\"")
     }
 
     private fun interface FilterChain : jakarta.servlet.FilterChain {

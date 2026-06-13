@@ -21,6 +21,7 @@ internal class ApiExchangeLogFormatter(
     ): String =
         buildJson(
             "requestId" to requestId,
+            "clientIp" to ClientIpResolver.resolve(request),
             "request" to requestFields(request),
             "response" to responseFields(response, durationMs),
         )
@@ -34,6 +35,7 @@ internal class ApiExchangeLogFormatter(
     ): String =
         buildJson(
             "requestId" to requestId,
+            "clientIp" to ClientIpResolver.resolve(request),
             "method" to request.method,
             "path" to request.requestURI,
             "response" to responseFields(response, durationMs, includeBody),

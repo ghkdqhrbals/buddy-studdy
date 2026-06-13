@@ -5,6 +5,7 @@ import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.common.adapter.inbound.web.ApiError
 import com.buddystuddy.backend.common.adapter.inbound.web.ApiErrorEnvelope
+import com.buddystuddy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -184,8 +185,9 @@ private object AnonymousRoutes {
 private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
     securityLog.debug(
-        "api_auth_ignored requestId={} method={} path={} status={} code={} message={}",
+        "api_auth_ignored requestId={} clientIp={} method={} path={} status={} code={} message={}",
         requestId,
+        ClientIpResolver.resolve(request),
         request.method,
         request.requestURI,
         error.status.value(),
@@ -207,8 +209,9 @@ private fun writeSecurityError(
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
     securityLog.warn(
-        "api_auth_failed requestId={} method={} path={} status={} code={} message={}",
+        "api_auth_failed requestId={} clientIp={} method={} path={} status={} code={} message={}",
         requestId,
+        ClientIpResolver.resolve(request),
         request.method,
         request.requestURI,
         status.value(),

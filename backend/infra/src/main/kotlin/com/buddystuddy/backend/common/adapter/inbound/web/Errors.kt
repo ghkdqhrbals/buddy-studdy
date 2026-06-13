@@ -42,8 +42,9 @@ class ErrorHandler {
             loginRequired = error.loginRequired,
         )
         log.warn(
-            "api_error requestId={} method={} path={} status={} code={} message={}",
+            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
             body.error.requestId,
+            ClientIpResolver.resolve(request),
             request.method,
             request.requestURI,
             error.status.value(),
