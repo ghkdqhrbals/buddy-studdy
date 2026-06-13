@@ -7,6 +7,7 @@ import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystuddy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
+import com.buddystuddy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystuddy.backend.community.application.port.outbound.ReportPort
 import com.buddystuddy.community.domain.entity.QuestionCommentEntity
@@ -47,6 +48,7 @@ class CommunityService(
     private val comments: QuestionCommentPort,
     private val reports: ReportPort,
     private val reactions: PublicQuestionReactionPublishPort,
+    private val search: QuestionSearchPort,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
     override fun publicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
@@ -59,6 +61,17 @@ class CommunityService(
         }
         val rows = page.content.map { community(it, principal) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
+    }
+
+    @Transactional(readOnly = true)
+    override fun publicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+        val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, limit, offset)
+        if (result.questionIds.isEmpty()) {
+            return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
+        }
+        val questionsById = questions.findPublicAnsweredByIds(result.questionIds).associateBy { it.id }
+        val rows = result.questionIds.mapNotNull { id -> questionsById[id]?.let { community(it, principal) } }
+        return CommunityQuestionsResponse(rows, result.totalCount, limit, offset)
     }
 
     @Transactional

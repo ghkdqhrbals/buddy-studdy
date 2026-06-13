@@ -31,6 +31,7 @@ interface StudyPort {
 
 interface QuestionPort {
     fun save(entity: QuestionEntity): QuestionEntity
+    fun findQuestionById(id: Long): Optional<QuestionEntity>
     fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity>
@@ -45,6 +46,7 @@ interface QuestionPort {
     fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredById(id: Long): QuestionEntity?
+    fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     fun softDelete(id: Long, userId: Long, now: Instant): Int
 }
 

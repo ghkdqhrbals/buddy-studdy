@@ -24,7 +24,7 @@ spring:
     enabled: ${FLYWAY_ENABLED:false}
     baseline-on-migrate: true
     baseline-version: 0
-    locations: classpath:db/migration
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration,classpath:db/postgresql-migration}
   jackson:
     property-naming-strategy: LOWER_CAMEL_CASE
   data:
@@ -75,6 +75,7 @@ buddystuddy:
     push-prefix: ${PUSH_STREAM_PREFIX:bs-push-v1}
     view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
     action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
+    question-search-prefix: ${QUESTION_SEARCH_STREAM_PREFIX:create-question-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}

@@ -130,6 +130,7 @@ class UserStatsServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val rows = mutableListOf<QuestionEntity>()
         override fun save(entity: QuestionEntity): QuestionEntity = entity
+        override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.ofNullable(rows.firstOrNull { it.id == id })
         override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null })
         override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null && it.topic.contains(query, ignoreCase = true) })
@@ -144,6 +145,7 @@ class UserStatsServiceTest {
         override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
+        override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
     }
 

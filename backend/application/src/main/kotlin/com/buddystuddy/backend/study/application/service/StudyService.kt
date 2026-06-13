@@ -5,6 +5,7 @@ import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
+import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
@@ -39,6 +40,7 @@ class StudyService(
     private val users: UserPort,
     private val cipher: KeyCipher,
     private val questionWriter: QuestionCreationWriteManager,
+    private val questionSearch: QuestionSearchSyncManager,
 ) : StudyUseCase, BrowseRecordsUseCase {
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
         createQuestionAsync(principal, studyId)
@@ -121,6 +123,7 @@ class StudyService(
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
+        questionSearch.syncQuestion(q)
         return q.toStudyRecord(questionStats.findById(q.id).orElse(null)).toProjection().toRecordResponse()
     }
 
@@ -158,12 +161,14 @@ class StudyService(
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         val record = q.toStudyRecord(questionStats.findById(id).orElse(null))
         q.apply(record.skip())
+        questionSearch.syncQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
     @Transactional
     override fun delete(principal: Principal, id: Long) {
         questions.softDelete(id, principal.userId, Instant.now())
+        questionSearch.deleteQuestion(id)
     }
 
     @Transactional
@@ -172,6 +177,7 @@ class StudyService(
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         val record = q.toStudyRecord(questionStats.findById(id).orElse(null))
         q.apply(record.restrictPublicity(isPublic))
+        questionSearch.syncQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 

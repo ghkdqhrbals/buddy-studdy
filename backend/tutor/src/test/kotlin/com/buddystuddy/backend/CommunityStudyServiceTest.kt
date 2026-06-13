@@ -9,6 +9,7 @@ import com.buddystuddy.backend.community.adapter.outbound.persistence.QuestionLi
 import com.buddystuddy.backend.community.adapter.outbound.persistence.ReportRepository
 import com.buddystuddy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystuddy.backend.community.application.service.CommunityService
+import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -55,6 +56,7 @@ class CommunityStudyServiceTest {
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
+    @Autowired lateinit var questionSearch: QuestionSearchSyncManager
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -95,6 +97,21 @@ class CommunityStudyServiceTest {
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
 
         val response = community.publicQuestions(null, null, limit = 10, offset = 0)
+
+        assertThat(response.totalCount).isEqualTo(2)
+        assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
+    }
+
+    @Test
+    fun `public questions v2 reads from search table and only returns public answered records`() {
+        val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
+        val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
+        val private = answeredPublicQuestion(author, "Private", createdAt = now.plusSeconds(3), publicQuestion = false)
+        val pending = pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(4))
+        val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden", createdAt = now.plusSeconds(5))
+        listOf(newest, older, private, pending, hidden).forEach { questionSearch.syncQuestion(it) }
+
+        val response = community.publicQuestionsV2(principal = null, query = null, limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())

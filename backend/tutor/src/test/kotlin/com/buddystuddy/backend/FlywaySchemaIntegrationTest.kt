@@ -15,6 +15,7 @@ import org.springframework.test.context.TestPropertySource
         "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.flyway.enabled=true",
+        "spring.flyway.locations=classpath:db/migration",
         "buddystuddy.scheduler.enabled=false",
         "buddystuddy.streams.enabled=false",
         "buddystuddy.crypto.master-key=test-master-key",

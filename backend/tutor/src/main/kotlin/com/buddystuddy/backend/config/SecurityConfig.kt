@@ -159,6 +159,7 @@ private object AnonymousRoutes {
         Route(null, "/api/v1/auth/**"),
         Route(HttpMethod.GET, "/api/v1/openai/models"),
         Route(HttpMethod.GET, "/api/v1/public/**"),
+        Route(HttpMethod.GET, "/api/v2/public/**"),
     )
 
     val requestMatchers: Array<RequestMatcher> = routes.map { route ->

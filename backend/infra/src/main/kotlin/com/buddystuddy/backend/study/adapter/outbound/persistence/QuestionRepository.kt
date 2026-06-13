@@ -11,6 +11,8 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort {
+    override fun findQuestionById(id: Long): java.util.Optional<QuestionEntity> = findById(id)
+
     override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
 
     @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and q.score is not null order by q.createdAt desc")
@@ -151,6 +153,19 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
         """
     )
     override fun findPublicAnsweredById(@Param("id") id: Long): QuestionEntity?
+
+    @Query(
+        """
+        select q from QuestionEntity q
+        join UserEntity u on u.id = q.userId
+        where q.id in :ids
+          and q.publicQuestion = true
+          and q.deletedAt is null
+          and q.score is not null
+          and u.allowPublicQuestions = true
+        """
+    )
+    override fun findPublicAnsweredByIds(@Param("ids") ids: Collection<Long>): List<QuestionEntity>
 
     @Modifying
     @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")
