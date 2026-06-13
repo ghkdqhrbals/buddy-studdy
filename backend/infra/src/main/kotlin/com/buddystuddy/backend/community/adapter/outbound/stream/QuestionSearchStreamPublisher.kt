@@ -16,14 +16,14 @@ import java.time.Instant
 @Component
 class QuestionSearchStreamPublisher(
     private val properties: BuddyStuddyProperties,
-    @Qualifier("questionSearchStreamPublisher") publisherProvider: ObjectProvider<RedisStreamPublisher>,
+    @Qualifier("questionSearchRedisStreamPublisher") publisherProvider: ObjectProvider<RedisStreamPublisher>,
 ) : QuestionSearchPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val publisher: RedisStreamPublisher? = publisherProvider.ifAvailable
 
     init {
         if (properties.streams.enabled) {
-            requireNotNull(publisher) { "questionSearchStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
+            requireNotNull(publisher) { "questionSearchRedisStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
         }
     }
 

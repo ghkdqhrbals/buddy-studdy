@@ -37,9 +37,11 @@ class RedisStreamStarterConfigTest {
                 assertThat(context).hasBean("pushStreamPublisher")
                 assertThat(context).hasBean("viewStreamPublisher")
                 assertThat(context).hasBean("actionStreamPublisher")
+                assertThat(context).hasBean("questionSearchRedisStreamPublisher")
                 assertThat(context).getBean("pushStreamPublisher").isInstanceOf(RedisStreamPublisher::class.java)
                 assertThat(context).getBean("viewStreamPublisher").isInstanceOf(RedisStreamPublisher::class.java)
                 assertThat(context).getBean("actionStreamPublisher").isInstanceOf(RedisStreamPublisher::class.java)
+                assertThat(context).getBean("questionSearchRedisStreamPublisher").isInstanceOf(RedisStreamPublisher::class.java)
             }
     }
 
@@ -53,6 +55,7 @@ class RedisStreamStarterConfigTest {
                 assertThat(context).hasBean("pushStreamPublisher")
                 assertThat(context).hasBean("viewStreamPublisher")
                 assertThat(context).hasBean("actionStreamPublisher")
+                assertThat(context).hasBean("questionSearchRedisStreamPublisher")
             }
     }
 
@@ -65,6 +68,7 @@ class RedisStreamStarterConfigTest {
                 assertThat(context).doesNotHaveBean("pushStreamPublisher")
                 assertThat(context).doesNotHaveBean("viewStreamPublisher")
                 assertThat(context).doesNotHaveBean("actionStreamPublisher")
+                assertThat(context).doesNotHaveBean("questionSearchRedisStreamPublisher")
             }
     }
 

@@ -61,9 +61,9 @@ class RedisStreamStarterConfig {
             redisConnectionFactory,
         )
 
-    @Bean("questionSearchStreamPublisher")
+    @Bean("questionSearchRedisStreamPublisher")
     @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-    fun questionSearchStreamPublisher(
+    fun questionSearchRedisStreamPublisher(
         properties: BuddyStuddyProperties,
         @Value("\${QUESTION_SEARCH_CONSUMER_GROUP_NAME:question-reader}")
         consumerGroupName: String,
