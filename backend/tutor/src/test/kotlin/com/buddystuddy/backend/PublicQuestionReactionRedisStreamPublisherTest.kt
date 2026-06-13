@@ -44,7 +44,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         val service = service(enabled = true, viewPublisher = viewPublisher, actionPublisher = actionPublisher)
 
         assertThat(service.publishViewed(20, null)).isTrue()
-        assertThat(service.publishCommented(30, 40)).isTrue()
+        assertThat(service.publishLiked(30, 40)).isTrue()
         assertThat(service.publishUnliked(31, 41)).isTrue()
 
         val viewRequest = viewPublisher.requests.single()
@@ -53,14 +53,14 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         assertThat(viewRequest.fields).containsEntry("questionId", "20")
         assertThat(viewRequest.fields).doesNotContainKey("userId")
         assertThat(actionPublisher.requests).hasSize(2)
-        assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_COMMENTED")
+        assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_LIKED")
         assertThat(actionPublisher.requests[0].fields).containsEntry("userId", "40")
         assertThat(actionPublisher.requests[1].fields).containsEntry("eventType", "QUESTION_UNLIKED")
         assertThat(output.out)
             .contains("redis_stream_publish_started")
             .contains("redis_stream_publish_succeeded")
             .contains("eventType=CONTENT_VIEWED")
-            .contains("eventType=QUESTION_COMMENTED")
+            .contains("eventType=QUESTION_LIKED")
     }
 
     @Test
@@ -70,12 +70,10 @@ class PublicQuestionReactionRedisStreamPublisherTest {
 
         assertThat(service.publishLiked(41, 100)).isTrue()
         assertThat(service.publishUnliked(41, 100)).isTrue()
-        assertThat(service.publishCommented(41, 100)).isTrue()
-        assertThat(service.publishCommentDeleted(41, 100)).isTrue()
 
-        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41", "41", "41")
+        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41")
         assertThat(actionPublisher.requests.map { it.fields["eventType"] })
-            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED", "QUESTION_COMMENTED", "QUESTION_COMMENT_DELETED")
+            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED")
         assertThat(actionPublisher.requests)
             .allSatisfy { request ->
                 assertThat(request.fields).containsEntry("questionId", "41")

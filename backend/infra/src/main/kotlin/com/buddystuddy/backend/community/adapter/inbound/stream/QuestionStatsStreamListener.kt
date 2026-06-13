@@ -132,13 +132,13 @@ class QuestionStatsStreamEventHandler(
             "QUESTION_UNLIKED" -> {
                 synchronizeLikeCount(fields, questionId)
             }
-            "QUESTION_COMMENTED" -> {
-                increment(questionId) { stats.incrementComment(questionId, 1, Instant.now()) }
-                logApplied(fields, questionId, "commentCount", 1)
-            }
-            "QUESTION_COMMENT_DELETED" -> {
-                increment(questionId) { stats.incrementComment(questionId, -1, Instant.now()) }
-                logApplied(fields, questionId, "commentCount", -1)
+            "QUESTION_COMMENTED", "QUESTION_COMMENT_DELETED" -> {
+                logger.info(
+                    "question_stats_event_ignored reason=comment_count_updated_synchronously eventId={} eventType={} questionId={}",
+                    fields["eventId"],
+                    fields["eventType"],
+                    questionId,
+                )
             }
             else -> logger.info(
                 "question_stats_event_ignored reason=unknown_event_type eventId={} eventType={} questionId={} fieldKeys={}",

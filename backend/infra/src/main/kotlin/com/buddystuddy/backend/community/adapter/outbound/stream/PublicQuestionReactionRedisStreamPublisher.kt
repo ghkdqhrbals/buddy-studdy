@@ -46,12 +46,6 @@ class PublicQuestionReactionRedisStreamPublisher(
     override fun publishUnliked(questionId: Long, userId: Long): Boolean =
         publishAction(questionId, QuestionStreamEventType.QUESTION_UNLIKED, userId)
 
-    override fun publishCommented(questionId: Long, userId: Long): Boolean =
-        publishAction(questionId, QuestionStreamEventType.QUESTION_COMMENTED, userId)
-
-    override fun publishCommentDeleted(questionId: Long, userId: Long): Boolean =
-        publishAction(questionId, QuestionStreamEventType.QUESTION_COMMENT_DELETED, userId)
-
     fun publishAction(questionId: Long, eventType: String, userId: Long?): Boolean =
         publishAction(questionId, QuestionStreamEventType.valueOf(eventType), userId)
 

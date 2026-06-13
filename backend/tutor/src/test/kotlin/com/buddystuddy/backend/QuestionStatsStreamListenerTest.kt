@@ -50,7 +50,7 @@ class QuestionStatsStreamListenerTest {
     }
 
     @Test
-    fun `like and comment action events update stats counts`() {
+    fun `like action events synchronize like count and ignore comment count events`() {
         stats.save(QuestionStatsEntity(questionId = 202))
         likes.save(QuestionLikeEntity(questionId = 202, userId = 1))
         likes.save(QuestionLikeEntity(questionId = 202, userId = 2))
@@ -91,7 +91,6 @@ class QuestionStatsStreamListenerTest {
         assertThat(publisher.publishLiked(606, 10)).isTrue()
         assertThat(publisher.publishLiked(606, 11)).isTrue()
         assertThat(publisher.publishUnliked(606, 10)).isTrue()
-        assertThat(publisher.publishCommented(606, 11)).isTrue()
 
         viewPublisher.requests.forEach { handler.processViewEvent(it.fields) }
         actionPublisher.requests.forEach { handler.processActionEvent(it.fields) }
@@ -99,7 +98,7 @@ class QuestionStatsStreamListenerTest {
         val updated = stats.findById(606).orElseThrow()
         assertThat(updated.viewCount).isEqualTo(2)
         assertThat(updated.likeCount).isEqualTo(1)
-        assertThat(updated.commentCount).isEqualTo(1)
+        assertThat(updated.commentCount).isZero()
     }
 
     @Test
@@ -117,7 +116,7 @@ class QuestionStatsStreamListenerTest {
         val updated = stats.findById(707).orElseThrow()
         assertThat(updated.viewCount).isEqualTo(1)
         assertThat(updated.likeCount).isEqualTo(1)
-        assertThat(updated.commentCount).isEqualTo(1)
+        assertThat(updated.commentCount).isZero()
     }
 
     @Test

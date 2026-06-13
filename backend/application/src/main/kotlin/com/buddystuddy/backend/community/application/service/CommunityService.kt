@@ -90,7 +90,7 @@ class CommunityService(
     override fun comment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
         publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
-        reactions.publishCommented(id, principal.userId)
+        incrementCommentCount(id, 1)
         return saved.toResponse(userProfile(principal.userId))
     }
 
@@ -107,7 +107,7 @@ class CommunityService(
         comment.deletedAt = now
         comment.updatedAt = now
         comments.save(comment)
-        reactions.publishCommentDeleted(id, principal.userId)
+        incrementCommentCount(id, -1)
         return CommunityCommentDeleteResponse(comment.id.toString(), id.toString())
     }
 
@@ -153,6 +153,19 @@ class CommunityService(
         val now = Instant.now()
         if (questionStats.setLikeCount(questionId, likeCount, now) == 0) {
             questionStats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
+        }
+    }
+
+    private fun incrementCommentCount(questionId: Long, delta: Int) {
+        val now = Instant.now()
+        if (questionStats.incrementComment(questionId, delta, now) == 0) {
+            questionStats.save(
+                QuestionStatsEntity(
+                    questionId = questionId,
+                    commentCount = maxOf(0, delta),
+                    updatedAt = now,
+                )
+            )
         }
     }
 

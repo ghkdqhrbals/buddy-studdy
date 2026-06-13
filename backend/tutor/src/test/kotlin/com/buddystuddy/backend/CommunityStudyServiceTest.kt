@@ -165,6 +165,7 @@ class CommunityStudyServiceTest {
         assertThat(saved.body).hasSize(1_000)
         assertThat(saved.author.displayName).isEqualTo("Viewer")
         assertThat(page.totalCount).isEqualTo(1)
+        assertThat(stats.findById(q.id).orElseThrow().commentCount).isEqualTo(1)
         val result = page.comments.single()
         assertThat(result.body).hasSize(1_000)
         assertThat(result.author.displayName).isEqualTo("Viewer")
@@ -181,6 +182,7 @@ class CommunityStudyServiceTest {
         assertThat(response.ok).isTrue()
         assertThat(response.id).isEqualTo(saved.id)
         assertThat(page.totalCount).isZero()
+        assertThat(stats.findById(q.id).orElseThrow().commentCount).isZero()
         assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNotNull()
     }
 
