@@ -73,15 +73,6 @@ struct MobileRootView: View {
                 }
             }
         }
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { appState.isBackendUnderMaintenance },
-                set: { _ in }
-            )
-        ) {
-            BackendMaintenanceView(strings: strings)
-                .interactiveDismissDisabled(true)
-        }
     }
 
     private var selectedMobileTab: Binding<AppTab> {
