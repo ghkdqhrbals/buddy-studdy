@@ -16,7 +16,7 @@ class QuestionSearchStreamListener(
     @StreamListener(
         id = "buddystuddy-question-search-listener",
         streamPrefix = "\${QUESTION_SEARCH_STREAM_PREFIX:create-question-v1}",
-        groupId = "\${QUESTION_SEARCH_CONSUMER_GROUP_NAME:question-reader}",
+        groupId = "\${QUESTION_SEARCH_CONSUMER_GROUP_NAME:bs-backend}",
         concurrency = "\${QUESTION_SEARCH_CONSUMER_MEMBER_CONCURRENCY:2}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",
         pollBatchSize = "\${QUESTION_SEARCH_CONSUMER_REDIS_POLL_BATCH_SIZE:50}",

@@ -21,8 +21,8 @@ class QuestionStatsStreamListener(
     @StreamListener(
         id = "buddystuddy-question-view-listener",
         streamPrefix = "\${VIEW_STREAM_PREFIX:bs-view-content-v1}",
-        groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-view-workers}}",
-        concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:2}}",
+        groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-backend}}",
+        concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",
         pollBatchSize = "\${VIEW_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
         pollTimeoutMs = "\${VIEW_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
@@ -34,7 +34,7 @@ class QuestionStatsStreamListener(
     @StreamListener(
         id = "buddystuddy-question-action-listener",
         streamPrefix = "\${ACTION_STREAM_PREFIX:bs-question-action-v1}",
-        groupId = "\${ACTION_CONSUMER_GROUP_NAME:\${ACTION_CONSUMER_GROUP:bs-question-action-workers}}",
+        groupId = "\${ACTION_CONSUMER_GROUP_NAME:\${ACTION_CONSUMER_GROUP:bs-backend}}",
         concurrency = "\${ACTION_CONSUMER_MEMBER_CONCURRENCY:\${ACTION_CONSUMER_RUNTIME_MAX_CONCURRENCY:2}}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",
         pollBatchSize = "\${ACTION_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",

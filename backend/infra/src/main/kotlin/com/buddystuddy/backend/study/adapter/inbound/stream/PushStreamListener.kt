@@ -25,8 +25,8 @@ class PushStreamListener(
     @StreamListener(
         id = "buddystuddy-push-listener",
         streamPrefix = "\${PUSH_STREAM_PREFIX:bs-push-v1}",
-        groupId = "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-push-workers}}",
-        concurrency = "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:2}}",
+        groupId = "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
+        concurrency = "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:4}}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",
         pollBatchSize = "\${PUSH_CONSUMER_REDIS_POLL_BATCH_SIZE:50}",
         pollTimeoutMs = "\${PUSH_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
