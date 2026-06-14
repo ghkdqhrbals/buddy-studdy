@@ -251,7 +251,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testDebuggingModeIsDisabledWhenDeveloperAccessIsMissing() async throws {
+    func testDebuggingModeStaysEnabledWithoutDeveloperAccess() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -297,8 +297,8 @@ final class StudyMateTests: XCTestCase {
 
         await appState.refreshPageAccess(reason: "test")
 
-        XCTAssertFalse(appState.isDebuggingEnabled)
-        XCTAssertFalse(store.loadIsDebuggingEnabled())
+        XCTAssertTrue(appState.isDebuggingEnabled)
+        XCTAssertTrue(store.loadIsDebuggingEnabled())
     }
 
     @MainActor

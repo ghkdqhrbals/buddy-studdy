@@ -3261,40 +3261,38 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                if appState.canUseDeveloperOptions {
-                    Section(strings.developerOptions) {
-                        Toggle(
-                            strings.debuggingMode,
-                            isOn: Binding(
-                                get: { appState.isDebuggingEnabled },
-                                set: { appState.setDebuggingEnabled($0) }
-                            )
+                Section(strings.developerOptions) {
+                    Toggle(
+                        strings.debuggingMode,
+                        isOn: Binding(
+                            get: { appState.isDebuggingEnabled },
+                            set: { appState.setDebuggingEnabled($0) }
                         )
+                    )
 
-                        if appState.isDebuggingEnabled {
-                            VStack(alignment: .leading, spacing: 6) {
-                                TextField(
-                                    strings.debugBackendBaseURL,
-                                    text: $appState.draftDebugBackendBaseURL,
-                                    prompt: Text(strings.debugBackendBaseURLPlaceholder)
-                                )
-                                #if os(iOS)
-                                .keyboardType(.URL)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                #endif
+                    if appState.isDebuggingEnabled {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                strings.debugBackendBaseURL,
+                                text: $appState.draftDebugBackendBaseURL,
+                                prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                            )
+                            #if os(iOS)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            #endif
 
-                                if !appState.isDraftDebugBackendBaseURLValid {
-                                    Text(strings.debugBackendBaseURLInvalid)
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                }
-
-                                Text(strings.debugBackendBaseURLHelp)
+                            if !appState.isDraftDebugBackendBaseURLValid {
+                                Text(strings.debugBackendBaseURLInvalid)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .foregroundStyle(.red)
                             }
+
+                            Text(strings.debugBackendBaseURLHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
