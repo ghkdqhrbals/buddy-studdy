@@ -27,6 +27,16 @@ class RedisStreamListenerDefaultsTest {
             .contains("8")
     }
 
+    @Test
+    fun `push and view listeners use stream prefixes without bs namespace`() {
+        assertThat(streamListener(PushStreamListener::class.java, "onPushRequested").streamPrefix)
+            .contains("push-v1")
+            .doesNotContain("bs-push-v1")
+        assertThat(streamListener(QuestionStatsStreamListener::class.java, "onQuestionViewed").streamPrefix)
+            .contains("view-content-v1")
+            .doesNotContain("bs-view-content-v1")
+    }
+
     private fun streamListener(type: Class<*>, methodName: String): StreamListener =
         type.methods.single { it.name == methodName }.getAnnotation(StreamListener::class.java)
 }

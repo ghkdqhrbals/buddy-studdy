@@ -72,8 +72,8 @@ buddystuddy:
     bundle-id: ${notificatoin.push.apns.bundle-id:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
-    push-prefix: ${PUSH_STREAM_PREFIX:bs-push-v1}
-    view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
+    push-prefix: ${PUSH_STREAM_PREFIX:push-v1}
+    view-prefix: ${VIEW_STREAM_PREFIX:view-content-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}

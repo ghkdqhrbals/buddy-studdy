@@ -19,7 +19,7 @@ class QuestionStatsStreamListener(
 
     @StreamListener(
         id = "buddystuddy-question-view-listener",
-        streamPrefix = "\${VIEW_STREAM_PREFIX:bs-view-content-v1}",
+        streamPrefix = "\${VIEW_STREAM_PREFIX:view-content-v1}",
         groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-backend}}",
         concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",

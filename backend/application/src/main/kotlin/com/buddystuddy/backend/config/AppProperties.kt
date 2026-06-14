@@ -26,8 +26,8 @@ data class BuddyStuddyProperties(
     )
     data class Streams(
         var enabled: Boolean = true,
-        var pushPrefix: String = "bs-push-v1",
-        var viewPrefix: String = "bs-view-content-v1",
+        var pushPrefix: String = "push-v1",
+        var viewPrefix: String = "view-content-v1",
         var maxLen: Long = 100_000,
     )
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
