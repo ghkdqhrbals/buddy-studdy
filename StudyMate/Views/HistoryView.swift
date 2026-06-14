@@ -418,12 +418,22 @@ struct HistoryView: View {
     @ViewBuilder
     private func recordDetailDestination(recordID: String, strings: AppStrings) -> some View {
         if let record = record(for: recordID) {
+            #if os(iOS)
+            if let question = record.asCommunityQuestion(author: appState.communityProfile) {
+                CommunityQuestionDetailView(question: question)
+                    .navigationTitle(strings.browseQuestions)
+                    .navigationBarTitleDisplayMode(.inline)
+            } else {
+                StudyRecordDetailView(record: record)
+                    .padding(.horizontal, 16)
+                    .navigationTitle(strings.recordDetail)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+            #else
             StudyRecordDetailView(record: record)
                 .padding(.horizontal, 16)
                 .navigationTitle(strings.recordDetail)
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
+            #endif
         } else {
             ContentUnavailableView(
                 strings.notificationQuestionMissingTitle,
@@ -466,6 +476,9 @@ struct HistoryView: View {
 
         await MainActor.run {
             reconcileVisibleCount()
+            if appState.focusedRecordRequest != nil {
+                showFocusedRecord()
+            }
             isRefreshing = false
         }
     }

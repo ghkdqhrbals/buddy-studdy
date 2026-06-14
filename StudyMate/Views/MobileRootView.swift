@@ -802,7 +802,7 @@ private enum HomeFeedScope: String, CaseIterable, Identifiable {
         }
     }
 }
-private struct HomeProfileAvatar: View {
+struct HomeProfileAvatar: View {
     var symbolName: String
     var displayName: String?
     var imageData: Data? = nil
@@ -2508,7 +2508,7 @@ private struct MobileCommunityQuestionRow: View {
     }
 }
 
-private struct CommunityQuestionDetailView: View {
+struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
     var question: CommunityQuestion
     @State private var displayQuestion: CommunityQuestion

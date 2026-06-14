@@ -197,6 +197,77 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(components.queryItemValue("offset"), "20")
     }
 
+    func testRecordDeepLinksResolveToRecordDetailRoutes() throws {
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records/record-123"))),
+            .recordDetail(recordID: "record-123")
+        )
+        XCTAssertEqual(
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records?recordId=record-456"))),
+            .recordDetail(recordID: "record-456")
+        )
+    }
+
+    func testNotificationPayloadDeepLinkResolvesToRecordDetailRoute() {
+        let deepLinkPayload: [AnyHashable: Any] = [
+            "deepLink": "buddystuddy://records/record-789"
+        ]
+
+        XCTAssertEqual(
+            StudyNotificationPayload.appRoute(from: deepLinkPayload),
+            .recordDetail(recordID: "record-789")
+        )
+        XCTAssertEqual(
+            StudyNotificationPayload.backendRecordID(from: deepLinkPayload),
+            "record-789"
+        )
+
+        let recordIDPayload: [AnyHashable: Any] = [
+            "recordId": "record-999"
+        ]
+        XCTAssertEqual(StudyNotificationPayload.backendRecordID(from: recordIDPayload), "record-999")
+    }
+
+    func testGradedStudyRecordAdaptsToCommunityQuestionDetailModel() throws {
+        let createdAt = Date(timeIntervalSince1970: 1_780_000_000)
+        let answeredAt = createdAt.addingTimeInterval(30)
+        let author = CommunityUserProfile(
+            id: 7,
+            displayName: "Min",
+            bio: "",
+            avatarURL: nil,
+            avatarSymbolName: "pixel-penguin",
+            avatarColorSeed: "avatar-color-sky"
+        )
+        let record = StudyRecord(
+            id: "42",
+            question: QuestionItem(question: "What is backpressure?", expectedAnswerHint: nil, createdAt: createdAt),
+            answer: "A way to slow producers.",
+            gradingResult: GradingResult(score: 88, isCorrect: true, feedback: "Good", explanation: "Clear enough."),
+            topic: "Distributed Systems",
+            difficulty: .level7,
+            answeredAt: answeredAt,
+            isPublic: true,
+            likeCount: 3,
+            commentCount: 2,
+            viewCount: 9
+        )
+
+        let question = try XCTUnwrap(record.asCommunityQuestion(author: author))
+
+        XCTAssertEqual(question.id, "42")
+        XCTAssertEqual(question.question, "What is backpressure?")
+        XCTAssertEqual(question.answer, "A way to slow producers.")
+        XCTAssertEqual(question.gradingResult?.score, 88)
+        XCTAssertEqual(question.topic, "Distributed Systems")
+        XCTAssertEqual(question.difficultyLevel, 7)
+        XCTAssertEqual(question.answeredAt, answeredAt)
+        XCTAssertEqual(question.author, author)
+        XCTAssertEqual(question.likeCount, 3)
+        XCTAssertEqual(question.commentCount, 2)
+        XCTAssertEqual(question.viewCount, 9)
+    }
+
     @MainActor
     func testProvisionalStudyRoomAccessIsRevokedWhenBackendAccessDenies() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
@@ -3493,20 +3564,23 @@ final class StudyMateTests: XCTestCase {
         let payload = try XCTUnwrap(
             """
             {
-              "records": [
+              "studies": [
                 {
-                  "id": "1",
-                  "question": {
-                    "question": "Swift에서 변수를 선언할 때 사용하는 키워드는 무엇인가요?",
-                    "expectedAnswerHint": "var",
-                    "createdAt": "2026-06-01T19:05:51.531909+00:00"
-                  },
-                  "answer": null,
-                  "gradingResult": null,
+                  "id": 1,
                   "topic": "Swift",
-                  "difficulty": 2,
-                  "answeredAt": null,
-                  "status": "ungraded"
+                  "difficultyLevel": 2,
+                  "intervalMinutes": 15,
+                  "enabled": true,
+                  "notificationSound": "default",
+                  "customPrompt": "짧게",
+                  "openAIModel": "gpt-5.4",
+                  "maxHistoryCount": 100,
+                  "nextDueAt": null,
+                  "lastSentAt": null,
+                  "lastError": null,
+                  "pendingQuestion": null,
+                  "createdAt": "2026-06-01T19:05:51.531909+00:00",
+                  "updatedAt": "2026-06-01T19:05:51.531909+00:00"
                 }
               ],
               "totalCount": 1,
@@ -3519,8 +3593,8 @@ final class StudyMateTests: XCTestCase {
 
         let state = try RemotePushBackendClient.makeDecoder().decode(BackendStudyPage.self, from: payload)
 
-        XCTAssertEqual(state.records.count, 1)
-        XCTAssertEqual(state.records.first?.id, "1")
+        XCTAssertEqual(state.studies.count, 1)
+        XCTAssertEqual(state.studies.first?.id, 1)
         XCTAssertEqual(state.totalCount, 1)
         XCTAssertEqual(state.limit, 100)
         XCTAssertEqual(state.offset, 0)
@@ -3814,11 +3888,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             difficultyLevel: category.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
-            notificationSound: settings.notificationSound.backendSoundName,
+            notificationSound: nil,
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            isQuestionPublic: settings.isQuestionPublic,
             nextDueAt: nil,
             lastSentAt: nil,
             lastError: nil,
@@ -3919,6 +3992,25 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             totalCount: 0,
             limit: limit,
             offset: offset
+        )
+    }
+
+    func fetchPublicQuestion(
+        registration: RemotePushRegistration,
+        questionID: String
+    ) async throws -> CommunityQuestion {
+        CommunityQuestion(
+            id: questionID,
+            question: "Question",
+            answer: "Answer",
+            gradingResult: GradingResult(score: 100, isCorrect: true, feedback: "Good", explanation: "Clear."),
+            topic: "Swift",
+            difficultyLevel: 5,
+            status: "graded",
+            source: "test",
+            createdAt: Date(),
+            answeredAt: Date(),
+            author: CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
         )
     }
 

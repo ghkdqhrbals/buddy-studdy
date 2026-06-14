@@ -973,7 +973,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic: String,
         difficulty: Difficulty,
         answeredAt: Date? = nil,
-        isPublic: Bool = false,
+        isPublic: Bool = true,
         likeCount: Int = 0,
         commentCount: Int = 0,
         viewCount: Int = 0
@@ -1000,10 +1000,34 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
         difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
-        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? true
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
+    }
+
+    func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
+        guard let gradingResult else {
+            return nil
+        }
+
+        return CommunityQuestion(
+            id: id,
+            question: question.question,
+            answer: answer,
+            gradingResult: gradingResult,
+            topic: topic,
+            difficultyLevel: difficulty.level,
+            status: "graded",
+            source: "record",
+            createdAt: question.createdAt,
+            answeredAt: answeredAt,
+            author: author,
+            likeCount: likeCount,
+            commentCount: commentCount,
+            viewCount: viewCount,
+            isLikedByMe: false
+        )
     }
 }
 
@@ -1800,7 +1824,8 @@ struct AppStrings {
     var topic: String { text("주제", "Topic") }
     var topicBrowser: String { text("주제 탐색", "Topic Browser") }
     var communityFeed: String { text("다른 사용자 질문", "Community Questions") }
-    var communityQuestion: String { text("공개 질문", "Community Question") }
+    var communityQuestion: String { text("질문 둘러보기", "Browse Question") }
+    var browseQuestions: String { text("질문 둘러보기", "Browse Question") }
     var comments: String { text("댓글", "Comments") }
     var noComments: String { text("아직 댓글이 없습니다.", "No comments yet.") }
     var writeComment: String { text("댓글 쓰기", "Write a comment") }

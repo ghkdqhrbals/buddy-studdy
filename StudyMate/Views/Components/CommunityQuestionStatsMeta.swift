@@ -20,11 +20,18 @@ struct CommunityQuestionTopMeta: View {
 
             if let author = question.author, !author.displayName.isEmpty {
                 HStack(spacing: 4) {
-                    PixelAvatarGlyph(
-                        avatarName: ProfileAvatarOption.glyphName(for: author.avatarSymbolName),
-                        colorSeed: author.avatarColorSeed
+                    #if os(iOS)
+                    HomeProfileAvatar(
+                        symbolName: author.avatarSymbolName,
+                        displayName: author.displayName,
+                        colorSeed: author.avatarColorSeed,
+                        size: 14
                     )
-                    .frame(width: 14, height: 14)
+                    #else
+                    Circle()
+                        .fill(Color.secondary.opacity(0.35))
+                        .frame(width: 14, height: 14)
+                    #endif
 
                     Text(author.displayName)
                         .lineLimit(1)

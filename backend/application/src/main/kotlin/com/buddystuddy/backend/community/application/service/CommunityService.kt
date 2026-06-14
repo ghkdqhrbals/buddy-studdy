@@ -127,7 +127,7 @@ class CommunityService(
     @Transactional(readOnly = true)
     override fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
-        val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtDesc(id, PageRequest.of(offset / limit, limit))
+        val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(id, PageRequest.of(offset / limit, limit))
         val profiles = users.findAllById(page.content.map { it.userId }).associateBy { it.id }
         return CommunityCommentsResponse(
             page.content.map { it.toResponse(profiles[it.userId]?.toProfile() ?: UserProfileResponse(0, "Buddy")) },

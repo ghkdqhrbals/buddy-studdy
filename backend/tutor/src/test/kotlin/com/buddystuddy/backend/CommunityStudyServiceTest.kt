@@ -189,6 +189,25 @@ class CommunityStudyServiceTest {
     }
 
     @Test
+    fun `comments page returns oldest comments first so the newest comment appears at the bottom`() {
+        val q = answeredPublicQuestion(author, "SwiftUI")
+        val first = community.createComment(principal, q.id, "first")
+        val second = community.createComment(principal, q.id, "second")
+        comments.save(comments.findById(first.id.toLong()).orElseThrow().apply {
+            createdAt = now.plusSeconds(1)
+            updatedAt = now.plusSeconds(1)
+        })
+        comments.save(comments.findById(second.id.toLong()).orElseThrow().apply {
+            createdAt = now.plusSeconds(2)
+            updatedAt = now.plusSeconds(2)
+        })
+
+        val page = community.getComments(q.id, limit = 20, offset = 0)
+
+        assertThat(page.comments.map { it.body }).containsExactly("first", "second")
+    }
+
+    @Test
     fun `comment owner can delete comment and deleted comments are hidden`() {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val saved = community.createComment(principal, q.id, "delete me")
