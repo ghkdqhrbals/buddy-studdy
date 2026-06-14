@@ -19,92 +19,47 @@ import java.util.stream.Stream
 @ExtendWith(OutputCaptureExtension::class)
 class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
-    fun `publish methods return false when streams are disabled`() {
-        val service = service(enabled = false, viewPublisher = RecordingPublisher(), actionPublisher = RecordingPublisher())
+    fun `publish view returns false when streams are disabled`() {
+        val service = service(enabled = false, viewPublisher = RecordingPublisher())
 
         assertThat(service.publishViewed(1, 2)).isFalse()
-        assertThat(service.publishLiked(1, 2)).isFalse()
     }
 
     @Test
-    fun `enabled streams require publisher beans`() {
+    fun `enabled streams require view publisher bean`() {
         assertThatThrownBy { service(enabled = true) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("viewStreamPublisher bean is required")
-
-        assertThatThrownBy { service(enabled = true, viewPublisher = RecordingPublisher()) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("actionStreamPublisher bean is required")
     }
 
     @Test
-    fun `view and action events publish typed field maps`(output: CapturedOutput) {
+    fun `view event publishes typed field map`(output: CapturedOutput) {
         val viewPublisher = RecordingPublisher()
-        val actionPublisher = RecordingPublisher()
-        val service = service(enabled = true, viewPublisher = viewPublisher, actionPublisher = actionPublisher)
+        val service = service(enabled = true, viewPublisher = viewPublisher)
 
         assertThat(service.publishViewed(20, null)).isTrue()
-        assertThat(service.publishLiked(30, 40)).isTrue()
-        assertThat(service.publishUnliked(31, 41)).isTrue()
 
         val viewRequest = viewPublisher.requests.single()
         assertThat(viewRequest.key).isEqualTo("20")
         assertThat(viewRequest.fields).containsEntry("eventType", "CONTENT_VIEWED")
         assertThat(viewRequest.fields).containsEntry("questionId", "20")
         assertThat(viewRequest.fields).doesNotContainKey("userId")
-        assertThat(actionPublisher.requests).hasSize(2)
-        assertThat(actionPublisher.requests[0].fields).containsEntry("eventType", "QUESTION_LIKED")
-        assertThat(actionPublisher.requests[0].fields).containsEntry("userId", "40")
-        assertThat(actionPublisher.requests[1].fields).containsEntry("eventType", "QUESTION_UNLIKED")
         assertThat(output.out)
             .contains("redis_stream_publish_started")
             .contains("redis_stream_publish_succeeded")
             .contains("eventType=CONTENT_VIEWED")
-            .contains("eventType=QUESTION_LIKED")
     }
 
     @Test
-    fun `reaction publishers emit distinct stats action event types`() {
-        val actionPublisher = RecordingPublisher()
-        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = actionPublisher)
-
-        assertThat(service.publishLiked(41, 100)).isTrue()
-        assertThat(service.publishUnliked(41, 100)).isTrue()
-
-        assertThat(actionPublisher.requests.map { it.key }).containsExactly("41", "41")
-        assertThat(actionPublisher.requests.map { it.fields["eventType"] })
-            .containsExactly("QUESTION_LIKED", "QUESTION_UNLIKED")
-        assertThat(actionPublisher.requests)
-            .allSatisfy { request ->
-                assertThat(request.fields).containsEntry("questionId", "41")
-                assertThat(request.fields).containsEntry("userId", "100")
-                assertThat(request.fields).containsKeys("createdAt", "eventId")
-                assertThat(request.options.maxLen).isEqualTo(100_000)
-                assertThat(request.options.approximateTrimming).isTrue()
-            }
-    }
-
-    @Test
-    fun `publish methods return false when publisher throws`() {
-        val failing = RecordingPublisher(fail = true)
-        val service = service(enabled = true, viewPublisher = failing, actionPublisher = failing)
+    fun `publish view returns false when publisher throws`() {
+        val service = service(enabled = true, viewPublisher = RecordingPublisher(fail = true))
 
         assertThat(service.publishViewed(1, 2)).isFalse()
-        assertThat(service.publishLiked(1, 2)).isFalse()
-    }
-
-    @Test
-    fun `string action publisher rejects unknown event type`() {
-        val service = service(enabled = true, viewPublisher = RecordingPublisher(), actionPublisher = RecordingPublisher())
-
-        assertThatThrownBy { service.publishAction(1, "UNKNOWN", 2) }
-            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private fun service(
         enabled: Boolean,
         viewPublisher: RedisStreamPublisher? = null,
-        actionPublisher: RedisStreamPublisher? = null,
     ): PublicQuestionReactionRedisStreamPublisher {
         val properties = BuddyStuddyProperties().apply {
             streams.enabled = enabled
@@ -112,7 +67,6 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         return PublicQuestionReactionRedisStreamPublisher(
             properties,
             provider(viewPublisher),
-            provider(actionPublisher),
         )
     }
 

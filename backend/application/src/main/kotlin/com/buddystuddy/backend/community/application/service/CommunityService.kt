@@ -87,12 +87,9 @@ class CommunityService(
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
-                reactions.publishLiked(id, principal.userId)
             }
         } else {
-            if (likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0) {
-                reactions.publishUnliked(id, principal.userId)
-            }
+            likes.deleteByQuestionIdAndUserId(id, principal.userId)
         }
         val likeCount = likes.countByQuestionId(id).toInt()
         overwriteLikeCount(id, likeCount)

@@ -1,12 +1,9 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionActionEvent
 import com.buddystuddy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
 import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystuddy.common.application.model.QuestionStreamEventType
 import com.buddystuddy.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
@@ -65,43 +62,4 @@ class RedisStreamEventsTest {
         )
     }
 
-    @Test
-    fun `action event exposes consistent stream field map`() {
-        val event = PublicQuestionActionEvent(
-            questionId = 30,
-            eventType = QuestionStreamEventType.QUESTION_LIKED,
-            userId = 40,
-            createdAt = Instant.ofEpochSecond(240),
-            eventId = "event-2",
-        )
-
-        assertThat(event.toStringMapWithoutNull()).containsExactlyInAnyOrderEntriesOf(
-            mapOf(
-                "eventId" to "event-2",
-                "eventType" to "QUESTION_LIKED",
-                "questionId" to "30",
-                "userId" to "40",
-                "createdAt" to "1970-01-01T00:04:00Z",
-            )
-        )
-    }
-
-    @Test
-    fun `action event rejects push and view event types`() {
-        assertThatThrownBy {
-            PublicQuestionActionEvent(
-                questionId = 30,
-                eventType = QuestionStreamEventType.QUESTION_PUSH_REQUESTED,
-                userId = 40,
-            )
-        }.isInstanceOf(IllegalArgumentException::class.java)
-
-        assertThatThrownBy {
-            PublicQuestionActionEvent(
-                questionId = 30,
-                eventType = QuestionStreamEventType.CONTENT_VIEWED,
-                userId = 40,
-            )
-        }.isInstanceOf(IllegalArgumentException::class.java)
-    }
 }

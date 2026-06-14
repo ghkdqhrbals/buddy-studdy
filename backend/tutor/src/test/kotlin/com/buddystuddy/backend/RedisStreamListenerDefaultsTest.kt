@@ -1,6 +1,5 @@
 package com.buddystuddy.backend
 
-import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionSearchStreamListener
 import com.buddystuddy.backend.community.adapter.inbound.stream.QuestionStatsStreamListener
 import com.buddystuddy.backend.study.adapter.inbound.stream.PushStreamListener
 import com.redisstream.consumer.StreamListener
@@ -13,8 +12,6 @@ class RedisStreamListenerDefaultsTest {
         val listeners = listOf(
             streamListener(PushStreamListener::class.java, "onPushRequested"),
             streamListener(QuestionStatsStreamListener::class.java, "onQuestionViewed"),
-            streamListener(QuestionStatsStreamListener::class.java, "onQuestionAction"),
-            streamListener(QuestionSearchStreamListener::class.java, "onQuestionCreated"),
         )
 
         assertThat(listeners.map { it.groupId }).allSatisfy {

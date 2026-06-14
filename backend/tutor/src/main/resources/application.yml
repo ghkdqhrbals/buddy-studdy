@@ -74,8 +74,6 @@ buddystuddy:
     enabled: ${REACTION_STREAM_ENABLED:true}
     push-prefix: ${PUSH_STREAM_PREFIX:bs-push-v1}
     view-prefix: ${VIEW_STREAM_PREFIX:bs-view-content-v1}
-    action-prefix: ${ACTION_STREAM_PREFIX:bs-question-action-v1}
-    question-search-prefix: ${QUESTION_SEARCH_STREAM_PREFIX:create-question-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}

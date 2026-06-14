@@ -28,8 +28,6 @@ data class BuddyStuddyProperties(
         var enabled: Boolean = true,
         var pushPrefix: String = "bs-push-v1",
         var viewPrefix: String = "bs-view-content-v1",
-        var actionPrefix: String = "bs-question-action-v1",
-        var questionSearchPrefix: String = "create-question-v1",
         var maxLen: Long = 100_000,
     )
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")

@@ -2,7 +2,6 @@ package com.buddystuddy.backend.community.adapter.outbound.stream
 
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.common.application.model.QuestionStreamEventType
 import com.buddystuddy.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
@@ -15,16 +14,13 @@ import org.springframework.stereotype.Component
 class PublicQuestionReactionRedisStreamPublisher(
     private val properties: BuddyStuddyProperties,
     @Qualifier("viewStreamPublisher") viewPublisherProvider: ObjectProvider<RedisStreamPublisher>,
-    @Qualifier("actionStreamPublisher") actionPublisherProvider: ObjectProvider<RedisStreamPublisher>,
 ) : PublicQuestionReactionPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
-    private val actionPublisher: RedisStreamPublisher? = actionPublisherProvider.ifAvailable
 
     init {
         if (properties.streams.enabled) {
             requireNotNull(viewPublisher) { "viewStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
-            requireNotNull(actionPublisher) { "actionStreamPublisher bean is required when buddystuddy.streams.enabled=true" }
         }
     }
 
@@ -38,27 +34,6 @@ class PublicQuestionReactionRedisStreamPublisher(
         }
         val fields = PublicQuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
         return publish(publisher, properties.streams.viewPrefix, questionId, fields)
-    }
-
-    override fun publishLiked(questionId: Long, userId: Long): Boolean =
-        publishAction(questionId, QuestionStreamEventType.QUESTION_LIKED, userId)
-
-    override fun publishUnliked(questionId: Long, userId: Long): Boolean =
-        publishAction(questionId, QuestionStreamEventType.QUESTION_UNLIKED, userId)
-
-    fun publishAction(questionId: Long, eventType: String, userId: Long?): Boolean =
-        publishAction(questionId, QuestionStreamEventType.valueOf(eventType), userId)
-
-    fun publishAction(questionId: Long, eventType: QuestionStreamEventType, userId: Long?): Boolean {
-        if (!properties.streams.enabled) {
-            logPublishSkipped("streams_disabled", properties.streams.actionPrefix, eventType.name, questionId, userId)
-            return false
-        }
-        val publisher = actionPublisher ?: run {
-            error("actionStreamPublisher bean is required when buddystuddy.streams.enabled=true")
-        }
-        val fields = PublicQuestionActionEvent(questionId = questionId, eventType = eventType, userId = userId).toStringMapWithoutNull()
-        return publish(publisher, properties.streams.actionPrefix, questionId, fields)
     }
 
     private fun publish(

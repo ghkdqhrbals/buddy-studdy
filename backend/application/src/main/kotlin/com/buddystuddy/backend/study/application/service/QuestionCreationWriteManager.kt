@@ -27,7 +27,7 @@ class QuestionCreationWriteManager(
         val savedQuestion = questions.save(question)
         questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id, updatedAt = now))
         pushOutbox.enqueue(push.toRequest(savedQuestion.id), now)
-        questionSearch.publishCreated(savedQuestion.id)
+        questionSearch.syncQuestion(savedQuestion)
         return savedQuestion
     }
 }

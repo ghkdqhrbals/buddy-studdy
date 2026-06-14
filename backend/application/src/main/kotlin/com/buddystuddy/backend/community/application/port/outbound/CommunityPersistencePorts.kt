@@ -30,10 +30,6 @@ interface QuestionSearchPort {
     fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult
 }
 
-interface QuestionSearchPublishPort {
-    fun publishCreated(questionId: Long): Boolean
-}
-
 data class SearchResult(
     val questionIds: List<Long>,
     val totalCount: Long,

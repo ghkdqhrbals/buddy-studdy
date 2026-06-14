@@ -1,6 +1,5 @@
 package com.buddystuddy.backend.community.adapter.inbound.stream
 
-import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.redisstream.consumer.ConsumedRedisStreamMessage
@@ -29,19 +28,6 @@ class QuestionStatsStreamListener(
     )
     fun onQuestionViewed(message: ConsumedRedisStreamMessage) {
         consume("buddystuddy-question-view-listener", message) { handler.processViewEvent(message.fields) }
-    }
-
-    @StreamListener(
-        id = "buddystuddy-question-action-listener",
-        streamPrefix = "\${ACTION_STREAM_PREFIX:bs-question-action-v1}",
-        groupId = "\${ACTION_CONSUMER_GROUP_NAME:\${ACTION_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${ACTION_CONSUMER_MEMBER_CONCURRENCY:\${ACTION_CONSUMER_RUNTIME_MAX_CONCURRENCY:2}}",
-        autoStartup = "\${buddystuddy.streams.enabled:true}",
-        pollBatchSize = "\${ACTION_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
-        pollTimeoutMs = "\${ACTION_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
-    )
-    fun onQuestionAction(message: ConsumedRedisStreamMessage) {
-        consume("buddystuddy-question-action-listener", message) { handler.processActionEvent(message.fields) }
     }
 
     private fun consume(listenerId: String, message: ConsumedRedisStreamMessage, block: () -> Unit) {
@@ -89,7 +75,6 @@ class QuestionStatsStreamListener(
 @Component
 class QuestionStatsStreamEventHandler(
     private val stats: QuestionStatsRepository,
-    private val likes: QuestionLikePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -112,63 +97,6 @@ class QuestionStatsStreamEventHandler(
             questionId,
             "viewCount",
         )
-    }
-
-    @Transactional
-    fun processActionEvent(fields: Map<String, String>) {
-        val questionId = fields.questionIdOrNull() ?: run {
-            logger.info(
-                "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
-                fields["eventId"],
-                fields["eventType"],
-                fields.keys,
-            )
-            return
-        }
-        when (fields["eventType"]) {
-            "QUESTION_LIKED" -> {
-                synchronizeLikeCount(fields, questionId)
-            }
-            "QUESTION_UNLIKED" -> {
-                synchronizeLikeCount(fields, questionId)
-            }
-            "QUESTION_COMMENTED", "QUESTION_COMMENT_DELETED" -> {
-                logger.info(
-                    "question_stats_event_ignored reason=comment_count_updated_synchronously eventId={} eventType={} questionId={}",
-                    fields["eventId"],
-                    fields["eventType"],
-                    questionId,
-                )
-            }
-            else -> logger.info(
-                "question_stats_event_ignored reason=unknown_event_type eventId={} eventType={} questionId={} fieldKeys={}",
-                fields["eventId"],
-                fields["eventType"],
-                questionId,
-                fields.keys,
-            )
-        }
-    }
-
-    private fun synchronizeLikeCount(fields: Map<String, String>, questionId: Long) {
-        val likeCount = likes.countByQuestionId(questionId).toInt()
-        overwriteLikeCount(questionId, likeCount)
-        logger.info(
-            "question_stats_event_applied eventId={} eventType={} questionId={} userId={} field={} value={}",
-            fields["eventId"],
-            fields["eventType"],
-            questionId,
-            fields["userId"],
-            "likeCount",
-            likeCount,
-        )
-    }
-
-    private fun overwriteLikeCount(questionId: Long, likeCount: Int) {
-        val now = Instant.now()
-        if (stats.setLikeCount(questionId, likeCount, now) == 0) {
-            stats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
-        }
     }
 
     private fun increment(questionId: Long, update: () -> Int) {

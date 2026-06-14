@@ -40,34 +40,6 @@ class RedisStreamStarterConfig {
             redisConnectionFactory,
         )
 
-    @Bean("actionStreamPublisher")
-    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-    fun actionStreamPublisher(
-        properties: BuddyStuddyProperties,
-        client: CoordinatorClient,
-        redisConnectionFactory: RedisConnectionFactory,
-    ): RedisStreamPublisher =
-        streamPublisher(
-            StreamPublisherDefinition(properties.streams.actionPrefix),
-            properties,
-            client,
-            redisConnectionFactory,
-        )
-
-    @Bean("questionSearchRedisStreamPublisher")
-    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-    fun questionSearchRedisStreamPublisher(
-        properties: BuddyStuddyProperties,
-        client: CoordinatorClient,
-        redisConnectionFactory: RedisConnectionFactory,
-    ): RedisStreamPublisher =
-        streamPublisher(
-            StreamPublisherDefinition(properties.streams.questionSearchPrefix),
-            properties,
-            client,
-            redisConnectionFactory,
-        )
-
     private fun streamPublisher(
         definition: StreamPublisherDefinition,
         properties: BuddyStuddyProperties,
