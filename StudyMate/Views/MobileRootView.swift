@@ -2828,12 +2828,6 @@ private struct CommunityCommentRow: View {
     var deleteTitle: String
     var onDelete: () -> Void
 
-    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             HomeProfileAvatar(
@@ -2850,7 +2844,7 @@ private struct CommunityCommentRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
-                    Text(Self.relativeDateFormatter.localizedString(for: comment.createdAt, relativeTo: Date()))
+                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: comment.createdAt))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: true, vertical: false)

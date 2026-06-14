@@ -228,6 +228,17 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(StudyNotificationPayload.backendRecordID(from: recordIDPayload), "record-999")
     }
 
+    func testStudyDateDisplayFormatterUsesShortDateAfterSevenDays() {
+        let formatter = ISO8601DateFormatter()
+        let referenceDate = formatter.date(from: "2026-06-08T00:00:00Z")!
+        let oldDate = formatter.date(from: "2026-06-01T00:00:00Z")!
+
+        XCTAssertEqual(
+            StudyDateDisplayFormatter.relativeOrShortDateString(for: oldDate, relativeTo: referenceDate),
+            "26.6.1"
+        )
+    }
+
     func testGradedStudyRecordAdaptsToCommunityQuestionDetailModel() throws {
         let createdAt = Date(timeIntervalSince1970: 1_780_000_000)
         let answeredAt = createdAt.addingTimeInterval(30)

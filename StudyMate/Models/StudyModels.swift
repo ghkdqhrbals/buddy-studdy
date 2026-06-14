@@ -1031,6 +1031,24 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 }
 
+enum StudyDateDisplayFormatter {
+    private static let absoluteThreshold: TimeInterval = 7 * 24 * 60 * 60
+
+    static func relativeOrShortDateString(for date: Date, relativeTo referenceDate: Date = Date()) -> String {
+        if abs(referenceDate.timeIntervalSince(date)) >= absoluteThreshold {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yy.M.d"
+            return formatter.string(from: date)
+        }
+
+        let relativeFormatter = RelativeDateTimeFormatter()
+        relativeFormatter.unitsStyle = .short
+        return relativeFormatter.localizedString(for: date, relativeTo: referenceDate)
+    }
+}
+
 struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
     var recordID: String
     var normalizedQuestion: String

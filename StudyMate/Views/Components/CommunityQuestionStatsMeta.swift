@@ -3,12 +3,6 @@ import SwiftUI
 struct CommunityQuestionTopMeta: View {
     var question: CommunityQuestion
 
-    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
     var body: some View {
         HStack(spacing: 6) {
             Text(question.topic.isEmpty ? "Swift" : question.topic)
@@ -40,7 +34,7 @@ struct CommunityQuestionTopMeta: View {
                 .accessibilityElement(children: .combine)
             }
 
-            Text(Self.relativeDateFormatter.localizedString(for: question.createdAt, relativeTo: Date()))
+            Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: question.createdAt))
                 .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 0)
