@@ -198,6 +198,59 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testProvisionalStudyRoomAccessIsRevokedWhenBackendAccessDenies() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        let accessToken = Self.jwt(
+            payload: [
+                "device_id": backend.registration.deviceID,
+                "is_anonymous": false,
+                "status": "ACTIVE"
+            ]
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: backend.registration.deviceID,
+                clientSecret: backend.registration.clientSecret,
+                apnsToken: "",
+                accessToken: accessToken,
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        backend.accessState = BackendAccessState(
+            user: BackendAccessUser(id: 4, status: "ACTIVE", displayName: "Tester"),
+            pageAccess: BackendPageAccess(
+                home: true,
+                publicQuestions: true,
+                myStudies: true,
+                studyRoom: false,
+                records: true,
+                stats: true,
+                profile: true,
+                developer: false,
+                admin: false
+            )
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        XCTAssertTrue(appState.openRoute(.studyRoom(categoryID: "swift")))
+        XCTAssertEqual(appState.homeStudyRoute?.categoryID, "swift")
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(backend.fetchAccessCallCount, 1)
+        XCTAssertNil(appState.homeStudyRoute)
+        XCTAssertNotNil(appState.pageAccessPrompt)
+        XCTAssertEqual(appState.selectedTab, .home)
+    }
+
+    @MainActor
     func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3622,7 +3675,22 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var gradeRecordResult: StudyRecord?
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
+    var fetchAccessCallCount = 0
     var fetchedSettings: BackendStudySettings?
+    var accessState = BackendAccessState(
+        user: BackendAccessUser(id: 1, status: "ACTIVE", displayName: "Tester"),
+        pageAccess: BackendPageAccess(
+            home: true,
+            publicQuestions: true,
+            myStudies: true,
+            studyRoom: true,
+            records: true,
+            stats: true,
+            profile: true,
+            developer: false,
+            admin: false
+        )
+    )
 
     func checkHealth() async throws {}
 
@@ -3662,6 +3730,11 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             accessTokenExpiresAt: Date().addingTimeInterval(3600)
         )
         return self.registration
+    }
+
+    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
+        fetchAccessCallCount += 1
+        return accessState
     }
 
     func updateSchedule(
@@ -3785,7 +3858,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
-        topic: String?,
+        query: String?,
         limit: Int,
         offset: Int,
         excludeDeviceID: String?
@@ -3912,9 +3985,15 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
-    func createQuestion(registration: RemotePushRegistration, topic: String?) async throws -> StudyRecord {
+    func deleteCommunityQuestionComment(
+        registration: RemotePushRegistration,
+        questionID: String,
+        commentID: String
+    ) async throws {}
+
+    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
         createQuestionCallCount += 1
-        callEvents.append("createQuestion:\(topic ?? "")")
+        callEvents.append("createQuestion:\(studyID)")
         if !createQuestionResults.isEmpty {
             return createQuestionResults.removeFirst()
         }
@@ -4008,6 +4087,25 @@ private final class HTTPRequestRecorder: @unchecked Sendable {
         lock.lock()
         storedRequests.append(request)
         lock.unlock()
+    }
+}
+
+private extension StudyMateTests {
+    static func jwt(payload: [String: Any]) -> String {
+        let header = ["alg": "HS256", "typ": "JWT"]
+        return [
+            base64URLString(jsonObject: header),
+            base64URLString(jsonObject: payload),
+            "signature"
+        ].joined(separator: ".")
+    }
+
+    private static func base64URLString(jsonObject: Any) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: jsonObject)
+        return data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

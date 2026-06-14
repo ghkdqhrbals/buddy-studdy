@@ -472,6 +472,7 @@ final class AppState: ObservableObject {
             backendAccessState = state
             isCommunitySignedIn = state.user.status != "ANONYMOUS"
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+            reconcileVisiblePageAccessAfterRefresh()
         } catch {
             if Self.isUnauthorizedBackendError(error) {
                 clearStoredBackendAccessToken()
@@ -480,6 +481,39 @@ final class AppState: ObservableObject {
                 settingsStore.saveIsCommunitySignedIn(false)
             }
             log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+        }
+    }
+
+    private func reconcileVisiblePageAccessAfterRefresh() {
+        guard let visibleProtectedPage = currentVisibleProtectedPage(),
+              !canAccess(visibleProtectedPage) else {
+            return
+        }
+
+        if selectedTab == .records || selectedTab == .statistics {
+            selectedTab = .home
+        }
+        redirectToPageAccessGuide(for: visibleProtectedPage)
+    }
+
+    private func currentVisibleProtectedPage() -> ProtectedAppPage? {
+        if homeStudyRoute != nil {
+            return .studyDetail
+        }
+
+        switch selectedTab {
+        case .records:
+            return .records
+        case .statistics:
+            return .statistics
+        case .study:
+            #if os(macOS)
+            return .studyDetail
+            #else
+            return nil
+            #endif
+        case .home, .settings:
+            return nil
         }
     }
 
