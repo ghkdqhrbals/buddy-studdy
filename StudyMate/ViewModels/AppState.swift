@@ -247,6 +247,10 @@ final class AppState: ObservableObject {
         return normalizedURL.isEmpty || Self.resolvedDebugBackendURL(from: normalizedURL) != nil
     }
 
+    var canUseDeveloperOptions: Bool {
+        backendAccessState.pageAccess.developer
+    }
+
     var mobileVisibleTab: AppTab {
         switch selectedTab {
         case .home, .records, .statistics, .settings:
@@ -472,6 +476,7 @@ final class AppState: ObservableObject {
             backendAccessState = state
             isCommunitySignedIn = state.user.status != "ANONYMOUS"
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+            disableDebuggingIfDeveloperAccessWasRevoked()
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
             if Self.isUnauthorizedBackendError(error) {
@@ -482,6 +487,17 @@ final class AppState: ObservableObject {
             }
             log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
         }
+    }
+
+    private func disableDebuggingIfDeveloperAccessWasRevoked() {
+        guard !canUseDeveloperOptions, isDebuggingEnabled else {
+            return
+        }
+
+        isDebuggingEnabled = false
+        settingsStore.saveIsDebuggingEnabled(false)
+        refreshRemotePushBackendClient(reason: "developer-access-revoked")
+        log(.info, "개발자 권한이 없어 디버깅 모드를 껐습니다.")
     }
 
     private func reconcileVisiblePageAccessAfterRefresh() {
@@ -4122,10 +4138,16 @@ final class AppState: ObservableObject {
     }
 
     func showAPIDebugPanel() {
+        guard canUseDeveloperOptions else {
+            return
+        }
         isAPIDebugPanelPresented = true
     }
 
     func requestDebugPanelIfEnabledOrEnableOnDemand() {
+        guard canUseDeveloperOptions else {
+            return
+        }
         isAPIDebugPanelPresented = true
         log(.info, "API 디버그 패널을 열었습니다.")
     }
@@ -4150,6 +4172,11 @@ final class AppState: ObservableObject {
     }
 
     func setDebuggingEnabled(_ isEnabled: Bool) {
+        guard !isEnabled || canUseDeveloperOptions else {
+            log(.warning, "개발자 권한이 없어 디버깅 모드를 켤 수 없습니다.")
+            return
+        }
+
         isDebuggingEnabled = isEnabled
         settingsStore.saveIsDebuggingEnabled(isEnabled)
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")

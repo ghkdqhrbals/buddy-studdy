@@ -251,6 +251,57 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testDebuggingModeIsDisabledWhenDeveloperAccessIsMissing() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        let accessToken = Self.jwt(
+            payload: [
+                "device_id": backend.registration.deviceID,
+                "is_anonymous": false,
+                "status": "ACTIVE"
+            ]
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: backend.registration.deviceID,
+                clientSecret: backend.registration.clientSecret,
+                apnsToken: "",
+                accessToken: accessToken,
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        store.saveIsDebuggingEnabled(true)
+        backend.accessState = BackendAccessState(
+            user: BackendAccessUser(id: 4, status: "ACTIVE", displayName: "Tester"),
+            pageAccess: BackendPageAccess(
+                home: true,
+                publicQuestions: true,
+                myStudies: true,
+                studyRoom: true,
+                records: true,
+                stats: true,
+                profile: true,
+                developer: false,
+                admin: false
+            )
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        XCTAssertTrue(appState.isDebuggingEnabled)
+
+        await appState.refreshPageAccess(reason: "test")
+
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
+    }
+
+    @MainActor
     func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

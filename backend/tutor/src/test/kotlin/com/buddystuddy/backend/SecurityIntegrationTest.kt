@@ -1,5 +1,9 @@
 package com.buddystuddy.backend
 
+import com.buddystuddy.auth.domain.entity.UserRoleEntity
+import com.buddystuddy.backend.auth.TokenProvider
+import com.buddystuddy.backend.auth.adapter.outbound.persistence.RoleRepository
+import com.buddystuddy.backend.auth.adapter.outbound.persistence.UserRoleRepository
 import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystuddy.backend.auth.application.service.LoginService
 import org.assertj.core.api.Assertions.assertThat
@@ -15,6 +19,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Instant
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
@@ -33,6 +38,9 @@ import java.net.http.HttpResponse
 @ExtendWith(OutputCaptureExtension::class)
 class SecurityIntegrationTest {
     @Autowired lateinit var login: LoginService
+    @Autowired lateinit var tokenProvider: TokenProvider
+    @Autowired lateinit var roles: RoleRepository
+    @Autowired lateinit var userRoles: UserRoleRepository
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -145,6 +153,21 @@ class SecurityIntegrationTest {
         assertThat(response.body()).contains("\"myStudies\":false")
         assertThat(response.body()).contains("\"records\":false")
         assertThat(response.body()).contains("\"stats\":false")
+    }
+
+    @Test
+    fun `admin role includes debug permission and exposes developer page access`() {
+        val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val adminRole = roles.findByCode("ADMIN") ?: error("ADMIN role must be seeded")
+        val principal = tokenProvider.parse(auth.accessToken)
+        val now = Instant.now()
+        userRoles.save(UserRoleEntity(userId = principal.userId, roleId = adminRole.id, createdAt = now, updatedAt = now))
+
+        val response = get("/api/v1/me/access", auth.accessToken)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).contains("\"developer\":true")
+        assertThat(response.body()).contains("\"admin\":true")
     }
 
     @Test

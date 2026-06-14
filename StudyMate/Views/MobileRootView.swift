@@ -3270,38 +3270,40 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                Section(strings.developerOptions) {
-                    Toggle(
-                        strings.debuggingMode,
-                        isOn: Binding(
-                            get: { appState.isDebuggingEnabled },
-                            set: { appState.setDebuggingEnabled($0) }
-                        )
-                    )
-
-                    if appState.isDebuggingEnabled {
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField(
-                                strings.debugBackendBaseURL,
-                                text: $appState.draftDebugBackendBaseURL,
-                                prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                if appState.canUseDeveloperOptions {
+                    Section(strings.developerOptions) {
+                        Toggle(
+                            strings.debuggingMode,
+                            isOn: Binding(
+                                get: { appState.isDebuggingEnabled },
+                                set: { appState.setDebuggingEnabled($0) }
                             )
-                            #if os(iOS)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            #endif
+                        )
 
-                            if !appState.isDraftDebugBackendBaseURLValid {
-                                Text(strings.debugBackendBaseURLInvalid)
+                        if appState.isDebuggingEnabled {
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField(
+                                    strings.debugBackendBaseURL,
+                                    text: $appState.draftDebugBackendBaseURL,
+                                    prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                                )
+                                #if os(iOS)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                #endif
+
+                                if !appState.isDraftDebugBackendBaseURLValid {
+                                    Text(strings.debugBackendBaseURLInvalid)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+
+                                Text(strings.debugBackendBaseURLHelp)
                                     .font(.caption)
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-
-                            Text(strings.debugBackendBaseURLHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -3335,29 +3337,6 @@ private struct MobileSettingsView: View {
             #endif
         }
         .contentShape(Rectangle())
-        .background {
-            SettingsDebugLongPressInstaller {
-                appState.requestDebugPanelIfEnabledOrEnableOnDemand()
-            }
-        }
-        .overlay {
-            if appState.isAPIDebugPanelPresented {
-                Color.black.opacity(0.12)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        appState.isAPIDebugPanelPresented = false
-                    }
-
-                MovableAPIDebugPanel(
-                    logs: appState.apiTrafficLogs,
-                    isPresented: $appState.isAPIDebugPanelPresented
-                )
-                .padding(18)
-                .transition(.scale(scale: 0.96).combined(with: .opacity))
-                .zIndex(1)
-            }
-        }
-        .animation(.snappy(duration: 0.18), value: appState.isAPIDebugPanelPresented)
         .disabled(appState.isLoadingBackendSettingsForEditing)
         .onAppear {
             appState.beginSettingsEditing()
