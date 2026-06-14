@@ -296,6 +296,30 @@ final class AppState: ObservableObject {
         return settingsStore.loadRemotePushRegistration()?.hasAccessToken == true
     }
 
+    private func shouldAllowProvisionalAccessWhileRefreshing(_ page: ProtectedAppPage) -> Bool {
+        guard settingsStore.loadRemotePushRegistration()?.hasRegisteredAccessToken == true else {
+            return false
+        }
+
+        guard backendAccessState.user.status == "ANONYMOUS" else {
+            return false
+        }
+
+        switch page {
+        case .myStudies, .studyDetail, .records, .statistics, .profile:
+            return true
+        case .publicQuestions:
+            return false
+        }
+    }
+
+    private func refreshPageAccessInBackground(reason: String) {
+        protectedPageAccessRefreshTask?.cancel()
+        protectedPageAccessRefreshTask = Task { [weak self] in
+            await self?.refreshPageAccess(reason: reason)
+        }
+    }
+
     private func refreshPageAccessThenOpen(_ nextTab: AppTab, protectedPage: ProtectedAppPage) {
         protectedPageAccessRefreshTask?.cancel()
         protectedPageAccessRefreshTask = Task { [weak self] in
@@ -399,6 +423,12 @@ final class AppState: ObservableObject {
     @discardableResult
     private func requirePageAccess(_ page: ProtectedAppPage) -> Bool {
         guard canAccess(page) else {
+            if shouldAllowProvisionalAccessWhileRefreshing(page) {
+                refreshPageAccessInBackground(reason: "provisional-\(page.accessLogName)")
+                log(.info, "저장된 registered access token이 있어 pageAccess 갱신 전 임시 진입을 허용합니다. page=\(page.accessLogName)")
+                return true
+            }
+
             redirectToPageAccessGuide(for: page)
             return false
         }

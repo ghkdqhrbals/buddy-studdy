@@ -32,7 +32,27 @@ struct RemotePushRegistration: Codable, Equatable {
         return true
     }
 
+    var hasRegisteredAccessToken: Bool {
+        hasAccessToken && accessTokenIsAnonymous == false
+    }
+
     private var accessTokenDeviceID: String? {
+        accessTokenPayload?["device_id"] as? String
+    }
+
+    private var accessTokenIsAnonymous: Bool? {
+        if let value = accessTokenPayload?["is_anonymous"] as? Bool {
+            return value
+        }
+
+        if let status = accessTokenPayload?["status"] as? String {
+            return status == "ANONYMOUS"
+        }
+
+        return nil
+    }
+
+    private var accessTokenPayload: [String: Any]? {
         guard let accessToken else {
             return nil
         }
@@ -40,13 +60,11 @@ struct RemotePushRegistration: Codable, Equatable {
         let segments = accessToken.split(separator: ".")
         guard segments.count >= 2,
               let payloadData = Self.base64URLDecodedData(String(segments[1])),
-              let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
-              let deviceID = object["device_id"] as? String,
-              !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] else {
             return nil
         }
 
-        return deviceID
+        return object
     }
 
     private static func base64URLDecodedData(_ value: String) -> Data? {
