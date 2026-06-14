@@ -34,7 +34,7 @@ dependencies {
     implementation("org.aspectj:aspectjweaver")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
-    implementation("io.github.ghkdqhrbals:redisstream-spring-boot-starter:0.2.0")
+    implementation("io.github.ghkdqhrbals:redisstream-spring-boot-starter:0.3.0")
     implementation("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")

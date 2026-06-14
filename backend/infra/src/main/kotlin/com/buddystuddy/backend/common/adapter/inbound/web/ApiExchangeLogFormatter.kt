@@ -151,6 +151,6 @@ internal class ApiExchangeLogFormatter(
 
     private companion object {
         private const val MAX_BODY_CHARS = 2_000
-        private val SENSITIVE_HEADERS = setOf("authorization", "cookie", "set-cookie", "x-client-secret")
+        private val SENSITIVE_HEADERS = setOf("cookie", "set-cookie", "x-client-secret")
     }
 }

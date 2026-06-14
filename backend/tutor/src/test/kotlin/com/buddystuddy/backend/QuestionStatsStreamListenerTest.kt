@@ -174,7 +174,7 @@ class QuestionStatsStreamListenerTest {
         }
 
     private data class PublishRequest(
-        val key: String,
+        val key: String?,
         val fields: Map<String, String>,
         val options: RedisStreamPublishOptions,
     )
@@ -183,7 +183,7 @@ class QuestionStatsStreamListenerTest {
         val requests = mutableListOf<PublishRequest>()
 
         override fun publish(
-            partitionKey: String,
+            partitionKey: String?,
             fields: Map<String, String>,
             options: RedisStreamPublishOptions,
         ): PublishedRedisStreamMessage {

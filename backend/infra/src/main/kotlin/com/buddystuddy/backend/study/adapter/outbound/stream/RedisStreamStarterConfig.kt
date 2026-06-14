@@ -5,7 +5,6 @@ import com.redisstream.consumer.CoordinatorClient
 import com.redisstream.producer.RedisStreamPublisher
 import com.redisstream.producer.RedisStreamXAddConfiguration
 import com.redisstream.producer.StreamProducer
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -17,13 +16,11 @@ class RedisStreamStarterConfig {
     @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun pushStreamPublisher(
         properties: BuddyStuddyProperties,
-        @Value("\${PUSH_CONSUMER_GROUP_NAME:bs-push-workers}")
-        consumerGroupName: String,
         client: CoordinatorClient,
         redisConnectionFactory: RedisConnectionFactory,
     ): RedisStreamPublisher =
         streamPublisher(
-            StreamPublisherDefinition(properties.streams.pushPrefix, consumerGroupName),
+            StreamPublisherDefinition(properties.streams.pushPrefix),
             properties,
             client,
             redisConnectionFactory,
@@ -33,13 +30,11 @@ class RedisStreamStarterConfig {
     @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun viewStreamPublisher(
         properties: BuddyStuddyProperties,
-        @Value("\${VIEW_CONSUMER_GROUP_NAME:bs-view-workers}")
-        consumerGroupName: String,
         client: CoordinatorClient,
         redisConnectionFactory: RedisConnectionFactory,
     ): RedisStreamPublisher =
         streamPublisher(
-            StreamPublisherDefinition(properties.streams.viewPrefix, consumerGroupName),
+            StreamPublisherDefinition(properties.streams.viewPrefix),
             properties,
             client,
             redisConnectionFactory,
@@ -49,13 +44,11 @@ class RedisStreamStarterConfig {
     @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun actionStreamPublisher(
         properties: BuddyStuddyProperties,
-        @Value("\${ACTION_CONSUMER_GROUP_NAME:bs-question-action-workers}")
-        consumerGroupName: String,
         client: CoordinatorClient,
         redisConnectionFactory: RedisConnectionFactory,
     ): RedisStreamPublisher =
         streamPublisher(
-            StreamPublisherDefinition(properties.streams.actionPrefix, consumerGroupName),
+            StreamPublisherDefinition(properties.streams.actionPrefix),
             properties,
             client,
             redisConnectionFactory,
@@ -65,13 +58,11 @@ class RedisStreamStarterConfig {
     @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun questionSearchRedisStreamPublisher(
         properties: BuddyStuddyProperties,
-        @Value("\${QUESTION_SEARCH_CONSUMER_GROUP_NAME:question-reader}")
-        consumerGroupName: String,
         client: CoordinatorClient,
         redisConnectionFactory: RedisConnectionFactory,
     ): RedisStreamPublisher =
         streamPublisher(
-            StreamPublisherDefinition(properties.streams.questionSearchPrefix, consumerGroupName),
+            StreamPublisherDefinition(properties.streams.questionSearchPrefix),
             properties,
             client,
             redisConnectionFactory,
@@ -85,7 +76,6 @@ class RedisStreamStarterConfig {
     ): RedisStreamPublisher =
         StreamProducer(
             streamPrefix = definition.streamPrefix,
-            consumerGroupName = definition.consumerGroupName,
             client = client,
             redisConnectionFactory = redisConnectionFactory,
             publishMaxAttempts = 2,
@@ -94,6 +84,5 @@ class RedisStreamStarterConfig {
 
     private data class StreamPublisherDefinition(
         val streamPrefix: String,
-        val consumerGroupName: String,
     )
 }

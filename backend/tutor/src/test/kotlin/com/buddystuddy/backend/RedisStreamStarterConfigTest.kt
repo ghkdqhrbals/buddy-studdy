@@ -81,10 +81,9 @@ class RedisStreamStarterConfigTest {
         ): HeartbeatResponse =
             error("heartbeat is not used by publisher configuration tests")
 
-        override fun producerRouting(streamPrefix: String, consumerGroup: String): ProducerRoutingResponse =
+        override fun producerRouting(streamPrefix: String): ProducerRoutingResponse =
             ProducerRoutingResponse(
                 streamPrefix = streamPrefix,
-                consumerGroup = consumerGroup,
                 metadataVersion = 1,
                 shardCount = 1,
                 streamKeyPattern = "$streamPrefix:{shardIndex}",
