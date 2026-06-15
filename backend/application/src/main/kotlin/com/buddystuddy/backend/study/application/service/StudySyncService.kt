@@ -43,7 +43,7 @@ class StudySyncService(
             studies.findByUserIdAndQuery(principal.userId, search, pageable)
         }
         return StudyPageResponse(
-            studies = page.content.map { it.toStudyRoomResponse() },
+            studies = page.content.toStudyRoomResponses(),
             totalCount = page.totalElements,
             limit = limit,
             offset = offset,
@@ -86,16 +86,27 @@ class StudySyncService(
             )
         )
 
-        return studies.save(study).toStudyRoomResponse()
+        return listOf(studies.save(study)).toStudyRoomResponses().single()
     }
 
-    private fun StudyEntity.toStudyRoomResponse(): StudyRoomResponse {
-        val pending = questions.findPendingByStudyId(id, PageRequest.of(0, 1))
-            .content
-            .firstOrNull()
-            ?.let { question ->
-                question.toStudyRecord(questionStats.findById(question.id).orElse(null)).toProjection().toRecordResponse()
-            }
+    private fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
+        if (isEmpty()) return emptyList()
+        val pendingByStudyId = questions.findLatestPendingByStudyIds(map { it.id }).associateBy { it.studyId }
+        val statsByQuestionId = pendingByStudyId.values
+            .map { it.id }
+            .takeIf { it.isNotEmpty() }
+            ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
+            .orEmpty()
+        return map { study -> study.toStudyRoomResponse(pendingByStudyId[study.id], statsByQuestionId) }
+    }
+
+    private fun StudyEntity.toStudyRoomResponse(
+        pendingQuestion: QuestionEntity? = null,
+        statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
+    ): StudyRoomResponse {
+        val pending = pendingQuestion?.let { question ->
+            question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+        }
 
         return StudyRoomResponse(
         id = id,

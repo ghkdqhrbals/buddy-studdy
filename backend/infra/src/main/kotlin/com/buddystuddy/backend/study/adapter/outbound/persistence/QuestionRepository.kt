@@ -92,6 +92,27 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
     @Query("select q from QuestionEntity q where q.studyId = :studyId and q.deletedAt is null and q.score is null and q.skippedAt is null order by q.createdAt desc")
     override fun findPendingByStudyId(@Param("studyId") studyId: Long, pageable: Pageable): Page<QuestionEntity>
 
+    @Query(
+        value = """
+        select *
+        from (
+            select q.*,
+                   row_number() over (
+                       partition by q.study_id
+                       order by q.created_at desc, q.id desc
+                   ) as study_rank
+            from questions q
+            where q.study_id in (:studyIds)
+              and q.deleted_at is null
+              and q.score is null
+              and q.skipped_at is null
+        ) ranked
+        where ranked.study_rank = 1
+        """,
+        nativeQuery = true,
+    )
+    override fun findLatestPendingByStudyIds(@Param("studyIds") studyIds: Collection<Long>): List<QuestionEntity>
+
     @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and (:includePending = true or q.score is not null) order by q.createdAt desc")
     override fun findVisibleByUser(@Param("userId") userId: Long, @Param("includePending") includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
 

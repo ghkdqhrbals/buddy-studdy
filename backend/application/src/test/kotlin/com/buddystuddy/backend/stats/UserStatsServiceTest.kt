@@ -258,6 +258,7 @@ class UserStatsServiceTest {
         override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.score != null && it.deletedAt == null })
         override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun countPendingForStudy(studyId: Long): Long = 0
