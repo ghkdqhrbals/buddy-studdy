@@ -40,6 +40,17 @@ class StatsService(
         val search = query.search?.trim()?.takeIf { it.isNotEmpty() }
         val overview = userStats.overviewByUser(userId, bounds.startDate, bounds.endDate, search)
         val selectedTopicKeys = userStats.findTopicKeysByUser(userId, bounds.startDate, bounds.endDate, search, limit, offset)
+        if (selectedTopicKeys.isEmpty()) {
+            return StatsResponse(
+                totalResponses = overview.totalResponses,
+                totalTopics = overview.totalTopics.toInt(),
+                topics = emptyList(),
+                totalCount = overview.totalTopics,
+                limit = limit,
+                offset = offset,
+                generatedAt = Instant.now(),
+            )
+        }
         val grouped = userStats.findByUserAndTopicKeys(userId, bounds.startDate, bounds.endDate, search, selectedTopicKeys)
             .groupBy { it.topicKey }
         val selectedGroups = selectedTopicKeys.mapNotNull { grouped[it] }

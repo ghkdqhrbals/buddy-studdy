@@ -206,6 +206,20 @@ class UserStatsServiceTest {
         assertThat(questionStats.findAllByIdsCalls).isZero()
     }
 
+    @Test
+    fun `stats skips topic detail lookup when no topics are selected`() {
+        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+
+        assertThat(response.topics).isEmpty()
+        assertThat(response.totalResponses).isZero()
+        assertThat(response.totalTopics).isZero()
+        assertThat(userStats.overviewByUserCalls).isEqualTo(1)
+        assertThat(userStats.findTopicKeysByUserCalls).isEqualTo(1)
+        assertThat(userStats.findByUserAndTopicKeysCalls).isZero()
+        assertThat(questions.findLatestGradedByUserAndTopicsCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
     private fun gradedQuestion(
         topic: String,
         difficultyLevel: Int,
