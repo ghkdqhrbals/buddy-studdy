@@ -8,6 +8,8 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 
 ## Required Secrets
 
+Backend deploy:
+
 - `EC2_HOST`
 - `EC2_USER`
 - `EC2_SSH_PRIVATE_KEY`
@@ -23,6 +25,10 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 - `OPENAPI_ACCESS_TOKEN` (optional, only if docs API endpoint is enabled)
 - `GOOGLE_IOS_CLIENT_ID`
 
+Monitoring deploy:
+
+- `GRAFANA_ADMIN_PASSWORD`
+
 ## Runtime Layout
 
 - `buddystuddy-nginx`: public HTTPS proxy on host port `443`.
@@ -37,6 +43,28 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 - If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
 - If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStuddy backend logs.
 - Other paths return 404 at Nginx.
+
+## Monitoring Deploy
+
+Monitoring is deployed separately from backend image rollout. Copy
+`deploy-monitoring.yml` into the deploy repository's `.github/workflows/`
+directory and run **Deploy BuddyStuddy Monitoring** manually.
+
+The workflow creates or replaces:
+
+- `rsc-loki`: Loki with persistent `rsc-loki-data` volume.
+- `rsc-promtail`: Promtail scraping Docker container logs.
+- `rsc-grafana`: Grafana with persistent `rsc-grafana-data` volume.
+
+Grafana dashboard provisioning is file-based, so dashboards are restored on
+container recreation:
+
+- `BuddyStuddy Log Search`
+- `BuddyStuddy API Performance`
+
+The workflow downloads dashboard JSON from this repository's
+`docs/observability/` directory and mounts them into Grafana provisioning. This
+keeps Grafana UI state from being the source of truth for log dashboards.
 
 ## Manual Deploy
 
