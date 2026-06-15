@@ -116,8 +116,12 @@ class LoginService(
     @Transactional
     override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
         val device = sessions.device(principal.deviceId)
-        val user = users.findById(principal.userId).orElseThrow()
-        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).updatePushToken(command.apnsToken, command.apnsEnvironment))
+        device.apply(
+            Account.of(
+                AccountUser(id = principal.userId, status = principal.status),
+                device.toAccountDevice(),
+            ).updatePushToken(command.apnsToken, command.apnsEnvironment)
+        )
     }
 
     @Transactional

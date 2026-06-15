@@ -4,6 +4,7 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.auth.domain.entity.DeviceEntity
 import com.buddystuddy.auth.domain.entity.UserDeviceEntity
 import com.buddystuddy.backend.auth.application.port.inbound.EmailLoginCommand
+import com.buddystuddy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystuddy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
 import com.buddystuddy.backend.auth.application.port.outbound.EmailVerificationCodePort
@@ -68,6 +69,20 @@ class LoginServiceEmailVerificationTest {
 
         assertThat(response.accessToken).isNotBlank()
         assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `push token update reuses principal user status`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        users.findByIdCalls = 0
+
+        login.updatePushToken(
+            Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS"),
+            PushTokenCommand(apnsToken = "apns-token", apnsEnvironment = "sandbox"),
+        )
+
+        assertThat(devices.findByDeviceId(device.deviceId)?.apnsToken).isEqualTo("apns-token")
+        assertThat(users.findByIdCalls).isZero()
     }
 
     @Test
