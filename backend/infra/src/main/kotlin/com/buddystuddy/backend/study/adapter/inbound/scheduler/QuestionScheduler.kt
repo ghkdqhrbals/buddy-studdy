@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.study.adapter.inbound.scheduler
 
+import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
@@ -36,10 +37,12 @@ class QuestionScheduler(
     fun runScheduled() {
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
+        val usersById = mutableMapOf<Long, UserEntity?>()
+        val recentQuestionsByUserId = mutableMapOf<Long, List<String>>()
         studies.findDue(now, PageRequest.of(0, 50)).forEach { study ->
             try {
                 val userId = study.userId
-                val user = users.findById(userId).orElse(null)
+                val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
                 val appLanguage = user?.appLanguage ?: "ko"
                 val pending = questions.countPendingForStudy(study.id)
                 if (pending >= properties.scheduler.maxPendingPerStudy) {
@@ -56,7 +59,9 @@ class QuestionScheduler(
                     study.updatedAt = now
                     return@forEach
                 }
-                val recent = questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+                val recent = recentQuestionsByUserId.getOrPut(userId) {
+                    questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+                }
                 val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
                 val saved = questions.save(
                     QuestionEntity(
