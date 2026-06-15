@@ -35,9 +35,10 @@ class StudyServiceTest {
     private val questionStats = FakeQuestionStatsPort()
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
+    private val serviceStudies = FakeStudyPort()
     private val service = StudyService(
         properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" },
-        studies = FakeStudyPort(),
+        studies = serviceStudies,
         questions = questions,
         questionStats = questionStats,
         openAI = openAI,
@@ -111,6 +112,27 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `create question reuses loaded user for search sync`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 77,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Kotlin",
+            difficultyLevel = 6,
+            intervalMinutes = 15,
+            customPrompt = "Keep it short.",
+            openaiModel = "gpt-5.4",
+        )
+
+        val response = service.createQuestion(principal, studyId = 77)
+
+        assertThat(response.question.question).isEqualTo("Question")
+        assertThat(openAI.generateCalls).isEqualTo(1)
+        assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `publicity reads question stats only for final response`() {
         questions.visibleRows += gradedQuestion(id = 401, topic = "Swift")
         questionStats.rows += QuestionStatsEntity(questionId = 401, likeCount = 2)
@@ -153,7 +175,13 @@ class StudyServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val visibleRows = mutableListOf<QuestionEntity>()
         val pendingRows = mutableListOf<QuestionEntity>()
-        override fun save(entity: QuestionEntity): QuestionEntity = entity
+        override fun save(entity: QuestionEntity): QuestionEntity {
+            if (entity.id == 0L) {
+                entity.id = ((visibleRows + pendingRows).maxOfOrNull { it.id } ?: 0L) + 1
+            }
+            visibleRows += entity
+            return entity
+        }
         override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.empty()
         override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
             (visibleRows + pendingRows).firstOrNull { it.id == id && it.userId == userId && it.deletedAt == null }
@@ -196,9 +224,11 @@ class StudyServiceTest {
     }
 
     private class FakeStudyPort : StudyPort {
+        val rows = mutableListOf<StudyEntity>()
         override fun save(entity: StudyEntity): StudyEntity = entity
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
-        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = null
+        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
+            rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
         override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> = emptyList()
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
@@ -222,9 +252,13 @@ class StudyServiceTest {
 
     private class FakeOpenAI : OpenAIPort {
         var gradeCalls = 0
+        var generateCalls = 0
         override fun validate(apiKey: String) = Unit
-        override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>) =
-            GeneratedQuestion("Question", null)
+        override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion {
+            generateCalls += 1
+            assertThat(language).isEqualTo("en")
+            return GeneratedQuestion("Question", null)
+        }
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
             gradeCalls += 1
             assertThat(language).isEqualTo("en")
