@@ -181,6 +181,19 @@ class UserStatsRepository(
                 difficulty_level,
                 claimed_updated_at
             )
+            with claimed as (
+                select
+                    id,
+                    user_id,
+                    stat_date,
+                    topic_key,
+                    difficulty_level,
+                    updated_at
+                from user_stats_dirty_keys
+                order by updated_at asc, id asc
+                limit :limit
+                for update skip locked
+            )
             select
                 id,
                 user_id,
@@ -188,10 +201,7 @@ class UserStatsRepository(
                 topic_key,
                 difficulty_level,
                 updated_at
-            from user_stats_dirty_keys
-            order by updated_at asc, id asc
-            limit :limit
-            for update skip locked
+            from claimed
             """.trimIndent(),
             MapSqlParameterSource().addValue("limit", limit),
         )
