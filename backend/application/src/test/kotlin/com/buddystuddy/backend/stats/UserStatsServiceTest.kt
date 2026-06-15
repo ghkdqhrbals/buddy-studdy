@@ -41,6 +41,8 @@ class UserStatsServiceTest {
         assertThat(sameDay.scoreSum).isEqualTo(140)
         assertThat(sameDay.bestScore).isEqualTo(80)
         assertThat(sameDay.correctCount).isEqualTo(1)
+        assertThat(userStats.replaceAllCalls).isZero()
+        assertThat(userStats.syncAllCalls).isEqualTo(1)
     }
 
     @Test
@@ -113,7 +115,17 @@ class UserStatsServiceTest {
 
     private class FakeUserStatsPort : UserStatsPort {
         val rows = mutableListOf<UserStatsEntity>()
+        var replaceAllCalls = 0
+        var syncAllCalls = 0
+
         override fun replaceAll(rows: Collection<UserStatsEntity>) {
+            replaceAllCalls += 1
+            this.rows.clear()
+            this.rows.addAll(rows)
+        }
+
+        override fun syncAll(rows: Collection<UserStatsEntity>) {
+            syncAllCalls += 1
             this.rows.clear()
             this.rows.addAll(rows)
         }

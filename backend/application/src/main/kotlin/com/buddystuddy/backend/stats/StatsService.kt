@@ -123,7 +123,7 @@ class StatsRefreshService(
             .filter { it.userId != null && it.deletedAt == null && it.score != null }
             .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
             .map { (key, questions) -> key.toEntity(questions, now) }
-        userStats.replaceAll(rows)
+        userStats.syncAll(rows)
     }
 
     private fun StatsBucketKey.toEntity(rows: List<QuestionEntity>, now: Instant): UserStatsEntity {
