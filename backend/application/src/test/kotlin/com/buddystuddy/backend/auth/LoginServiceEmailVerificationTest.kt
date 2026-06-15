@@ -75,6 +75,8 @@ class LoginServiceEmailVerificationTest {
         assertThat(user?.passwordHash).isEqualTo(sha256("password123"))
         assertThat(response.profile.displayName).isEqualTo("new")
         assertThat(emailCodes.consumed).isTrue()
+        assertThat(roles.grantRoleCalls).isEqualTo(2)
+        assertThat(roles.grantRoleCallsFor(user!!.id, "REGISTERED_USER")).isEqualTo(1)
     }
 
     @Test
@@ -185,12 +187,19 @@ class LoginServiceEmailVerificationTest {
 
     private class InMemoryRoleAssignmentPort : RoleAssignmentPort {
         private val roles = mutableSetOf<Pair<Long, String>>()
+        private val calls = mutableListOf<Pair<Long, String>>()
+        val grantRoleCalls: Int
+            get() = calls.size
 
         override fun grantRoleIfMissing(userId: Long, roleCode: String) {
+            calls += userId to roleCode
             roles += userId to roleCode
         }
 
         override fun countUserRoles(userId: Long, roleCode: String): Long =
             if (userId to roleCode in roles) 1 else 0
+
+        fun grantRoleCallsFor(userId: Long, roleCode: String): Int =
+            calls.count { it == userId to roleCode }
     }
 }

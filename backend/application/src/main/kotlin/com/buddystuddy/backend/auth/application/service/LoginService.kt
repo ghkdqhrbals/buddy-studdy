@@ -147,7 +147,6 @@ class LoginService(
                     updatedAt = now,
                 )
             )
-            roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         } else if (user.passwordHash != sha256(command.password)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
