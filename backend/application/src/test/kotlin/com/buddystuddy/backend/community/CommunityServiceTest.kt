@@ -66,6 +66,20 @@ class CommunityServiceTest {
         assertThat(likes.findLikedQuestionIdsCalls).isEqualTo(1)
     }
 
+    @Test
+    fun `liking a public question increments stats without recounting likes`() {
+        users.rows += UserEntity(id = 10, providerId = "u10", displayName = "Author A")
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
+        questionStats.rows += QuestionStatsEntity(questionId = 100, likeCount = 3, commentCount = 1, viewCount = 20)
+
+        val response = service.setLike(principal, id = 100, liked = true)
+
+        assertThat(response.likeCount).isEqualTo(4)
+        assertThat(response.isLikedByMe).isTrue()
+        assertThat(questionStats.incrementLikeCalls).isEqualTo(1)
+        assertThat(questionStats.findByIdCalls).isEqualTo(1)
+    }
+
     private fun publicQuestion(id: Long, userId: Long, topic: String) = QuestionEntity(
         id = id,
         deviceId = "dev-1",
@@ -136,6 +150,7 @@ class CommunityServiceTest {
         val rows = mutableListOf<QuestionStatsEntity>()
         var findByIdCalls = 0
         var findAllByIdsCalls = 0
+        var incrementLikeCalls = 0
 
         override fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
         override fun findById(id: Long): Optional<QuestionStatsEntity> {
@@ -149,7 +164,13 @@ class CommunityServiceTest {
         }
 
         override fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
+        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int {
+            incrementLikeCalls += 1
+            val row = rows.firstOrNull { it.questionId == questionId } ?: return 0
+            row.likeCount = maxOf(0, row.likeCount + delta)
+            row.updatedAt = now
+            return 1
+        }
         override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
         override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
@@ -159,7 +180,10 @@ class CommunityServiceTest {
         var existsCalls = 0
         var findLikedQuestionIdsCalls = 0
 
-        override fun save(entity: QuestionLikeEntity): QuestionLikeEntity = entity
+        override fun save(entity: QuestionLikeEntity): QuestionLikeEntity {
+            rows += entity
+            return entity
+        }
         override fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean {
             existsCalls += 1
             return rows.any { it.questionId == questionId && it.userId == userId }
@@ -171,7 +195,6 @@ class CommunityServiceTest {
         }
 
         override fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long = 0
-        override fun countByQuestionId(questionId: Long): Long = rows.count { it.questionId == questionId }.toLong()
     }
 
     private class FakeQuestionCommentPort : QuestionCommentPort {

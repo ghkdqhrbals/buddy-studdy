@@ -12,5 +12,4 @@ interface QuestionLikeRepository : JpaRepository<QuestionLikeEntity, Long>, Ques
     @Query("select l.questionId from QuestionLikeEntity l where l.userId = :userId and l.questionId in :questionIds")
     override fun findLikedQuestionIds(@Param("userId") userId: Long, @Param("questionIds") questionIds: Collection<Long>): Set<Long>
     override fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
-    override fun countByQuestionId(questionId: Long): Long
 }

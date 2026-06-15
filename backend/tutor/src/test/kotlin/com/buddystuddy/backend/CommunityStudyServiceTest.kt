@@ -155,12 +155,12 @@ class CommunityStudyServiceTest {
         val unliked = community.setLike(principal, q.id, liked = false)
         val unlikedAgain = community.setLike(principal, q.id, liked = false)
 
-        assertThat(liked.likeCount).isEqualTo(1)
-        assertThat(likedAgain.likeCount).isEqualTo(1)
-        assertThat(unliked.likeCount).isEqualTo(0)
-        assertThat(unlikedAgain.likeCount).isEqualTo(0)
+        assertThat(liked.likeCount).isEqualTo(4)
+        assertThat(likedAgain.likeCount).isEqualTo(4)
+        assertThat(unliked.likeCount).isEqualTo(3)
+        assertThat(unlikedAgain.likeCount).isEqualTo(3)
         assertThat(likes.existsByQuestionIdAndUserId(q.id, viewer.id)).isFalse()
-        assertThat(stats.findById(q.id).orElseThrow().likeCount).isEqualTo(0)
+        assertThat(stats.findById(q.id).orElseThrow().likeCount).isEqualTo(3)
     }
 
     @Test

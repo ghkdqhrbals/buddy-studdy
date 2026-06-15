@@ -87,15 +87,20 @@ class CommunityService(
     @Transactional
     override fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
         publicAnsweredQuestion(id)
+        var changed = false
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
                 likes.save(QuestionLikeEntity(questionId = id, userId = principal.userId))
+                changed = true
             }
         } else {
-            likes.deleteByQuestionIdAndUserId(id, principal.userId)
+            changed = likes.deleteByQuestionIdAndUserId(id, principal.userId) > 0
         }
-        val likeCount = likes.countByQuestionId(id).toInt()
-        overwriteLikeCount(id, likeCount)
+        val likeCount = if (changed) {
+            incrementLikeCount(id, if (liked) 1 else -1)
+        } else {
+            currentLikeCount(id)
+        }
         return CommunityLikeResponse(id.toString(), likeCount, liked)
     }
 
@@ -173,12 +178,22 @@ class CommunityService(
         questions.findPublicAnsweredById(id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
 
-    private fun overwriteLikeCount(questionId: Long, likeCount: Int) {
+    private fun incrementLikeCount(questionId: Long, delta: Int): Int {
         val now = Instant.now()
-        if (questionStats.setLikeCount(questionId, likeCount, now) == 0) {
-            questionStats.save(QuestionStatsEntity(questionId = questionId, likeCount = likeCount, updatedAt = now))
+        if (questionStats.incrementLike(questionId, delta, now) == 0) {
+            return questionStats.save(
+                QuestionStatsEntity(
+                    questionId = questionId,
+                    likeCount = maxOf(0, delta),
+                    updatedAt = now,
+                )
+            ).likeCount
         }
+        return currentLikeCount(questionId)
     }
+
+    private fun currentLikeCount(questionId: Long): Int =
+        questionStats.findById(questionId).map { it.likeCount }.orElse(0)
 
     private fun incrementCommentCount(questionId: Long, delta: Int) {
         val now = Instant.now()

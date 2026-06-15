@@ -12,7 +12,6 @@ interface QuestionLikePort {
     fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
     fun findLikedQuestionIds(userId: Long, questionIds: Collection<Long>): Set<Long>
     fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
-    fun countByQuestionId(questionId: Long): Long
 }
 
 interface QuestionCommentPort {
