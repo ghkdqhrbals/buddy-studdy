@@ -1,0 +1,14 @@
+{
+  "resources": {
+    "includes": [],
+    "excludes": []
+  },
+  "bundles": [
+    {
+      "name": "org.springframework.security.messages"
+    },
+    {
+      "name": "sun.util.resources.LocaleNames"
+    }
+  ]
+}

@@ -3,7 +3,39 @@ plugins {
     kotlin("plugin.spring")
     id("org.springframework.boot")
     id("io.spring.dependency-management")
+    id("org.graalvm.buildtools.native")
     jacoco
+}
+
+tasks.register("patchNativeReachabilityMetadata") {
+    val aotMetadata = layout.buildDirectory.file("resources/aot/META-INF/native-image/com.buddystuddy/tutor/reachability-metadata.json")
+    dependsOn("processAotResources")
+    inputs.file(aotMetadata)
+    outputs.file(aotMetadata)
+
+    doLast {
+        val file = aotMetadata.get().asFile
+        if (!file.exists()) {
+            return@doLast
+        }
+        val text = file.readText()
+        val patched = text
+            .replace(
+                Regex("""(?s),\s*\{\s*"bundle"\s*:\s*"org\.springframework\.security\.messages"\s*\}"""),
+                "",
+            )
+            .replace(
+                Regex("""(?s),\s*\{\s*"bundle"\s*:\s*"sun\.util\.resources\.LocaleNames"\s*\}"""),
+                "",
+            )
+        if (patched != text) {
+            file.writeText(patched)
+        }
+    }
+}
+
+tasks.named("generateResourcesConfigFile") {
+    dependsOn("patchNativeReachabilityMetadata")
 }
 
 java {
@@ -68,5 +100,16 @@ tasks.jacocoTestReport {
     reports {
         xml.required.set(true)
         html.required.set(true)
+    }
+}
+
+graalvmNative {
+    binaries {
+        named("main") {
+            imageName.set("buddystuddy-backend")
+            buildArgs.add("--no-fallback")
+            buildArgs.add("--parallelism=2")
+            buildArgs.add("-Ob")
+        }
     }
 }
