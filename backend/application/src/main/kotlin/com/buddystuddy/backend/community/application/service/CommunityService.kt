@@ -59,7 +59,8 @@ class CommunityService(
         } else {
             questions.findPublicAnsweredByQuery(search, pageable)
         }
-        val rows = page.content.map { community(it, principal) }
+        val context = communityContext(page.content, principal)
+        val rows = page.content.map { community(it, context) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
@@ -70,7 +71,9 @@ class CommunityService(
             return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
         }
         val questionsById = questions.findPublicAnsweredByIds(result.questionIds).associateBy { it.id }
-        val rows = result.questionIds.mapNotNull { id -> questionsById[id]?.let { community(it, principal) } }
+        val orderedQuestions = result.questionIds.mapNotNull { questionsById[it] }
+        val context = communityContext(orderedQuestions, principal)
+        val rows = orderedQuestions.map { community(it, context) }
         return CommunityQuestionsResponse(rows, result.totalCount, limit, offset)
     }
 
@@ -78,7 +81,7 @@ class CommunityService(
     override fun getPublicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
         reactions.publishViewed(id, principal?.userId)
-        return community(q, principal)
+        return community(q, communityContext(listOf(q), principal))
     }
 
     @Transactional
@@ -148,10 +151,21 @@ class CommunityService(
         )
     }
 
-    private fun community(q: QuestionEntity, principal: Principal?): CommunityQuestionResponse {
-        val author = q.userId?.let { users.findById(it).orElse(null)?.toAuthorProjection() }
-        val stats = questionStats.findById(q.id).orElse(null)
-        val liked = principal?.let { likes.existsByQuestionIdAndUserId(q.id, it.userId) } ?: false
+    private fun communityContext(questions: List<QuestionEntity>, principal: Principal?): CommunityContext {
+        if (questions.isEmpty()) return CommunityContext()
+        val userIds = questions.mapNotNull { it.userId }.distinct()
+        val questionIds = questions.map { it.id }
+        return CommunityContext(
+            authorsById = users.findAllById(userIds).associateBy { it.id },
+            statsByQuestionId = questionStats.findAllByIds(questionIds).associateBy { it.questionId },
+            likedQuestionIds = principal?.let { likes.findLikedQuestionIds(it.userId, questionIds) }.orEmpty(),
+        )
+    }
+
+    private fun community(q: QuestionEntity, context: CommunityContext): CommunityQuestionResponse {
+        val author = q.userId?.let { context.authorsById[it]?.toAuthorProjection() }
+        val stats = context.statsByQuestionId[q.id]
+        val liked = q.id in context.likedQuestionIds
         return PublicQuestion.of(q.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked).toProjection().toCommunityQuestionResponse()
     }
 
@@ -183,6 +197,12 @@ class CommunityService(
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
     }.toProfile()
 }
+
+private data class CommunityContext(
+    val authorsById: Map<Long, UserEntity> = emptyMap(),
+    val statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
+    val likedQuestionIds: Set<Long> = emptySet(),
+)
 
 private fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
     id = id,
