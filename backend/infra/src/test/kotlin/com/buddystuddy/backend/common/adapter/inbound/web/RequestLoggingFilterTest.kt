@@ -125,6 +125,28 @@ class RequestLoggingFilterTest {
     }
 
     @Test
+    fun `large json response body is logged as truncated metadata`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        val response = MockHttpServletResponse()
+        val records = (1..300).joinToString(",") { index ->
+            """{"id":$index,"question":"question-$index-${"x".repeat(40)}"}"""
+        }
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.contentType = "application/json"
+            servletResponse.writer.write("""{"records":[$records]}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(response.contentAsString).contains("question-300")
+        assertThat(output.out).contains("\"body\":{\"truncated\":true")
+        assertThat(output.out).contains("\"originalChars\":")
+        assertThat(output.out).contains("\"preview\":")
+        assertThat(output.out).doesNotContain("question-300")
+        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+    }
+
+    @Test
     fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) {
         val request = MockHttpServletRequest("GET", "/api/v1/records")
         request.addHeader("X-Forwarded-For", "198.51.100.7, 10.0.0.2")

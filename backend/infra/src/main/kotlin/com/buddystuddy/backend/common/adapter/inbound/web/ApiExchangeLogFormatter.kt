@@ -78,8 +78,13 @@ internal class ApiExchangeLogFormatter(
     private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any? {
         if (bytes.isEmpty()) return ""
         val charset = charsetFor(encoding, contentType)
-        val body = redact(String(bytes, charset)).let {
-            if (it.length > MAX_BODY_CHARS) it.take(MAX_BODY_CHARS) + "...[truncated]" else it
+        val body = redact(String(bytes, charset))
+        if (body.length > MAX_BODY_CHARS) {
+            return mapOf(
+                "truncated" to true,
+                "originalChars" to body.length,
+                "preview" to body.take(MAX_BODY_CHARS) + "...[truncated]",
+            )
         }
         return parseJsonBody(body, contentType)
     }
