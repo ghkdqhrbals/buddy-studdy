@@ -2,7 +2,6 @@ package com.buddystuddy.backend.auth.application.permission
 
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.auth.application.port.outbound.PermissionQueryPort
-import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import org.springframework.http.HttpStatus
@@ -11,7 +10,6 @@ import org.springframework.stereotype.Component
 @Component
 class PermissionChecker(
     private val permissions: PermissionQueryPort,
-    private val users: UserPort,
 ) {
     fun check(principal: Principal?, requiredPermissions: Collection<String>) {
         val required = requiredPermissions.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -40,8 +38,7 @@ class PermissionChecker(
         }
 
         val activeRequired = required.any { grantedByCode[it]?.requiresActiveAccount == true }
-        val currentStatus = users.findById(principal.userId).map { it.status }.orElse(principal.status)
-        if (activeRequired && currentStatus in FORBIDDEN_WRITE_STATUSES) {
+        if (activeRequired && principal.status in FORBIDDEN_WRITE_STATUSES) {
             throw ApiException(
                 HttpStatus.FORBIDDEN,
                 ApiErrorCode.ACCOUNT_FORBIDDEN,
