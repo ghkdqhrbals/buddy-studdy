@@ -392,13 +392,9 @@ final class AppState: ObservableObject {
 
     private func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
         switch tab {
-        case .records:
-            return .records
-        case .statistics:
-            return .statistics
         case .study:
             return .studyDetail
-        case .home, .settings:
+        case .home, .records, .statistics, .settings:
             return nil
         }
     }

@@ -1930,8 +1930,9 @@ enum RemotePushBackendError: LocalizedError {
 
     var isPageAccessDenied: Bool {
         switch self {
-        case .httpStatus(_, _, let apiError):
-            return apiError?.code == "PAGE_ACCESS_DENIED"
+        case .httpStatus(let statusCode, _, let apiError):
+            return statusCode == 401
+                || apiError?.code == "PAGE_ACCESS_DENIED"
                 || apiError?.code == "AUTH_GOOGLE_REQUIRED"
                 || apiError?.code == "PERMISSION_DENIED"
                 || apiError?.code == "ACCOUNT_FORBIDDEN"
