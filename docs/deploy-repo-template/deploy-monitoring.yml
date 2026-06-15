@@ -28,8 +28,17 @@ jobs:
             exit 1
           fi
 
-          mkdir -p /opt/buddystuddy-monitoring
-          cd /opt/buddystuddy-monitoring
+          SUDO=""
+          if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+            SUDO="sudo"
+          fi
+
+          monitoring_root="/opt/redis-stream-coordinator"
+          ${SUDO} mkdir -p "${monitoring_root}"
+          if [ -n "${SUDO}" ]; then
+            ${SUDO} chown -R "$(id -u):$(id -g)" "${monitoring_root}"
+          fi
+          cd "${monitoring_root}"
 
           mkdir -p \
             grafana/provisioning/datasources \
