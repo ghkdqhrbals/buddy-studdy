@@ -24,7 +24,8 @@ env:
 jobs:
   build:
     name: Build and Publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     outputs:
       image_ref: ${{ steps.resolve.outputs.image_ref }}
       image_tag: ${{ steps.resolve.outputs.image_tag }}
@@ -65,6 +66,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_REF }}
             ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   notify:
     name: Notify Deploy Repo
