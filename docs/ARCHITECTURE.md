@@ -118,6 +118,13 @@ User answer
 - Simple camelCase boundaries are separated before normalization.
 - The displayed topic is the most frequent/recent label in the merged group.
 - Topic range is estimated from difficulty level and score, then widened by small sample size and conflicting evidence.
+- Backend topic statistics are a materialized read model in `user_stats`.
+- `questions` remains the source of truth. Answer grading and record deletion mark only the affected `(user_id, stat_date, topic_key, difficulty_level)` bucket in `user_stats_dirty_keys`.
+- The refresh job processes dirty keys in bounded batches and recomputes each bucket with PostgreSQL aggregation instead of loading all questions into application memory.
+- Dirty key processing is at-least-once and idempotent: recalculating the same bucket deletes and reinserts only that bucket's `user_stats` rows.
+- Refresh claims dirty rows with `FOR UPDATE SKIP LOCKED`; if the process crashes before commit, the transaction rolls back and the dirty rows remain for the next run.
+- Refresh deletes a dirty row only when its `updated_at` still matches the claimed value. If a new answer/delete updates the same bucket during refresh, the dirty row is kept and retried in a later batch.
+- H2/test environments fall back to a full rebuild path; production PostgreSQL uses incremental dirty-key refresh.
 
 ## Build And Verification
 

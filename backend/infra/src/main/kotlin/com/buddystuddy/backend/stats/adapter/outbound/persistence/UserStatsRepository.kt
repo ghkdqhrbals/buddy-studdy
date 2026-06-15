@@ -161,21 +161,37 @@ class UserStatsRepository(
         jdbc.execute(
             """
             create temporary table if not exists tmp_user_stats_dirty (
+                id bigint not null,
                 user_id bigint not null,
                 stat_date date not null,
                 topic_key varchar(255) not null,
-                difficulty_level integer not null
+                difficulty_level integer not null,
+                claimed_updated_at timestamp with time zone not null
             ) on commit drop
             """.trimIndent(),
         )
         jdbc.update("truncate table tmp_user_stats_dirty")
         namedJdbc.update(
             """
-            insert into tmp_user_stats_dirty (user_id, stat_date, topic_key, difficulty_level)
-            select user_id, stat_date, topic_key, difficulty_level
+            insert into tmp_user_stats_dirty (
+                id,
+                user_id,
+                stat_date,
+                topic_key,
+                difficulty_level,
+                claimed_updated_at
+            )
+            select
+                id,
+                user_id,
+                stat_date,
+                topic_key,
+                difficulty_level,
+                updated_at
             from user_stats_dirty_keys
             order by updated_at asc, id asc
             limit :limit
+            for update skip locked
             """.trimIndent(),
             MapSqlParameterSource().addValue("limit", limit),
         )
@@ -248,10 +264,8 @@ class UserStatsRepository(
             """
             delete from user_stats_dirty_keys source
             using tmp_user_stats_dirty dirty
-            where source.user_id = dirty.user_id
-              and source.stat_date = dirty.stat_date
-              and source.topic_key = dirty.topic_key
-              and source.difficulty_level = dirty.difficulty_level
+            where source.id = dirty.id
+              and source.updated_at = dirty.claimed_updated_at
             """.trimIndent(),
         )
         return dirtyCount
