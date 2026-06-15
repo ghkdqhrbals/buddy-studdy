@@ -29,6 +29,8 @@ data class BuddyStuddyProperties(
         var pushPrefix: String = "push-v1",
         var viewPrefix: String = "view-content-v1",
         var maxLen: Long = 100_000,
+        var viewQueueCapacity: Int = 20_000,
+        var viewPublisherConcurrency: Int = 4,
     )
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")

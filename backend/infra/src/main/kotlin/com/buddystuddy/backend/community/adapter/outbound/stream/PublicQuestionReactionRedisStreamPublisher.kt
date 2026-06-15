@@ -43,7 +43,7 @@ class PublicQuestionReactionRedisStreamPublisher(
         fields: Map<String, String>,
     ): Boolean =
         try {
-            logger.info(
+            logger.debug(
                 "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} questionId={} userId={} fieldKeys={}",
                 prefix,
                 fields["eventId"],
@@ -58,7 +58,7 @@ class PublicQuestionReactionRedisStreamPublisher(
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
-            logger.info(
+            logger.debug(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} questionId={} userId={}",
                 published.streamKey,
                 published.recordId,
@@ -84,7 +84,7 @@ class PublicQuestionReactionRedisStreamPublisher(
         }
 
     private fun logPublishSkipped(reason: String, prefix: String, eventType: String, questionId: Long, userId: Long?) {
-        logger.info(
+        logger.debug(
             "redis_stream_publish_skipped reason={} prefix={} eventType={} questionId={} userId={}",
             reason,
             prefix,

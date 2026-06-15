@@ -32,7 +32,7 @@ class QuestionStatsStreamListener(
 
     private fun consume(listenerId: String, message: ConsumedRedisStreamMessage, block: () -> Unit) {
         try {
-            logger.info(
+            logger.debug(
                 "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} fieldKeys={}",
                 listenerId,
                 message.streamKey,
@@ -45,7 +45,7 @@ class QuestionStatsStreamListener(
             )
             block()
             message.ack()
-            logger.info(
+            logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={}",
                 listenerId,
                 message.streamKey,
@@ -81,7 +81,7 @@ class QuestionStatsStreamEventHandler(
     @Transactional
     fun processViewEvent(fields: Map<String, String>) {
         val questionId = fields.questionIdOrNull() ?: run {
-            logger.info(
+            logger.debug(
                 "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
                 fields["eventId"],
                 fields["eventType"],
@@ -90,7 +90,7 @@ class QuestionStatsStreamEventHandler(
             return
         }
         increment(questionId) { stats.incrementView(questionId, 1, Instant.now()) }
-        logger.info(
+        logger.debug(
             "question_stats_event_applied eventId={} eventType={} questionId={} deltaField={}",
             fields["eventId"],
             fields["eventType"] ?: "CONTENT_VIEWED",
@@ -107,7 +107,7 @@ class QuestionStatsStreamEventHandler(
     }
 
     private fun logApplied(fields: Map<String, String>, questionId: Long, deltaField: String, delta: Int) {
-        logger.info(
+        logger.debug(
             "question_stats_event_applied eventId={} eventType={} questionId={} userId={} deltaField={} delta={}",
             fields["eventId"],
             fields["eventType"],
