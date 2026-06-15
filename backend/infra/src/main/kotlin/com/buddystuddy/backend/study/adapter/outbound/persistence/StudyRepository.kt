@@ -13,6 +13,13 @@ interface StudyRepository : JpaRepository<StudyEntity, Long>, StudyPort {
     override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
+
+    @Query("select s from StudyEntity s where s.userId = :userId and s.topic in :topics")
+    override fun findByUserIdAndTopics(
+        @Param("userId") userId: Long,
+        @Param("topics") topics: Collection<String>,
+    ): List<StudyEntity>
+
     override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
 
     @Query(

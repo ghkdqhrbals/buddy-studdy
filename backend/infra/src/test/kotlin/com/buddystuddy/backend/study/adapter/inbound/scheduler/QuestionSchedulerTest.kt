@@ -123,6 +123,8 @@ class QuestionSchedulerTest {
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = null
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
+        override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
+            rows.filter { it.userId == userId && it.topic in topics }
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> = rows.filter { it.nextDueAt?.isAfter(now) != true }

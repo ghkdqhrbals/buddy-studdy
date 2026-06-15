@@ -73,6 +73,8 @@ class StudySyncServiceTest {
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = rows.firstOrNull { it.userId == userId && it.topic == topic }
+        override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
+            rows.filter { it.userId == userId && it.topic in topics }
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =

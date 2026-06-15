@@ -44,9 +44,13 @@ class SettingsService(
             users.save(user)
         }
         var next: Instant? = null
+        val studiesByTopic = studies.findByUserIdAndTopics(principal.userId, items.map { it.topic }.distinct())
+            .associateBy { it.topic }
+            .toMutableMap()
         items.forEach { item ->
-            val study = studies.findByUserIdAndTopic(principal.userId, item.topic)
-                ?: StudyEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
+            val study = studiesByTopic.getOrPut(item.topic) {
+                StudyEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
+            }
             study.deviceId = principal.deviceId
             study.apply(StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
@@ -62,7 +66,9 @@ class SettingsService(
                 anonymous = principal.anonymous,
                 now = now,
             ))
-            next = studies.save(study).nextDueAt
+            val saved = studies.save(study)
+            studiesByTopic[item.topic] = saved
+            next = saved.nextDueAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)
     }
