@@ -10,13 +10,11 @@ The public API domain is `https://api.ghkdqhrbals.org`.
 
 Backend deploy:
 
-- `EC2_HOST`
-- `EC2_USER`
-- `EC2_SSH_PRIVATE_KEY`
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
 - `BACKEND_MASTER_KEY`
 - `BACKEND_API_TOKEN`
+- `REDIS_STREAM_COORDINATOR_PASSWORD`
 - `APNS_AUTH_KEY_BASE64`
 - `APNS_KEY_ID`
 - `APNS_TEAM_ID`
@@ -34,6 +32,7 @@ Monitoring deploy:
 - `buddystuddy-nginx`: public HTTPS proxy on host port `443`.
 - `buddystuddy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
 - `buddystuddy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
+- `rsc-coordinator`: Redis Stream Coordinator on Docker network port `8080`, deployed from a GHCR native-image artifact.
 - `buddystuddy-db`: private PostgreSQL container on Docker network port `5432`.
 - `buddystuddy-postgres-data`: persistent Docker volume for PostgreSQL data.
 - `buddystuddy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
@@ -49,6 +48,10 @@ Monitoring deploy:
 Monitoring is deployed separately from backend image rollout. Copy
 `deploy-monitoring.yml` into the deploy repository's `.github/workflows/`
 directory and run **Deploy BuddyStuddy Monitoring** manually.
+
+Monitoring is PLG only: Promtail, Loki, and Grafana. Prometheus and Redis
+exporter containers are explicitly removed by the workflow so they do not
+consume memory or disk I/O on the small EC2 host.
 
 The workflow creates or replaces:
 
@@ -68,19 +71,27 @@ keeps Grafana UI state from being the source of truth for log dashboards.
 
 ## Manual Deploy
 
-Run the `Deploy Backend to EC2` workflow and provide the image ref, for example:
+Run the `Deploy BuddyStudy Backend` workflow and provide the backend image ref,
+for example:
 
 ```text
 ghcr.io/ghkdqhrbals/buddy-studdy-backend:latest
 ```
 
-Optional coordinator route:
+Optionally override the Redis Stream Coordinator native image ref:
 
 ```text
-COORDINATOR_BACKEND_URL=http://redis-coordinator:8080
+ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest
 ```
 
-`coordinator.ghkdqhrbals.org` must resolve to the same EC2 host before deployment so Let's Encrypt can issue a certificate that includes both API and coordinator hostnames.
+Backend and coordinator container images must be built on GitHub-hosted
+runners and pushed to GHCR before this workflow runs. The self-hosted EC2
+runner must only pull those images and run containers; it must not compile
+backend code or build Docker images.
+
+`coordinator.ghkdqhrbals.org` must resolve to the same EC2 host before
+deployment so Let's Encrypt can issue a certificate that includes both API and
+coordinator hostnames.
 
 The deploy process uses a blue/green rolling pattern:
 

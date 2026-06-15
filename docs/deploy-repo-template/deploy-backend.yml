@@ -10,6 +10,11 @@ on:
         description: "Image ref to deploy."
         required: true
         type: string
+      coordinator_image:
+        description: "Redis Stream Coordinator image ref to deploy. Leave empty to keep the current default."
+        required: false
+        default: "ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest"
+        type: string
 
 concurrency:
   group: deploy-backend
@@ -22,6 +27,7 @@ jobs:
     timeout-minutes: 20
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      COORDINATOR_IMAGE_REF: ${{ github.event.client_payload.coordinator_image || inputs.coordinator_image || 'ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
       COORDINATOR_DOMAIN: coordinator.ghkdqhrbals.org
 
@@ -48,6 +54,7 @@ jobs:
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
           APNS_ENV: ${{ secrets.APNS_ENV }}
+          REDIS_STREAM_COORDINATOR_PASSWORD: ${{ secrets.REDIS_STREAM_COORDINATOR_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -101,6 +108,7 @@ jobs:
           APNS_ENV=${APNS_ENV}
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
+          REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD}
           ENV
           chmod 600 .env
 
@@ -113,13 +121,31 @@ jobs:
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           docker pull "${IMAGE_REF}"
+          docker pull "${COORDINATOR_IMAGE_REF}"
           docker pull nginx:1.27-alpine
           docker pull postgres:16-alpine
           docker pull certbot/certbot:v2.11.0
           docker pull curlimages/curl:8.11.0
 
           docker network create buddystuddy-net >/dev/null 2>&1 || true
+          docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
           docker volume create buddystuddy-postgres-data >/dev/null
+
+          docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
+
+          docker rm -f rsc-coordinator >/dev/null 2>&1 || true
+          docker run -d \
+            --name rsc-coordinator \
+            --network redis-stream-coordinator-net \
+            --restart unless-stopped \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            -e AWS_REGION=ap-northeast-2 \
+            -e AWS_SECRET_ID=${APP_SECRET_ID} \
+            -e REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD} \
+            -p 18080:8080 \
+            "${COORDINATOR_IMAGE_REF}"
+
+          docker network connect buddystuddy-net rsc-coordinator >/dev/null 2>&1 || true
 
           docker rm -f buddystuddy-caddy >/dev/null 2>&1 || true
           if docker inspect buddystuddy-db >/dev/null 2>&1; then

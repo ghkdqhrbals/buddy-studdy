@@ -164,6 +164,15 @@ jobs:
           docker pull grafana/promtail:3.3.2
           docker pull grafana/grafana:11.4.0
 
+          docker rm -f \
+            rsc-prometheus \
+            redis-exporter-6379 \
+            redis-exporter-6380 \
+            redis-exporter-6381 \
+            buddystuddy-loki \
+            buddystuddy-promtail \
+            >/dev/null 2>&1 || true
+
           docker rm -f rsc-loki rsc-promtail rsc-grafana >/dev/null 2>&1 || true
 
           docker run -d \

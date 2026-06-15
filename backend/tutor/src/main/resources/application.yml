@@ -87,4 +87,4 @@ buddystuddy:
 redis-stream-coordinator:
   coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
   username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
-#  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:${REDIS_STREAM_COORDINATOR_PASSWORD:}}
+  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:${REDIS_STREAM_COORDINATOR_PASSWORD:}}
