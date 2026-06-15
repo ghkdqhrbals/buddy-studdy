@@ -183,6 +183,29 @@ class UserStatsServiceTest {
         assertThat(questions.findGradedByUserAndTopicsCalls).isZero()
     }
 
+    @Test
+    fun `stats skips record stats lookup when selected topics have no latest records`() {
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "redis",
+            topic = "Redis",
+            difficultyLevel = 4,
+            responseCount = 1,
+            scoreCount = 1,
+            scoreSum = 90,
+            bestScore = 90,
+            correctCount = 1,
+            latestAt = Instant.parse("2026-06-10T08:00:00Z"),
+        )
+
+        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+
+        assertThat(response.topics.single().records).isEmpty()
+        assertThat(questions.findLatestGradedByUserAndTopicsCalls).isEqualTo(1)
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
     private fun gradedQuestion(
         topic: String,
         difficultyLevel: Int,

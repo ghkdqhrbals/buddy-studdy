@@ -106,7 +106,11 @@ class StatsService(
             aliases,
             perTopicLimit = 20,
         )
-        val statsByQuestionId = stats.findAllByIds(records.map { it.id }).associateBy { it.questionId }
+        val statsByQuestionId = records
+            .map { it.id }
+            .takeIf { it.isNotEmpty() }
+            ?.let { stats.findAllByIds(it).associateBy { stat -> stat.questionId } }
+            .orEmpty()
         return records
             .groupBy { normalizedTopic(it.topic) }
             .mapValues { (_, topicRecords) ->
