@@ -1,7 +1,6 @@
 package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.auth.Principal
-import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.backend.stats.application.model.StatsQuery
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
@@ -9,13 +8,16 @@ import com.buddystuddy.backend.stats.application.model.TopicStatsResponse
 import com.buddystuddy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystuddy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystuddy.backend.stats.application.port.outbound.UserStatsPort
+import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
-import com.buddystuddy.study.domain.StudyRecord
-import com.buddystuddy.study.domain.StudyRecordState
-import com.buddystuddy.study.domain.StudyRecordStats
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.stats.domain.entity.UserStatsEntity
+import com.buddystuddy.study.domain.StudyRecord
+import com.buddystuddy.study.domain.StudyRecordState
+import com.buddystuddy.study.domain.StudyRecordStats
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import java.text.Normalizer
@@ -37,11 +39,14 @@ class StatsService(
         val bounds = query.dateBounds()
         val rows = userStats.findByUser(userId, bounds.startDate, bounds.endDate, query.search?.trim()?.takeIf { it.isNotEmpty() })
         val grouped = rows.groupBy { it.topicKey }
-        val topics = grouped.values
+        val selectedGroups = grouped.values
             .sortedWith(compareByDescending<List<UserStatsEntity>> { it.sumOf(UserStatsEntity::responseCount) }.thenBy { it.first().topicKey })
             .drop(offset)
             .take(limit)
-            .map { rows -> topicStats(rows) }
+        val latestRecordsByTopicKey = latestRecordsByTopicKey(userId, selectedGroups)
+        val topics = selectedGroups.map { topicRows ->
+            topicStats(topicRows, latestRecordsByTopicKey[topicRows.first().topicKey].orEmpty())
+        }
         return StatsResponse(
             totalResponses = rows.sumOf { it.responseCount },
             totalTopics = grouped.size,
@@ -53,7 +58,7 @@ class StatsService(
         )
     }
 
-    private fun topicStats(rows: List<UserStatsEntity>): TopicStatsResponse {
+    private fun topicStats(rows: List<UserStatsEntity>, records: List<StudyRecordResponse>): TopicStatsResponse {
         val responseCount = rows.sumOf { it.responseCount }
         val scoreCount = rows.sumOf { it.scoreCount }
         val scoreSum = rows.sumOf { it.scoreSum }
@@ -83,16 +88,36 @@ class StatsService(
                 upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
             ),
             latestAt = rows.maxOf { it.latestAt },
-            records = latestRecords(rows.first().userId, aliases),
+            records = records,
         )
     }
 
-    private fun latestRecords(userId: Long, topics: List<String>) =
-        questions.findGradedByUserAndTopics(userId, topics, PageRequest.of(0, 20))
-            .content
-            .map { it.toStudyRecord().toProjection().toRecordResponse() }
+    private fun latestRecordsByTopicKey(
+        userId: Long,
+        topicGroups: List<List<UserStatsEntity>>,
+    ): Map<String, List<StudyRecordResponse>> {
+        if (topicGroups.isEmpty()) return emptyMap()
+        val aliases = topicGroups.flatMap { rows ->
+            rows.sortedByDescending { it.responseCount }.map { it.topic }.distinct()
+        }.distinct()
+        if (aliases.isEmpty()) return emptyMap()
+        val records = questions.findGradedByUserAndTopics(
+            userId,
+            aliases,
+            PageRequest.of(0, (topicGroups.size * 20).coerceAtLeast(20)),
+        ).content
+        val statsByQuestionId = stats.findAllByIds(records.map { it.id }).associateBy { it.questionId }
+        return records
+            .groupBy { normalizedTopic(it.topic) }
+            .mapValues { (_, topicRecords) ->
+                topicRecords
+                    .sortedByDescending { it.answeredAt ?: it.createdAt }
+                    .take(20)
+                    .map { it.toStudyRecord(statsByQuestionId[it.id]).toProjection().toRecordResponse() }
+            }
+    }
 
-    private fun QuestionEntity.toStudyRecord() = StudyRecord.of(
+    private fun QuestionEntity.toStudyRecord(statsEntity: QuestionStatsEntity?) = StudyRecord.of(
         StudyRecordState(
             id = id,
             question = question,
@@ -108,7 +133,7 @@ class StatsService(
             answeredAt = answeredAt,
             publicQuestion = publicQuestion,
         ),
-        stats.findById(id).orElse(null)?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
+        statsEntity?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )
 
 }

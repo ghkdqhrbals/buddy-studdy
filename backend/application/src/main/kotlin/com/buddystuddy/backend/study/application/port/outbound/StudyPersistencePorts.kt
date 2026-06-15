@@ -53,6 +53,7 @@ interface QuestionPort {
 interface QuestionStatsPort {
     fun save(entity: QuestionStatsEntity): QuestionStatsEntity
     fun findById(id: Long): Optional<QuestionStatsEntity>
+    fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity>
     fun incrementView(questionId: Long, delta: Int, now: Instant): Int
     fun incrementLike(questionId: Long, delta: Int, now: Instant): Int
     fun incrementComment(questionId: Long, delta: Int, now: Instant): Int

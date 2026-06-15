@@ -9,6 +9,9 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, QuestionStatsPort {
+    override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> =
+        findAllById(ids)
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """
