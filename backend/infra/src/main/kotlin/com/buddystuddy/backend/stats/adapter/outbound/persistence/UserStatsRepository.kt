@@ -12,7 +12,9 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
+import java.sql.Date
 import java.sql.ResultSet
+import java.sql.Timestamp
 import java.time.LocalDate
 import javax.sql.DataSource
 
@@ -285,7 +287,7 @@ class UserStatsRepository(
             override fun setValues(ps: java.sql.PreparedStatement, i: Int) {
                 val row = this@keysBatchSetter[i]
                 ps.setLong(1, row.userId)
-                ps.setObject(2, row.statDate)
+                ps.setDate(2, Date.valueOf(row.statDate))
                 ps.setString(3, row.topicKey)
                 ps.setInt(4, row.difficultyLevel)
             }
@@ -298,7 +300,7 @@ class UserStatsRepository(
             override fun setValues(ps: java.sql.PreparedStatement, i: Int) {
                 val row = this@upsertBatchSetter[i]
                 ps.setLong(1, row.userId)
-                ps.setObject(2, row.statDate)
+                ps.setDate(2, Date.valueOf(row.statDate))
                 ps.setString(3, row.topicKey)
                 ps.setString(4, row.topic)
                 ps.setInt(5, row.difficultyLevel)
@@ -307,9 +309,9 @@ class UserStatsRepository(
                 ps.setInt(8, row.scoreSum)
                 ps.setInt(9, row.bestScore)
                 ps.setInt(10, row.correctCount)
-                ps.setObject(11, row.latestAt)
-                ps.setObject(12, row.createdAt)
-                ps.setObject(13, row.updatedAt)
+                ps.setTimestamp(11, Timestamp.from(row.latestAt))
+                ps.setTimestamp(12, Timestamp.from(row.createdAt))
+                ps.setTimestamp(13, Timestamp.from(row.updatedAt))
             }
         }
 }
