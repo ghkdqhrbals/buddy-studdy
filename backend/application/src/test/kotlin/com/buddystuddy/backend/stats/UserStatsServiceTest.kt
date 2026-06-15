@@ -3,6 +3,7 @@ package com.buddystuddy.backend.stats
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.stats.application.model.StatsQuery
 import com.buddystuddy.backend.stats.application.port.outbound.UserStatsPort
+import com.buddystuddy.backend.stats.application.port.outbound.UserStatsOverview
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.stats.domain.entity.UserStatsEntity
@@ -87,6 +88,10 @@ class UserStatsServiceTest {
         assertThat(response.topics.map { it.topic }).containsExactly("SwiftUI")
         assertThat(response.topics.single().average).isEqualTo(90)
         assertThat(response.topics.single().levelRange.level).isEqualTo(6)
+        assertThat(userStats.findByUserCalls).isZero()
+        assertThat(userStats.overviewByUserCalls).isEqualTo(1)
+        assertThat(userStats.findTopicKeysByUserCalls).isEqualTo(1)
+        assertThat(userStats.findByUserAndTopicKeysCalls).isEqualTo(1)
     }
 
     @Test
@@ -206,6 +211,10 @@ class UserStatsServiceTest {
         val rows = mutableListOf<UserStatsEntity>()
         var replaceAllCalls = 0
         var syncAllCalls = 0
+        var findByUserCalls = 0
+        var overviewByUserCalls = 0
+        var findTopicKeysByUserCalls = 0
+        var findByUserAndTopicKeysCalls = 0
 
         override fun replaceAll(rows: Collection<UserStatsEntity>) {
             replaceAllCalls += 1
@@ -219,7 +228,50 @@ class UserStatsServiceTest {
             this.rows.addAll(rows)
         }
 
-        override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> =
+        override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> {
+            findByUserCalls += 1
+            return filtered(userId, startDate, endDate, query)
+        }
+
+        override fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview {
+            overviewByUserCalls += 1
+            val rows = filtered(userId, startDate, endDate, query)
+            return UserStatsOverview(
+                totalResponses = rows.sumOf { it.responseCount },
+                totalTopics = rows.map { it.topicKey }.distinct().size.toLong(),
+            )
+        }
+
+        override fun findTopicKeysByUser(
+            userId: Long,
+            startDate: LocalDate?,
+            endDate: LocalDate?,
+            query: String?,
+            limit: Int,
+            offset: Int,
+        ): List<String> {
+            findTopicKeysByUserCalls += 1
+            return filtered(userId, startDate, endDate, query)
+                .groupBy { it.topicKey }
+                .entries
+                .sortedWith(compareByDescending<Map.Entry<String, List<UserStatsEntity>>> { it.value.sumOf(UserStatsEntity::responseCount) }.thenBy { it.key })
+                .drop(offset)
+                .take(limit)
+                .map { it.key }
+        }
+
+        override fun findByUserAndTopicKeys(
+            userId: Long,
+            startDate: LocalDate?,
+            endDate: LocalDate?,
+            query: String?,
+            topicKeys: Collection<String>,
+        ): List<UserStatsEntity> {
+            findByUserAndTopicKeysCalls += 1
+            return filtered(userId, startDate, endDate, query).filter { it.topicKey in topicKeys }
+        }
+
+        private fun filtered(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> =
             rows.filter { row ->
                 row.userId == userId &&
                     (startDate == null || !row.statDate.isBefore(startDate)) &&

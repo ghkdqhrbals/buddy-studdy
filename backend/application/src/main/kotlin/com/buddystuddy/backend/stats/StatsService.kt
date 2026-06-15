@@ -37,21 +37,21 @@ class StatsService(
 
     private fun stats(userId: Long, limit: Int, offset: Int, query: StatsQuery): StatsResponse {
         val bounds = query.dateBounds()
-        val rows = userStats.findByUser(userId, bounds.startDate, bounds.endDate, query.search?.trim()?.takeIf { it.isNotEmpty() })
-        val grouped = rows.groupBy { it.topicKey }
-        val selectedGroups = grouped.values
-            .sortedWith(compareByDescending<List<UserStatsEntity>> { it.sumOf(UserStatsEntity::responseCount) }.thenBy { it.first().topicKey })
-            .drop(offset)
-            .take(limit)
+        val search = query.search?.trim()?.takeIf { it.isNotEmpty() }
+        val overview = userStats.overviewByUser(userId, bounds.startDate, bounds.endDate, search)
+        val selectedTopicKeys = userStats.findTopicKeysByUser(userId, bounds.startDate, bounds.endDate, search, limit, offset)
+        val grouped = userStats.findByUserAndTopicKeys(userId, bounds.startDate, bounds.endDate, search, selectedTopicKeys)
+            .groupBy { it.topicKey }
+        val selectedGroups = selectedTopicKeys.mapNotNull { grouped[it] }
         val latestRecordsByTopicKey = latestRecordsByTopicKey(userId, selectedGroups)
         val topics = selectedGroups.map { topicRows ->
             topicStats(topicRows, latestRecordsByTopicKey[topicRows.first().topicKey].orEmpty())
         }
         return StatsResponse(
-            totalResponses = rows.sumOf { it.responseCount },
-            totalTopics = grouped.size,
+            totalResponses = overview.totalResponses,
+            totalTopics = overview.totalTopics.toInt(),
             topics = topics,
-            totalCount = grouped.size.toLong(),
+            totalCount = overview.totalTopics,
             limit = limit,
             offset = offset,
             generatedAt = Instant.now(),
