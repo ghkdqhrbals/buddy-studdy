@@ -87,7 +87,25 @@ class QuestionSchedulerTest {
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
         assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Kotlin")
         assertThat(questions.countPendingForStudyCalls).isZero()
-        assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+        assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(1)
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+    }
+
+    @Test
+    fun `scheduled run uses batch pending counts when per study pending limit is above one`() {
+        properties.scheduler.maxPendingPerStudy = 2
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
+        studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
+        questions.pendingRows += pendingQuestion(id = 902, studyId = 101, topic = "Swift", now = now.plusSeconds(1))
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
+        assertThat(questions.countPendingForStudyCalls).isZero()
+        assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(1)
     }
 
     private fun study(id: Long, userId: Long, topic: String, now: Instant) = StudyEntity(
@@ -149,6 +167,7 @@ class QuestionSchedulerTest {
         val savedRows = mutableListOf<QuestionEntity>()
         var findVisibleByUserCalls = 0
         var countPendingForStudyCalls = 0
+        var countPendingByStudyIdsCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
         override fun save(entity: QuestionEntity): QuestionEntity {
             entity.id = (savedRows.size + 1).toLong()
@@ -180,6 +199,14 @@ class QuestionSchedulerTest {
         override fun countPendingForStudy(studyId: Long): Long {
             countPendingForStudyCalls += 1
             return pendingRows.count { it.studyId == studyId }.toLong()
+        }
+        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
+            countPendingByStudyIdsCalls += 1
+            return pendingRows
+                .filter { it.studyId in studyIds }
+                .groupingBy { it.studyId!! }
+                .eachCount()
+                .mapValues { it.value.toLong() }
         }
         override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()

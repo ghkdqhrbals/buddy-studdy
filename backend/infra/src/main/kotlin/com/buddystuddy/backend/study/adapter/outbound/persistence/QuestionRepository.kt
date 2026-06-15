@@ -145,6 +145,26 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
 
     @Query(
         """
+        select q.studyId as studyId, count(q) as pendingCount
+        from QuestionEntity q
+        where q.studyId in :studyIds
+          and q.deletedAt is null
+          and q.skippedAt is null
+          and q.score is null
+        group by q.studyId
+        """
+    )
+    fun findPendingCountsByStudyIds(@Param("studyIds") studyIds: Collection<Long>): List<PendingCountRow>
+
+    override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
+        if (studyIds.isEmpty()) {
+            emptyMap()
+        } else {
+            findPendingCountsByStudyIds(studyIds).associate { it.studyId to it.pendingCount }
+        }
+
+    @Query(
+        """
         select q from QuestionEntity q
         join UserEntity u on u.id = q.userId
         where q.publicQuestion = true
@@ -217,4 +237,9 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
     @Modifying
     @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")
     override fun softDelete(@Param("id") id: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
+}
+
+interface PendingCountRow {
+    val studyId: Long
+    val pendingCount: Long
 }

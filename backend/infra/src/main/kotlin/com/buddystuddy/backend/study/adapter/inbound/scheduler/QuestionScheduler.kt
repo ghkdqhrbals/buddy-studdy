@@ -47,7 +47,7 @@ class QuestionScheduler(
                 val userId = study.userId
                 val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
                 val appLanguage = user?.appLanguage ?: "ko"
-                val pending = pendingCounts[study.id] ?: questions.countPendingForStudy(study.id)
+                val pending = pendingCounts[study.id] ?: 0L
                 if (pending >= properties.scheduler.maxPendingPerStudy) {
                     study.lastError = "Pending question limit reached ($pending)."
                     study.nextDueAt = now.plusSeconds(5 * 60)
@@ -116,10 +116,7 @@ class QuestionScheduler(
     }
 
     private fun pendingCounts(dueStudies: List<StudyEntity>): Map<Long, Long> {
-        if (dueStudies.isEmpty() || properties.scheduler.maxPendingPerStudy > 1) return emptyMap()
-        val pendingStudyIds = questions.findLatestPendingByStudyIds(dueStudies.map { it.id })
-            .mapNotNull { it.studyId }
-            .toSet()
-        return dueStudies.associate { study -> study.id to if (study.id in pendingStudyIds) 1L else 0L }
+        if (dueStudies.isEmpty()) return emptyMap()
+        return questions.countPendingByStudyIds(dueStudies.map { it.id })
     }
 }

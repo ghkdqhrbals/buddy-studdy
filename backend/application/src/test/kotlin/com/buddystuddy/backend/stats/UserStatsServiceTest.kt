@@ -314,6 +314,7 @@ class UserStatsServiceTest {
         override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun countPendingForStudy(studyId: Long): Long = 0
+        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
         override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()

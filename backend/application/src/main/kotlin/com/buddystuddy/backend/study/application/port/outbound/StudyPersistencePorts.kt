@@ -45,6 +45,7 @@ interface QuestionPort {
     fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
     fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity>
     fun countPendingForStudy(studyId: Long): Long
+    fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long>
     fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>

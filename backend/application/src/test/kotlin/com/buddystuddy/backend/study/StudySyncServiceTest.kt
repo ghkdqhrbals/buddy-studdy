@@ -123,6 +123,12 @@ class StudySyncServiceTest {
         override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun countPendingForStudy(studyId: Long): Long = pendingRows.count { it.studyId == studyId }.toLong()
+        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
+            pendingRows
+                .filter { it.studyId in studyIds }
+                .groupingBy { it.studyId!! }
+                .eachCount()
+                .mapValues { it.value.toLong() }
         override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
