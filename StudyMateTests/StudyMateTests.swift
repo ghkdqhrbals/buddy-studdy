@@ -59,6 +59,34 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordsAndStatisticsTabsOpenBeforeBackendAccessCheck() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let appState = AppState(settingsStore: store, remotePushBackendClient: FakeRemotePushBackendClient())
+
+        appState.setSelectedTab(.records)
+
+        XCTAssertEqual(appState.mobileVisibleTab, .records)
+        XCTAssertNil(appState.pageAccessPrompt)
+
+        appState.setSelectedTab(.statistics)
+
+        XCTAssertEqual(appState.mobileVisibleTab, .statistics)
+        XCTAssertNil(appState.pageAccessPrompt)
+    }
+
+    func testHTTP401CountsAsPageAccessDenied() {
+        let error = RemotePushBackendError.httpStatus(401, "", nil)
+
+        XCTAssertTrue(error.isPageAccessDenied)
+    }
+
+    @MainActor
     func testSkippingOnboardingPersistsFlagAndPausesWithoutAPIKey() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
