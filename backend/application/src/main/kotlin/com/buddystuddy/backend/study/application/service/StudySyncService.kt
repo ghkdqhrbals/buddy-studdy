@@ -66,6 +66,7 @@ class StudySyncService(
                 topic = topic,
                 createdAt = now,
             )
+        val isNewStudy = study.id == 0L
 
         study.topic = topic
         study.deviceId = principal.deviceId
@@ -86,7 +87,12 @@ class StudySyncService(
             )
         )
 
-        return listOf(studies.save(study)).toStudyRoomResponses().single()
+        val saved = studies.save(study)
+        return if (isNewStudy) {
+            saved.toStudyRoomResponse()
+        } else {
+            listOf(saved).toStudyRoomResponses().single()
+        }
     }
 
     private fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {

@@ -42,6 +42,19 @@ class StudySyncServiceTest {
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
     }
 
+    @Test
+    fun `create new study does not query pending question`() {
+        val response = service.createStudy(
+            principal,
+            com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand(topic = "Postgres"),
+        )
+
+        assertThat(response.topic).isEqualTo("Postgres")
+        assertThat(response.pendingQuestion).isNull()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
+        assertThat(questionStats.findAllByIdsCalls).isZero()
+    }
+
     private fun study(id: Long, topic: String) = StudyEntity(
         id = id,
         deviceId = principal.deviceId,
