@@ -57,6 +57,32 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
         pageable: Pageable,
     ): Page<QuestionEntity>
 
+    @Query(
+        value = """
+        select *
+        from (
+            select q.*,
+                   row_number() over (
+                       partition by q.topic
+                       order by coalesce(q.answered_at, q.created_at) desc, q.created_at desc, q.id desc
+                   ) as topic_rank
+            from questions q
+            where q.user_id = :userId
+              and q.deleted_at is null
+              and q.score is not null
+              and q.topic in (:topics)
+        ) ranked
+        where ranked.topic_rank <= :perTopicLimit
+        order by coalesce(ranked.answered_at, ranked.created_at) desc, ranked.created_at desc, ranked.id desc
+        """,
+        nativeQuery = true,
+    )
+    override fun findLatestGradedByUserAndTopics(
+        @Param("userId") userId: Long,
+        @Param("topics") topics: Collection<String>,
+        @Param("perTopicLimit") perTopicLimit: Int,
+    ): List<QuestionEntity>
+
     @Query("select q from QuestionEntity q where q.deletedAt is null and q.score is not null order by q.answeredAt desc, q.createdAt desc")
     override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity>
 

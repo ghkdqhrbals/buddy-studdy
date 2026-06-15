@@ -125,10 +125,57 @@ class UserStatsServiceTest {
         val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
 
         assertThat(response.topics).hasSize(2)
-        assertThat(questions.findGradedByUserAndTopicsCalls).isEqualTo(1)
+        assertThat(questions.findGradedByUserAndTopicsCalls).isZero()
+        assertThat(questions.findLatestGradedByUserAndTopicsCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
         assertThat(response.topics.flatMap { it.records }.map { it.viewCount }).containsExactlyInAnyOrder(10, 20)
+    }
+
+    @Test
+    fun `stats preserves latest records for each selected topic when one topic dominates recent records`() {
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "swiftui",
+            topic = "SwiftUI",
+            difficultyLevel = 6,
+            responseCount = 50,
+            scoreCount = 50,
+            scoreSum = 4000,
+            bestScore = 95,
+            correctCount = 50,
+            latestAt = Instant.parse("2026-06-10T10:00:00Z"),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "redis",
+            topic = "Redis",
+            difficultyLevel = 4,
+            responseCount = 1,
+            scoreCount = 1,
+            scoreSum = 90,
+            bestScore = 90,
+            correctCount = 1,
+            latestAt = Instant.parse("2026-06-09T08:00:00Z"),
+        )
+        repeat(50) { index ->
+            questions.rows += gradedQuestion(
+                topic = "SwiftUI",
+                difficultyLevel = 6,
+                score = 80,
+                correct = true,
+                answeredAt = "2026-06-10T10:${index.toString().padStart(2, '0')}:00Z",
+            )
+        }
+        questions.rows += gradedQuestion(topic = "Redis", difficultyLevel = 4, score = 90, correct = true, answeredAt = "2026-06-09T08:00:00Z")
+
+        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+
+        assertThat(response.topics.single { it.topic == "Redis" }.records).hasSize(1)
+        assertThat(questions.findLatestGradedByUserAndTopicsCalls).isEqualTo(1)
+        assertThat(questions.findGradedByUserAndTopicsCalls).isZero()
     }
 
     private fun gradedQuestion(
@@ -184,6 +231,7 @@ class UserStatsServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val rows = mutableListOf<QuestionEntity>()
         var findGradedByUserAndTopicsCalls = 0
+        var findLatestGradedByUserAndTopicsCalls = 0
         override fun save(entity: QuestionEntity): QuestionEntity = entity
         override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.ofNullable(rows.firstOrNull { it.id == id })
         override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
@@ -191,7 +239,21 @@ class UserStatsServiceTest {
         override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null && it.topic.contains(query, ignoreCase = true) })
         override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> {
             findGradedByUserAndTopicsCalls += 1
-            return PageImpl(rows.filter { it.userId == userId && it.score != null && it.topic in topics })
+            val content = rows
+                .filter { it.userId == userId && it.score != null && it.topic in topics }
+                .sortedByDescending { it.answeredAt ?: it.createdAt }
+                .drop(pageable.offset.toInt())
+                .take(pageable.pageSize)
+            return PageImpl(content)
+        }
+        override fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> {
+            findLatestGradedByUserAndTopicsCalls += 1
+            return rows
+                .filter { it.userId == userId && it.score != null && it.topic in topics }
+                .groupBy { it.topic }
+                .values
+                .flatMap { topicRows -> topicRows.sortedByDescending { it.answeredAt ?: it.createdAt }.take(perTopicLimit) }
+                .sortedByDescending { it.answeredAt ?: it.createdAt }
         }
         override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.score != null && it.deletedAt == null })
         override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()

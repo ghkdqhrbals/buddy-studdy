@@ -101,11 +101,11 @@ class StatsService(
             rows.sortedByDescending { it.responseCount }.map { it.topic }.distinct()
         }.distinct()
         if (aliases.isEmpty()) return emptyMap()
-        val records = questions.findGradedByUserAndTopics(
+        val records = questions.findLatestGradedByUserAndTopics(
             userId,
             aliases,
-            PageRequest.of(0, (topicGroups.size * 20).coerceAtLeast(20)),
-        ).content
+            perTopicLimit = 20,
+        )
         val statsByQuestionId = stats.findAllByIds(records.map { it.id }).associateBy { it.questionId }
         return records
             .groupBy { normalizedTopic(it.topic) }

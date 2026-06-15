@@ -36,6 +36,7 @@ interface QuestionPort {
     fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity>
     fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity>
+    fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity>
     fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity>
     fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
