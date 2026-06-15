@@ -1609,7 +1609,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         email: String = "",
         bio: String,
         avatarURL: URL?,
-        avatarSymbolName: String = "pixel-buddy",
+        avatarSymbolName: String = "pixel-book-pup",
         avatarColorSeed: String = "avatar-color-mint",
         pageAccess: CommunityPageAccess = .restricted
     ) {
@@ -1632,7 +1632,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
         bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
         avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
-        avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-buddy"
+        avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-book-pup"
         avatarColorSeed = try container.decodeIfPresent(String.self, forKey: .avatarColorSeed) ?? "avatar-color-mint"
         pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
     }

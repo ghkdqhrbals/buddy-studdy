@@ -929,12 +929,12 @@ struct HomeProfileAvatar: View {
     }
 
     private var defaultGlyph: some View {
-        PixelAvatarGlyph(
-            avatarName: ProfileAvatarOption.glyphName(for: symbolName),
+        ProfileAvatarSprite(
+            symbolName: symbolName,
             colorSeed: defaultColorSeed,
-            usesNeutralColor: usesNeutralColor
+            usesNeutralColor: usesNeutralColor,
+            size: size
         )
-            .frame(width: size, height: size)
     }
 
     private var defaultColorSeed: String {
@@ -961,6 +961,30 @@ struct HomeProfileAvatar: View {
             .clipShape(Circle())
     }
     #endif
+}
+
+struct ProfileAvatarSprite: View {
+    var symbolName: String
+    var colorSeed: String
+    var usesNeutralColor: Bool
+    var size: CGFloat
+
+    var body: some View {
+        let palette = PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor)
+
+        Circle()
+            .fill(palette.background)
+            .overlay {
+                Image(ProfileAvatarOption.assetName(for: symbolName))
+                    .resizable()
+                    .interpolation(.none)
+                    .antialiased(false)
+                    .scaledToFit()
+                    .padding(size * 0.08)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+    }
 }
 
 struct PixelAvatarGlyph: View {
@@ -2156,33 +2180,13 @@ private struct EmailSignInSheet: View {
 }
 
 enum ProfileAvatarOption {
-    static let defaultSymbolName = "pixel-buddy"
+    static let defaultSymbolName = "pixel-book-pup"
 
     static let all = [
         defaultSymbolName,
-        "pixel-scholar",
-        "pixel-coder",
-        "pixel-explorer",
-        "pixel-artist",
-        "pixel-star",
-        "pixel-girl",
-        "pixel-princess",
-        "pixel-flower",
-        "pixel-hero",
-        "pixel-wizard",
-        "pixel-robot",
-        "pixel-chef",
-        "pixel-pilot",
-        "pixel-nurse",
-        "pixel-knight",
-        "pixel-dancer",
-        "pixel-gamer",
-        "pixel-scientist",
-        "pixel-astronaut",
         "pixel-dachshund",
         "pixel-pencil-pup",
         "pixel-sleepy-pup",
-        "pixel-book-pup",
         "pixel-cat",
         "pixel-bear",
         "pixel-rabbit",
@@ -2193,34 +2197,73 @@ enum ProfileAvatarOption {
         "pixel-study-mage"
     ]
 
+    static func assetName(for symbolName: String) -> String {
+        switch canonicalName(for: symbolName) {
+        case "pixel-dachshund":
+            return "ProfileAvatarDachshund"
+        case "pixel-pencil-pup":
+            return "ProfileAvatarPencilPup"
+        case "pixel-sleepy-pup":
+            return "ProfileAvatarSleepyPup"
+        case "pixel-cat":
+            return "ProfileAvatarCat"
+        case "pixel-bear":
+            return "ProfileAvatarBear"
+        case "pixel-rabbit":
+            return "ProfileAvatarRabbit"
+        case "pixel-penguin":
+            return "ProfileAvatarPenguin"
+        case "pixel-fox":
+            return "ProfileAvatarFox"
+        case "pixel-chick":
+            return "ProfileAvatarChick"
+        case "pixel-tutor-bot":
+            return "ProfileAvatarTutorBot"
+        case "pixel-study-mage":
+            return "ProfileAvatarStudyMage"
+        case "pixel-book-pup":
+            fallthrough
+        default:
+            return "ProfileAvatarBookPup"
+        }
+    }
+
     static func glyphName(for symbolName: String) -> String {
         canonicalName(for: symbolName)
     }
 
     static func canonicalName(for symbolName: String) -> String {
         switch symbolName {
-        case "person.fill", "person.crop.circle.fill", "pencil.tip":
+        case "person.fill", "person.crop.circle.fill", "pencil.tip", "pixel-buddy":
             return defaultSymbolName
         case "graduationcap.circle.fill":
-            return "pixel-scholar"
+            return "pixel-book-pup"
         case "book.circle.fill":
-            return "pixel-buddy"
+            return "pixel-book-pup"
         case "star.circle.fill":
-            return "pixel-star"
+            return "pixel-chick"
         case "bolt.circle.fill":
-            return "pixel-coder"
+            return "pixel-tutor-bot"
         case "leaf.circle.fill":
-            return "pixel-explorer"
+            return "pixel-fox"
         case "graduationcap.fill":
-            return "pixel-scholar"
+            return "pixel-book-pup"
         case "book.fill", "brain.head.profile":
-            return "pixel-buddy"
+            return "pixel-book-pup"
         case "sparkles", "star.fill":
-            return "pixel-star"
+            return "pixel-chick"
         case "bolt.fill":
-            return "pixel-coder"
+            return "pixel-tutor-bot"
         case "leaf.fill":
-            return "pixel-explorer"
+            return "pixel-fox"
+        case "pixel-scholar", "pixel-artist", "pixel-girl", "pixel-princess", "pixel-flower":
+            return "pixel-book-pup"
+        case "pixel-coder", "pixel-robot", "pixel-scientist":
+            return "pixel-tutor-bot"
+        case "pixel-explorer", "pixel-hero", "pixel-knight", "pixel-dancer", "pixel-gamer":
+            return "pixel-fox"
+        case "pixel-star", "pixel-chef", "pixel-pilot", "pixel-nurse", "pixel-wizard", "pixel-astronaut":
+            return "pixel-study-mage"
         default:
             return all.contains(symbolName) ? symbolName : defaultSymbolName
         }

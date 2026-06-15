@@ -86,6 +86,18 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(error.isPageAccessDenied)
     }
 
+    func testProfileAvatarOptionsUsePixelAnimalSprites() {
+        XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-book-pup")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-book-pup")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-robot"), "pixel-tutor-bot")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "sparkles"), "pixel-chick")
+        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-book-pup"), "ProfileAvatarBookPup")
+        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-fox"), "ProfileAvatarFox")
+        XCTAssertTrue(ProfileAvatarOption.all.allSatisfy { $0.hasPrefix("pixel-") })
+        XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-buddy"))
+        XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-scholar"))
+    }
+
     @MainActor
     func testSkippingOnboardingPersistsFlagAndPausesWithoutAPIKey() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
