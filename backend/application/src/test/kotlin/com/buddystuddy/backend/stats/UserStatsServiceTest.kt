@@ -27,18 +27,17 @@ class UserStatsServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `refresh delegates dirty stats aggregation to repository`() {
+    fun `refresh rebuilds user stats from graded questions`() {
         questions.rows += gradedQuestion(topic = "Swift UI", difficultyLevel = 5, score = 80, correct = true, answeredAt = "2026-06-10T02:00:00Z")
         questions.rows += gradedQuestion(topic = "swift  ui", difficultyLevel = 5, score = 60, correct = false, answeredAt = "2026-06-10T03:00:00Z")
         questions.rows += gradedQuestion(topic = "SwiftUI", difficultyLevel = 6, score = 90, correct = true, answeredAt = "2026-06-11T04:00:00Z")
 
         refresh.refreshAll(Instant.parse("2026-06-13T00:00:00Z"))
 
-        assertThat(userStats.refreshDirtyCalls).isEqualTo(1)
-        assertThat(userStats.lastRefreshDirtyLimit).isEqualTo(5_000)
         assertThat(userStats.replaceAllCalls).isZero()
-        assertThat(userStats.syncAllCalls).isZero()
-        assertThat(questions.findAllGradedForStatsCalls).isZero()
+        assertThat(userStats.syncAllCalls).isEqualTo(1)
+        assertThat(questions.findAllGradedForStatsCalls).isEqualTo(1)
+        assertThat(userStats.rows).hasSize(2)
     }
 
     @Test
@@ -247,9 +246,6 @@ class UserStatsServiceTest {
         var overviewByUserCalls = 0
         var findTopicKeysByUserCalls = 0
         var findByUserAndTopicKeysCalls = 0
-        var markDirtyCalls = 0
-        var refreshDirtyCalls = 0
-        var lastRefreshDirtyLimit = 0
 
         override fun replaceAll(rows: Collection<UserStatsEntity>) {
             replaceAllCalls += 1
@@ -261,18 +257,6 @@ class UserStatsServiceTest {
             syncAllCalls += 1
             this.rows.clear()
             this.rows.addAll(rows)
-        }
-
-        override fun supportsIncrementalRefresh(): Boolean = true
-
-        override fun markDirty(userId: Long, statDate: LocalDate, topicKey: String, difficultyLevel: Int, now: Instant) {
-            markDirtyCalls += 1
-        }
-
-        override fun refreshDirty(now: Instant, limit: Int): Int {
-            refreshDirtyCalls += 1
-            lastRefreshDirtyLimit = limit
-            return rows.size
         }
 
         override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> {

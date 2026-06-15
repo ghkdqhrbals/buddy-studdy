@@ -8,8 +8,6 @@ import com.buddystuddy.backend.community.application.port.outbound.SearchResult
 import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.backend.stats.application.port.outbound.UserStatsOverview
-import com.buddystuddy.backend.stats.application.port.outbound.UserStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
@@ -21,7 +19,6 @@ import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.service.QuestionCreationWriteManager
 import com.buddystuddy.backend.study.application.service.StudyService
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
-import com.buddystuddy.stats.domain.entity.UserStatsEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
@@ -31,7 +28,6 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import java.time.Instant
-import java.time.LocalDate
 import java.util.Optional
 
 class StudyServiceTest {
@@ -40,7 +36,6 @@ class StudyServiceTest {
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
     private val serviceStudies = FakeStudyPort()
-    private val userStats = FakeUserStatsPort()
     private val service = StudyService(
         properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" },
         studies = serviceStudies,
@@ -56,7 +51,6 @@ class StudyServiceTest {
             questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
         ),
         questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
-        userStats = userStats,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -115,19 +109,14 @@ class StudyServiceTest {
         assertThat(openAI.gradeCalls).isEqualTo(1)
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
-        assertThat(userStats.dirtyKeys).hasSize(1)
-        assertThat(userStats.dirtyKeys.single().userId).isEqualTo(principal.userId)
-        assertThat(userStats.dirtyKeys.single().topicKey).isEqualTo("kotlin")
-        assertThat(userStats.dirtyKeys.single().difficultyLevel).isEqualTo(5)
     }
 
     @Test
-    fun `delete marks graded record stats dirty before soft delete`() {
+    fun `delete soft deletes graded record`() {
         questions.visibleRows += gradedQuestion(id = 601, topic = "Redis")
 
         service.delete(principal, id = 601)
 
-        assertThat(userStats.dirtyKeys).containsExactly(FakeDirtyKey(principal.userId, LocalDate.parse("2026-06-10"), "redis", 5))
         assertThat(questions.visibleRows.single { it.id == 601L }.deletedAt).isNotNull()
     }
 
@@ -306,25 +295,4 @@ class StudyServiceTest {
         override fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
     }
 
-    private data class FakeDirtyKey(
-        val userId: Long,
-        val statDate: LocalDate,
-        val topicKey: String,
-        val difficultyLevel: Int,
-    )
-
-    private class FakeUserStatsPort : UserStatsPort {
-        val dirtyKeys = mutableListOf<FakeDirtyKey>()
-        override fun replaceAll(rows: Collection<UserStatsEntity>) = Unit
-        override fun syncAll(rows: Collection<UserStatsEntity>) = Unit
-        override fun supportsIncrementalRefresh(): Boolean = true
-        override fun markDirty(userId: Long, statDate: LocalDate, topicKey: String, difficultyLevel: Int, now: Instant) {
-            dirtyKeys += FakeDirtyKey(userId, statDate, topicKey, difficultyLevel)
-        }
-        override fun refreshDirty(now: Instant, limit: Int): Int = 0
-        override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> = emptyList()
-        override fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview = UserStatsOverview(0, 0)
-        override fun findTopicKeysByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?, limit: Int, offset: Int): List<String> = emptyList()
-        override fun findByUserAndTopicKeys(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?, topicKeys: Collection<String>): List<UserStatsEntity> = emptyList()
-    }
 }

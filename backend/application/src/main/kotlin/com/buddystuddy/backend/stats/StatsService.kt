@@ -159,10 +159,6 @@ class StatsRefreshService(
     private val userStats: UserStatsPort,
 ) : RefreshUserStatsUseCase {
     override fun refreshAll(now: Instant) {
-        if (userStats.supportsIncrementalRefresh()) {
-            userStats.refreshDirty(now, MAX_DIRTY_KEYS_PER_REFRESH)
-            return
-        }
         val rows = questions.findAllGradedForStats(PageRequest.of(0, MAX_REFRESH_QUESTIONS)).content
             .filter { it.userId != null && it.deletedAt == null && it.score != null }
             .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
@@ -197,7 +193,6 @@ class StatsRefreshService(
     )
 
     private companion object {
-        private const val MAX_DIRTY_KEYS_PER_REFRESH = 5_000
         private const val MAX_REFRESH_QUESTIONS = 500_000
     }
 }
