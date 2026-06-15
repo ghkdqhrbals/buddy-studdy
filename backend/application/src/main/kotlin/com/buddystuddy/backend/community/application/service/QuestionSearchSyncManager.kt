@@ -17,6 +17,10 @@ class QuestionSearchSyncManager(
 ) {
     fun syncQuestion(question: QuestionEntity) {
         val user = question.userId?.let { users.findById(it).orElse(null) }
+        syncQuestion(question, user)
+    }
+
+    fun syncQuestion(question: QuestionEntity, user: UserEntity?) {
         if (user == null) {
             search.deleteByQuestionId(question.id)
             return

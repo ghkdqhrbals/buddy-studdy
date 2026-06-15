@@ -109,8 +109,8 @@ class StudyService(
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         val record = q.toStudyRecord()
         q.apply(record.answer(answer))
+        val user = users.findById(principal.userId).orElse(null)
         if (grade && q.score == null) {
-            val user = users.findById(principal.userId).orElse(null)
             val study = q.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
                 ?: studies.findByUserIdAndTopic(principal.userId, q.topic)
                 ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
@@ -125,7 +125,7 @@ class StudyService(
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
-        questionSearch.syncQuestion(q)
+        questionSearch.syncQuestion(q, user)
         return q.toStudyRecord(questionStats.findById(q.id).orElse(null)).toProjection().toRecordResponse()
     }
 

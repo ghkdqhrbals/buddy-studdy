@@ -47,9 +47,9 @@ class StudyServiceTest {
             questions = questions,
             questionStats = questionStats,
             pushOutbox = FakePushOutboxPort(),
-            questionSearch = QuestionSearchSyncManager(questions, FakeUserPort(), FakeQuestionSearchPort()),
+            questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
         ),
-        questionSearch = QuestionSearchSyncManager(questions, FakeUserPort(), FakeQuestionSearchPort()),
+        questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
