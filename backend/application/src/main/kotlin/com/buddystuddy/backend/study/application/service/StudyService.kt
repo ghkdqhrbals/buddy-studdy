@@ -160,8 +160,7 @@ class StudyService(
     override fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val record = q.toStudyRecord(questionStats.findById(id).orElse(null))
-        q.apply(record.skip())
+        q.apply(q.toStudyRecord().skip())
         questionSearch.syncQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
@@ -176,8 +175,7 @@ class StudyService(
     override fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val record = q.toStudyRecord(questionStats.findById(id).orElse(null))
-        q.apply(record.restrictPublicity(isPublic))
+        q.apply(q.toStudyRecord().restrictPublicity(isPublic))
         questionSearch.syncQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }

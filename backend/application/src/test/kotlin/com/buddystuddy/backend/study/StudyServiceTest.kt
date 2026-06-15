@@ -81,6 +81,30 @@ class StudyServiceTest {
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
     }
 
+    @Test
+    fun `skip reads question stats only for final response`() {
+        questions.visibleRows += pendingQuestion(id = 301, topic = "Redis")
+        questionStats.rows += QuestionStatsEntity(questionId = 301, viewCount = 5)
+
+        val response = service.skip(principal, id = 301)
+
+        assertThat(response.id).isEqualTo("301")
+        assertThat(response.viewCount).isEqualTo(5)
+        assertThat(questionStats.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `publicity reads question stats only for final response`() {
+        questions.visibleRows += gradedQuestion(id = 401, topic = "Swift")
+        questionStats.rows += QuestionStatsEntity(questionId = 401, likeCount = 2)
+
+        val response = service.publicity(principal, id = 401, isPublic = true)
+
+        assertThat(response.id).isEqualTo("401")
+        assertThat(response.likeCount).isEqualTo(2)
+        assertThat(questionStats.findByIdCalls).isEqualTo(1)
+    }
+
     private fun gradedQuestion(id: Long, topic: String) = question(id, topic).apply {
         status = "graded"
         answer = "Answer"
@@ -114,7 +138,8 @@ class StudyServiceTest {
         val pendingRows = mutableListOf<QuestionEntity>()
         override fun save(entity: QuestionEntity): QuestionEntity = entity
         override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.empty()
-        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
+        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
+            (visibleRows + pendingRows).firstOrNull { it.id == id && it.userId == userId && it.deletedAt == null }
         override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
