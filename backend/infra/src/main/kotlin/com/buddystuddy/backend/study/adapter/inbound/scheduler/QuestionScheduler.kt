@@ -4,14 +4,15 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
-import com.buddystuddy.study.domain.entity.QuestionEntity
-import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.study.domain.entity.QuestionEntity
+import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.StudyEntity
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
@@ -39,12 +40,14 @@ class QuestionScheduler(
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
         val recentQuestionsByUserId = mutableMapOf<Long, List<String>>()
-        studies.findDue(now, PageRequest.of(0, 50)).forEach { study ->
+        val dueStudies = studies.findDue(now, PageRequest.of(0, 50))
+        val pendingCounts = pendingCounts(dueStudies)
+        dueStudies.forEach { study ->
             try {
                 val userId = study.userId
                 val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
                 val appLanguage = user?.appLanguage ?: "ko"
-                val pending = questions.countPendingForStudy(study.id)
+                val pending = pendingCounts[study.id] ?: questions.countPendingForStudy(study.id)
                 if (pending >= properties.scheduler.maxPendingPerStudy) {
                     study.lastError = "Pending question limit reached ($pending)."
                     study.nextDueAt = now.plusSeconds(5 * 60)
@@ -110,5 +113,13 @@ class QuestionScheduler(
                 log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
             }
         }
+    }
+
+    private fun pendingCounts(dueStudies: List<StudyEntity>): Map<Long, Long> {
+        if (dueStudies.isEmpty() || properties.scheduler.maxPendingPerStudy > 1) return emptyMap()
+        val pendingStudyIds = questions.findLatestPendingByStudyIds(dueStudies.map { it.id })
+            .mapNotNull { it.studyId }
+            .toSet()
+        return dueStudies.associate { study -> study.id to if (study.id in pendingStudyIds) 1L else 0L }
     }
 }

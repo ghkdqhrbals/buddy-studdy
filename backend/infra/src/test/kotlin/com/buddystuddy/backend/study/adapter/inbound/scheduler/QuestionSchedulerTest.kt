@@ -74,6 +74,22 @@ class QuestionSchedulerTest {
         }
     }
 
+    @Test
+    fun `scheduled run uses batch pending lookup when per study pending limit is one`() {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
+        studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
+        assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Kotlin")
+        assertThat(questions.countPendingForStudyCalls).isZero()
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+    }
+
     private fun study(id: Long, userId: Long, topic: String, now: Instant) = StudyEntity(
         id = id,
         deviceId = "dev-$userId",
@@ -84,6 +100,21 @@ class QuestionSchedulerTest {
         nextDueAt = now.minusSeconds(1),
         createdAt = now.minusSeconds(120),
         updatedAt = now.minusSeconds(120),
+    )
+
+    private fun pendingQuestion(id: Long, studyId: Long, topic: String, now: Instant) = QuestionEntity(
+        id = id,
+        deviceId = "dev-7",
+        userId = 7,
+        studyId = studyId,
+        question = "Pending $topic",
+        topic = topic,
+        difficultyLevel = 5,
+        scheduledFor = now.minusSeconds(60),
+        sentAt = now.minusSeconds(60),
+        status = "ungraded",
+        createdAt = now.minusSeconds(60),
+        updatedAt = now.minusSeconds(60),
     )
 
     private class FakeStudyPort : StudyPort {
@@ -112,8 +143,11 @@ class QuestionSchedulerTest {
 
     private class FakeQuestionPort : QuestionPort {
         val visibleRows = mutableListOf<QuestionEntity>()
+        val pendingRows = mutableListOf<QuestionEntity>()
         val savedRows = mutableListOf<QuestionEntity>()
         var findVisibleByUserCalls = 0
+        var countPendingForStudyCalls = 0
+        var findLatestPendingByStudyIdsCalls = 0
         override fun save(entity: QuestionEntity): QuestionEntity {
             entity.id = (savedRows.size + 1).toLong()
             savedRows += entity
@@ -128,13 +162,23 @@ class QuestionSchedulerTest {
         override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
+        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> {
+            findLatestPendingByStudyIdsCalls += 1
+            return pendingRows
+                .filter { it.studyId in studyIds }
+                .groupBy { it.studyId }
+                .values
+                .mapNotNull { rows -> rows.maxWithOrNull(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id }) }
+        }
         override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> {
             findVisibleByUserCalls += 1
             return PageImpl(visibleRows.filter { it.userId == userId }, pageable, visibleRows.count { it.userId == userId }.toLong())
         }
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun countPendingForStudy(studyId: Long): Long = 0
+        override fun countPendingForStudy(studyId: Long): Long {
+            countPendingForStudyCalls += 1
+            return pendingRows.count { it.studyId == studyId }.toLong()
+        }
         override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
