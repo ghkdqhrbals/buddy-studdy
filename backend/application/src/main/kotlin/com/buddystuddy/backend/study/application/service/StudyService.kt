@@ -85,6 +85,7 @@ class StudyService(
                 room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
                 QuestionPushOutboxCommand(
                     createdAt = now,
+                    studyId = study.id,
                     deviceId = study.deviceId,
                     userId = principal.userId,
                     question = generated.question,

@@ -16,6 +16,7 @@ abstract class BaseRedisStreamEvent(
 
 data class QuestionPushRequestedEvent(
     val recordId: Long,
+    val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
     val question: String,

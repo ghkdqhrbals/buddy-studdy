@@ -41,6 +41,7 @@ class RedisStreamPushPublisher(
         }
         val event = QuestionPushRequestedEvent(
             recordId = request.recordId,
+            studyId = request.studyId,
             deviceId = request.deviceId,
             userId = request.userId,
             question = request.question,

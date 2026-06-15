@@ -53,4 +53,9 @@ from questions q
 join users u on u.id = q.user_id
 where q.user_id is not null
   and q.score is not null
-  and q.deleted_at is null;
+  and q.deleted_at is null
+  and not exists (
+      select 1
+      from question_search qs
+      where qs.question_id = q.id
+  );

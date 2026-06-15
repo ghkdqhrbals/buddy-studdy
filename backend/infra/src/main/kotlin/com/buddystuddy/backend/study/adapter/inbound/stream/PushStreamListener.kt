@@ -88,11 +88,12 @@ class PushStreamListener(
         val provider = this["pushProvider"] ?: this["provider"] ?: PushMessageType.APNS.name
         val common = QuestionPushMessageFields(
             recordId = this["recordId"] ?: "",
+            studyId = this["studyId"]?.takeIf(String::isNotBlank),
             question = this["question"] ?: "A new study question is ready.",
             topic = this["topic"] ?: "",
             sound = this["sound"]?.takeIf(String::isNotBlank),
         )
-        val deepLink = "buddystuddy://records/${common.recordId}"
+        val deepLink = PushDeepLinkFactory.studyRoomOrRecord(common.studyId, common.recordId)
         return when (provider.uppercase()) {
             PushMessageType.FCM.name -> FcmQuestionMessage(
                 recordId = common.recordId,
@@ -123,8 +124,17 @@ class PushStreamListener(
 
     private data class QuestionPushMessageFields(
         val recordId: String,
+        val studyId: String?,
         val question: String,
         val topic: String,
         val sound: String?,
     )
+}
+
+internal object PushDeepLinkFactory {
+    fun studyRoomOrRecord(studyId: String?, recordId: String): String =
+        studyId
+            ?.takeIf(String::isNotBlank)
+            ?.let { "buddystuddy://studies/$it" }
+            ?: "buddystuddy://records/$recordId"
 }

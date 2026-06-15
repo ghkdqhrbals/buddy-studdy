@@ -30,6 +30,7 @@ class QuestionPushOutboxPersistenceAdapter(
         outbox.save(
             QuestionPushOutboxEntity(
                 recordId = request.recordId,
+                studyId = request.studyId,
                 deviceId = request.deviceId,
                 userId = request.userId,
                 question = request.question,

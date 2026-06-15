@@ -22,6 +22,8 @@ class QuestionPushOutboxEntity(
     var id: Long = 0,
     @Column(name = "record_id", nullable = false)
     var recordId: Long = 0,
+    @Column(name = "study_id")
+    var studyId: Long? = null,
     @Column(name = "device_id", nullable = false, length = 191)
     var deviceId: String = "",
     @Column(name = "user_id")

@@ -79,6 +79,7 @@ class QuestionPushOutboxDispatcher(
     private fun QuestionPushOutboxEntity.toRequest(): QuestionPushRequest =
         QuestionPushRequest(
             recordId = recordId,
+            studyId = studyId,
             createdAt = createdAt,
             deviceId = deviceId,
             userId = userId,

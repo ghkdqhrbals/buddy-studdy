@@ -12,6 +12,7 @@ class RedisStreamEventsTest {
     fun `push event uses the same object to string map conversion`() {
         val event = QuestionPushRequestedEvent(
             recordId = 1,
+            studyId = 10,
             deviceId = "device-1",
             userId = null,
             question = "What is SwiftUI?",
@@ -30,6 +31,7 @@ class RedisStreamEventsTest {
                 "eventId" to "event-push",
                 "eventType" to "QUESTION_PUSH_REQUESTED",
                 "recordId" to "1",
+                "studyId" to "10",
                 "deviceId" to "device-1",
                 "question" to "What is SwiftUI?",
                 "topic" to "SwiftUI",

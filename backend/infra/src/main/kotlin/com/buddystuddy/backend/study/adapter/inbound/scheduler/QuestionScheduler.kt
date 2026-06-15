@@ -88,6 +88,7 @@ class QuestionScheduler(
                 pushOutbox.enqueue(
                     QuestionPushRequest(
                         recordId = saved.id,
+                        studyId = study.id,
                         createdAt = now,
                         deviceId = study.deviceId,
                         userId = userId,

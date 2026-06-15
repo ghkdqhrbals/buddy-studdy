@@ -4,6 +4,7 @@ import java.time.Instant
 
 data class QuestionPushRequest(
     val recordId: Long,
+    val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
     val question: String,
@@ -21,6 +22,7 @@ interface QuestionPushPublishPort {
 }
 
 data class QuestionPushOutboxCommand(
+    val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
     val question: String,
@@ -35,6 +37,7 @@ data class QuestionPushOutboxCommand(
     fun toRequest(recordId: Long): QuestionPushRequest =
         QuestionPushRequest(
             recordId = recordId,
+            studyId = studyId,
             createdAt = createdAt,
             deviceId = deviceId,
             userId = userId,

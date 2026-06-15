@@ -87,6 +87,7 @@ class RedisStreamPushPublisherTest {
 
     private fun pushEvent(topic: String = "SwiftUI") = QuestionPushRequest(
         recordId = 10,
+        studyId = 77,
         deviceId = "device-1",
         userId = 11,
         question = "What is SwiftUI?",
