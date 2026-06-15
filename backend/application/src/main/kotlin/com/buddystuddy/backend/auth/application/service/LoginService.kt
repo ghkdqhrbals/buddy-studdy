@@ -95,8 +95,7 @@ class LoginService(
     @Transactional
     override fun token(deviceId: String, clientSecret: String): AccessTokenResponse {
         val principal = authenticateDevice(deviceId, clientSecret)
-        val user = users.findById(principal.userId).orElseThrow()
-        val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous, user.status)
+        val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous, principal.status)
         return AccessTokenResponse(token.first, token.second)
     }
 

@@ -60,6 +60,17 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `device token reissue reuses authenticated user status`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        users.findByIdCalls = 0
+
+        val response = login.token(device.deviceId, device.clientSecret)
+
+        assertThat(response.accessToken).isNotBlank()
+        assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `new email user is created only when verification code matches`() {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         login.emailCode("new@example.com")
@@ -133,6 +144,7 @@ class LoginServiceEmailVerificationTest {
     private class InMemoryUserPort : UserPort {
         private val users = linkedMapOf<Long, UserEntity>()
         private var nextId = 1L
+        var findByIdCalls = 0
 
         override fun save(entity: UserEntity): UserEntity {
             if (entity.id == 0L) {
@@ -142,7 +154,10 @@ class LoginServiceEmailVerificationTest {
             return entity
         }
 
-        override fun findById(id: Long): Optional<UserEntity> = Optional.ofNullable(users[id])
+        override fun findById(id: Long): Optional<UserEntity> {
+            findByIdCalls += 1
+            return Optional.ofNullable(users[id])
+        }
         override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = ids.mapNotNull { users[it] }.toMutableList()
         override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
             users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
