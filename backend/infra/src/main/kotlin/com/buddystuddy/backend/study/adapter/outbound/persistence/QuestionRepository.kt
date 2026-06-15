@@ -111,7 +111,10 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
         """,
         nativeQuery = true,
     )
-    override fun findLatestPendingByStudyIds(@Param("studyIds") studyIds: Collection<Long>): List<QuestionEntity>
+    fun findLatestPendingByStudyIdsInternal(@Param("studyIds") studyIds: Collection<Long>): List<QuestionEntity>
+
+    override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> =
+        if (studyIds.isEmpty()) emptyList() else findLatestPendingByStudyIdsInternal(studyIds)
 
     @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and (:includePending = true or q.score is not null) order by q.createdAt desc")
     override fun findVisibleByUser(@Param("userId") userId: Long, @Param("includePending") includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
@@ -232,7 +235,10 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
           and u.allowPublicQuestions = true
         """
     )
-    override fun findPublicAnsweredByIds(@Param("ids") ids: Collection<Long>): List<QuestionEntity>
+    fun findPublicAnsweredByIdsInternal(@Param("ids") ids: Collection<Long>): List<QuestionEntity>
+
+    override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> =
+        if (ids.isEmpty()) emptyList() else findPublicAnsweredByIdsInternal(ids)
 
     @Modifying
     @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")

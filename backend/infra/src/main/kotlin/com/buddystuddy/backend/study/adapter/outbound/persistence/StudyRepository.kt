@@ -15,10 +15,13 @@ interface StudyRepository : JpaRepository<StudyEntity, Long>, StudyPort {
     override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
 
     @Query("select s from StudyEntity s where s.userId = :userId and s.topic in :topics")
-    override fun findByUserIdAndTopics(
+    fun findByUserIdAndTopicsInternal(
         @Param("userId") userId: Long,
         @Param("topics") topics: Collection<String>,
     ): List<StudyEntity>
+
+    override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
+        if (topics.isEmpty()) emptyList() else findByUserIdAndTopicsInternal(userId, topics)
 
     override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
 
