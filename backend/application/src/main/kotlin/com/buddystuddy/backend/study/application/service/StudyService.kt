@@ -12,6 +12,7 @@ import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
 import com.buddystuddy.study.domain.StudyRoom
 import com.buddystuddy.study.domain.StudyRoomPendingLimitExceeded
+import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
@@ -136,13 +137,13 @@ class StudyService(
         } else {
             questions.findVisibleByUserAndQuery(principal.userId, includePending = false, search, pageable)
         }
-        return RecordsPageResponse(page.content.map { it.toStudyRecord(questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
     override fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse {
         val page = questions.findPendingByUser(principal.userId, PageRequest.of(offset / limit, limit))
-        return RecordsPageResponse(page.content.map { it.toStudyRecord(questionStats.findById(it.id).orElse(null)).toProjection().toRecordResponse() }, page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
@@ -197,4 +198,12 @@ class StudyService(
 
     private fun recentQuestions(principal: Principal): List<String> =
         questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+
+    private fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
+        if (isEmpty()) return emptyList()
+        val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
+        return map { question ->
+            question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+        }
+    }
 }
