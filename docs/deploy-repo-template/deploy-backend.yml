@@ -84,6 +84,7 @@ jobs:
 
           cat > .env <<ENV
           SPRING_PROFILES_ACTIVE=prod
+          FLYWAY_ENABLED=true
           DATABASE_URL=${DATABASE_URL}
           DATABASE_USERNAME=${POSTGRES_USER}
           DATABASE_PASSWORD=${POSTGRES_PASSWORD}
