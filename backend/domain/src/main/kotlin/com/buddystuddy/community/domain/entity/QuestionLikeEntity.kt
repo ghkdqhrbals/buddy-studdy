@@ -5,6 +5,7 @@ import jakarta.persistence.Entity
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
+import jakarta.persistence.Index
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
@@ -13,6 +14,7 @@ import java.time.Instant
 @Table(
     name = "question_likes",
     uniqueConstraints = [UniqueConstraint(name = "uq_question_likes_question_user", columnNames = ["question_id", "user_id"])],
+    indexes = [Index(name = "idx_question_likes_user_question", columnList = "user_id,question_id")],
 )
 class QuestionLikeEntity(
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)

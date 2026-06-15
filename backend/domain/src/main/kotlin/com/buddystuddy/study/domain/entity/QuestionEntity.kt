@@ -18,6 +18,7 @@ import java.time.Instant
         Index(name = "idx_questions_study_created", columnList = "study_id,created_at"),
         Index(name = "idx_questions_public", columnList = "is_public,deleted_at,created_at"),
         Index(name = "idx_questions_pending_study", columnList = "study_id,deleted_at,skipped_at,score,status"),
+        Index(name = "idx_questions_user_topic_graded_latest", columnList = "user_id,topic,deleted_at,score,answered_at,created_at,id"),
     ]
 )
 class QuestionEntity(
