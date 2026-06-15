@@ -33,13 +33,15 @@ import java.util.Optional
 class StudyServiceTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
+    private val users = FakeUserPort()
+    private val openAI = FakeOpenAI()
     private val service = StudyService(
-        properties = BuddyStuddyProperties(),
+        properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" },
         studies = FakeStudyPort(),
         questions = questions,
         questionStats = questionStats,
-        openAI = FakeOpenAI(),
-        users = FakeUserPort(),
+        openAI = openAI,
+        users = users,
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
@@ -90,6 +92,21 @@ class StudyServiceTest {
 
         assertThat(response.id).isEqualTo("301")
         assertThat(response.viewCount).isEqualTo(5)
+        assertThat(questionStats.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `graded answer loads user and question stats only once`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        questions.visibleRows += pendingQuestion(id = 501, topic = "Kotlin")
+        questionStats.rows += QuestionStatsEntity(questionId = 501, viewCount = 5)
+
+        val response = service.answer(principal, recordId = 501, answer = "My answer", grade = true)
+
+        assertThat(response.id).isEqualTo("501")
+        assertThat(response.gradingResult?.score).isEqualTo(100)
+        assertThat(openAI.gradeCalls).isEqualTo(1)
+        assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
     }
 
@@ -190,19 +207,29 @@ class StudyServiceTest {
     }
 
     private class FakeUserPort : UserPort {
+        var row: UserEntity? = null
+        var findByIdCalls = 0
         override fun save(entity: UserEntity): UserEntity = entity
-        override fun findById(id: Long): Optional<UserEntity> = Optional.empty()
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = mutableListOf()
+        override fun findById(id: Long): Optional<UserEntity> {
+            findByIdCalls += 1
+            return Optional.ofNullable(row?.takeIf { it.id == id })
+        }
+        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
+            row?.takeIf { it.id in ids.toSet() }?.let { mutableListOf(it) } ?: mutableListOf()
         override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
         override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
     private class FakeOpenAI : OpenAIPort {
+        var gradeCalls = 0
         override fun validate(apiKey: String) = Unit
         override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>) =
             GeneratedQuestion("Question", null)
-        override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String) =
-            GradedAnswer(100, true, "Good", "Because")
+        override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
+            gradeCalls += 1
+            assertThat(language).isEqualTo("en")
+            return GradedAnswer(100, true, "Good", "Because")
+        }
     }
 
     private class FakePushOutboxPort : QuestionPushOutboxPort {

@@ -107,20 +107,21 @@ class StudyService(
     override fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val record = q.toStudyRecord(questionStats.findById(q.id).orElse(null))
+        val record = q.toStudyRecord()
         q.apply(record.answer(answer))
         if (grade && q.score == null) {
+            val user = users.findById(principal.userId).orElse(null)
             val study = q.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
                 ?: studies.findByUserIdAndTopic(principal.userId, q.topic)
                 ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             val graded = openAI.grade(
-                apiKeyFor(principal),
+                apiKeyFor(user),
                 openAIModelFor(study),
                 q.question,
                 answer,
                 q.topic,
                 q.difficultyLevel,
-                appLanguageFor(principal),
+                user?.appLanguage ?: "ko",
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
@@ -180,9 +181,6 @@ class StudyService(
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
-    private fun apiKeyFor(principal: Principal): String =
-        apiKeyFor(users.findById(principal.userId).orElse(null))
-
     private fun apiKeyFor(user: com.buddystuddy.account.domain.entity.UserEntity?): String {
         return cipher.decrypt(user?.openaiApiKeyCipher)
             ?: properties.openai.apiKey.takeIf { it.isNotBlank() }
@@ -190,9 +188,6 @@ class StudyService(
     }
 
     private fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model
-
-    private fun appLanguageFor(principal: Principal): String =
-        users.findById(principal.userId).orElse(null)?.appLanguage ?: "ko"
 
     private fun recentQuestions(principal: Principal): List<String> =
         questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
