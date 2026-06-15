@@ -7,6 +7,9 @@ import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.stats.application.port.outbound.UserStatsPort
+import com.buddystuddy.backend.stats.normalizedTopic
+import com.buddystuddy.backend.stats.statsDate
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
@@ -42,6 +45,7 @@ class StudyService(
     private val cipher: KeyCipher,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
+    private val userStats: UserStatsPort,
 ) : StudyUseCase, BrowseRecordsUseCase {
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
         createQuestionAsync(principal, studyId)
@@ -126,6 +130,7 @@ class StudyService(
                 user?.appLanguage ?: "ko",
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
+            markStatsDirty(q, Instant.now())
         }
         questionSearch.syncQuestion(q, user)
         return q.toStudyRecord(questionStats.findById(q.id).orElse(null)).toProjection().toRecordResponse()
@@ -170,7 +175,11 @@ class StudyService(
 
     @Transactional
     override fun delete(principal: Principal, id: Long) {
-        questions.softDelete(id, principal.userId, Instant.now())
+        val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
+        val now = Instant.now()
+        markStatsDirty(q, now)
+        questions.softDelete(id, principal.userId, now)
         questionSearch.deleteQuestion(id)
     }
 
@@ -193,6 +202,18 @@ class StudyService(
 
     private fun recentQuestions(principal: Principal): List<String> =
         questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+
+    private fun markStatsDirty(question: QuestionEntity, now: Instant) {
+        val userId = question.userId ?: return
+        if (question.score == null) return
+        userStats.markDirty(
+            userId = userId,
+            statDate = statsDate(question),
+            topicKey = normalizedTopic(question.topic),
+            difficultyLevel = question.difficultyLevel,
+            now = now,
+        )
+    }
 
     private fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
