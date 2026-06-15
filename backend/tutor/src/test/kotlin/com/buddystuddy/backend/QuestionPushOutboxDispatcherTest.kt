@@ -7,6 +7,8 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPubli
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.study.domain.entity.QuestionPushOutboxEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -29,6 +31,11 @@ import java.time.Instant
 )
 class QuestionPushOutboxDispatcherTest {
     @Autowired lateinit var outbox: QuestionPushOutboxJpaRepository
+
+    @BeforeEach
+    fun clearOutbox() {
+        outbox.deleteAll()
+    }
 
     @Test
     fun `dispatcher publishes pending push outbox and marks published`() {
@@ -104,12 +111,68 @@ class QuestionPushOutboxDispatcherTest {
         assertThat(retry.lastError).isEqualTo("Push stream publish failed.")
     }
 
+    @Test
+    fun `dispatcher isolates publish exception and continues remaining items`() {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        val failing = outbox.save(
+            QuestionPushOutboxEntity(
+                recordId = 12,
+                deviceId = "device-fail",
+                userId = 22,
+                question = "Fails?",
+                topic = "Redis",
+                nextAttemptAt = now.minusSeconds(1),
+                createdAt = now.minusSeconds(20),
+                updatedAt = now.minusSeconds(20),
+            )
+        )
+        val succeeding = outbox.save(
+            QuestionPushOutboxEntity(
+                recordId = 13,
+                deviceId = "device-ok",
+                userId = 23,
+                question = "Succeeds?",
+                topic = "Kotlin",
+                nextAttemptAt = now.minusSeconds(1),
+                createdAt = now.minusSeconds(10),
+                updatedAt = now.minusSeconds(10),
+            )
+        )
+        val dispatcher = QuestionPushOutboxDispatcher(
+            BuddyStuddyProperties(
+                scheduler = BuddyStuddyProperties.Scheduler(enabled = true),
+                streams = BuddyStuddyProperties.Streams(enabled = true),
+            ),
+            outbox,
+            ThrowingThenCapturingPushPublisher(failingRecordId = 12),
+        )
+
+        assertThatCode { dispatcher.dispatchPendingPushes() }.doesNotThrowAnyException()
+
+        val retry = outbox.findById(failing.id).orElseThrow()
+        val published = outbox.findById(succeeding.id).orElseThrow()
+        assertThat(retry.status).isEqualTo("PENDING")
+        assertThat(retry.attempts).isEqualTo(1)
+        assertThat(retry.lastError).contains("boom")
+        assertThat(published.status).isEqualTo("PUBLISHED")
+        assertThat(published.publishedAt).isNotNull()
+    }
+
     private class CapturingPushPublisher(private val result: Boolean) : QuestionPushPublishPort {
         val requests = mutableListOf<QuestionPushRequest>()
 
         override fun publishPush(request: QuestionPushRequest): Boolean {
             requests += request
             return result
+        }
+    }
+
+    private class ThrowingThenCapturingPushPublisher(private val failingRecordId: Long) : QuestionPushPublishPort {
+        override fun publishPush(request: QuestionPushRequest): Boolean {
+            if (request.recordId == failingRecordId) {
+                throw IllegalStateException("boom")
+            }
+            return true
         }
     }
 }

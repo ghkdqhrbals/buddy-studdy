@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 @Component
@@ -21,41 +20,57 @@ class QuestionPushOutboxDispatcher(
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Scheduled(fixedDelayString = "\${buddystuddy.scheduler.poll-ms:30000}")
-    @Transactional
     fun dispatchPendingPushes() {
         if (!properties.scheduler.enabled || !properties.streams.enabled) return
 
         val now = Instant.now()
         outbox.findPending(now, PageRequest.of(0, 50)).forEach { item ->
-            val published = streams.publishPush(item.toRequest())
-            if (published) {
-                item.status = "PUBLISHED"
-                item.publishedAt = now
-                item.lastError = null
-                item.updatedAt = now
-                log.info(
-                    "question_push_outbox_published outboxId={} recordId={} deviceId={} userId={}",
-                    item.id,
-                    item.recordId,
-                    item.deviceId,
-                    item.userId,
-                )
-                outbox.save(item)
-            } else {
-                item.attempts += 1
-                item.lastError = "Push stream publish failed."
-                item.nextAttemptAt = now.plusSeconds(retryDelaySeconds(item.attempts))
-                item.updatedAt = now
-                log.warn(
-                    "question_push_outbox_retry_scheduled outboxId={} recordId={} attempts={} nextAttemptAt={}",
-                    item.id,
-                    item.recordId,
-                    item.attempts,
-                    item.nextAttemptAt,
-                )
-                outbox.save(item)
-            }
+            dispatchItem(item, now)
         }
+    }
+
+    fun dispatchItem(item: QuestionPushOutboxEntity, now: Instant = Instant.now()) {
+        val published = runCatching { streams.publishPush(item.toRequest()) }
+            .onFailure { error -> log.warn("question_push_outbox_publish_failed outboxId={} recordId={} error={}", item.id, item.recordId, error.message) }
+            .getOrElse { error ->
+                markRetry(item, now, error.message ?: error.javaClass.simpleName)
+                return
+            }
+        if (published) {
+            markPublished(item, now)
+        } else {
+            markRetry(item, now, "Push stream publish failed.")
+        }
+    }
+
+    private fun markPublished(item: QuestionPushOutboxEntity, now: Instant) {
+        item.status = "PUBLISHED"
+        item.publishedAt = now
+        item.lastError = null
+        item.updatedAt = now
+        log.info(
+            "question_push_outbox_published outboxId={} recordId={} deviceId={} userId={}",
+            item.id,
+            item.recordId,
+            item.deviceId,
+            item.userId,
+        )
+        outbox.save(item)
+    }
+
+    private fun markRetry(item: QuestionPushOutboxEntity, now: Instant, error: String) {
+        item.attempts += 1
+        item.lastError = error
+        item.nextAttemptAt = now.plusSeconds(retryDelaySeconds(item.attempts))
+        item.updatedAt = now
+        log.warn(
+            "question_push_outbox_retry_scheduled outboxId={} recordId={} attempts={} nextAttemptAt={}",
+            item.id,
+            item.recordId,
+            item.attempts,
+            item.nextAttemptAt,
+        )
+        outbox.save(item)
     }
 
     private fun retryDelaySeconds(attempts: Int): Long =
