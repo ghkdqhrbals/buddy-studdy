@@ -49,7 +49,7 @@ jobs:
               type: loki
               access: proxy
               url: http://rsc-loki:3100
-              isDefault: true
+              isDefault: false
               editable: true
           YAML
 
