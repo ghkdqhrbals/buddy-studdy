@@ -133,7 +133,12 @@ class CommunityService(
     override fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(id, PageRequest.of(offset / limit, limit))
-        val profiles = users.findAllById(page.content.map { it.userId }).associateBy { it.id }
+        val profiles = page.content
+            .map { it.userId }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { users.findAllById(it).associateBy { user -> user.id } }
+            .orEmpty()
         return CommunityCommentsResponse(
             page.content.map { it.toResponse(profiles[it.userId]?.toProfile() ?: UserProfileResponse(0, "Buddy")) },
             page.totalElements,

@@ -80,6 +80,17 @@ class CommunityServiceTest {
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
     }
 
+    @Test
+    fun `empty comment page skips author lookup`() {
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
+
+        val response = service.getComments(id = 100, limit = 20, offset = 0)
+
+        assertThat(response.comments).isEmpty()
+        assertThat(response.totalCount).isZero()
+        assertThat(users.findAllByIdCalls).isZero()
+    }
+
     private fun publicQuestion(id: Long, userId: Long, topic: String) = QuestionEntity(
         id = id,
         deviceId = "dev-1",
