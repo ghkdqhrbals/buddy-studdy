@@ -6,13 +6,18 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.TestPropertySource
+import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.junit.jupiter.Container
+import org.testcontainers.junit.jupiter.Testcontainers
 
 @SpringBootTest
+@Testcontainers
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystuddy-flyway;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
+        "spring.datasource.driver-class-name=org.postgresql.Driver",
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.flyway.enabled=true",
         "spring.flyway.locations=classpath:db/migration",
@@ -25,6 +30,26 @@ import org.springframework.test.context.TestPropertySource
 )
 class FlywaySchemaIntegrationTest {
     @Autowired lateinit var users: UserRepository
+
+    companion object {
+        @Container
+        @JvmStatic
+        val postgres = PostgreSQLContainer("postgres:16-alpine")
+            .withDatabaseName("buddystuddy")
+            .withUsername("buddystuddy")
+            .withPassword("buddystuddy")
+
+        @DynamicPropertySource
+        @JvmStatic
+        fun datasource(registry: DynamicPropertyRegistry) {
+            if (!postgres.isRunning) {
+                postgres.start()
+            }
+            registry.add("spring.datasource.url", postgres::getJdbcUrl)
+            registry.add("spring.datasource.username", postgres::getUsername)
+            registry.add("spring.datasource.password", postgres::getPassword)
+        }
+    }
 
     @Test
     fun `flyway schema supports user openai settings`() {

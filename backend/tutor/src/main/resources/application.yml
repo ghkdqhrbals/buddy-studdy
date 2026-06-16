@@ -24,7 +24,7 @@ spring:
     enabled: ${FLYWAY_ENABLED:false}
     baseline-on-migrate: true
     baseline-version: 0
-    locations: ${FLYWAY_LOCATIONS:classpath:db/migration,classpath:db/postgresql-migration}
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
   jackson:
     property-naming-strategy: LOWER_CAMEL_CASE
   data:
