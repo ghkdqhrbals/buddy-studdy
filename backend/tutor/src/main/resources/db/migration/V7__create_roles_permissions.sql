@@ -75,6 +75,8 @@ from (
     union all select 'record:update', 'Update records', true
     union all select 'record:delete', 'Delete records', true
     union all select 'record:publish', 'Publish records', true
+    union all select 'notification:read', 'Read notifications', false
+    union all select 'notification:delete', 'Delete notifications', true
     union all select 'stats:read', 'Read statistics', false
     union all select 'public-question:read', 'Read public questions', false
     union all select 'public-question:like', 'Like public questions', true
@@ -112,6 +114,8 @@ join permissions p on p.code in (
     'record:update',
     'record:delete',
     'record:publish',
+    'notification:read',
+    'notification:delete',
     'stats:read',
     'public-question:read',
     'public-question:like',

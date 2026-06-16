@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface DeviceRepository : JpaRepository<DeviceEntity, Long>, DevicePort {
     override fun findByDeviceId(deviceId: String): DeviceEntity?
+    override fun findAllByUserId(userId: Long): List<DeviceEntity>
 }

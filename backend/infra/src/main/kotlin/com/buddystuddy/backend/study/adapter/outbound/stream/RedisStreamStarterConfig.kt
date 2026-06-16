@@ -40,6 +40,20 @@ class RedisStreamStarterConfig {
             redisConnectionFactory,
         )
 
+    @Bean("notificationStreamPublisher")
+    @ConditionalOnProperty(prefix = "buddystuddy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+    fun notificationStreamPublisher(
+        properties: BuddyStuddyProperties,
+        client: CoordinatorClient,
+        redisConnectionFactory: RedisConnectionFactory,
+    ): RedisStreamPublisher =
+        streamPublisher(
+            StreamPublisherDefinition(properties.streams.notificationPrefix),
+            properties,
+            client,
+            redisConnectionFactory,
+        )
+
     private fun streamPublisher(
         definition: StreamPublisherDefinition,
         properties: BuddyStuddyProperties,

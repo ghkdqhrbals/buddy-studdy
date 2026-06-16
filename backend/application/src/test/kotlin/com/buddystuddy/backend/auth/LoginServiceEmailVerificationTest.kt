@@ -194,6 +194,8 @@ class LoginServiceEmailVerificationTest {
         }
 
         override fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override fun findAllByUserId(userId: Long): List<DeviceEntity> =
+            devices.values.filter { it.userId == userId }
     }
 
     private class InMemoryUserDevicePort : UserDevicePort {

@@ -17,6 +17,7 @@ interface UserPort {
 interface DevicePort {
     fun save(entity: DeviceEntity): DeviceEntity
     fun findByDeviceId(deviceId: String): DeviceEntity?
+    fun findAllByUserId(userId: Long): List<DeviceEntity>
 }
 
 interface UserDevicePort {

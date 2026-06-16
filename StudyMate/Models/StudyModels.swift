@@ -1648,6 +1648,14 @@ struct AppStrings {
     }
     var notificationSound: String { text("알림음", "Notification sound") }
     var notificationSoundHelp: String { text("질문 알림을 받을 때 소리를 낼지 선택합니다.", "Choose whether question notifications play a sound.") }
+    var notificationInbox: String { text("알림", "Notifications") }
+    var noNotifications: String { text("아직 알림이 없습니다", "No notifications yet") }
+    var noNotificationsDescription: String {
+        text("댓글, 좋아요 같은 활동이 생기면 여기에 표시됩니다.", "Thread activity such as comments and likes will appear here.")
+    }
+    var deleteAllNotifications: String { text("전체삭제", "Clear All") }
+    var deleteNotification: String { text("삭제", "Delete") }
+    var unreadNotification: String { text("읽지 않음", "Unread") }
     var updates: String { text("업데이트", "Updates") }
     var automaticallyCheckForUpdates: String { text("자동으로 업데이트 확인", "Automatically check for updates") }
     var automaticallyDownloadUpdates: String { text("가능하면 자동으로 다운로드", "Automatically download updates when available") }

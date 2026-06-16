@@ -223,6 +223,7 @@ private struct MobileHomeView: View {
     @State private var editingStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
+    @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
     @State private var isPullRefreshing = false
@@ -305,6 +306,11 @@ private struct MobileHomeView: View {
             prompt: strings.topicSearch,
             focus: $isSearchFocused
         )
+        .navigationDestination(isPresented: $isShowingNotifications) {
+            MobileNotificationsView()
+                .padding(.horizontal, 16)
+                .mobileTabTitle(strings.notificationInbox)
+        }
         .toolbar {
             #if os(iOS)
             if #available(iOS 26.0, *) {
@@ -328,6 +334,13 @@ private struct MobileHomeView: View {
                 }
                 .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
 
+                if !isHomeSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        notificationToolbarButton(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeAddToolbarButton(strings: strings)
@@ -337,6 +350,12 @@ private struct MobileHomeView: View {
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     homeToolbarSearchControl(strings: strings)
+                }
+
+                if !isHomeSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        notificationToolbarButton(strings: strings)
+                    }
                 }
 
                 if shouldShowHomeAddToolbarButton {
@@ -354,6 +373,7 @@ private struct MobileHomeView: View {
         }
         .task {
             await loadCommunityQuestionsIfNeeded(userInitiated: false)
+            await appState.refreshNotificationUnreadCount()
         }
         .onAppear {
             handleAppRouteRequest(appState.appRouteRequest)
@@ -784,6 +804,28 @@ private struct MobileHomeView: View {
         .accessibilityLabel(strings.newStudyCategory)
     }
 
+    private func notificationToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            isShowingNotifications = true
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                MobileToolbarIconButtonLabel(systemName: "bell.fill")
+
+                if appState.notificationUnreadCount > 0 {
+                    Text(appState.notificationUnreadCount > 99 ? "99+" : "\(appState.notificationUnreadCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Color.red, in: Capsule())
+                        .offset(x: 7, y: -5)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.notificationInbox)
+    }
+
     @MainActor
     private func showHomeSearch() {
         if isSearchVisible || !activeTrimmedSearchText.isEmpty {
@@ -914,6 +956,135 @@ private enum HomeFeedScope: String, CaseIterable, Identifiable {
         }
     }
 }
+
+private struct MobileNotificationsView: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            if appState.isLoadingNotifications && appState.notifications.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 24)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            } else if appState.notifications.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(strings.noNotifications)
+                        .font(.title2.weight(.bold))
+                    Text(strings.noNotificationsDescription)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 320, alignment: .center)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            } else {
+                ForEach(appState.notifications) { notification in
+                    Button {
+                        Task {
+                            await appState.markNotificationRead(notification)
+                            if let deepLink = notification.deepLink,
+                               let url = URL(string: deepLink) {
+                                appState.openDeepLink(url)
+                            }
+                        }
+                    } label: {
+                        MobileNotificationRow(notification: notification, strings: strings)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            Task {
+                                await appState.deleteNotification(notification)
+                            }
+                        } label: {
+                            Label(strings.deleteNotification, systemImage: "trash")
+                        }
+                    }
+                    .task {
+                        await appState.loadMoreNotificationsIfNeeded(current: notification)
+                    }
+                }
+
+                if appState.isLoadingNotifications {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            await appState.loadNotifications(reset: true)
+        }
+        .task {
+            await appState.loadNotifications(reset: true)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(strings.deleteAllNotifications) {
+                    Task {
+                        await appState.deleteAllNotifications()
+                    }
+                }
+                .disabled(appState.notifications.isEmpty)
+            }
+        }
+    }
+}
+
+private struct MobileNotificationRow: View {
+    var notification: BackendAppNotification
+    var strings: AppStrings
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(notification.isRead ? Color.secondary.opacity(0.18) : Color.accentColor)
+                .frame(width: 10, height: 10)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(notification.title)
+                        .font(.body.weight(notification.isRead ? .semibold : .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(notification.createdAt, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(notification.body)
+                    .font(.subheadline)
+                    .foregroundStyle(notification.isRead ? .secondary : .primary)
+                    .lineLimit(3)
+
+                if !notification.isRead {
+                    Text(strings.unreadNotification)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
 struct HomeProfileAvatar: View {
     var symbolName: String
     var displayName: String?

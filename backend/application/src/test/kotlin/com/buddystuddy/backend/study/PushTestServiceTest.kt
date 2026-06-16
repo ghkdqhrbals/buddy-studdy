@@ -74,6 +74,8 @@ class PushTestServiceTest {
     private class FakeDevicePort(private val device: DeviceEntity?) : DevicePort {
         override fun save(entity: DeviceEntity): DeviceEntity = entity
         override fun findByDeviceId(deviceId: String): DeviceEntity? = device?.takeIf { it.deviceId == deviceId }
+        override fun findAllByUserId(userId: Long): List<DeviceEntity> =
+            device?.takeIf { it.userId == userId }?.let { listOf(it) }.orEmpty()
     }
 
     private class CapturingPushNotificationPort : PushNotificationPort {

@@ -17,6 +17,8 @@ object Permissions {
     const val RECORD_UPDATE = "record:update"
     const val RECORD_DELETE = "record:delete"
     const val RECORD_PUBLISH = "record:publish"
+    const val NOTIFICATION_READ = "notification:read"
+    const val NOTIFICATION_DELETE = "notification:delete"
     const val STATS_READ = "stats:read"
     const val PUBLIC_QUESTION_READ = "public-question:read"
     const val PUBLIC_QUESTION_LIKE = "public-question:like"

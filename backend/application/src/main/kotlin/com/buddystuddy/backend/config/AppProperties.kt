@@ -35,6 +35,7 @@ data class BuddyStuddyProperties(
         var enabled: Boolean = true,
         var pushPrefix: String = "push-v1",
         var viewPrefix: String = "view-v1",
+        var notificationPrefix: String = "notification-v1",
         var maxLen: Long = 100_000,
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,

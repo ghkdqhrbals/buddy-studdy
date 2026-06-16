@@ -9,6 +9,8 @@ import com.buddystuddy.backend.community.application.port.outbound.QuestionComme
 import com.buddystuddy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystuddy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.community.application.port.outbound.ReportPort
 import com.buddystuddy.community.domain.entity.QuestionCommentEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
@@ -49,6 +51,7 @@ class CommunityService(
     private val reports: ReportPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val search: QuestionSearchPort,
+    private val notifications: PublishNotificationUseCase,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
     override fun getPublicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
@@ -86,7 +89,7 @@ class CommunityService(
 
     @Transactional
     override fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
-        publicAnsweredQuestion(id)
+        val question = publicAnsweredQuestion(id)
         var changed = false
         if (liked) {
             if (!likes.existsByQuestionIdAndUserId(id, principal.userId)) {
@@ -101,14 +104,34 @@ class CommunityService(
         } else {
             currentLikeCount(id)
         }
+        if (changed && liked) {
+            publishThreadNotification(
+                ownerUserId = question.userId,
+                actorUserId = principal.userId,
+                eventId = "question-like-$id-${principal.userId}",
+                title = "새 좋아요",
+                body = "내 질문에 좋아요가 추가되었습니다.",
+                questionId = id,
+                shouldPush = false,
+            )
+        }
         return CommunityLikeResponse(id.toString(), likeCount, liked)
     }
 
     @Transactional
     override fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
-        publicAnsweredQuestion(id)
+        val question = publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         incrementCommentCount(id, 1)
+        publishThreadNotification(
+            ownerUserId = question.userId,
+            actorUserId = principal.userId,
+            eventId = "question-comment-${saved.id}",
+            title = "새 댓글",
+            body = saved.body,
+            questionId = id,
+            shouldPush = true,
+        )
         return saved.toResponse(userProfile(principal.userId))
     }
 
@@ -216,6 +239,33 @@ class CommunityService(
     private fun userProfile(id: Long) = users.findById(id).orElseThrow {
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
     }.toProfile()
+
+    private fun publishThreadNotification(
+        ownerUserId: Long?,
+        actorUserId: Long,
+        eventId: String,
+        title: String,
+        body: String,
+        questionId: Long,
+        shouldPush: Boolean,
+    ) {
+        val recipientId = ownerUserId ?: return
+        if (recipientId == actorUserId) return
+        notifications.publish(
+            NotificationRequestCommand(
+                eventId = eventId,
+                userId = recipientId,
+                actorUserId = actorUserId,
+                type = "THREAD_ACTIVITY",
+                title = title,
+                body = body,
+                threadType = "question",
+                threadId = questionId.toString(),
+                deepLink = "buddystuddy://public/questions/$questionId",
+                shouldPush = shouldPush,
+            )
+        )
+    }
 }
 
 private data class CommunityContext(

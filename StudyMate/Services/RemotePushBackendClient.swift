@@ -169,6 +169,20 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState
 
+    func fetchNotifications(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendNotificationsPage
+
+    func fetchNotificationUnreadCount(registration: RemotePushRegistration) async throws -> Int
+
+    func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws
+
+    func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws
+
+    func deleteAllNotifications(registration: RemotePushRegistration) async throws
+
     func updateSchedule(
         registration: RemotePushRegistration,
         settings: StudySettings,
@@ -569,6 +583,66 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendRecordsPage.self, from: data)
+    }
+
+    func fetchNotifications(
+        registration: RemotePushRegistration,
+        limit: Int = 30,
+        offset: Int = 0
+    ) async throws -> BackendNotificationsPage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "notifications"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
+            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendNotificationsPage.self, from: data)
+    }
+
+    func fetchNotificationUnreadCount(registration: RemotePushRegistration) async throws -> Int {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", "unread-count")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(NotificationUnreadCountResponse.self, from: data).unreadCount
+    }
+
+    func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", notificationID, "read")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", notificationID)
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
+    }
+
+    func deleteAllNotifications(registration: RemotePushRegistration) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications")
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
     }
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings {
@@ -1671,6 +1745,31 @@ struct CommunityCommentsResponse: Decodable, Equatable {
     var totalCount: Int
     var limit: Int
     var offset: Int
+}
+
+struct BackendAppNotification: Decodable, Equatable, Identifiable {
+    var id: String
+    var type: String
+    var title: String
+    var body: String
+    var threadType: String?
+    var threadId: String?
+    var deepLink: String?
+    var isRead: Bool
+    var createdAt: Date
+    var readAt: Date?
+}
+
+struct BackendNotificationsPage: Decodable, Equatable {
+    var notifications: [BackendAppNotification]
+    var unreadCount: Int
+    var totalCount: Int
+    var limit: Int
+    var offset: Int
+}
+
+private struct NotificationUnreadCountResponse: Decodable {
+    var unreadCount: Int
 }
 
 struct BackendTopicStats: Decodable, Equatable, Identifiable {

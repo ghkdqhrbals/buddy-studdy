@@ -10,6 +10,8 @@ import com.buddystuddy.backend.community.application.port.outbound.ReportPort
 import com.buddystuddy.backend.community.application.port.outbound.SearchResult
 import com.buddystuddy.backend.community.application.service.CommunityService
 import com.buddystuddy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.community.domain.entity.QuestionCommentEntity
@@ -40,6 +42,7 @@ class CommunityServiceTest {
         reports = FakeReportPort(),
         reactions = FakeReactionPublisher(),
         search = FakeQuestionSearchPort(),
+        notifications = FakeNotificationPublisher(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -227,5 +230,13 @@ class CommunityServiceTest {
         override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
         override fun deleteByQuestionId(questionId: Long): Long = 0
         override fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+    }
+
+    private class FakeNotificationPublisher : PublishNotificationUseCase {
+        val rows = mutableListOf<NotificationRequestCommand>()
+        override fun publish(command: NotificationRequestCommand): Boolean {
+            rows += command
+            return true
+        }
     }
 }
