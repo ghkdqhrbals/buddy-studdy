@@ -131,7 +131,6 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
                 subview.alpha = hidesSystemIndicator ? 0 : 1
             }
             refreshControl.layer.zPosition = 1
-            synchronize(refreshControl, in: scrollView, isRefreshing: isRefreshing)
         }
 
         private func retry(
@@ -159,24 +158,6 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
             }
         }
 
-        private func synchronize(_ refreshControl: UIRefreshControl, in scrollView: UIScrollView, isRefreshing: Bool) {
-            if isRefreshing {
-                if !refreshControl.isRefreshing {
-                    refreshControl.beginRefreshing()
-                }
-
-                guard !scrollView.isDragging && !scrollView.isDecelerating else {
-                    return
-                }
-
-                let targetY = -scrollView.adjustedContentInset.top - max(refreshControl.bounds.height, 48)
-                if scrollView.contentOffset.y > targetY {
-                    scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: targetY), animated: true)
-                }
-            } else if refreshControl.isRefreshing {
-                refreshControl.endRefreshing()
-            }
-        }
     }
 }
 

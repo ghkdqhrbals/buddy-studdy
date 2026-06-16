@@ -226,6 +226,7 @@ private struct MobileHomeView: View {
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
     @State private var isPullRefreshing = false
+    @State private var pullRefreshIndicatorTask: Task<Void, Never>?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -835,8 +836,18 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func refreshHomeData() async {
-        isPullRefreshing = true
+        pullRefreshIndicatorTask?.cancel()
+        isPullRefreshing = false
+        pullRefreshIndicatorTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else {
+                return
+            }
+            isPullRefreshing = true
+        }
         defer {
+            pullRefreshIndicatorTask?.cancel()
+            pullRefreshIndicatorTask = nil
             isPullRefreshing = false
         }
 
