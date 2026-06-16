@@ -991,7 +991,7 @@ struct ProfileAvatarSprite: View {
                     .interpolation(.none)
                     .antialiased(false)
                     .scaledToFit()
-                    .padding(size * 0.08)
+                    .padding(size * 0.045)
             }
             .frame(width: size, height: size)
             .clipShape(Circle())
@@ -1584,24 +1584,25 @@ private struct MobileProfileSettingsSheet: View {
                     }
                 } else if appState.isCommunitySignedIn {
                     Section {
-                        VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .center, spacing: 14) {
                             HomeProfileAvatar(
                                 symbolName: draftAvatarSymbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
                                 colorSeed: draftAvatarColorSeed,
                                 usesNeutralColor: appState.communityProfile == nil,
-                                size: 72
+                                size: 94
                             )
-                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
 
                             TextField(strings.profileDisplayName, text: $profileDisplayName)
-                                .font(.title3.weight(.semibold))
+                                .font(.title2.weight(.bold))
+                                .multilineTextAlignment(.center)
                                 .textInputAutocapitalization(.words)
                                 .submitLabel(.done)
-                                .padding(.vertical, 10)
+                                .padding(.vertical, 12)
                                 .padding(.horizontal, 12)
-                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                             if !profileAccountText.isEmpty {
                                 HStack(spacing: 8) {
@@ -1618,25 +1619,26 @@ private struct MobileProfileSettingsSheet: View {
                                             .lineLimit(1)
                                     }
                                 }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .padding(.vertical, 9)
+                                .padding(.horizontal, 13)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .background(Color.secondary.opacity(0.06), in: Capsule())
                             }
                         }
-                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
                     }
                     .listRowBackground(Color.clear)
 
                     Section {
                         DisclosureGroup(isExpanded: $isShowingAvatarCustomization) {
-                            VStack(alignment: .leading, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 18) {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(strings.profileCharacter)
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
+                                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
                                         ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                             Button {
                                                 draftAvatarSymbolName = option
@@ -1657,7 +1659,7 @@ private struct MobileProfileSettingsSheet: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    HStack(spacing: 10) {
+                                    HStack(spacing: 12) {
                                         ForEach(ProfileAvatarColorOption.all) { option in
                                             Button {
                                                 draftAvatarColorSeed = option.id
@@ -1688,10 +1690,11 @@ private struct MobileProfileSettingsSheet: View {
                                     imageData: nil,
                                     colorSeed: draftAvatarColorSeed,
                                     usesNeutralColor: false,
-                                    size: 36
+                                    size: 40
                                 )
                                 Text(strings.profileAvatar)
                                     .font(.body.weight(.semibold))
+                                Spacer(minLength: 0)
                             }
                         }
                     }
@@ -1891,26 +1894,37 @@ private struct MobileProfileSettingsSheet: View {
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
-        HomeProfileAvatar(
-            symbolName: symbolName,
-            displayName: nil,
-            imageData: nil,
-            colorSeed: colorSeed,
-            usesNeutralColor: false,
-            size: 42
-        )
-        .padding(4)
-        .background(isSelected ? Color.primary.opacity(0.10) : Color.clear, in: Circle())
+        ZStack(alignment: .bottomTrailing) {
+            HomeProfileAvatar(
+                symbolName: symbolName,
+                displayName: nil,
+                imageData: nil,
+                colorSeed: colorSeed,
+                usesNeutralColor: false,
+                size: 48
+            )
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color.accentColor)
+                    .background(Color.primary.opacity(0.12), in: Circle())
+                    .offset(x: 1, y: 1)
+            }
+        }
+        .frame(width: 58, height: 58)
+        .background(isSelected ? Color.primary.opacity(0.08) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
-            Circle()
-                .stroke(isSelected ? Color.primary.opacity(0.55) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.primary.opacity(0.35) : Color.secondary.opacity(0.08), lineWidth: 1)
         }
     }
 
     private func colorChoice(color: Color, isSelected: Bool) -> some View {
         Circle()
             .fill(color)
-            .frame(width: 28, height: 28)
+            .frame(width: 34, height: 34)
             .overlay {
                 Circle()
                     .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
@@ -1926,7 +1940,7 @@ private struct MobileProfileSettingsSheet: View {
                     center: .center
                 )
             )
-            .frame(width: 28, height: 28)
+            .frame(width: 34, height: 34)
             .overlay {
                 Circle()
                     .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
@@ -2680,16 +2694,17 @@ private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             CommunityQuestionTopMeta(question: question)
 
             Text(question.question)
-                .font(.subheadline)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
             CommunityQuestionStatsMeta(question: question)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 }
 
@@ -2782,23 +2797,44 @@ struct CommunityQuestionDetailView: View {
     }
 
     private var communityQuestionMeta: some View {
-        HStack(spacing: 8) {
-            Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Text("Lv.\(displayQuestion.difficultyLevel)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let answeredAt = displayQuestion.answeredAt {
-                Text(answeredAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 9) {
+            if let author = displayQuestion.author {
+                HomeProfileAvatar(
+                    symbolName: author.avatarSymbolName,
+                    displayName: author.displayName,
+                    colorSeed: author.avatarColorSeed,
+                    size: 34
+                )
             }
 
-            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 3) {
+                if let author = displayQuestion.author, !author.displayName.isEmpty {
+                    Text(author.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 6) {
+                    Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
+                        .lineLimit(1)
+
+                    Text("Lv.\(displayQuestion.difficultyLevel)")
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if let answeredAt = displayQuestion.answeredAt {
+                        Text(answeredAt, style: .date)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if displayQuestion.author == nil {
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -3020,10 +3056,10 @@ private struct CommunityCommentRow: View {
                 symbolName: comment.author.avatarSymbolName,
                 displayName: comment.author.displayName,
                 colorSeed: comment.author.avatarColorSeed,
-                size: 26
+                size: 30
             )
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Text(comment.author.displayName)
                         .font(.caption.weight(.semibold))
@@ -3041,6 +3077,7 @@ private struct CommunityCommentRow: View {
                     .font(.subheadline)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.vertical, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if canDelete {
@@ -3095,7 +3132,7 @@ private struct CommunityAnswerMessage: View {
                         symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
                         colorSeed: author.avatarColorSeed,
-                        size: 30
+                        size: 34
                     )
 
                     Text(author.displayName)

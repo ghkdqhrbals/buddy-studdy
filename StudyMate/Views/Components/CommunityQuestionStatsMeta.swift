@@ -4,13 +4,15 @@ struct CommunityQuestionTopMeta: View {
     var question: CommunityQuestion
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(question.topic.isEmpty ? "Swift" : question.topic)
-                .lineLimit(1)
-                .truncationMode(.tail)
+        HStack(spacing: 7) {
+            HStack(spacing: 5) {
+                Text(question.topic.isEmpty ? "Swift" : question.topic)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            Text("Lv.\(question.difficultyLevel)")
-                .fixedSize(horizontal: true, vertical: false)
+                Text("Lv.\(question.difficultyLevel)")
+                    .fixedSize(horizontal: true, vertical: false)
+            }
 
             if let author = question.author, !author.displayName.isEmpty {
                 HStack(spacing: 4) {
@@ -19,18 +21,19 @@ struct CommunityQuestionTopMeta: View {
                         symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
                         colorSeed: author.avatarColorSeed,
-                        size: 14
+                        size: 20
                     )
                     #else
                     Circle()
                         .fill(Color.secondary.opacity(0.35))
-                        .frame(width: 14, height: 14)
+                        .frame(width: 20, height: 20)
                     #endif
 
                     Text(author.displayName)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
+                .font(.caption.weight(.semibold))
                 .accessibilityElement(children: .combine)
             }
 
