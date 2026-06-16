@@ -991,6 +991,7 @@ struct ProfileAvatarSprite: View {
                     .interpolation(.none)
                     .antialiased(false)
                     .scaledToFit()
+                    .scaleEffect(1.12)
             }
             .frame(width: size, height: size)
             .clipShape(Circle())
@@ -1637,7 +1638,7 @@ private struct MobileProfileSettingsSheet: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 54, maximum: 62), spacing: 10)], spacing: 10) {
                                         ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                             Button {
                                                 draftAvatarSymbolName = option
@@ -1651,6 +1652,7 @@ private struct MobileProfileSettingsSheet: View {
                                             .buttonStyle(.plain)
                                         }
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
 
                                 VStack(alignment: .leading, spacing: 10) {
@@ -1658,7 +1660,7 @@ private struct MobileProfileSettingsSheet: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    HStack(spacing: 12) {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 38, maximum: 44), spacing: 10)], spacing: 10) {
                                         ForEach(ProfileAvatarColorOption.all) { option in
                                             Button {
                                                 draftAvatarColorSeed = option.id
@@ -1678,6 +1680,7 @@ private struct MobileProfileSettingsSheet: View {
                                         }
                                         .buttonStyle(.plain)
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .padding(.top, 12)
@@ -2208,6 +2211,23 @@ enum ProfileAvatarOption {
 
     static let all = [
         defaultSymbolName,
+        "pixel-fox-geek",
+        "pixel-fox-cyber",
+        "pixel-robot-tutor",
+        "pixel-hoodie-coder",
+        "pixel-wizard-student",
+        "pixel-owl-professor",
+        "pixel-penguin-graduate",
+        "pixel-cat-developer",
+        "pixel-cat-laptop",
+        "pixel-cat-geek",
+        "pixel-cat-student",
+        "pixel-cat-wizard",
+        "pixel-cat-gamer",
+        "pixel-cat-robot",
+        "pixel-bunny-headphones",
+        "pixel-bear-calculator",
+        "pixel-frog-scientist",
         "pixel-book-pup",
         "pixel-dachshund",
         "pixel-pencil-pup",
@@ -2247,6 +2267,18 @@ enum ProfileAvatarOption {
             return "ProfileAvatarPenguinGraduate"
         case "pixel-cat-developer":
             return "ProfileAvatarCatDeveloper"
+        case "pixel-cat-laptop":
+            return "ProfileAvatarCatLaptop"
+        case "pixel-cat-geek":
+            return "ProfileAvatarCatGeek"
+        case "pixel-cat-student":
+            return "ProfileAvatarCatStudent"
+        case "pixel-cat-wizard":
+            return "ProfileAvatarCatWizard"
+        case "pixel-cat-gamer":
+            return "ProfileAvatarCatGamer"
+        case "pixel-cat-robot":
+            return "ProfileAvatarCatRobot"
         case "pixel-bunny-headphones":
             return "ProfileAvatarBunnyHeadphones"
         case "pixel-bear-calculator":
