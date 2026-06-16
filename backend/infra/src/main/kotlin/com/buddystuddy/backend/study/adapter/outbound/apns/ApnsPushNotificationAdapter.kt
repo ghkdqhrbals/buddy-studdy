@@ -26,8 +26,9 @@ class ApnsPushNotificationAdapter(
 ) : PushQuestionSender {
     override val type: PushMessageType = PushMessageType.APNS
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val timeout = Duration.ofSeconds(5)
     private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(timeout)
         .version(HttpClient.Version.HTTP_2)
         .build()
 
@@ -39,23 +40,27 @@ class ApnsPushNotificationAdapter(
             return
         }
         val jwt = apnsJwt()
+        val request = buildRequest(message, jwt)
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() !in 200..299) {
+            throw IllegalStateException("APNs failed status=${response.statusCode()} body=${response.body()}")
+        }
+        logger.info("apns_push_sent recordId={} topic={} status={}", message.recordId, message.topic, response.statusCode())
+    }
+
+    internal fun buildRequest(message: ApnsQuestionMessage, jwt: String): HttpRequest {
         val environment = message.environment.lowercase()
         val host = if (environment == "sandbox") "api.sandbox.push.apple.com" else "api.push.apple.com"
         val body = message.payload.toJson()
-        val request = HttpRequest.newBuilder()
-            .uri(URI.create("https://$host/3/device/$token"))
-            .timeout(Duration.ofSeconds(15))
+        return HttpRequest.newBuilder()
+            .uri(URI.create("https://$host/3/device/${message.token}"))
+            .timeout(timeout)
             .header("authorization", "bearer $jwt")
             .header("apns-topic", properties.apns.bundleId)
             .header("apns-push-type", "alert")
             .header("apns-priority", "10")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() !in 200..299) {
-            throw IllegalStateException("APNs failed status=${response.statusCode()} body=${response.body()}")
-        }
-        logger.info("apns_push_sent recordId={} topic={} status={}", message.recordId, message.topic, response.statusCode())
     }
 
     private fun apnsJwt(): String {

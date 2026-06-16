@@ -9,6 +9,9 @@ import com.buddystuddy.backend.study.application.port.outbound.FcmQuestionMessag
 import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
+import com.buddystuddy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamConfiguration
@@ -45,8 +48,9 @@ class PushStreamListener(
                 message.fields["userId"],
                 message.fields.keys,
             )
-            val device = message.fields["deviceId"]?.let { devices.findByDeviceId(it) }
-            val pushMessage = message.fields.toPushQuestionMessage(
+            val device = PushEventPayloadParser.deviceId(message.fields)?.let { devices.findByDeviceId(it) }
+            val pushMessage = PushEventPayloadParser.toPushQuestionMessage(
+                fields = message.fields,
                 apnsToken = message.fields["apnsToken"] ?: device?.apnsToken ?: "",
                 apnsEnvironment = message.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production",
             )
@@ -81,18 +85,38 @@ class PushStreamListener(
         }
     }
 
-    private fun Map<String, String>.toPushQuestionMessage(
+}
+
+internal object PushEventPayloadParser {
+    private val mapper = jacksonObjectMapper().findAndRegisterModules()
+
+    fun deviceId(fields: Map<String, String>): String? =
+        payload(fields)?.deviceId ?: fields["deviceId"]?.takeIf(String::isNotBlank)
+
+    fun toPushQuestionMessage(
+        fields: Map<String, String>,
         apnsToken: String,
         apnsEnvironment: String,
     ): PushQuestionMessage {
-        val provider = this["pushProvider"] ?: this["provider"] ?: PushMessageType.APNS.name
-        val common = QuestionPushMessageFields(
-            recordId = this["recordId"] ?: "",
-            studyId = this["studyId"]?.takeIf(String::isNotBlank),
-            question = this["question"] ?: "A new study question is ready.",
-            topic = this["topic"] ?: "",
-            sound = this["sound"]?.takeIf(String::isNotBlank),
-        )
+        val payload = payload(fields)
+        val provider = fields["pushProvider"] ?: fields["provider"] ?: PushMessageType.APNS.name
+        val common = if (payload != null) {
+            QuestionPushMessageFields(
+                recordId = payload.recordId.toString(),
+                studyId = payload.studyId?.toString(),
+                question = payload.question,
+                topic = payload.topic,
+                sound = payload.sound?.takeIf(String::isNotBlank),
+            )
+        } else {
+            QuestionPushMessageFields(
+                recordId = fields["recordId"] ?: "",
+                studyId = fields["studyId"]?.takeIf(String::isNotBlank),
+                question = fields["question"] ?: "A new study question is ready.",
+                topic = fields["topic"] ?: "",
+                sound = fields["sound"]?.takeIf(String::isNotBlank),
+            )
+        }
         val deepLink = PushDeepLinkFactory.studyRoomOrRecord(common.studyId, common.recordId)
         return when (provider.uppercase()) {
             PushMessageType.FCM.name -> FcmQuestionMessage(
@@ -101,7 +125,7 @@ class PushStreamListener(
                 topic = common.topic,
                 sound = common.sound,
                 deepLink = deepLink,
-                token = this["fcmToken"] ?: this["pushToken"] ?: "",
+                token = fields["fcmToken"] ?: fields["pushToken"] ?: "",
             )
             else -> ApnsQuestionMessage(
                 recordId = common.recordId,
@@ -121,6 +145,11 @@ class PushStreamListener(
             )
         }
     }
+
+    private fun payload(fields: Map<String, String>): QuestionPushRequestedPayload? =
+        fields["payload"]?.takeIf(String::isNotBlank)?.let {
+            mapper.readValue<QuestionPushRequestedPayload>(it)
+        }
 
     private data class QuestionPushMessageFields(
         val recordId: String,

@@ -3,7 +3,6 @@ package com.buddystuddy.backend.study.adapter.outbound.stream
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
-import com.buddystuddy.utils.toStringMapWithoutNull
 import com.redisstream.producer.RedisStreamPublishOptions
 import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
@@ -53,7 +52,7 @@ class RedisStreamPushPublisher(
             intervalMinutes = request.intervalMinutes,
             createdAt = request.createdAt,
         )
-        val fields = event.toStringMapWithoutNull()
+        val fields = event.toRedisStreamFields()
         val partitionKey = event.topic.ifBlank { event.recordId.toString() }
         logger.info(
             "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",

@@ -1,6 +1,11 @@
 package com.buddystuddy.backend.study.adapter.outbound.stream
 
 import com.buddystuddy.common.application.model.QuestionStreamEventType
+import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonInclude.Value
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Instant
 import java.util.UUID
 
@@ -29,3 +34,46 @@ data class QuestionPushRequestedEvent(
     val createdAt: Instant = Instant.now(),
     override val eventId: String = UUID.randomUUID().toString(),
 ) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId)
+
+data class QuestionPushRequestedPayload(
+    val recordId: Long,
+    val studyId: Long?,
+    val deviceId: String,
+    val userId: Long?,
+    val question: String,
+    val expectedAnswerHint: String?,
+    val topic: String,
+    val difficultyLevel: Int,
+    val language: String,
+    val sound: String?,
+    val intervalMinutes: Int,
+    val createdAt: Instant,
+)
+
+private val redisStreamEventMapper = jacksonObjectMapper()
+    .registerModule(JavaTimeModule())
+    .setDefaultPropertyInclusion(Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
+    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+
+fun QuestionPushRequestedEvent.toRedisStreamFields(): Map<String, String> =
+    mapOf(
+        "eventId" to eventId,
+        "eventType" to eventType.name,
+        "payload" to redisStreamEventMapper.writeValueAsString(toPayload()),
+    )
+
+private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
+    QuestionPushRequestedPayload(
+        recordId = recordId,
+        studyId = studyId,
+        deviceId = deviceId,
+        userId = userId,
+        question = question,
+        expectedAnswerHint = expectedAnswerHint,
+        topic = topic,
+        difficultyLevel = difficultyLevel,
+        language = language,
+        sound = sound,
+        intervalMinutes = intervalMinutes,
+        createdAt = createdAt,
+    )
