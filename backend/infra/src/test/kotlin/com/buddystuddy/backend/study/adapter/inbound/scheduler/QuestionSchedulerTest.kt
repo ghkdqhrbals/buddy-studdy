@@ -4,6 +4,7 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
@@ -12,6 +13,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutbo
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.service.ScheduledQuestionService
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
@@ -35,7 +37,7 @@ class QuestionSchedulerTest {
         scheduler = BuddyStuddyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
         openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
     )
-    private val scheduler = QuestionScheduler(
+    private val scheduler = ScheduledQuestionService(
         properties = properties,
         studies = studies,
         users = users,
@@ -45,6 +47,16 @@ class QuestionSchedulerTest {
         openAI = openAI,
         pushOutbox = pushOutbox,
     )
+
+    @Test
+    fun `question scheduler delegates to schedule input port`() {
+        val useCase = FakeRunQuestionScheduleUseCase()
+        val adapter = QuestionScheduler(useCase)
+
+        adapter.runScheduled()
+
+        assertThat(useCase.calls).isEqualTo(1)
+    }
 
     @Test
     fun `scheduled run reuses user and recent question lookups for studies of same user`() {
@@ -64,7 +76,7 @@ class QuestionSchedulerTest {
             updatedAt = now.minusSeconds(60),
         )
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).hasSize(2)
         assertThat(pushOutbox.requests).hasSize(2)
@@ -83,7 +95,7 @@ class QuestionSchedulerTest {
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
         assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Kotlin")
@@ -103,7 +115,7 @@ class QuestionSchedulerTest {
         studies.rows += study(id = 104, userId = 7, topic = "Kafka", now = now)
         studies.rows += study(id = 105, userId = 7, topic = "Postgres", now = now)
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101, 102, 103, 104, 105)
         assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Swift", "Kotlin", "Redis", "Kafka", "Postgres")
@@ -121,7 +133,7 @@ class QuestionSchedulerTest {
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
         questions.pendingRows += pendingQuestion(id = 902, studyId = 101, topic = "Swift", now = now.plusSeconds(1))
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
         assertThat(questions.countPendingForStudyCalls).isZero()
@@ -136,7 +148,7 @@ class QuestionSchedulerTest {
         studies.rows += study
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = dueAt)
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(pushOutbox.requests).isEmpty()
@@ -152,7 +164,7 @@ class QuestionSchedulerTest {
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
         studies.rows += study
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(openAI.generateQuestionCalls).isZero()
@@ -168,7 +180,7 @@ class QuestionSchedulerTest {
         studies.rows += study
         openAI.failure = IllegalStateException("OpenAI unavailable")
 
-        scheduler.runScheduled()
+        scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(pushOutbox.requests).isEmpty()
@@ -221,6 +233,13 @@ class QuestionSchedulerTest {
                 .sortedWith(compareBy<StudyEntity> { it.nextDueAt }.thenBy { it.id })
                 .drop(pageable.offset.toInt())
                 .take(pageable.pageSize)
+        }
+    }
+
+    private class FakeRunQuestionScheduleUseCase : RunQuestionScheduleUseCase {
+        var calls = 0
+        override fun runDueQuestions() {
+            calls += 1
         }
     }
 

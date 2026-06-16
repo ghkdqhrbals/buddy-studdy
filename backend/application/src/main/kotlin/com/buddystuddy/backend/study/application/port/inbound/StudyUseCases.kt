@@ -35,3 +35,7 @@ interface StudySyncUseCase {
     fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
     fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
 }
+
+interface RunQuestionScheduleUseCase {
+    fun runDueQuestions()
+}
