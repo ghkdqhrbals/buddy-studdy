@@ -2205,7 +2205,15 @@ enum ProfileAvatarOption {
         "pixel-fox",
         "pixel-chick",
         "pixel-tutor-bot",
-        "pixel-study-mage"
+        "pixel-study-mage",
+        "pixel-owl",
+        "pixel-panda",
+        "pixel-koala",
+        "pixel-frog",
+        "pixel-turtle",
+        "pixel-seal",
+        "pixel-hamster",
+        "pixel-deer"
     ]
 
     static func assetName(for symbolName: String) -> String {
@@ -2232,6 +2240,22 @@ enum ProfileAvatarOption {
             return "ProfileAvatarTutorBot"
         case "pixel-study-mage":
             return "ProfileAvatarStudyMage"
+        case "pixel-owl":
+            return "ProfileAvatarOwl"
+        case "pixel-panda":
+            return "ProfileAvatarPanda"
+        case "pixel-koala":
+            return "ProfileAvatarKoala"
+        case "pixel-frog":
+            return "ProfileAvatarFrog"
+        case "pixel-turtle":
+            return "ProfileAvatarTurtle"
+        case "pixel-seal":
+            return "ProfileAvatarSeal"
+        case "pixel-hamster":
+            return "ProfileAvatarHamster"
+        case "pixel-deer":
+            return "ProfileAvatarDeer"
         case "pixel-book-pup":
             fallthrough
         default:
@@ -2275,6 +2299,12 @@ enum ProfileAvatarOption {
             return "pixel-fox"
         case "pixel-star", "pixel-chef", "pixel-pilot", "pixel-nurse", "pixel-wizard", "pixel-astronaut":
             return "pixel-study-mage"
+        case "pixel-dog":
+            return "pixel-dachshund"
+        case "pixel-bird":
+            return "pixel-owl"
+        case "pixel-mint", "pixel-green":
+            return "pixel-frog"
         default:
             return all.contains(symbolName) ? symbolName : defaultSymbolName
         }
