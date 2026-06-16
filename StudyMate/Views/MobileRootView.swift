@@ -981,11 +981,17 @@ struct ProfileAvatarSprite: View {
     var size: CGFloat
 
     var body: some View {
-        Image(ProfileAvatarOption.assetName(for: symbolName))
-            .resizable()
-            .interpolation(.none)
-            .antialiased(false)
-            .scaledToFit()
+        let palette = PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor)
+
+        Circle()
+            .fill(palette.background)
+            .overlay {
+                Image(ProfileAvatarOption.assetName(for: symbolName))
+                    .resizable()
+                    .interpolation(.none)
+                    .antialiased(false)
+                    .scaledToFit()
+            }
             .frame(width: size, height: size)
             .clipShape(Circle())
     }
