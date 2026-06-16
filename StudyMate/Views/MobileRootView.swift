@@ -1659,25 +1659,28 @@ private struct MobileProfileSettingsSheet: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 38, maximum: 44), spacing: 10)], spacing: 10) {
-                                        ForEach(ProfileAvatarColorOption.all) { option in
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 12) {
+                                            ForEach(ProfileAvatarColorOption.all) { option in
+                                                Button {
+                                                    draftAvatarColorSeed = option.id
+                                                } label: {
+                                                    colorChoice(
+                                                        color: option.color,
+                                                        isSelected: draftAvatarColorSeed == option.id
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+
                                             Button {
-                                                draftAvatarColorSeed = option.id
+                                                isShowingCustomColorEditor = true
                                             } label: {
-                                                colorChoice(
-                                                    color: option.color,
-                                                    isSelected: draftAvatarColorSeed == option.id
-                                                )
+                                                customColorChoice(isSelected: ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil)
                                             }
                                             .buttonStyle(.plain)
                                         }
-
-                                        Button {
-                                            isShowingCustomColorEditor = true
-                                        } label: {
-                                            customColorChoice(isSelected: ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil)
-                                        }
-                                        .buttonStyle(.plain)
+                                        .padding(.vertical, 2)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
@@ -1886,41 +1889,62 @@ private struct MobileProfileSettingsSheet: View {
     }
 
     private func colorChoice(color: Color, isSelected: Bool) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: 34, height: 34)
-            .overlay {
-                Circle()
-                    .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+        ZStack {
+            Circle()
+                .fill(color)
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.28), radius: 2, x: 0, y: 1)
             }
-            .padding(2)
+        }
+        .frame(width: 46, height: 46)
+        .overlay {
+            Circle()
+                .stroke(isSelected ? Color.primary.opacity(0.78) : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+        }
+        .overlay {
+            Circle()
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                .padding(4)
+        }
+        .padding(1)
     }
 
     private func customColorChoice(isSelected: Bool) -> some View {
-        Circle()
-            .fill(
-                AngularGradient(
-                    colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red],
-                    center: .center
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .fill(
+                    AngularGradient(
+                        colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red],
+                        center: .center
+                    )
                 )
-            )
-            .frame(width: 34, height: 34)
-            .overlay {
-                Circle()
-                    .stroke(isSelected ? Color.primary : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
-            }
-            .padding(2)
-            .accessibilityLabel(strings.customProfileColor)
-    }
+                .frame(width: 58, height: 46)
 
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color.accentColor)
+                    .offset(x: 3, y: 3)
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+        }
+        .accessibilityLabel(strings.customProfileColor)
+    }
 }
 
 private struct ProfileAvatarColorEditorSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var red: Double
-    @State private var green: Double
-    @State private var blue: Double
+    @State private var hue: Double
+    @State private var saturation: Double
     var onApply: (ProfileAvatarCustomColor) -> Void
 
     private var strings: AppStrings {
@@ -1928,44 +1952,45 @@ private struct ProfileAvatarColorEditorSheet: View {
     }
 
     private var selectedColor: ProfileAvatarCustomColor {
-        ProfileAvatarCustomColor(red: Int(red.rounded()), green: Int(green.rounded()), blue: Int(blue.rounded()))
+        ProfileAvatarCustomColor(hue: hue, saturation: saturation)
     }
 
     init(initialColor: ProfileAvatarCustomColor, onApply: @escaping (ProfileAvatarCustomColor) -> Void) {
-        _red = State(initialValue: Double(initialColor.red))
-        _green = State(initialValue: Double(initialColor.green))
-        _blue = State(initialValue: Double(initialColor.blue))
+        let hsv = initialColor.hsvApproximation
+        _hue = State(initialValue: hsv.hue)
+        _saturation = State(initialValue: hsv.saturation)
         self.onApply = onApply
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    HStack(spacing: 16) {
-                        Circle()
-                            .fill(selectedColor.color)
-                            .frame(width: 64, height: 64)
-                            .overlay {
-                                Circle()
-                                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                            }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(strings.customProfileColor)
-                                .font(.headline)
-                            Text("RGB \(selectedColor.red), \(selectedColor.green), \(selectedColor.blue)")
-                                .font(.footnote.monospacedDigit())
-                                .foregroundStyle(.secondary)
+            VStack(spacing: 18) {
+                VStack(spacing: 12) {
+                    Circle()
+                        .fill(selectedColor.color)
+                        .frame(width: 72, height: 72)
+                        .overlay {
+                            Circle()
+                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                         }
-                    }
-                    .padding(.vertical, 4)
-                }
 
-                rgbSlider(title: strings.red, value: $red, tint: .red)
-                rgbSlider(title: strings.green, value: $green, tint: .green)
-                rgbSlider(title: strings.blue, value: $blue, tint: .blue)
+                    Text("RGB \(selectedColor.red), \(selectedColor.green), \(selectedColor.blue)")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 14)
+
+                ProfileAvatarSpectrumPicker(hue: $hue, saturation: $saturation)
+                    .frame(height: 190)
+                    .padding(.horizontal, 4)
+
+                Text(strings.customProfileColor)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
             }
+            .padding(20)
             .navigationTitle(strings.profileColor)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1984,24 +2009,64 @@ private struct ProfileAvatarColorEditorSheet: View {
             }
         }
     }
+}
 
-    private func rgbSlider(title: String, value: Binding<Double>, tint: Color) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("\(Int(value.wrappedValue.rounded()))")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.secondary)
+private struct ProfileAvatarSpectrumPicker: View {
+    @Binding var hue: Double
+    @Binding var saturation: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = proxy.size
+            let x = CGFloat(hue) * size.width
+            let y = (1 - CGFloat(saturation)) * size.height
+
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    colors: stride(from: 0.0, through: 1.0, by: 0.1).map {
+                        Color(hue: $0, saturation: 1, brightness: 0.95)
+                    },
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .overlay {
+                    LinearGradient(
+                        colors: [.white, .white.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .blendMode(.screen)
+                }
+                .overlay {
+                    LinearGradient(
+                        colors: [.black.opacity(0), .black.opacity(0.18)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 }
 
-                Slider(value: value, in: 0...255, step: 1)
-                    .tint(tint)
+                Circle()
+                    .strokeBorder(.white, lineWidth: 3)
+                    .background(Circle().fill(Color(hue: hue, saturation: saturation, brightness: 0.92)))
+                    .shadow(color: .black.opacity(0.28), radius: 4, x: 0, y: 2)
+                    .frame(width: 34, height: 34)
+                    .position(x: min(max(x, 17), size.width - 17), y: min(max(y, 17), size.height - 17))
             }
-            .padding(.vertical, 2)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        hue = min(1, max(0, Double(value.location.x / max(size.width, 1))))
+                        saturation = min(1, max(0, 1 - Double(value.location.y / max(size.height, 1))))
+                    }
+            )
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -2263,14 +2328,24 @@ private struct ProfileAvatarColorOption: Identifiable {
     var color: Color
 
     static let all: [ProfileAvatarColorOption] = [
+        ProfileAvatarColorOption(id: "avatar-color-sage", color: Color(red: 0.39, green: 0.60, blue: 0.43)),
         ProfileAvatarColorOption(id: "avatar-color-mint", color: Color(red: 0.20, green: 0.72, blue: 0.52)),
-        ProfileAvatarColorOption(id: "avatar-color-sky", color: Color(red: 0.20, green: 0.50, blue: 0.86)),
-        ProfileAvatarColorOption(id: "avatar-color-violet", color: Color(red: 0.50, green: 0.36, blue: 0.82)),
-        ProfileAvatarColorOption(id: "avatar-color-rose", color: Color(red: 0.84, green: 0.33, blue: 0.47)),
-        ProfileAvatarColorOption(id: "avatar-color-amber", color: Color(red: 0.86, green: 0.56, blue: 0.20)),
         ProfileAvatarColorOption(id: "avatar-color-teal", color: Color(red: 0.16, green: 0.62, blue: 0.70)),
+        ProfileAvatarColorOption(id: "avatar-color-sky", color: Color(red: 0.20, green: 0.50, blue: 0.86)),
+        ProfileAvatarColorOption(id: "avatar-color-denim", color: Color(red: 0.24, green: 0.38, blue: 0.68)),
+        ProfileAvatarColorOption(id: "avatar-color-indigo", color: Color(red: 0.38, green: 0.34, blue: 0.72)),
+        ProfileAvatarColorOption(id: "avatar-color-violet", color: Color(red: 0.50, green: 0.36, blue: 0.82)),
+        ProfileAvatarColorOption(id: "avatar-color-plum", color: Color(red: 0.60, green: 0.34, blue: 0.62)),
+        ProfileAvatarColorOption(id: "avatar-color-rose", color: Color(red: 0.84, green: 0.33, blue: 0.47)),
+        ProfileAvatarColorOption(id: "avatar-color-coral", color: Color(red: 0.92, green: 0.43, blue: 0.34)),
+        ProfileAvatarColorOption(id: "avatar-color-amber", color: Color(red: 0.86, green: 0.56, blue: 0.20)),
+        ProfileAvatarColorOption(id: "avatar-color-gold", color: Color(red: 0.76, green: 0.64, blue: 0.24)),
+        ProfileAvatarColorOption(id: "avatar-color-lime", color: Color(red: 0.48, green: 0.70, blue: 0.28)),
+        ProfileAvatarColorOption(id: "avatar-color-olive", color: Color(red: 0.47, green: 0.52, blue: 0.31)),
+        ProfileAvatarColorOption(id: "avatar-color-cocoa", color: Color(red: 0.55, green: 0.39, blue: 0.28)),
+        ProfileAvatarColorOption(id: "avatar-color-slate", color: Color(red: 0.33, green: 0.39, blue: 0.48)),
         ProfileAvatarColorOption(id: "avatar-color-graphite", color: Color(red: 0.36, green: 0.38, blue: 0.42)),
-        ProfileAvatarColorOption(id: "avatar-color-lime", color: Color(red: 0.48, green: 0.70, blue: 0.28))
+        ProfileAvatarColorOption(id: "avatar-color-charcoal", color: Color(red: 0.20, green: 0.22, blue: 0.25))
     ]
 
     static func option(for seed: String) -> ProfileAvatarColorOption? {
@@ -2315,6 +2390,61 @@ private struct ProfileAvatarCustomColor: Equatable {
         self.init(red: red, green: green, blue: blue)
     }
 
+    init(hue: Double, saturation: Double) {
+        let clampedHue = min(1, max(0, hue))
+        let clampedSaturation = min(1, max(0, saturation))
+        let brightness = 0.92
+        let sector = clampedHue * 6
+        let chroma = brightness * clampedSaturation
+        let x = chroma * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
+        let match = brightness - chroma
+        let rgb: (Double, Double, Double)
+
+        switch sector {
+        case 0..<1:
+            rgb = (chroma, x, 0)
+        case 1..<2:
+            rgb = (x, chroma, 0)
+        case 2..<3:
+            rgb = (0, chroma, x)
+        case 3..<4:
+            rgb = (0, x, chroma)
+        case 4..<5:
+            rgb = (x, 0, chroma)
+        default:
+            rgb = (chroma, 0, x)
+        }
+
+        self.init(
+            red: Int(((rgb.0 + match) * 255).rounded()),
+            green: Int(((rgb.1 + match) * 255).rounded()),
+            blue: Int(((rgb.2 + match) * 255).rounded())
+        )
+    }
+
+    var hsvApproximation: (hue: Double, saturation: Double) {
+        let r = Double(red) / 255
+        let g = Double(green) / 255
+        let b = Double(blue) / 255
+        let maxValue = max(r, g, b)
+        let minValue = min(r, g, b)
+        let delta = maxValue - minValue
+        let saturation = maxValue == 0 ? 0 : delta / maxValue
+        let hue: Double
+
+        if delta == 0 {
+            hue = 0
+        } else if maxValue == r {
+            hue = ((g - b) / delta).truncatingRemainder(dividingBy: 6) / 6
+        } else if maxValue == g {
+            hue = (((b - r) / delta) + 2) / 6
+        } else {
+            hue = (((r - g) / delta) + 4) / 6
+        }
+
+        return (hue < 0 ? hue + 1 : hue, saturation)
+    }
+
     static func from(seed: String) -> ProfileAvatarCustomColor {
         if let customColor = ProfileAvatarCustomColor(seed: seed) {
             return customColor
@@ -2323,7 +2453,7 @@ private struct ProfileAvatarCustomColor: Equatable {
            let components = preset.color.avatarRGBComponents {
             return ProfileAvatarCustomColor(red: components.red, green: components.green, blue: components.blue)
         }
-        return ProfileAvatarCustomColor(red: 78, green: 163, blue: 122)
+        return ProfileAvatarCustomColor(red: 244, green: 181, blue: 94)
     }
 
     private static func clamped(_ value: Int) -> Int {
