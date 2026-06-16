@@ -1482,7 +1482,6 @@ private struct MobileProfileSettingsSheet: View {
     @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
     @State private var draftAvatarColorSeed = ""
     @State private var allowPublicQuestionsAccess = true
-    @State private var isConfirmingWithdrawal = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
     @State private var isShowingAvatarCustomization = false
@@ -1715,22 +1714,6 @@ private struct MobileProfileSettingsSheet: View {
                             Text(strings.communityLogout)
                         }
                     }
-
-                    Section {
-                        Button(role: .destructive) {
-                            isConfirmingWithdrawal = true
-                        } label: {
-                            Text(strings.deleteAccount)
-                                .font(.caption2)
-                                .foregroundStyle(.red.opacity(0.72))
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
-                        .buttonStyle(.plain)
-                    } footer: {
-                        Text(strings.deleteAccountNotice)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary.opacity(0.78))
-                    }
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
@@ -1839,27 +1822,6 @@ private struct MobileProfileSettingsSheet: View {
             .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
                 if isSignedIn, !wasSignedInWhenOpened {
                     dismiss()
-                }
-            }
-            .confirmationDialog(
-                strings.deleteAccount,
-                isPresented: $isConfirmingWithdrawal,
-                titleVisibility: .visible
-            ) {
-                Button(strings.deleteAccount, role: .destructive) {
-                    Task {
-                        await appState.withdrawCommunityAccount()
-                        dismiss()
-                    }
-                }
-                Button(strings.cancel, role: .cancel) {}
-            } message: {
-                Text(strings.deleteAccountConfirmMessage)
-            }
-            .disabled(appState.isWithdrawingCommunityAccount)
-            .overlay {
-                if appState.isWithdrawingCommunityAccount {
-                    ProgressView()
                 }
             }
             .sheet(isPresented: $isShowingEmailSignIn) {
