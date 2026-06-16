@@ -63,6 +63,8 @@ buddystuddy:
     poll-ms: ${SCHEDULER_POLL_MS:30000}
     max-pending-per-study: ${MAX_PENDING_PER_STUDY:1}
     batch-size: ${SCHEDULER_BATCH_SIZE:50}
+    processing-timeout-seconds: ${SCHEDULER_PROCESSING_TIMEOUT_SECONDS:300}
+    worker-id: ${SCHEDULER_WORKER_ID:}
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}

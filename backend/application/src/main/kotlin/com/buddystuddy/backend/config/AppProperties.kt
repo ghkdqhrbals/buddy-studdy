@@ -21,6 +21,8 @@ data class BuddyStuddyProperties(
         var pollMs: Long = 30_000,
         var maxPendingPerStudy: Int = 1,
         var batchSize: Int = 50,
+        var processingTimeoutSeconds: Long = 300,
+        var workerId: String = "",
     )
     data class OpenAI(var apiKey: String = "", var model: String = "gpt-5.4")
     data class Apns(

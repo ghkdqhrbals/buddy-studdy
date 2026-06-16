@@ -12,11 +12,14 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.service.ScheduledQuestionService
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
@@ -28,6 +31,7 @@ import java.util.Optional
 
 class QuestionSchedulerTest {
     private val studies = FakeStudyPort()
+    private val jobs = FakeStudyQuestionJobPort()
     private val users = FakeUserPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
@@ -40,6 +44,7 @@ class QuestionSchedulerTest {
     private val scheduler = ScheduledQuestionService(
         properties = properties,
         studies = studies,
+        jobs = jobs,
         users = users,
         questions = questions,
         questionStats = questionStats,
@@ -64,6 +69,8 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        jobs.rows += job(id = 1001, studyId = 101, userId = 7, now = now)
+        jobs.rows += job(id = 1002, studyId = 102, userId = 7, now = now)
         questions.visibleRows += QuestionEntity(
             id = 900,
             deviceId = "dev-1",
@@ -80,6 +87,8 @@ class QuestionSchedulerTest {
 
         assertThat(questions.savedRows).hasSize(2)
         assertThat(pushOutbox.requests).hasSize(2)
+        assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.COMPLETED }).hasSize(2)
+        assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.SCHEDULED }).hasSize(2)
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questions.findVisibleByUserCalls).isEqualTo(1)
         assertThat(openAI.recentArguments).allSatisfy { recent ->
@@ -93,6 +102,8 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        jobs.rows += job(id = 1001, studyId = 101, userId = 7, now = now)
+        jobs.rows += job(id = 1002, studyId = 102, userId = 7, now = now)
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
 
         scheduler.runDueQuestions()
@@ -114,13 +125,37 @@ class QuestionSchedulerTest {
         studies.rows += study(id = 103, userId = 7, topic = "Redis", now = now)
         studies.rows += study(id = 104, userId = 7, topic = "Kafka", now = now)
         studies.rows += study(id = 105, userId = 7, topic = "Postgres", now = now)
+        jobs.rows += job(id = 1001, studyId = 101, userId = 7, now = now)
+        jobs.rows += job(id = 1002, studyId = 102, userId = 7, now = now)
+        jobs.rows += job(id = 1003, studyId = 103, userId = 7, now = now)
+        jobs.rows += job(id = 1004, studyId = 104, userId = 7, now = now)
+        jobs.rows += job(id = 1005, studyId = 105, userId = 7, now = now)
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101, 102, 103, 104, 105)
         assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Swift", "Kotlin", "Redis", "Kafka", "Postgres")
-        assertThat(studies.findDueCalls).isEqualTo(4)
+        assertThat(jobs.claimDueCalls).isEqualTo(4)
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(3)
+    }
+
+    @Test
+    fun `scheduled run recovers stale processing jobs before claiming due work`() {
+        properties.scheduler.processingTimeoutSeconds = 60
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
+        jobs.rows += job(id = 1001, studyId = 101, userId = 7, now = now).apply {
+            status = StudyQuestionJobStatus.PROCESSING
+            lockedAt = Instant.now().minusSeconds(120)
+            lockedBy = "dead-worker"
+        }
+
+        scheduler.runDueQuestions()
+
+        assertThat(jobs.recoverStaleProcessingCalls).isEqualTo(1)
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(101)
+        assertThat(jobs.rows.first { it.id == 1001L }.status).isEqualTo(StudyQuestionJobStatus.COMPLETED)
     }
 
     @Test
@@ -130,6 +165,8 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        jobs.rows += job(id = 1001, studyId = 101, userId = 7, now = now)
+        jobs.rows += job(id = 1002, studyId = 102, userId = 7, now = now)
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = now)
         questions.pendingRows += pendingQuestion(id = 902, studyId = 101, topic = "Swift", now = now.plusSeconds(1))
 
@@ -146,14 +183,16 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
         studies.rows += study
+        val scheduledJob = job(id = 1001, studyId = 101, userId = 7, now = dueAt)
+        jobs.rows += scheduledJob
         questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = dueAt)
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(pushOutbox.requests).isEmpty()
-        assertThat(study.lastError).contains("Pending question limit reached")
-        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(250, 310)
+        assertThat(scheduledJob.lastError).contains("Pending question limit reached")
+        assertThat(Duration.between(Instant.now(), scheduledJob.scheduledAt).seconds).isBetween(250, 310)
     }
 
     @Test
@@ -163,13 +202,15 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
         studies.rows += study
+        val scheduledJob = job(id = 1001, studyId = 101, userId = 7, now = dueAt)
+        jobs.rows += scheduledJob
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(openAI.generateQuestionCalls).isZero()
-        assertThat(study.lastError).isEqualTo("No OpenAI API key configured for study.")
-        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(1_750, 1_810)
+        assertThat(scheduledJob.lastError).isEqualTo("No OpenAI API key configured for study.")
+        assertThat(Duration.between(Instant.now(), scheduledJob.scheduledAt).seconds).isBetween(1_750, 1_810)
     }
 
     @Test
@@ -178,14 +219,16 @@ class QuestionSchedulerTest {
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
         studies.rows += study
+        val scheduledJob = job(id = 1001, studyId = 101, userId = 7, now = dueAt)
+        jobs.rows += scheduledJob
         openAI.failure = IllegalStateException("OpenAI unavailable")
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(pushOutbox.requests).isEmpty()
-        assertThat(study.lastError).isEqualTo("OpenAI unavailable")
-        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(550, 610)
+        assertThat(scheduledJob.lastError).isEqualTo("OpenAI unavailable")
+        assertThat(Duration.between(Instant.now(), scheduledJob.scheduledAt).seconds).isBetween(550, 610)
     }
 
     private fun study(id: Long, userId: Long, topic: String, now: Instant) = StudyEntity(
@@ -196,6 +239,17 @@ class QuestionSchedulerTest {
         difficultyLevel = 5,
         intervalMinutes = 15,
         nextDueAt = now.minusSeconds(1),
+        createdAt = now.minusSeconds(120),
+        updatedAt = now.minusSeconds(120),
+    )
+
+    private fun job(id: Long, studyId: Long, userId: Long, now: Instant) = StudyQuestionJobEntity(
+        id = id,
+        studyId = studyId,
+        deviceId = "dev-$userId",
+        userId = userId,
+        scheduledAt = now.minusSeconds(1),
+        status = StudyQuestionJobStatus.SCHEDULED,
         createdAt = now.minusSeconds(120),
         updatedAt = now.minusSeconds(120),
     )
@@ -217,22 +271,62 @@ class QuestionSchedulerTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
-        var findDueCalls = 0
         override fun save(entity: StudyEntity): StudyEntity = entity
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
-        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = null
+        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
+            rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
         override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> {
-            findDueCalls += 1
+    }
+
+    private class FakeStudyQuestionJobPort : StudyQuestionJobPort {
+        val rows = mutableListOf<StudyQuestionJobEntity>()
+        var claimDueCalls = 0
+        var recoverStaleProcessingCalls = 0
+        override fun save(entity: StudyQuestionJobEntity): StudyQuestionJobEntity {
+            if (entity.id == 0L) {
+                entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
+                rows += entity
+            }
+            return entity
+        }
+        override fun saveBatch(entities: Iterable<StudyQuestionJobEntity>): List<StudyQuestionJobEntity> =
+            entities.map { save(it) }
+        override fun findLatestByStudyId(studyId: Long): StudyQuestionJobEntity? =
+            rows.filter { it.studyId == studyId }.maxByOrNull { it.id }
+        override fun findLatestByStudyIds(studyIds: Collection<Long>): List<StudyQuestionJobEntity> =
+            rows.filter { it.studyId in studyIds }
+                .groupBy { it.studyId }
+                .mapNotNull { it.value.maxByOrNull { job -> job.id } }
+        override fun claimDue(now: Instant, limit: Int): List<StudyQuestionJobEntity> {
+            claimDueCalls += 1
             return rows
-                .filter { it.enabled && it.nextDueAt != null && it.nextDueAt?.isAfter(now) != true }
-                .sortedWith(compareBy<StudyEntity> { it.nextDueAt }.thenBy { it.id })
-                .drop(pageable.offset.toInt())
-                .take(pageable.pageSize)
+                .filter { it.status == StudyQuestionJobStatus.SCHEDULED && !it.scheduledAt.isAfter(now) }
+                .sortedWith(compareBy<StudyQuestionJobEntity> { it.scheduledAt }.thenBy { it.id })
+                .take(limit)
+        }
+        override fun cancelScheduledByStudyId(studyId: Long, now: Instant): Int {
+            val targets = rows.filter { it.studyId == studyId && it.status == StudyQuestionJobStatus.SCHEDULED }
+            targets.forEach {
+                it.status = StudyQuestionJobStatus.CANCELED
+                it.canceledAt = now
+                it.updatedAt = now
+            }
+            return targets.size
+        }
+        override fun recoverStaleProcessing(before: Instant, now: Instant): Int {
+            recoverStaleProcessingCalls += 1
+            val targets = rows.filter { it.status == StudyQuestionJobStatus.PROCESSING && it.lockedAt?.isBefore(before) == true }
+            targets.forEach {
+                it.status = StudyQuestionJobStatus.SCHEDULED
+                it.lockedAt = null
+                it.lockedBy = null
+                it.updatedAt = now
+            }
+            return targets.size
         }
     }
 

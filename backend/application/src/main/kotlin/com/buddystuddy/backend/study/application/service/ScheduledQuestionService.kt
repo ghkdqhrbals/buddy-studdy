@@ -10,10 +10,13 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
@@ -25,6 +28,7 @@ import java.time.Instant
 class ScheduledQuestionService(
     private val properties: BuddyStuddyProperties,
     private val studies: StudyPort,
+    private val jobs: StudyQuestionJobPort,
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
@@ -50,34 +54,68 @@ class ScheduledQuestionService(
     override fun runDueQuestions() {
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
+        val recovered = jobs.recoverStaleProcessing(now.minusSeconds(properties.scheduler.processingTimeoutSeconds), now)
+        if (recovered > 0) {
+            log.warn("scheduled_question_jobs_recovered count={}", recovered)
+        }
         val usersById = mutableMapOf<Long, UserEntity?>()
         val recentQuestionsByUserId = mutableMapOf<Long, List<String>>()
         val batchSize = properties.scheduler.batchSize.coerceAtLeast(1)
+        val workerId = properties.scheduler.workerId.ifBlank { "backend-${ProcessHandle.current().pid()}" }
         var processed = 0
         while (true) {
-            val dueStudies = studies.findDue(now, PageRequest.of(0, batchSize))
-            if (dueStudies.isEmpty()) break
-            val pendingCounts = pendingCounts(dueStudies)
-            dueStudies.forEach { study ->
+            val dueJobs = jobs.claimDue(now, batchSize)
+            if (dueJobs.isEmpty()) break
+            dueJobs.forEach { it.markProcessing(workerId, now) }
+            jobs.saveBatch(dueJobs)
+
+            val dueStudies = dueJobs.mapNotNull { job ->
+                studies.findByIdAndUserId(job.studyId, job.userId)
+                    ?.takeIf { it.enabled }
+                    ?: run {
+                        job.markCanceled("Study is missing or disabled.", now)
+                        null
+                    }
+            }
+            val pendingCounts = pendingCounts(dueJobs.map { it.studyId })
+            val studiesById = dueStudies.associateBy { it.id }
+            dueJobs.forEach { job ->
+                val study = studiesById[job.studyId] ?: return@forEach
                 creator.createIfReady(
+                    job = job,
                     study = study,
                     now = now,
-                    pending = pendingCounts[study.id] ?: 0L,
+                    pending = pendingCounts[job.studyId] ?: 0L,
                     usersById = usersById,
                     recentQuestionsByUserId = recentQuestionsByUserId,
                 )
+                if (job.status == StudyQuestionJobStatus.COMPLETED && study.enabled) {
+                    jobs.save(study.toNextJob(now.plusSeconds(study.intervalMinutes.toLong() * 60), now))
+                }
             }
-            processed += dueStudies.size
+            jobs.saveBatch(dueJobs)
+            processed += dueJobs.size
         }
         if (processed > 0) {
             log.info("scheduled_question_drain_completed processed={} batchSize={}", processed, batchSize)
         }
     }
 
-    private fun pendingCounts(dueStudies: List<StudyEntity>): Map<Long, Long> {
-        if (dueStudies.isEmpty()) return emptyMap()
-        return questions.countPendingByStudyIds(dueStudies.map { it.id })
+    private fun pendingCounts(studyIds: List<Long>): Map<Long, Long> {
+        if (studyIds.isEmpty()) return emptyMap()
+        return questions.countPendingByStudyIds(studyIds)
     }
+
+    private fun StudyEntity.toNextJob(scheduledAt: Instant, now: Instant): StudyQuestionJobEntity =
+        StudyQuestionJobEntity(
+            studyId = id,
+            deviceId = deviceId,
+            userId = userId,
+            scheduledAt = scheduledAt,
+            status = StudyQuestionJobStatus.SCHEDULED,
+            createdAt = now,
+            updatedAt = now,
+        )
 }
 
 class ScheduledQuestionCreator(
@@ -92,6 +130,7 @@ class ScheduledQuestionCreator(
     private val log: Logger,
 ) {
     fun createIfReady(
+        job: StudyQuestionJobEntity,
         study: StudyEntity,
         now: Instant,
         pending: Long,
@@ -103,32 +142,32 @@ class ScheduledQuestionCreator(
             val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
             val appLanguage = user?.appLanguage ?: "ko"
             if (pending >= properties.scheduler.maxPendingPerStudy) {
-                study.applyRetry("Pending question limit reached ($pending).", backoffPolicy.pendingLimitNextDueAt(now), now)
-                log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} topic={} pending={}", study.deviceId, userId, study.id, study.topic, pending)
+                job.markScheduled("Pending question limit reached ($pending).", backoffPolicy.pendingLimitNextDueAt(now), now)
+                log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} jobId={} topic={} pending={}", study.deviceId, userId, study.id, job.id, study.topic, pending)
                 return
             }
             val apiKey = cipher.decrypt(user?.openaiApiKeyCipher) ?: properties.openai.apiKey
             if (apiKey.isBlank()) {
-                study.applyRetry("No OpenAI API key configured for study.", backoffPolicy.missingApiKeyNextDueAt(now), now)
-                log.info("scheduled_question_skipped_missing_api_key deviceId={} userId={} studyId={} topic={}", study.deviceId, userId, study.id, study.topic)
+                job.markScheduled("No OpenAI API key configured for study.", backoffPolicy.missingApiKeyNextDueAt(now), now)
+                log.info("scheduled_question_skipped_missing_api_key deviceId={} userId={} studyId={} jobId={} topic={}", study.deviceId, userId, study.id, job.id, study.topic)
                 return
             }
             val recent = recentQuestionsByUserId.getOrPut(userId) {
                 questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
             }
             val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
-            val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, now))
+            val saved = questions.save(study.toScheduledQuestion(job, generated.question, generated.hint, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
             pushOutbox.enqueue(study.toPushRequest(saved.id, generated.question, generated.hint, appLanguage, now), now)
-            study.applySuccess(now)
-            log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, study.topic, saved.id)
+            job.markCompleted(saved.id, now)
+            log.info("scheduled_question_created deviceId={} userId={} studyId={} jobId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, job.id, study.topic, saved.id)
         } catch (error: Exception) {
-            study.applyRetry(error.message ?: error.javaClass.simpleName, backoffPolicy.failureNextDueAt(now), now)
-            log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
+            job.markScheduled(error.message ?: error.javaClass.simpleName, backoffPolicy.failureNextDueAt(now), now)
+            log.warn("scheduled_question_failed deviceId={} userId={} studyId={} jobId={} topic={} error={}", study.deviceId, study.userId, study.id, job.id, study.topic, error.message)
         }
     }
 
-    private fun StudyEntity.toScheduledQuestion(question: String, hint: String?, now: Instant): QuestionEntity =
+    private fun StudyEntity.toScheduledQuestion(job: StudyQuestionJobEntity, question: String, hint: String?, now: Instant): QuestionEntity =
         QuestionEntity(
             deviceId = deviceId,
             userId = userId,
@@ -137,7 +176,7 @@ class ScheduledQuestionCreator(
             hint = hint,
             topic = topic,
             difficultyLevel = difficultyLevel,
-            scheduledFor = nextDueAt ?: now,
+            scheduledFor = job.scheduledAt,
             sentAt = now,
             status = "ungraded",
             source = "scheduled",
@@ -168,18 +207,42 @@ class ScheduledQuestionCreator(
             intervalMinutes = intervalMinutes,
         )
 
-    private fun StudyEntity.applySuccess(now: Instant) {
-        lastSentAt = now
-        nextDueAt = now.plusSeconds(intervalMinutes.toLong() * 60)
-        lastError = null
-        updatedAt = now
-    }
+}
 
-    private fun StudyEntity.applyRetry(error: String, nextDueAt: Instant, now: Instant) {
-        lastError = error
-        this.nextDueAt = nextDueAt
-        updatedAt = now
-    }
+private fun StudyQuestionJobEntity.markProcessing(workerId: String, now: Instant) {
+    status = StudyQuestionJobStatus.PROCESSING
+    lockedAt = now
+    lockedBy = workerId
+    attemptCount += 1
+    updatedAt = now
+}
+
+private fun StudyQuestionJobEntity.markScheduled(error: String, scheduledAt: Instant, now: Instant) {
+    status = StudyQuestionJobStatus.SCHEDULED
+    this.scheduledAt = scheduledAt
+    lockedAt = null
+    lockedBy = null
+    lastError = error
+    updatedAt = now
+}
+
+private fun StudyQuestionJobEntity.markCompleted(questionId: Long, now: Instant) {
+    status = StudyQuestionJobStatus.COMPLETED
+    createdQuestionId = questionId
+    completedAt = now
+    lockedAt = null
+    lockedBy = null
+    lastError = null
+    updatedAt = now
+}
+
+private fun StudyQuestionJobEntity.markCanceled(reason: String, now: Instant) {
+    status = StudyQuestionJobStatus.CANCELED
+    canceledAt = now
+    lockedAt = null
+    lockedBy = null
+    lastError = reason
+    updatedAt = now
 }
 
 class ScheduleBackoffPolicy(

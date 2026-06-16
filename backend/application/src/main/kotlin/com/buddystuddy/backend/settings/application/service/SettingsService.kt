@@ -11,12 +11,15 @@ import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.study.domain.StudyRoomSettings
 import com.buddystuddy.study.domain.StudyRoomSettingsCommand
 import com.buddystuddy.study.domain.StudyRoomSettingsState
 import com.buddystuddy.study.domain.StudyRoomSettingsUpdate
+import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -25,6 +28,7 @@ import java.time.Instant
 @Service
 class SettingsService(
     private val studies: StudyPort,
+    private val jobs: StudyQuestionJobPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
 ) : SettingsUseCase {
@@ -67,8 +71,9 @@ class SettingsService(
                 now = now,
             ))
             val saved = studies.save(study)
+            saved.rescheduleQuestionJob(now)
             studiesByTopic[item.topic] = saved
-            next = saved.nextDueAt
+            next = jobs.findLatestByStudyId(saved.id)?.takeIf { it.status == StudyQuestionJobStatus.SCHEDULED }?.scheduledAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)
     }
@@ -119,7 +124,9 @@ class SettingsService(
         study.topic = command.topic.ifBlank { study.topic }
         study.deviceId = principal.deviceId
         val saved = studies.save(study)
-        return ScheduleResponse(principal.deviceId, saved.enabled, saved.nextDueAt)
+        saved.rescheduleQuestionJob(now)
+        val latestJob = jobs.findLatestByStudyId(saved.id)
+        return ScheduleResponse(principal.deviceId, saved.enabled, latestJob?.takeIf { it.status == StudyQuestionJobStatus.SCHEDULED }?.scheduledAt)
     }
 
     private fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
@@ -135,7 +142,22 @@ class SettingsService(
         customPrompt = update.customPrompt
         openaiModel = update.openaiModel
         maxHistoryCount = update.maxHistoryCount
-        nextDueAt = update.nextDueAt
         updatedAt = update.updatedAt
+    }
+
+    private fun StudyEntity.rescheduleQuestionJob(now: Instant) {
+        jobs.cancelScheduledByStudyId(id, now)
+        if (!enabled) return
+        jobs.save(
+            StudyQuestionJobEntity(
+                studyId = id,
+                deviceId = deviceId,
+                userId = userId,
+                scheduledAt = now.plusSeconds(intervalMinutes.toLong() * 60),
+                status = StudyQuestionJobStatus.SCHEDULED,
+                createdAt = now,
+                updatedAt = now,
+            )
+        )
     }
 }

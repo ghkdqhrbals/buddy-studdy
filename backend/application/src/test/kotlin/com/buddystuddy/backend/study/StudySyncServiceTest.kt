@@ -3,10 +3,13 @@ package com.buddystuddy.backend.study
 import com.buddystuddy.backend.auth.Principal
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.service.StudySyncService
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
+import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import com.buddystuddy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -18,9 +21,10 @@ import java.util.Optional
 
 class StudySyncServiceTest {
     private val studies = FakeStudyPort()
+    private val jobs = FakeStudyQuestionJobPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
-    private val service = StudySyncService(studies, questions, questionStats)
+    private val service = StudySyncService(studies, jobs, questions, questionStats)
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
@@ -51,6 +55,8 @@ class StudySyncServiceTest {
 
         assertThat(response.topic).isEqualTo("Postgres")
         assertThat(response.pendingQuestion).isNull()
+        assertThat(response.nextDueAt).isNotNull()
+        assertThat(jobs.rows.single().status).isEqualTo(StudyQuestionJobStatus.SCHEDULED)
         assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isZero()
     }
@@ -92,7 +98,32 @@ class StudySyncServiceTest {
             PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId && it.topic.contains(query, ignoreCase = true) }, pageable, rows.count { it.userId == userId }.toLong())
-        override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> = emptyList()
+    }
+
+    private class FakeStudyQuestionJobPort : StudyQuestionJobPort {
+        val rows = mutableListOf<StudyQuestionJobEntity>()
+        override fun save(entity: StudyQuestionJobEntity): StudyQuestionJobEntity {
+            if (entity.id == 0L) {
+                entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
+                rows += entity
+            }
+            return entity
+        }
+        override fun saveBatch(entities: Iterable<StudyQuestionJobEntity>): List<StudyQuestionJobEntity> =
+            entities.map { save(it) }
+        override fun findLatestByStudyId(studyId: Long): StudyQuestionJobEntity? =
+            rows.filter { it.studyId == studyId }.maxByOrNull { it.id }
+        override fun findLatestByStudyIds(studyIds: Collection<Long>): List<StudyQuestionJobEntity> =
+            rows.filter { it.studyId in studyIds }
+                .groupBy { it.studyId }
+                .mapNotNull { it.value.maxByOrNull { job -> job.id } }
+        override fun claimDue(now: Instant, limit: Int): List<StudyQuestionJobEntity> = emptyList()
+        override fun cancelScheduledByStudyId(studyId: Long, now: Instant): Int {
+            val targets = rows.filter { it.studyId == studyId && it.status == StudyQuestionJobStatus.SCHEDULED }
+            targets.forEach { it.status = StudyQuestionJobStatus.CANCELED }
+            return targets.size
+        }
+        override fun recoverStaleProcessing(before: Instant, now: Instant): Int = 0
     }
 
     private class FakeQuestionPort : QuestionPort {

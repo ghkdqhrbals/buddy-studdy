@@ -252,7 +252,6 @@ class StudyServiceTest {
         override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> = emptyList()
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> = emptyList()
     }
 
     private class FakeUserPort : UserPort {
