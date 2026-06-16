@@ -11,7 +11,6 @@ create table if not exists users (
     avatar_color_seed varchar(64) not null,
     bio varchar(500) not null,
     allow_public_questions boolean not null,
-    app_language varchar(16) not null default 'ko',
     openai_api_key_cipher text,
     openai_model varchar(64) not null default 'gpt-5.4',
     created_at timestamp with time zone not null,
@@ -68,6 +67,7 @@ create table if not exists schedules (
     app_language varchar(16) not null,
     openai_model varchar(64) not null,
     max_history_count integer not null,
+    is_question_public boolean not null,
     openai_api_key_cipher text,
     next_due_at timestamp with time zone,
     last_sent_at timestamp with time zone,
@@ -138,8 +138,6 @@ create table if not exists question_comments (
     created_at timestamp with time zone not null,
     updated_at timestamp with time zone not null
 );
-create index if not exists idx_question_comments_question_active_created
-    on question_comments (question_id, deleted_at, created_at desc);
 
 create table if not exists reports (
     id bigserial primary key,
