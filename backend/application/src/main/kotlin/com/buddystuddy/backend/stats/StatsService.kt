@@ -31,6 +31,7 @@ class StatsService(
     private val userStats: UserStatsPort,
     private val questions: QuestionPort,
     private val stats: QuestionStatsPort,
+    private val topicStatsAssembler: TopicStatsAssembler = TopicStatsAssembler(),
 ) : GetStudyStatsUseCase {
     override fun stats(principal: Principal, limit: Int, offset: Int, query: StatsQuery): StatsResponse =
         stats(principal.userId, limit, offset, query)
@@ -56,7 +57,7 @@ class StatsService(
         val selectedGroups = selectedTopicKeys.mapNotNull { grouped[it] }
         val latestRecordsByTopicKey = latestRecordsByTopicKey(userId, selectedGroups)
         val topics = selectedGroups.map { topicRows ->
-            topicStats(topicRows, latestRecordsByTopicKey[topicRows.first().topicKey].orEmpty())
+            topicStatsAssembler.assemble(topicRows, latestRecordsByTopicKey[topicRows.first().topicKey].orEmpty())
         }
         return StatsResponse(
             totalResponses = overview.totalResponses,
@@ -66,40 +67,6 @@ class StatsService(
             limit = limit,
             offset = offset,
             generatedAt = Instant.now(),
-        )
-    }
-
-    private fun topicStats(rows: List<UserStatsEntity>, records: List<StudyRecordResponse>): TopicStatsResponse {
-        val responseCount = rows.sumOf { it.responseCount }
-        val scoreCount = rows.sumOf { it.scoreCount }
-        val scoreSum = rows.sumOf { it.scoreSum }
-        val avg = if (scoreCount == 0) 0 else scoreSum / scoreCount
-        val best = rows.maxOfOrNull { it.bestScore } ?: 0
-        val correctRate = if (scoreCount == 0) 0 else rows.sumOf { it.correctCount } * 100 / scoreCount
-        val byLevel = rows.groupBy { it.difficultyLevel }.maxByOrNull { it.value.sumOf(UserStatsEntity::responseCount) }
-        val level = byLevel?.key ?: rows.first().difficultyLevel
-        val center = level + ((avg - 50) / 100.0)
-        val uncertainty = 1.6 / max(1.0, scoreCount.toDouble()).coerceAtMost(4.0)
-        val topicRows = rows.sortedByDescending { it.responseCount }
-        val aliases = topicRows.map { it.topic }.distinct()
-        return TopicStatsResponse(
-            topicKey = rows.first().topicKey,
-            topic = aliases.firstOrNull() ?: rows.first().topic,
-            topicAliases = aliases,
-            count = responseCount,
-            average = avg,
-            best = best,
-            correctRate = correctRate,
-            levelRange = TopicLevelRangeResponse(
-                level = level,
-                average = avg,
-                sampleCount = scoreCount,
-                centerLevel = center.coerceIn(1.0, 10.0),
-                lowerBound = (center - uncertainty).coerceIn(1.0, 10.0),
-                upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
-            ),
-            latestAt = rows.maxOf { it.latestAt },
-            records = records,
         )
     }
 
@@ -153,18 +120,61 @@ class StatsService(
 
 }
 
+class TopicStatsAssembler {
+    fun assemble(rows: List<UserStatsEntity>, records: List<StudyRecordResponse>): TopicStatsResponse {
+        require(rows.isNotEmpty()) { "Topic stats rows must not be empty." }
+        val responseCount = rows.sumOf { it.responseCount }
+        val scoreCount = rows.sumOf { it.scoreCount }
+        val scoreSum = rows.sumOf { it.scoreSum }
+        val avg = if (scoreCount == 0) 0 else scoreSum / scoreCount
+        val best = rows.maxOfOrNull { it.bestScore } ?: 0
+        val correctRate = if (scoreCount == 0) 0 else rows.sumOf { it.correctCount } * 100 / scoreCount
+        val dominantLevelRows = rows.groupBy { it.difficultyLevel }.maxByOrNull { it.value.sumOf(UserStatsEntity::responseCount) }
+        val level = dominantLevelRows?.key ?: rows.first().difficultyLevel
+        val center = level + ((avg - 50) / 100.0)
+        val uncertainty = 1.6 / max(1.0, scoreCount.toDouble()).coerceAtMost(4.0)
+        val topicRows = rows.sortedByDescending { it.responseCount }
+        val aliases = topicRows.map { it.topic }.distinct()
+        return TopicStatsResponse(
+            topicKey = rows.first().topicKey,
+            topic = aliases.firstOrNull() ?: rows.first().topic,
+            topicAliases = aliases,
+            count = responseCount,
+            average = avg,
+            best = best,
+            correctRate = correctRate,
+            levelRange = TopicLevelRangeResponse(
+                level = level,
+                average = avg,
+                sampleCount = scoreCount,
+                centerLevel = center.coerceIn(1.0, 10.0),
+                lowerBound = (center - uncertainty).coerceIn(1.0, 10.0),
+                upperBound = (center + uncertainty).coerceIn(1.0, 10.0),
+            ),
+            latestAt = rows.maxOf { it.latestAt },
+            records = records,
+        )
+    }
+}
+
 @Service
 class StatsRefreshService(
     private val questions: QuestionPort,
     private val userStats: UserStatsPort,
+    private val rowBuilder: UserStatsRowBuilder = UserStatsRowBuilder(),
 ) : RefreshUserStatsUseCase {
     override fun refreshAll(now: Instant) {
-        val rows = questions.findAllGradedForStats(PageRequest.of(0, MAX_REFRESH_QUESTIONS)).content
-            .filter { it.userId != null && it.deletedAt == null && it.score != null }
-            .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
-            .map { (key, questions) -> key.toEntity(questions, now) }
+        val rows = rowBuilder.build(questions.findAllGradedForStats(PageRequest.of(0, MAX_REFRESH_QUESTIONS)).content, now)
         userStats.syncAll(rows)
     }
+}
+
+class UserStatsRowBuilder {
+    fun build(questions: List<QuestionEntity>, now: Instant): List<UserStatsEntity> =
+        questions
+            .filter { it.userId != null && it.deletedAt == null && it.score != null }
+            .groupBy { StatsBucketKey(it.userId!!, statsDate(it), normalizedTopic(it.topic), it.difficultyLevel) }
+            .map { (key, rows) -> key.toEntity(rows, now) }
 
     private fun StatsBucketKey.toEntity(rows: List<QuestionEntity>, now: Instant): UserStatsEntity {
         val scores = rows.mapNotNull { it.score }
@@ -191,11 +201,9 @@ class StatsRefreshService(
         val topicKey: String,
         val difficultyLevel: Int,
     )
-
-    private companion object {
-        private const val MAX_REFRESH_QUESTIONS = 500_000
-    }
 }
+
+private const val MAX_REFRESH_QUESTIONS = 500_000
 
 internal fun normalizedTopic(value: String): String =
     Normalizer.normalize(value.trim().lowercase(), Normalizer.Form.NFKC).replace(Regex("\\s+"), " ")

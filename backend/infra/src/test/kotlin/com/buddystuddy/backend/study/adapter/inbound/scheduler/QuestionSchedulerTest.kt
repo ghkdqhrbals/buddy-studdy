@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import java.time.Duration
 import java.time.Instant
 import java.util.Optional
 
@@ -106,6 +107,54 @@ class QuestionSchedulerTest {
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
         assertThat(questions.countPendingForStudyCalls).isZero()
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `scheduled run backs off briefly when study already has pending question`() {
+        val dueAt = Instant.now().minusSeconds(1)
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
+        studies.rows += study
+        questions.pendingRows += pendingQuestion(id = 901, studyId = 101, topic = "Swift", now = dueAt)
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows).isEmpty()
+        assertThat(pushOutbox.requests).isEmpty()
+        assertThat(study.lastError).contains("Pending question limit reached")
+        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(250, 310)
+    }
+
+    @Test
+    fun `scheduled run backs off longer when api key is missing`() {
+        properties.openai.apiKey = ""
+        val dueAt = Instant.now().minusSeconds(1)
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
+        studies.rows += study
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows).isEmpty()
+        assertThat(openAI.generateQuestionCalls).isZero()
+        assertThat(study.lastError).isEqualTo("No OpenAI API key configured for study.")
+        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(1_750, 1_810)
+    }
+
+    @Test
+    fun `scheduled run backs off on openai failure without enqueueing push`() {
+        val dueAt = Instant.now().minusSeconds(1)
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
+        studies.rows += study
+        openAI.failure = IllegalStateException("OpenAI unavailable")
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows).isEmpty()
+        assertThat(pushOutbox.requests).isEmpty()
+        assertThat(study.lastError).isEqualTo("OpenAI unavailable")
+        assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(550, 610)
     }
 
     private fun study(id: Long, userId: Long, topic: String, now: Instant) = StudyEntity(
@@ -228,8 +277,12 @@ class QuestionSchedulerTest {
 
     private class FakeOpenAI : OpenAIPort {
         val recentArguments = mutableListOf<List<String>>()
+        var generateQuestionCalls = 0
+        var failure: RuntimeException? = null
         override fun validate(apiKey: String) = Unit
         override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion {
+            generateQuestionCalls += 1
+            failure?.let { throw it }
             recentArguments += recent
             return GeneratedQuestion("Question for $topic", "Hint")
         }

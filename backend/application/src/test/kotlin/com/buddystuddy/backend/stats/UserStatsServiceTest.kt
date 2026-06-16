@@ -89,6 +89,32 @@ class UserStatsServiceTest {
     }
 
     @Test
+    fun `topic stats assembler keeps level range bounded and sample count based`() {
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "architecture",
+            topic = "Architecture",
+            difficultyLevel = 10,
+            responseCount = 3,
+            scoreCount = 3,
+            scoreSum = 300,
+            bestScore = 100,
+            correctCount = 3,
+            latestAt = Instant.parse("2026-06-10T08:00:00Z"),
+        )
+
+        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val range = response.topics.single().levelRange
+
+        assertThat(range.level).isEqualTo(10)
+        assertThat(range.sampleCount).isEqualTo(3)
+        assertThat(range.centerLevel).isEqualTo(10.0)
+        assertThat(range.lowerBound).isBetween(1.0, 10.0)
+        assertThat(range.upperBound).isEqualTo(10.0)
+    }
+
+    @Test
     fun `stats loads latest records and record stats in batches`() {
         userStats.rows += UserStatsEntity(
             userId = 7,
