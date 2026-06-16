@@ -93,6 +93,25 @@ class QuestionSchedulerTest {
     }
 
     @Test
+    fun `scheduled run drains all due studies across multiple batches`() {
+        properties.scheduler.batchSize = 2
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
+        studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+        studies.rows += study(id = 103, userId = 7, topic = "Redis", now = now)
+        studies.rows += study(id = 104, userId = 7, topic = "Kafka", now = now)
+        studies.rows += study(id = 105, userId = 7, topic = "Postgres", now = now)
+
+        scheduler.runScheduled()
+
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(101, 102, 103, 104, 105)
+        assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Swift", "Kotlin", "Redis", "Kafka", "Postgres")
+        assertThat(studies.findDueCalls).isEqualTo(4)
+        assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(3)
+    }
+
+    @Test
     fun `scheduled run uses batch pending counts when per study pending limit is above one`() {
         properties.scheduler.maxPendingPerStudy = 2
         val now = Instant.parse("2026-06-10T00:00:00Z")
@@ -186,6 +205,7 @@ class QuestionSchedulerTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
+        var findDueCalls = 0
         override fun save(entity: StudyEntity): StudyEntity = entity
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = null
@@ -194,7 +214,14 @@ class QuestionSchedulerTest {
             rows.filter { it.userId == userId && it.topic in topics }
         override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> = rows.filter { it.nextDueAt?.isAfter(now) != true }
+        override fun findDue(now: Instant, pageable: Pageable): List<StudyEntity> {
+            findDueCalls += 1
+            return rows
+                .filter { it.enabled && it.nextDueAt != null && it.nextDueAt?.isAfter(now) != true }
+                .sortedWith(compareBy<StudyEntity> { it.nextDueAt }.thenBy { it.id })
+                .drop(pageable.offset.toInt())
+                .take(pageable.pageSize)
+        }
     }
 
     private class FakeUserPort : UserPort {

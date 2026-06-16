@@ -62,6 +62,7 @@ buddystuddy:
     enabled: ${SCHEDULER_ENABLED:true}
     poll-ms: ${SCHEDULER_POLL_MS:30000}
     max-pending-per-study: ${MAX_PENDING_PER_STUDY:1}
+    batch-size: ${SCHEDULER_BATCH_SIZE:50}
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}

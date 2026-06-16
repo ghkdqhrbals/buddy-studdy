@@ -16,7 +16,12 @@ data class BuddyStuddyProperties(
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
-    data class Scheduler(var enabled: Boolean = true, var pollMs: Long = 30_000, var maxPendingPerStudy: Int = 1)
+    data class Scheduler(
+        var enabled: Boolean = true,
+        var pollMs: Long = 30_000,
+        var maxPendingPerStudy: Int = 1,
+        var batchSize: Int = 50,
+    )
     data class OpenAI(var apiKey: String = "", var model: String = "gpt-5.4")
     data class Apns(
         var teamId: String = "",

@@ -52,16 +52,25 @@ class QuestionScheduler(
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
         val recentQuestionsByUserId = mutableMapOf<Long, List<String>>()
-        val dueStudies = studies.findDue(now, PageRequest.of(0, 50))
-        val pendingCounts = pendingCounts(dueStudies)
-        dueStudies.forEach { study ->
-            creator.createIfReady(
-                study = study,
-                now = now,
-                pending = pendingCounts[study.id] ?: 0L,
-                usersById = usersById,
-                recentQuestionsByUserId = recentQuestionsByUserId,
-            )
+        val batchSize = properties.scheduler.batchSize.coerceAtLeast(1)
+        var processed = 0
+        while (true) {
+            val dueStudies = studies.findDue(now, PageRequest.of(0, batchSize))
+            if (dueStudies.isEmpty()) break
+            val pendingCounts = pendingCounts(dueStudies)
+            dueStudies.forEach { study ->
+                creator.createIfReady(
+                    study = study,
+                    now = now,
+                    pending = pendingCounts[study.id] ?: 0L,
+                    usersById = usersById,
+                    recentQuestionsByUserId = recentQuestionsByUserId,
+                )
+            }
+            processed += dueStudies.size
+        }
+        if (processed > 0) {
+            log.info("scheduled_question_drain_completed processed={} batchSize={}", processed, batchSize)
         }
     }
 
