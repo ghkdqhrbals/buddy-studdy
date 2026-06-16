@@ -55,6 +55,31 @@ create table if not exists user_devices (
 create index if not exists idx_user_devices_user_id on user_devices (user_id);
 create index if not exists idx_user_devices_device_id on user_devices (device_id);
 
+create table if not exists schedules (
+    id bigserial primary key,
+    device_id varchar(191) not null,
+    user_id bigint,
+    topic varchar(255) not null,
+    difficulty_level integer not null,
+    interval_minutes integer not null,
+    enabled boolean not null,
+    notification_sound varchar(64),
+    custom_prompt text not null,
+    app_language varchar(16) not null,
+    openai_model varchar(64) not null,
+    max_history_count integer not null,
+    openai_api_key_cipher text,
+    next_due_at timestamp with time zone,
+    last_sent_at timestamp with time zone,
+    last_error text,
+    created_at timestamp with time zone not null,
+    updated_at timestamp with time zone not null,
+    constraint idx_schedules_device_user_topic unique (device_id, user_id, topic)
+);
+
+create index if not exists idx_schedules_due on schedules (enabled, next_due_at);
+create index if not exists idx_schedules_device_user on schedules (device_id, user_id);
+
 create table if not exists questions (
     id bigserial primary key,
     device_id varchar(191) not null,
