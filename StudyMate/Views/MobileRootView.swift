@@ -2205,10 +2205,11 @@ private struct EmailSignInSheet: View {
 }
 
 enum ProfileAvatarOption {
-    static let defaultSymbolName = "pixel-book-pup"
+    static let defaultSymbolName = "pixel-fox"
 
     static let all = [
         defaultSymbolName,
+        "pixel-book-pup",
         "pixel-dachshund",
         "pixel-pencil-pup",
         "pixel-sleepy-pup",
@@ -2216,7 +2217,6 @@ enum ProfileAvatarOption {
         "pixel-bear",
         "pixel-rabbit",
         "pixel-penguin",
-        "pixel-fox",
         "pixel-chick",
         "pixel-tutor-bot",
         "pixel-study-mage",
@@ -2306,7 +2306,7 @@ enum ProfileAvatarOption {
         case "leaf.fill":
             return "pixel-fox"
         case "pixel-scholar", "pixel-artist", "pixel-girl", "pixel-princess", "pixel-flower":
-            return "pixel-book-pup"
+            return defaultSymbolName
         case "pixel-coder", "pixel-robot", "pixel-scientist":
             return "pixel-tutor-bot"
         case "pixel-explorer", "pixel-hero", "pixel-knight", "pixel-dancer", "pixel-gamer":

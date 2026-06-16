@@ -87,8 +87,8 @@ final class StudyMateTests: XCTestCase {
     }
 
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
-        XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-book-pup")
-        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-book-pup")
+        XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-robot"), "pixel-tutor-bot")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "sparkles"), "pixel-chick")
         XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-book-pup"), "ProfileAvatarBookPup")
@@ -96,6 +96,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-owl"), "ProfileAvatarOwl")
         XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-deer"), "ProfileAvatarDeer")
         XCTAssertEqual(ProfileAvatarOption.all.count, 20)
+        XCTAssertEqual(ProfileAvatarOption.all.first, "pixel-fox")
         XCTAssertTrue(ProfileAvatarOption.all.allSatisfy { $0.hasPrefix("pixel-") })
         XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-buddy"))
         XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-scholar"))
