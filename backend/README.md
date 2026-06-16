@@ -20,7 +20,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
 - Uses Spring Data JPA ORM with repository/service transaction boundaries.
-- Keeps Flyway disabled by default in runtime; Flyway is retained for schema validation tests. Hibernate DDL auto-update is disabled.
+- Runs Flyway by default in the `dev` profile and keeps Hibernate DDL auto-update disabled.
 - Generates due questions with OpenAI.
 - Publishes scheduled push jobs through redis-stream-coordinator and consumes them with `@StreamListener`.
 - Sends APNs remote notifications to iPhone from the stream consumer.
@@ -65,8 +65,8 @@ For iPhone testing against a backend running on this Mac, see [Local Backend Tun
 
 ## Runtime Profiles
 
-- `dev`: development defaults, scheduler/stream disabled by default, API docs enabled.
-- `prod`: production deployment defaults, scheduler/stream enabled, API docs disabled unless explicitly enabled.
+- `dev`: development defaults, Flyway enabled by default, scheduler/stream enabled, API docs enabled.
+- `prod`: production deployment defaults, Flyway disabled unless `FLYWAY_ENABLED=true`, scheduler/stream enabled, API docs disabled unless explicitly enabled.
 
 ## Docker
 
@@ -154,8 +154,8 @@ Client apps should not call OpenAI directly. They should register a backend devi
 
 ## Database Migrations
 
-Runtime starts with Flyway disabled by default and `spring.jpa.hibernate.ddl-auto=validate`. Flyway migration files are retained under
-`tutor/src/main/resources/db/migration` for tests and explicit manual migration runs.
+The `dev` profile starts with Flyway enabled by default and `spring.jpa.hibernate.ddl-auto=validate`. The `prod` profile keeps Flyway disabled unless `FLYWAY_ENABLED=true`.
+Migration files live under `tutor/src/main/resources/db/migration`.
 
 If a running database was deployed before user-level OpenAI settings, apply the equivalent patch manually:
 
