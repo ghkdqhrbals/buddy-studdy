@@ -2211,54 +2211,28 @@ enum ProfileAvatarOption {
 
     static let all = [
         defaultSymbolName,
+        "pixel-cat-laptop",
+        "pixel-cat-developer",
+        "pixel-cat-geek",
+        "pixel-cat-student",
+        "pixel-cat-wizard",
+        "pixel-cat-gamer",
+        "pixel-cat-robot",
+        "pixel-fox-student",
         "pixel-fox-geek",
         "pixel-fox-cyber",
         "pixel-fox-scholar",
         "pixel-fox-arctic-coder",
         "pixel-fox-detective",
         "pixel-fox-headset",
-        "pixel-robot-tutor",
-        "pixel-hoodie-coder",
-        "pixel-wizard-student",
-        "pixel-owl-professor",
-        "pixel-penguin-graduate",
-        "pixel-cat-developer",
-        "pixel-cat-laptop",
-        "pixel-cat-geek",
-        "pixel-cat-student",
-        "pixel-cat-wizard",
-        "pixel-cat-gamer",
-        "pixel-cat-robot",
-        "pixel-bunny-headphones",
         "pixel-rabbit-pencil",
         "pixel-rabbit-hacker",
         "pixel-rabbit-wizard",
         "pixel-rabbit-gamer",
-        "pixel-bear-calculator",
-        "pixel-frog-scientist",
         "pixel-dog-dachshund-student",
         "pixel-dog-corgi-reader",
         "pixel-dog-shiba-geek",
-        "pixel-dog-robot-puppy",
-        "pixel-book-pup",
-        "pixel-dachshund",
-        "pixel-pencil-pup",
-        "pixel-sleepy-pup",
-        "pixel-cat",
-        "pixel-bear",
-        "pixel-rabbit",
-        "pixel-penguin",
-        "pixel-chick",
-        "pixel-tutor-bot",
-        "pixel-study-mage",
-        "pixel-owl",
-        "pixel-panda",
-        "pixel-koala",
-        "pixel-frog",
-        "pixel-turtle",
-        "pixel-seal",
-        "pixel-hamster",
-        "pixel-deer"
+        "pixel-dog-robot-puppy"
     ]
 
     static func assetName(for symbolName: String) -> String {
@@ -2322,9 +2296,9 @@ enum ProfileAvatarOption {
         case "pixel-dog-robot-puppy":
             return "ProfileAvatarDogRobotPuppy"
         case "pixel-fox-student":
-            fallthrough
-        default:
             return "ProfileAvatarFoxStudent"
+        default:
+            return "ProfileAvatarCatLaptop"
         }
     }
 
