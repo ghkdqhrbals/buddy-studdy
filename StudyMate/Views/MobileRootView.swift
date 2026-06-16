@@ -2207,20 +2207,16 @@ private struct EmailSignInSheet: View {
 }
 
 enum ProfileAvatarOption {
-    static let defaultSymbolName = "pixel-fox"
+    static let defaultSymbolName = "pixel-fox-scholar"
 
     static let all = [
         defaultSymbolName,
         "pixel-cat-laptop",
-        "pixel-cat-developer",
         "pixel-cat-geek",
         "pixel-cat-student",
         "pixel-cat-wizard",
         "pixel-cat-gamer",
         "pixel-cat-robot",
-        "pixel-fox-student",
-        "pixel-fox-geek",
-        "pixel-fox-cyber",
         "pixel-fox-scholar",
         "pixel-fox-arctic-coder",
         "pixel-fox-detective",
@@ -2237,10 +2233,6 @@ enum ProfileAvatarOption {
 
     static func assetName(for symbolName: String) -> String {
         switch canonicalName(for: symbolName) {
-        case "pixel-fox-geek":
-            return "ProfileAvatarFoxGeek"
-        case "pixel-fox-cyber":
-            return "ProfileAvatarFoxCyber"
         case "pixel-fox-scholar":
             return "ProfileAvatarFoxScholar"
         case "pixel-fox-arctic-coder":
@@ -2249,18 +2241,6 @@ enum ProfileAvatarOption {
             return "ProfileAvatarFoxDetective"
         case "pixel-fox-headset":
             return "ProfileAvatarFoxHeadset"
-        case "pixel-robot-tutor":
-            return "ProfileAvatarRobotTutorNew"
-        case "pixel-hoodie-coder":
-            return "ProfileAvatarHoodieCoder"
-        case "pixel-wizard-student":
-            return "ProfileAvatarWizardStudent"
-        case "pixel-owl-professor":
-            return "ProfileAvatarOwlProfessor"
-        case "pixel-penguin-graduate":
-            return "ProfileAvatarPenguinGraduate"
-        case "pixel-cat-developer":
-            return "ProfileAvatarCatDeveloper"
         case "pixel-cat-laptop":
             return "ProfileAvatarCatLaptop"
         case "pixel-cat-geek":
@@ -2273,8 +2253,6 @@ enum ProfileAvatarOption {
             return "ProfileAvatarCatGamer"
         case "pixel-cat-robot":
             return "ProfileAvatarCatRobot"
-        case "pixel-bunny-headphones":
-            return "ProfileAvatarBunnyHeadphones"
         case "pixel-rabbit-pencil":
             return "ProfileAvatarRabbitPencil"
         case "pixel-rabbit-hacker":
@@ -2283,10 +2261,6 @@ enum ProfileAvatarOption {
             return "ProfileAvatarRabbitWizard"
         case "pixel-rabbit-gamer":
             return "ProfileAvatarRabbitGamer"
-        case "pixel-bear-calculator":
-            return "ProfileAvatarBearCalculator"
-        case "pixel-frog-scientist":
-            return "ProfileAvatarFrogScientist"
         case "pixel-dog-dachshund-student":
             return "ProfileAvatarDogDachshundStudent"
         case "pixel-dog-corgi-reader":
@@ -2295,8 +2269,6 @@ enum ProfileAvatarOption {
             return "ProfileAvatarDogShibaGeek"
         case "pixel-dog-robot-puppy":
             return "ProfileAvatarDogRobotPuppy"
-        case "pixel-fox-student":
-            return "ProfileAvatarFoxStudent"
         default:
             return "ProfileAvatarCatLaptop"
         }
@@ -2310,56 +2282,14 @@ enum ProfileAvatarOption {
         switch symbolName {
         case "person.fill", "person.crop.circle.fill", "pencil.tip", "pixel-buddy":
             return defaultSymbolName
-        case "graduationcap.circle.fill":
-            return "pixel-penguin-graduate"
-        case "book.circle.fill":
-            return "pixel-owl-professor"
-        case "star.circle.fill":
-            return "pixel-wizard-student"
-        case "bolt.circle.fill":
-            return "pixel-robot-tutor"
-        case "leaf.circle.fill":
-            return "pixel-fox-student"
-        case "graduationcap.fill":
-            return "pixel-penguin-graduate"
-        case "book.fill", "brain.head.profile":
-            return "pixel-owl-professor"
-        case "sparkles", "star.fill":
-            return "pixel-wizard-student"
-        case "bolt.fill":
-            return "pixel-robot-tutor"
-        case "leaf.fill":
-            return "pixel-fox-student"
-        case "pixel-scholar", "pixel-artist", "pixel-girl", "pixel-princess", "pixel-flower":
+        case "pixel-fox", "pixel-fox-student", "pixel-book-pup", "pixel-dachshund", "pixel-pencil-pup", "pixel-sleepy-pup":
             return defaultSymbolName
-        case "pixel-coder", "pixel-robot", "pixel-scientist":
-            return "pixel-robot-tutor"
-        case "pixel-explorer", "pixel-hero", "pixel-knight", "pixel-dancer", "pixel-gamer":
-            return "pixel-hoodie-coder"
-        case "pixel-star", "pixel-chef", "pixel-pilot", "pixel-nurse", "pixel-wizard", "pixel-astronaut":
-            return "pixel-wizard-student"
-        case "pixel-book-pup", "pixel-dachshund", "pixel-pencil-pup", "pixel-sleepy-pup", "pixel-fox":
-            return "pixel-fox-student"
-        case "pixel-dog", "pixel-bear":
-            return "pixel-bear-calculator"
-        case "pixel-bird":
-            return "pixel-owl-professor"
-        case "pixel-mint", "pixel-green":
-            return "pixel-frog-scientist"
         case "pixel-cat":
-            return "pixel-cat-developer"
+            return "pixel-cat-laptop"
         case "pixel-rabbit":
-            return "pixel-bunny-headphones"
-        case "pixel-penguin":
-            return "pixel-penguin-graduate"
-        case "pixel-chick", "pixel-study-mage":
-            return "pixel-wizard-student"
-        case "pixel-tutor-bot":
-            return "pixel-robot-tutor"
-        case "pixel-owl":
-            return "pixel-owl-professor"
-        case "pixel-panda", "pixel-koala", "pixel-turtle", "pixel-seal", "pixel-hamster", "pixel-deer":
-            return "pixel-hoodie-coder"
+            return "pixel-rabbit-pencil"
+        case "pixel-dog":
+            return "pixel-dog-dachshund-student"
         default:
             return all.contains(symbolName) ? symbolName : defaultSymbolName
         }
