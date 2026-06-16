@@ -1638,7 +1638,7 @@ private struct MobileProfileSettingsSheet: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
 
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 54, maximum: 62), spacing: 10)], spacing: 10) {
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 66), spacing: 10)], spacing: 10) {
                                         ForEach(ProfileAvatarOption.all, id: \.self) { option in
                                             Button {
                                                 draftAvatarSymbolName = option
@@ -1903,19 +1903,19 @@ private struct MobileProfileSettingsSheet: View {
                 imageData: nil,
                 colorSeed: colorSeed,
                 usesNeutralColor: false,
-                size: 48
+                size: 54
             )
 
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, Color.accentColor)
                     .background(Color.primary.opacity(0.12), in: Circle())
-                    .offset(x: 1, y: 1)
+                    .offset(x: 2, y: 2)
             }
         }
-        .frame(width: 58, height: 58)
+        .frame(width: 62, height: 62)
         .background(isSelected ? Color.primary.opacity(0.08) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
