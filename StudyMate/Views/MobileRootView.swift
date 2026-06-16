@@ -2213,6 +2213,10 @@ enum ProfileAvatarOption {
         defaultSymbolName,
         "pixel-fox-geek",
         "pixel-fox-cyber",
+        "pixel-fox-scholar",
+        "pixel-fox-arctic-coder",
+        "pixel-fox-detective",
+        "pixel-fox-headset",
         "pixel-robot-tutor",
         "pixel-hoodie-coder",
         "pixel-wizard-student",
@@ -2226,8 +2230,16 @@ enum ProfileAvatarOption {
         "pixel-cat-gamer",
         "pixel-cat-robot",
         "pixel-bunny-headphones",
+        "pixel-rabbit-pencil",
+        "pixel-rabbit-hacker",
+        "pixel-rabbit-wizard",
+        "pixel-rabbit-gamer",
         "pixel-bear-calculator",
         "pixel-frog-scientist",
+        "pixel-dog-dachshund-student",
+        "pixel-dog-corgi-reader",
+        "pixel-dog-shiba-geek",
+        "pixel-dog-robot-puppy",
         "pixel-book-pup",
         "pixel-dachshund",
         "pixel-pencil-pup",
@@ -2255,6 +2267,14 @@ enum ProfileAvatarOption {
             return "ProfileAvatarFoxGeek"
         case "pixel-fox-cyber":
             return "ProfileAvatarFoxCyber"
+        case "pixel-fox-scholar":
+            return "ProfileAvatarFoxScholar"
+        case "pixel-fox-arctic-coder":
+            return "ProfileAvatarFoxArcticCoder"
+        case "pixel-fox-detective":
+            return "ProfileAvatarFoxDetective"
+        case "pixel-fox-headset":
+            return "ProfileAvatarFoxHeadset"
         case "pixel-robot-tutor":
             return "ProfileAvatarRobotTutorNew"
         case "pixel-hoodie-coder":
@@ -2281,10 +2301,26 @@ enum ProfileAvatarOption {
             return "ProfileAvatarCatRobot"
         case "pixel-bunny-headphones":
             return "ProfileAvatarBunnyHeadphones"
+        case "pixel-rabbit-pencil":
+            return "ProfileAvatarRabbitPencil"
+        case "pixel-rabbit-hacker":
+            return "ProfileAvatarRabbitHacker"
+        case "pixel-rabbit-wizard":
+            return "ProfileAvatarRabbitWizard"
+        case "pixel-rabbit-gamer":
+            return "ProfileAvatarRabbitGamer"
         case "pixel-bear-calculator":
             return "ProfileAvatarBearCalculator"
         case "pixel-frog-scientist":
             return "ProfileAvatarFrogScientist"
+        case "pixel-dog-dachshund-student":
+            return "ProfileAvatarDogDachshundStudent"
+        case "pixel-dog-corgi-reader":
+            return "ProfileAvatarDogCorgiReader"
+        case "pixel-dog-shiba-geek":
+            return "ProfileAvatarDogShibaGeek"
+        case "pixel-dog-robot-puppy":
+            return "ProfileAvatarDogRobotPuppy"
         case "pixel-fox-student":
             fallthrough
         default:
