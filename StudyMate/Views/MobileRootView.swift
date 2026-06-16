@@ -2858,8 +2858,9 @@ struct CommunityQuestionDetailView: View {
             }
             .padding(.leading, 12)
             .padding(.trailing, 8)
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .padding(.bottom, 12)
         }
     }
 
