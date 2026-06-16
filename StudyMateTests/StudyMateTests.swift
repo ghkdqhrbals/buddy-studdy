@@ -739,6 +739,58 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(appState.draftSettings.intervalMinutes, 30)
     }
 
+    @MainActor
+    func testLoadingBackendSettingsForEditingPreservesStudyList() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let firstCategory = StudyCategory(title: "Redis", difficulty: .level6)
+        let secondCategory = StudyCategory(title: "Kafka", difficulty: .level7)
+        store.saveSettings(
+            StudySettings(
+                topic: "Redis",
+                difficulty: .level6,
+                appLanguage: .korean,
+                language: .korean,
+                customPrompt: "짧게",
+                intervalMinutes: 15,
+                studyCategories: [firstCategory, secondCategory],
+                selectedStudyCategoryID: secondCategory.id
+            )
+        )
+
+        let backend = FakeRemotePushBackendClient()
+        store.saveRemotePushRegistration(backend.registration)
+        backend.fetchedSettings = BackendStudySettings(
+            topic: "Backend Default",
+            difficultyLevel: 5,
+            intervalMinutes: 30,
+            enabled: true,
+            notificationSound: "default",
+            customPrompt: "서버 설정",
+            appLanguage: "ko",
+            openAIModel: StudySettings.defaultOpenAIModel,
+            maxHistoryCount: 100,
+            isQuestionPublic: true,
+            openAIKeyConfigured: true
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        appState.beginSettingsEditing()
+        await appState.loadBackendSettingsForEditing()
+        appState.cancelSettingsEditing()
+
+        XCTAssertEqual(backend.fetchSettingsCallCount, 1)
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Redis", "Kafka"])
+        XCTAssertEqual(appState.settings.selectedStudyCategoryID, secondCategory.id)
+        XCTAssertEqual(appState.studyCategoriesForDisplay.map(\.title), ["Redis", "Kafka"])
+        XCTAssertEqual(store.loadSettings().studyCategories.map(\.title), ["Redis", "Kafka"])
+    }
+
     func testTopicGroupingNormalizesCaseSpacingAndSeparators() {
         let topics = [
             "Spring Boot",

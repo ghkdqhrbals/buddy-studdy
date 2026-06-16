@@ -1787,7 +1787,9 @@ struct BackendStudySettings: Decodable, Equatable {
             customPrompt: customPrompt,
             intervalMinutes: intervalMinutes,
             maxHistoryCount: maxHistoryCount,
-            isQuestionPublic: isQuestionPublic
+            isQuestionPublic: isQuestionPublic,
+            studyCategories: fallback.studyCategories,
+            selectedStudyCategoryID: fallback.selectedStudyCategoryID
         )
     }
 }

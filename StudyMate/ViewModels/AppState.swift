@@ -3234,7 +3234,9 @@ final class AppState: ObservableObject {
         }
 
         await syncRemotePushScheduleIfPossible(reason: reason)
+        #if os(macOS)
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        #endif
         log(.info, "백엔드 스케줄러가 예약 질문을 담당하므로 로컬 OpenAI 생성을 수행하지 않았습니다. reason=\(reason), deviceID=\(registration.deviceID)")
         return false
     }
@@ -4409,6 +4411,10 @@ final class AppState: ObservableObject {
 
     private func restartTimer() {
         timerTask?.cancel()
+        #if os(iOS)
+        timerTask = nil
+        return
+        #else
         guard hasCompletedOnboarding, isRunning else {
             return
         }
@@ -4425,6 +4431,7 @@ final class AppState: ObservableObject {
                 await self?.handleScheduledQuestionTick()
             }
         }
+        #endif
     }
 
     private func timerPollIntervalSeconds() -> UInt64 {
