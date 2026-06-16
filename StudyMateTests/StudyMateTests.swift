@@ -86,7 +86,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(error.isPageAccessDenied)
     }
 
-    func testProfileAvatarOptionsUsePixelAnimalSprites() {
+    func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-book-pup")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-book-pup")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-robot"), "pixel-tutor-bot")
