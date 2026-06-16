@@ -33,7 +33,7 @@ class RedisStreamListenerDefaultsTest {
             .contains("push-v1")
             .doesNotContain("bs-push-v1")
         assertThat(streamListener(QuestionStatsStreamListener::class.java, "onQuestionViewed").streamPrefix)
-            .contains("view-content-v1")
+            .contains("view-v1")
             .doesNotContain("bs-view-content-v1")
     }
 

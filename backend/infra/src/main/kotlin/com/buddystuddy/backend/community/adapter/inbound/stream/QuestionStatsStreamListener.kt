@@ -19,10 +19,10 @@ class QuestionStatsStreamListener(
 
     @StreamListener(
         id = "buddystuddy-question-view-listener",
-        streamPrefix = "\${VIEW_STREAM_PREFIX:view-content-v1}",
-        groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-backend}}",
+        streamPrefix = "\${VIEW_STREAM_PREFIX:view-v1}",
+        groupId = "bs-backend-2",
         concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
-        autoStartup = "\${buddystuddy.streams.enabled:true}",
+        autoStartup = "true",
         pollBatchSize = "\${VIEW_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
         pollTimeoutMs = "\${VIEW_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
     )
@@ -31,6 +31,7 @@ class QuestionStatsStreamListener(
     }
 
     private fun consume(listenerId: String, message: ConsumedRedisStreamMessage, block: () -> Unit) {
+        logger.info("Consuming $listenerId")
         try {
             logger.debug(
                 "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} fieldKeys={}",

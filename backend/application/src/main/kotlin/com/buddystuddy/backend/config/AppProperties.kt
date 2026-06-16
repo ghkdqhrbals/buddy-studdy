@@ -27,7 +27,7 @@ data class BuddyStuddyProperties(
     data class Streams(
         var enabled: Boolean = true,
         var pushPrefix: String = "push-v1",
-        var viewPrefix: String = "view-content-v1",
+        var viewPrefix: String = "view-v1",
         var maxLen: Long = 100_000,
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,
