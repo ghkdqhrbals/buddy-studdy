@@ -39,11 +39,15 @@ interface AppNotificationRepository : JpaRepository<AppNotificationEntity, Long>
                n.updatedAt = :now
          where n.id = :id
            and n.shouldPush = true
-           and n.pushClaimedAt is null
            and n.pushSentAt is null
+           and (n.pushClaimedAt is null or n.pushClaimedAt < :staleBefore)
         """
     )
-    override fun claimPush(@Param("id") id: Long, @Param("now") now: Instant): Int
+    override fun claimPush(
+        @Param("id") id: Long,
+        @Param("now") now: Instant,
+        @Param("staleBefore") staleBefore: Instant,
+    ): Int
 
     @Modifying
     @Transactional

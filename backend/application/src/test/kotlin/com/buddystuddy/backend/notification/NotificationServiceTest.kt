@@ -109,8 +109,13 @@ class NotificationServiceTest {
             return count
         }
 
-        override fun claimPush(id: Long, now: Instant): Int {
-            val row = rows.firstOrNull { it.id == id && it.shouldPush && it.pushClaimedAt == null && it.pushSentAt == null } ?: return 0
+        override fun claimPush(id: Long, now: Instant, staleBefore: Instant): Int {
+            val row = rows.firstOrNull {
+                it.id == id &&
+                    it.shouldPush &&
+                    it.pushSentAt == null &&
+                    (it.pushClaimedAt == null || it.pushClaimedAt!!.isBefore(staleBefore))
+            } ?: return 0
             row.pushClaimedAt = now
             return 1
         }

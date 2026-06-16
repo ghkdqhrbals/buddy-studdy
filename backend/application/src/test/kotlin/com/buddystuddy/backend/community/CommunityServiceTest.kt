@@ -33,6 +33,7 @@ class CommunityServiceTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
+    private val notificationPublisher = FakeNotificationPublisher()
     private val service = CommunityService(
         users = users,
         questions = questions,
@@ -42,7 +43,7 @@ class CommunityServiceTest {
         reports = FakeReportPort(),
         reactions = FakeReactionPublisher(),
         search = FakeQuestionSearchPort(),
-        notifications = FakeNotificationPublisher(),
+        notifications = notificationPublisher,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -81,6 +82,32 @@ class CommunityServiceTest {
         assertThat(response.isLikedByMe).isTrue()
         assertThat(questionStats.incrementLikeCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
+        val notification = notificationPublisher.rows.single()
+        assertThat(notification.eventId).isEqualTo("question-like-100-7")
+        assertThat(notification.userId).isEqualTo(10)
+        assertThat(notification.actorUserId).isEqualTo(7)
+        assertThat(notification.threadType).isEqualTo("question")
+        assertThat(notification.threadId).isEqualTo("100")
+        assertThat(notification.shouldPush).isFalse()
+    }
+
+    @Test
+    fun `commenting on another user's question publishes push eligible thread notification`() {
+        users.rows += UserEntity(id = 7, providerId = "u7", displayName = "Commenter")
+        users.rows += UserEntity(id = 10, providerId = "u10", displayName = "Author A")
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
+
+        val response = service.createComment(principal, id = 100, body = "좋은 질문입니다.")
+
+        assertThat(response.body).isEqualTo("좋은 질문입니다.")
+        val notification = notificationPublisher.rows.single()
+        assertThat(notification.eventId).isEqualTo("question-comment-1")
+        assertThat(notification.userId).isEqualTo(10)
+        assertThat(notification.actorUserId).isEqualTo(7)
+        assertThat(notification.threadType).isEqualTo("question")
+        assertThat(notification.threadId).isEqualTo("100")
+        assertThat(notification.deepLink).isEqualTo("buddystuddy://public/questions/100")
+        assertThat(notification.shouldPush).isTrue()
     }
 
     @Test
@@ -213,7 +240,13 @@ class CommunityServiceTest {
     }
 
     private class FakeQuestionCommentPort : QuestionCommentPort {
-        override fun save(entity: QuestionCommentEntity): QuestionCommentEntity = entity
+        private var nextId = 1L
+        override fun save(entity: QuestionCommentEntity): QuestionCommentEntity {
+            if (entity.id == 0L) {
+                entity.id = nextId++
+            }
+            return entity
+        }
         override fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity? = null
         override fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity> = Page.empty()
     }

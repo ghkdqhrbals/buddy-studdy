@@ -17,6 +17,7 @@ import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
+import java.time.Duration
 import java.time.Instant
 
 @StreamConfiguration
@@ -27,6 +28,7 @@ class NotificationStreamListener(
     private val pushNotifications: PushNotificationPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val stalePushClaimAge = Duration.ofMinutes(5)
 
     @StreamListener(
         id = "buddystuddy-notification-listener",
@@ -82,7 +84,7 @@ class NotificationStreamListener(
 
     private fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
         val now = Instant.now()
-        if (notifications.claimPush(notificationId, now) == 0) {
+        if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
             return
         }
         val targetDevices = devices.findAllByUserId(command.userId).filter { it.apnsToken.isNotBlank() }
