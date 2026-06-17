@@ -56,7 +56,7 @@ class RedisStreamPushPublisher(
             createdAt = request.createdAt,
         )
         val fields = event.toRedisStreamFields()
-        val partitionKey = event.topic.ifBlank { event.recordId.toString() }
+        val partitionKey = event.deviceId.ifBlank { event.userId?.toString() ?: event.recordId.toString() }
         logger.info(
             "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",
             properties.streams.pushPrefix,

@@ -17,6 +17,7 @@ import com.redisstream.consumer.ConsumedRedisStreamMessage
 import com.redisstream.consumer.RedisStreamXNackMode
 import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
+import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 
 @StreamConfiguration
@@ -26,6 +27,18 @@ class PushStreamListener(
     private val userDevices: UserDevicePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+
+    @PostConstruct
+    fun logInitialized() {
+        logger.info(
+            "push_stream_listener_initialized listener={} streamPrefix={} groupId={} concurrency={} autoStartup={}",
+            "buddystuddy-push-listener",
+            "\${PUSH_STREAM_PREFIX:push-v1}",
+            "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
+            "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:4}}",
+            "\${buddystuddy.streams.enabled:true}",
+        )
+    }
 
     @StreamListener(
         id = "buddystuddy-push-listener",

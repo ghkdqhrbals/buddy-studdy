@@ -35,14 +35,14 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event publishes with topic as stream key hint`(output: CapturedOutput) {
+    fun `push event publishes with device id as stream key hint`(output: CapturedOutput) {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, pushPublisher = publisher)
 
         assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.key).isEqualTo("SwiftUI")
+        assertThat(request.key).isEqualTo("device-1")
         assertThat(request.fields).containsEntry("eventType", "QUESTION_PUSH_REQUESTED")
         assertThat(request.fields).containsKey("payload")
         assertThat(request.fields["payload"])
@@ -66,11 +66,11 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event falls back to record id when topic is blank`() {
+    fun `push event falls back to record id when device id and user id are blank`() {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, pushPublisher = publisher)
 
-        assertThat(service.publishPush(pushEvent(topic = ""))).isTrue()
+        assertThat(service.publishPush(pushEvent(deviceId = "", userId = null))).isTrue()
 
         assertThat(publisher.requests.single().key).isEqualTo("10")
     }
@@ -96,11 +96,15 @@ class RedisStreamPushPublisherTest {
         )
     }
 
-    private fun pushEvent(topic: String = "SwiftUI") = QuestionPushRequest(
+    private fun pushEvent(
+        topic: String = "SwiftUI",
+        deviceId: String = "device-1",
+        userId: Long? = 11,
+    ) = QuestionPushRequest(
         recordId = 10,
         studyId = 77,
-        deviceId = "device-1",
-        userId = 11,
+        deviceId = deviceId,
+        userId = userId,
         question = "What is SwiftUI?",
         expectedAnswerHint = "UI framework",
         topic = topic,
