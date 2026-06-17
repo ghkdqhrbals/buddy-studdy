@@ -126,7 +126,7 @@ final class AppState: ObservableObject {
     @Published var isGradingAnswer = false
     @Published var isRunning: Bool
     @Published var studyRecords: [StudyRecord]
-    @Published var backendStudyRooms: [BackendStudyRoom] = []
+    @Published private var studyRoomState = StudyRoomStateStore()
     @Published var backendStats: BackendStats?
     @Published var isBackendStatsLoading = false
     @Published var backendStatsErrorMessage: String?
@@ -156,6 +156,10 @@ final class AppState: ObservableObject {
     @Published var backendAccessState: BackendAccessState = .signedOut
     @Published var homeStudySearchResults: [StudyCategory]? = nil
     @Published var recordSearchResults: [StudyRecord]? = nil
+
+    var backendStudyRooms: [BackendStudyRoom] {
+        studyRoomState.rooms
+    }
 
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
@@ -642,8 +646,8 @@ final class AppState: ObservableObject {
     }
 
     var pendingQuestionCount: Int {
-        if !backendStudyRooms.isEmpty {
-            return backendStudyRooms.filter { Self.isPendingStudyRoomQuestion($0.pendingQuestion) }.count
+        if studyRoomState.hasRooms {
+            return studyRoomState.pendingQuestionCount
         }
 
         return pendingRecordsIncludingCurrent.count
@@ -654,26 +658,14 @@ final class AppState: ObservableObject {
     }
 
     func pendingQuestionCount(for category: StudyCategory) -> Int {
+        if let backendCount = studyRoomState.pendingQuestionCount(for: category) {
+            return backendCount
+        }
+
         let categoryKey = Self.normalizedCategoryText(for: category.title)
-        let matchingBackendRooms = backendStudyRooms.filter {
-            Self.normalizedCategoryText(for: $0.topic) == categoryKey
-        }
-
-        if !matchingBackendRooms.isEmpty {
-            return matchingBackendRooms.filter { Self.isPendingStudyRoomQuestion($0.pendingQuestion) }.count
-        }
-
         return pendingRecordsIncludingCurrent.filter {
             Self.normalizedCategoryText(for: $0.topic) == categoryKey
         }.count
-    }
-
-    private static func isPendingStudyRoomQuestion(_ record: StudyRecord?) -> Bool {
-        guard let record else {
-            return false
-        }
-
-        return record.gradingResult == nil
     }
 
     func hasReachedPendingQuestionLimit(for category: StudyCategory?) -> Bool {
@@ -1257,7 +1249,7 @@ final class AppState: ObservableObject {
     }
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
-        backendStudyRooms = studyPage.studies
+        studyRoomState.replace(with: studyPage.studies)
         guard !isEditingSettings, !studyPage.studies.isEmpty else {
             return
         }
@@ -1314,16 +1306,7 @@ final class AppState: ObservableObject {
     }
 
     private func refreshBackendStudyRoomsFromRecords() {
-        backendStudyRooms = backendStudyRooms.map { room in
-            guard let pendingQuestion = room.pendingQuestion,
-                  let refreshedRecord = studyRecords.first(where: { $0.id == pendingQuestion.id }) else {
-                return room
-            }
-
-            var nextRoom = room
-            nextRoom.pendingQuestion = refreshedRecord
-            return nextRoom
-        }
+        studyRoomState.refreshPendingQuestions(from: studyRecords)
     }
 
     func searchBackendStudies(query: String) async {
@@ -2954,27 +2937,7 @@ final class AppState: ObservableObject {
     }
 
     func backendStudyRoom(categoryID: String?) -> BackendStudyRoom? {
-        if let categoryID,
-           let studyID = Int(categoryID),
-           let room = backendStudyRooms.first(where: { $0.id == studyID }) {
-            return room
-        }
-
-        if let categoryID,
-           let category = settings.category(for: categoryID),
-           let room = backendStudyRooms.first(where: {
-               Self.normalizedCategoryText(for: $0.topic) == Self.normalizedCategoryText(for: category.title)
-           }) {
-            return room
-        }
-
-        if let selectedCategoryID = settings.selectedStudyCategoryID,
-           let studyID = Int(selectedCategoryID),
-           let room = backendStudyRooms.first(where: { $0.id == studyID }) {
-            return room
-        }
-
-        return backendStudyRooms.first
+        studyRoomState.room(categoryID: categoryID, settings: settings)
     }
 
     func answerDraft(for record: StudyRecord?) -> String {
@@ -3502,15 +3465,7 @@ final class AppState: ObservableObject {
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             studyRecords = settingsStore.loadStudyRecords()
-            backendStudyRooms = backendStudyRooms.map { room in
-                guard room.id == studyID else {
-                    return room
-                }
-
-                var nextRoom = room
-                nextRoom.pendingQuestion = record
-                return nextRoom
-            }
+            studyRoomState.setPendingQuestion(record, forStudyID: studyID)
 
             let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
             if shouldActivateQuestion {
@@ -3845,15 +3800,7 @@ final class AppState: ObservableObject {
         settingsStore.deleteAnswerDraft(recordID: record.id)
         settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         studyRecords = settingsStore.loadStudyRecords()
-        backendStudyRooms = backendStudyRooms.map { room in
-            guard room.pendingQuestion?.id == record.id else {
-                return room
-            }
-
-            var nextRoom = room
-            nextRoom.pendingQuestion = record
-            return nextRoom
-        }
+        studyRoomState.applyAnsweredRecord(record)
         notificationService.cancelQuestionNotification(for: record.question)
         hasAPIKeyError = false
         statusMessage = "채점이 완료됐습니다."
@@ -3937,15 +3884,7 @@ final class AppState: ObservableObject {
 
         settingsStore.deleteAnswerDraft(recordID: record.id)
         studyRecords = settingsStore.loadStudyRecords()
-        backendStudyRooms = backendStudyRooms.map { room in
-            guard room.pendingQuestion?.id == record.id else {
-                return room
-            }
-
-            var nextRoom = room
-            nextRoom.pendingQuestion = nil
-            return nextRoom
-        }
+        studyRoomState.clearPendingQuestion(recordID: record.id)
 
         if matchesCurrentQuestion {
             self.currentQuestion = nil
