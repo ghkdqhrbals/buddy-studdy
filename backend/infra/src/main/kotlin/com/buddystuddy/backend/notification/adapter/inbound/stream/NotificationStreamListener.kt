@@ -5,11 +5,8 @@ import com.buddystuddy.backend.notification.adapter.outbound.stream.Notification
 import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystuddy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystuddy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystuddy.backend.study.application.port.outbound.ApnsAlert
-import com.buddystuddy.backend.study.application.port.outbound.ApnsAps
-import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
-import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionPayload
-import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.redisstream.consumer.ConsumedRedisStreamMessage
@@ -25,7 +22,7 @@ class NotificationStreamListener(
     private val processor: ProcessNotificationEventUseCase,
     private val notifications: NotificationPersistencePort,
     private val devices: DevicePort,
-    private val pushNotifications: PushNotificationPort,
+    private val pushPublisher: QuestionPushPublishPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
@@ -93,32 +90,55 @@ class NotificationStreamListener(
             return
         }
         try {
-            val unreadCount = notifications
-                .countByUserIdAndReadAtIsNullAndDeletedAtIsNull(command.userId)
-                .toInt()
-                .coerceAtLeast(1)
-            targetDevices.forEach { device ->
-                pushNotifications.sendQuestion(
-                    ApnsQuestionMessage(
-                        recordId = notificationId.toString(),
-                        topic = command.threadType ?: "notification",
-                        token = device.apnsToken,
-                        environment = device.apnsEnvironment,
-                        payload = ApnsQuestionPayload(
-                            aps = ApnsAps(
-                                alert = ApnsAlert(title = command.title, body = command.body),
-                                sound = "default",
-                                badge = unreadCount,
-                            ),
-                            deepLink = command.deepLink ?: "buddystuddy://notifications/$notificationId",
-                        ),
+            val metadata = NotificationPushMetadata.from(command.metadataJson)
+            val failedDeviceIds = targetDevices.mapNotNull { device ->
+                val published = pushPublisher.publishPush(
+                    QuestionPushRequest(
+                        recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
+                        studyId = metadata.studyId,
+                        deviceId = device.deviceId,
+                        userId = command.userId,
+                        question = command.body,
+                        expectedAnswerHint = null,
+                        topic = metadata.topic ?: command.threadType ?: "notification",
+                        difficultyLevel = metadata.difficultyLevel ?: 1,
+                        language = metadata.language ?: "ko",
+                        sound = metadata.sound ?: "default",
+                        intervalMinutes = metadata.intervalMinutes ?: 0,
+                        title = command.title,
+                        body = command.body,
+                        deepLink = command.deepLink ?: "buddystuddy://notifications/$notificationId",
                     )
                 )
+                if (published) null else device.deviceId
+            }
+            if (failedDeviceIds.isNotEmpty()) {
+                notifications.markPushFailed(notificationId, "Push publish failed for devices: ${failedDeviceIds.joinToString(",")}", Instant.now())
+                return
             }
             notifications.markPushSent(notificationId, Instant.now())
         } catch (error: Exception) {
             notifications.markPushFailed(notificationId, error.message ?: error.javaClass.simpleName, Instant.now())
         }
+    }
+}
+
+private data class NotificationPushMetadata(
+    val recordId: Long? = null,
+    val studyId: Long? = null,
+    val topic: String? = null,
+    val difficultyLevel: Int? = null,
+    val language: String? = null,
+    val sound: String? = null,
+    val intervalMinutes: Int? = null,
+) {
+    companion object {
+        private val mapper = jacksonObjectMapper().findAndRegisterModules()
+
+        fun from(raw: String?): NotificationPushMetadata =
+            raw?.takeIf(String::isNotBlank)?.let {
+                runCatching { mapper.readValue<NotificationPushMetadata>(it) }.getOrNull()
+            } ?: NotificationPushMetadata()
     }
 }
 

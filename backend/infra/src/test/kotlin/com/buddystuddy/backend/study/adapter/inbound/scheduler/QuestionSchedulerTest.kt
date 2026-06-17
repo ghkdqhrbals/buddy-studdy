@@ -4,15 +4,14 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
@@ -39,8 +38,7 @@ class QuestionSchedulerTest {
     private val questionStats = FakeQuestionStatsPort()
     private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
-    private val pushOutbox = FakePushOutboxPort()
-    private val pushOutboxDispatch = FakePushOutboxDispatchPort()
+    private val notifications = FakeNotificationPublisher()
     private val properties = BuddyStuddyProperties(
         scheduler = BuddyStuddyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
         openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
@@ -53,10 +51,9 @@ class QuestionSchedulerTest {
         questions = questions,
         questionStats = questionStats,
         questionCreatedPublisher = questionCreatedPublisher,
+        notifications = notifications,
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         openAI = openAI,
-        pushOutbox = pushOutbox,
-        pushOutboxDispatch = pushOutboxDispatch,
     )
 
     @Test
@@ -93,7 +90,11 @@ class QuestionSchedulerTest {
 
         assertThat(questions.savedRows).hasSize(2)
         assertThat(questionCreatedPublisher.questionIds).containsExactly(1, 2)
-        assertThat(pushOutbox.requests).hasSize(2)
+        assertThat(notifications.commands).hasSize(2)
+        assertThat(notifications.commands).allSatisfy { command ->
+            assertThat(command.shouldPush).isTrue()
+            assertThat(command.type).isEqualTo("STUDY_QUESTION")
+        }
         assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.COMPLETED }).hasSize(2)
         assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.SCHEDULED }).hasSize(2)
         assertThat(users.findByIdCalls).isEqualTo(1)
@@ -116,7 +117,7 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
-        assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Kotlin")
+        assertThat(notifications.commands.map { it.body }).containsExactly("Question for Kotlin")
         assertThat(questions.countPendingForStudyCalls).isZero()
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(1)
         assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
@@ -141,7 +142,13 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101, 102, 103, 104, 105)
-        assertThat(pushOutbox.requests.map { it.topic }).containsExactly("Swift", "Kotlin", "Redis", "Kafka", "Postgres")
+        assertThat(notifications.commands.map { it.body }).containsExactly(
+            "Question for Swift",
+            "Question for Kotlin",
+            "Question for Redis",
+            "Question for Kafka",
+            "Question for Postgres",
+        )
         assertThat(jobs.claimDueCalls).isEqualTo(4)
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(3)
     }
@@ -197,7 +204,7 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
-        assertThat(pushOutbox.requests).isEmpty()
+        assertThat(notifications.commands).isEmpty()
         assertThat(scheduledJob.lastError).contains("Pending question limit reached")
         assertThat(Duration.between(Instant.now(), scheduledJob.scheduledAt).seconds).isBetween(250, 310)
     }
@@ -233,7 +240,7 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).isEmpty()
-        assertThat(pushOutbox.requests).isEmpty()
+        assertThat(notifications.commands).isEmpty()
         assertThat(scheduledJob.lastError).isEqualTo("OpenAI unavailable")
         assertThat(Duration.between(Instant.now(), scheduledJob.scheduledAt).seconds).isBetween(550, 610)
     }
@@ -437,18 +444,11 @@ class QuestionSchedulerTest {
             GradedAnswer(100, true, "Good", "Because")
     }
 
-    private class FakePushOutboxPort : QuestionPushOutboxPort {
-        val requests = mutableListOf<QuestionPushRequest>()
-        override fun enqueue(request: QuestionPushRequest, now: Instant): Long {
-            requests += request
-            return requests.size.toLong()
-        }
-    }
-
-    private class FakePushOutboxDispatchPort : QuestionPushOutboxDispatchPort {
-        val outboxIds = mutableListOf<Long>()
-        override fun dispatchOutbox(outboxId: Long) {
-            outboxIds += outboxId
+    private class FakeNotificationPublisher : PublishNotificationUseCase {
+        val commands = mutableListOf<NotificationRequestCommand>()
+        override fun publish(command: NotificationRequestCommand): Boolean {
+            commands += command
+            return true
         }
     }
 

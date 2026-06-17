@@ -8,14 +8,13 @@ import com.buddystuddy.backend.community.application.port.outbound.SearchResult
 import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
@@ -51,9 +50,8 @@ class StudyServiceTest {
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
             questionStats = questionStats,
-            pushOutbox = FakePushOutboxPort(),
-            pushOutboxDispatch = FakePushOutboxDispatchPort(),
             questionCreatedPublisher = FakeQuestionCreatedPublisher(),
+            notifications = FakeNotificationPublisher(),
         ),
         questionSearch = QuestionSearchSyncManager(BuddyStuddyProperties(), questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
     )
@@ -289,12 +287,12 @@ class StudyServiceTest {
         }
     }
 
-    private class FakePushOutboxPort : QuestionPushOutboxPort {
-        override fun enqueue(request: QuestionPushRequest, now: Instant): Long = 1
-    }
-
-    private class FakePushOutboxDispatchPort : QuestionPushOutboxDispatchPort {
-        override fun dispatchOutbox(outboxId: Long) = Unit
+    private class FakeNotificationPublisher : PublishNotificationUseCase {
+        val commands = mutableListOf<NotificationRequestCommand>()
+        override fun publish(command: NotificationRequestCommand): Boolean {
+            commands += command
+            return true
+        }
     }
 
     private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {

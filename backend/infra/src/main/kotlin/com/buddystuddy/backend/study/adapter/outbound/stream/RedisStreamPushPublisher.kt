@@ -50,6 +50,9 @@ class RedisStreamPushPublisher(
             language = request.language,
             sound = request.sound,
             intervalMinutes = request.intervalMinutes,
+            title = request.title,
+            body = request.body,
+            deepLink = request.deepLink,
             createdAt = request.createdAt,
         )
         val fields = event.toRedisStreamFields()

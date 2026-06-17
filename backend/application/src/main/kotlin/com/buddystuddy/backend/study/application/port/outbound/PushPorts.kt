@@ -14,6 +14,9 @@ data class QuestionPushRequest(
     val language: String,
     val sound: String?,
     val intervalMinutes: Int,
+    val title: String? = null,
+    val body: String? = null,
+    val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
 )
 

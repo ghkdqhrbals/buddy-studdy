@@ -31,6 +31,9 @@ data class QuestionPushRequestedEvent(
     val language: String,
     val sound: String?,
     val intervalMinutes: Int,
+    val title: String? = null,
+    val body: String? = null,
+    val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
     override val eventId: String = UUID.randomUUID().toString(),
 ) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId)
@@ -47,6 +50,9 @@ data class QuestionPushRequestedPayload(
     val language: String,
     val sound: String?,
     val intervalMinutes: Int,
+    val title: String?,
+    val body: String?,
+    val deepLink: String?,
     val createdAt: Instant,
 )
 
@@ -101,5 +107,8 @@ private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload
         language = language,
         sound = sound,
         intervalMinutes = intervalMinutes,
+        title = title,
+        body = body,
+        deepLink = deepLink,
         createdAt = createdAt,
     )

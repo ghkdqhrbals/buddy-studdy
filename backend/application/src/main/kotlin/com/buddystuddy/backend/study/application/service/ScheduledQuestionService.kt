@@ -4,13 +4,11 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
@@ -37,10 +35,9 @@ class ScheduledQuestionService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
+    private val notifications: PublishNotificationUseCase,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
-    private val pushOutbox: QuestionPushOutboxPort,
-    private val pushOutboxDispatch: QuestionPushOutboxDispatchPort,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -50,10 +47,9 @@ class ScheduledQuestionService(
         questions = questions,
         questionStats = questionStats,
         questionCreatedPublisher = questionCreatedPublisher,
+        notifications = notifications,
         cipher = cipher,
         openAI = openAI,
-        pushOutbox = pushOutbox,
-        pushOutboxDispatch = pushOutboxDispatch,
         backoffPolicy = backoffPolicy,
         log = log,
     )
@@ -132,10 +128,9 @@ class ScheduledQuestionCreator(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
+    private val notifications: PublishNotificationUseCase,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
-    private val pushOutbox: QuestionPushOutboxPort,
-    private val pushOutboxDispatch: QuestionPushOutboxDispatchPort,
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
 ) {
@@ -168,13 +163,12 @@ class ScheduledQuestionCreator(
             val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
             val saved = questions.save(study.toScheduledQuestion(job, generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
-            val outboxId = pushOutbox.enqueue(study.toPushRequest(saved.id, generated.question, generated.hint, appLanguage, now), now)
             job.markCompleted(saved.id, now)
             afterCommit {
                 questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
-                pushOutboxDispatch.dispatchOutbox(outboxId)
+                notifications.publish(saved.toQuestionNotification(study, appLanguage))
             }
-            log.info("scheduled_question_created deviceId={} userId={} studyId={} jobId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, job.id, study.topic, saved.id)
+            log.info("scheduled_question_created deviceId={} userId={} studyId={} jobId={} topic={} questionId={} notification=true", study.deviceId, userId, study.id, job.id, study.topic, saved.id)
         } catch (error: Exception) {
             job.markScheduled(error.message ?: error.javaClass.simpleName, backoffPolicy.failureNextDueAt(now), now)
             log.warn("scheduled_question_failed deviceId={} userId={} studyId={} jobId={} topic={} error={}", study.deviceId, study.userId, study.id, job.id, study.topic, error.message)
@@ -218,28 +212,6 @@ class ScheduledQuestionCreator(
             publicQuestion = true,
             createdAt = now,
             updatedAt = now,
-        )
-
-    private fun StudyEntity.toPushRequest(
-        recordId: Long,
-        question: String,
-        hint: String?,
-        appLanguage: String,
-        now: Instant,
-    ): QuestionPushRequest =
-        QuestionPushRequest(
-            recordId = recordId,
-            studyId = id,
-            createdAt = now,
-            deviceId = deviceId,
-            userId = userId,
-            question = question,
-            expectedAnswerHint = hint,
-            topic = topic,
-            difficultyLevel = difficultyLevel,
-            language = appLanguage,
-            sound = notificationSound,
-            intervalMinutes = intervalMinutes,
         )
 
 }

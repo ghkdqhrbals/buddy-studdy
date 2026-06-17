@@ -8,6 +8,7 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
 import com.buddystuddy.backend.crypto.KeyCipher
+import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import com.buddystuddy.backend.study.application.model.toRecordResponse
@@ -19,9 +20,9 @@ import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCa
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
-import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxCommand
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -82,21 +83,9 @@ class StudyService(
         val now = Instant.now()
 
         val questionDeferred = async(Dispatchers.IO) {
-            questionWriter.saveQuestionWithOutbox(
+            questionWriter.saveQuestionWithNotification(
                 room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
-                QuestionPushOutboxCommand(
-                    createdAt = now,
-                    studyId = study.id,
-                    deviceId = study.deviceId,
-                    userId = principal.userId,
-                    question = generated.question,
-                    expectedAnswerHint = generated.hint,
-                    topic = study.topic,
-                    difficultyLevel = study.difficultyLevel,
-                    language = appLanguage,
-                    sound = study.notificationSound,
-                    intervalMinutes = study.intervalMinutes,
-                ),
+                { saved -> saved.toQuestionNotification(study, appLanguage) },
                 now,
             )
         }
@@ -226,3 +215,39 @@ private fun StudyRecordResponse.withTranslatedText(translated: QuestionSearchEnt
         ),
     )
 }
+
+internal val studyNotificationMapper = jacksonObjectMapper().findAndRegisterModules()
+
+internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLanguage: String): NotificationRequestCommand =
+    NotificationRequestCommand(
+        eventId = "question-created-$id",
+        userId = study.userId,
+        type = "STUDY_QUESTION",
+        title = "BuddyStuddy",
+        body = question,
+        threadType = "study_question",
+        threadId = id.toString(),
+        deepLink = "buddystuddy://studies/${study.id}",
+        metadataJson = studyNotificationMapper.writeValueAsString(
+            QuestionNotificationMetadata(
+                recordId = id,
+                studyId = study.id,
+                topic = study.topic,
+                difficultyLevel = study.difficultyLevel,
+                language = appLanguage,
+                sound = study.notificationSound,
+                intervalMinutes = study.intervalMinutes,
+            )
+        ),
+        shouldPush = true,
+    )
+
+internal data class QuestionNotificationMetadata(
+    val recordId: Long,
+    val studyId: Long,
+    val topic: String,
+    val difficultyLevel: Int,
+    val language: String,
+    val sound: String?,
+    val intervalMinutes: Int,
+)

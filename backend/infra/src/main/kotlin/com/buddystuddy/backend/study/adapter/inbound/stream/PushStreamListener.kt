@@ -126,23 +126,29 @@ internal object PushEventPayloadParser {
                 recordId = payload.recordId.toString(),
                 studyId = payload.studyId?.toString(),
                 question = payload.question,
+                title = payload.title,
+                body = payload.body,
                 topic = payload.topic,
                 sound = payload.sound?.takeIf(String::isNotBlank),
+                deepLink = payload.deepLink,
             )
         } else {
             QuestionPushMessageFields(
                 recordId = fields["recordId"] ?: "",
                 studyId = fields["studyId"]?.takeIf(String::isNotBlank),
                 question = fields["question"] ?: "A new study question is ready.",
+                title = fields["title"],
+                body = fields["body"],
                 topic = fields["topic"] ?: "",
                 sound = fields["sound"]?.takeIf(String::isNotBlank),
+                deepLink = fields["deepLink"],
             )
         }
-        val deepLink = PushDeepLinkFactory.studyRoomOrRecord(common.studyId, common.recordId)
+        val deepLink = common.deepLink ?: PushDeepLinkFactory.studyRoomOrRecord(common.studyId, common.recordId)
         return when (provider.uppercase()) {
             PushMessageType.FCM.name -> FcmQuestionMessage(
                 recordId = common.recordId,
-                question = common.question,
+                question = common.body ?: common.question,
                 topic = common.topic,
                 sound = common.sound,
                 deepLink = deepLink,
@@ -156,8 +162,8 @@ internal object PushEventPayloadParser {
                 payload = ApnsQuestionPayload(
                     aps = ApnsAps(
                         alert = ApnsAlert(
-                            title = "BuddyStuddy",
-                            body = common.question,
+                            title = common.title ?: "BuddyStuddy",
+                            body = common.body ?: common.question,
                         ),
                         sound = common.sound ?: "default",
                     ),
@@ -176,8 +182,11 @@ internal object PushEventPayloadParser {
         val recordId: String,
         val studyId: String?,
         val question: String,
+        val title: String?,
+        val body: String?,
         val topic: String,
         val sound: String?,
+        val deepLink: String?,
     )
 }
 
