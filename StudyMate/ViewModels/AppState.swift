@@ -130,14 +130,7 @@ final class AppState: ObservableObject {
     @Published private var statsState = StatsStateStore()
     @Published var hasAPIKeyError = false
     @Published var isValidatingAPIKey = false
-    @Published var appLogs: [AppLogEntry]
-    @Published var appLogTotalCount: Int
-    @Published var appLogPage: Int
-    @Published var apiTrafficLogs: [APITrafficLogEntry] = []
-    @Published var isAPIDebugPanelPresented = false
-    @Published var isDebuggingEnabled: Bool
-    @Published var debugBackendBaseURL: String
-    @Published var draftDebugBackendBaseURL: String
+    @Published private var developerState = DeveloperStateStore()
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var notificationLandingMessage: String?
@@ -153,6 +146,94 @@ final class AppState: ObservableObject {
     @Published var isCommunitySignedIn: Bool
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var searchState = SearchStateStore()
+
+    var appLogs: [AppLogEntry] {
+        get {
+            developerState.appLogs
+        }
+        set {
+            var nextState = developerState
+            nextState.appLogs = newValue
+            developerState = nextState
+        }
+    }
+
+    var appLogTotalCount: Int {
+        get {
+            developerState.appLogTotalCount
+        }
+        set {
+            var nextState = developerState
+            nextState.appLogTotalCount = newValue
+            developerState = nextState
+        }
+    }
+
+    var appLogPage: Int {
+        get {
+            developerState.appLogPage
+        }
+        set {
+            var nextState = developerState
+            nextState.appLogPage = newValue
+            developerState = nextState
+        }
+    }
+
+    var apiTrafficLogs: [APITrafficLogEntry] {
+        get {
+            developerState.apiTrafficLogs
+        }
+        set {
+            var nextState = developerState
+            nextState.apiTrafficLogs = newValue
+            developerState = nextState
+        }
+    }
+
+    var isAPIDebugPanelPresented: Bool {
+        get {
+            developerState.isAPIDebugPanelPresented
+        }
+        set {
+            var nextState = developerState
+            nextState.isAPIDebugPanelPresented = newValue
+            developerState = nextState
+        }
+    }
+
+    var isDebuggingEnabled: Bool {
+        get {
+            developerState.isDebuggingEnabled
+        }
+        set {
+            var nextState = developerState
+            nextState.isDebuggingEnabled = newValue
+            developerState = nextState
+        }
+    }
+
+    var debugBackendBaseURL: String {
+        get {
+            developerState.debugBackendBaseURL
+        }
+        set {
+            var nextState = developerState
+            nextState.debugBackendBaseURL = newValue
+            developerState = nextState
+        }
+    }
+
+    var draftDebugBackendBaseURL: String {
+        get {
+            developerState.draftDebugBackendBaseURL
+        }
+        set {
+            var nextState = developerState
+            nextState.draftDebugBackendBaseURL = newValue
+            developerState = nextState
+        }
+    }
 
     var backendStudyRooms: [BackendStudyRoom] {
         studyRoomState.rooms
@@ -1000,12 +1081,14 @@ final class AppState: ObservableObject {
         self.savedSettings = effectiveLoadedSettings
         self.savedAPIKey = loadedAPIKey
         self.savedDebugBackendBaseURL = loadedDebugBackendBaseURL
-        self.appLogs = loadedLogPage.entries
-        self.appLogTotalCount = loadedLogPage.totalCount
-        self.appLogPage = loadedLogPage.page
-        self.isDebuggingEnabled = loadedIsDebuggingEnabled
-        self.debugBackendBaseURL = loadedDebugBackendBaseURL
-        self.draftDebugBackendBaseURL = loadedDebugBackendBaseURL
+        self.developerState = DeveloperStateStore(
+            appLogs: loadedLogPage.entries,
+            appLogTotalCount: loadedLogPage.totalCount,
+            appLogPage: loadedLogPage.page,
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
+            debugBackendBaseURL: loadedDebugBackendBaseURL,
+            draftDebugBackendBaseURL: loadedDebugBackendBaseURL
+        )
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
         self.isCloudSyncEnabled = cloudSyncService == nil ? false : settingsStore.loadIsCloudSyncEnabled()
         if cloudSyncService == nil {
@@ -4747,20 +4830,21 @@ final class AppState: ObservableObject {
 
     func clearAppLogs() {
         settingsStore.clearAppLogs()
-        appLogs = []
-        appLogTotalCount = 0
-        appLogPage = 0
+        var nextState = developerState
+        nextState.clearAppLogs()
+        developerState = nextState
     }
 
     func appendAPITrafficLog(_ entry: APITrafficLogEntry) {
-        apiTrafficLogs.insert(entry, at: 0)
-        if apiTrafficLogs.count > Self.maxAPITrafficLogs {
-            apiTrafficLogs.removeLast(apiTrafficLogs.count - Self.maxAPITrafficLogs)
-        }
+        var nextState = developerState
+        nextState.appendAPITrafficLog(entry, limit: Self.maxAPITrafficLogs)
+        developerState = nextState
     }
 
     func clearAPITrafficLogs() {
-        apiTrafficLogs = []
+        var nextState = developerState
+        nextState.clearAPITrafficLogs()
+        developerState = nextState
     }
 
     func showAPIDebugPanel() {
@@ -4778,9 +4862,9 @@ final class AppState: ObservableObject {
 
     func loadAppLogPage(_ page: Int) {
         let logPage = settingsStore.loadAppLogs(page: page, pageSize: Self.developerLogPageSize)
-        appLogs = logPage.entries
-        appLogTotalCount = logPage.totalCount
-        appLogPage = logPage.page
+        var nextState = developerState
+        nextState.applyLogPage(logPage)
+        developerState = nextState
     }
 
     func loadPreviousAppLogPage() {
