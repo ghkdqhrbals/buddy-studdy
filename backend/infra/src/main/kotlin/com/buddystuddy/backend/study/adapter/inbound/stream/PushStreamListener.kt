@@ -35,7 +35,7 @@ class PushStreamListener(
             "buddystuddy-push-listener",
             "\${PUSH_STREAM_PREFIX:push-v1}",
             "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
-            "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:4}}",
+            "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
             "\${buddystuddy.streams.enabled:true}",
         )
     }
@@ -44,7 +44,7 @@ class PushStreamListener(
         id = "buddystuddy-push-listener",
         streamPrefix = "\${PUSH_STREAM_PREFIX:push-v1}",
         groupId = "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:4}}",
+        concurrency = "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
         autoStartup = "\${buddystuddy.streams.enabled:true}",
         pollBatchSize = "\${PUSH_CONSUMER_REDIS_POLL_BATCH_SIZE:50}",
         pollTimeoutMs = "\${PUSH_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",

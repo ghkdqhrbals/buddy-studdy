@@ -22,7 +22,7 @@ class RedisStreamListenerDefaultsTest {
     @Test
     fun `push and view listeners use requested default concurrency`() {
         assertThat(streamListener(PushStreamListener::class.java, "onPushRequested").concurrency)
-            .contains("4")
+            .contains("8")
         assertThat(streamListener(QuestionStatsStreamListener::class.java, "onQuestionViewed").concurrency)
             .contains("8")
     }
