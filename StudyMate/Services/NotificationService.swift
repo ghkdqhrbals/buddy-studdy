@@ -1096,43 +1096,7 @@ final class StudyRemoteNotificationBridge {
             return false
         }
 
-        let recordID = StudyNotificationPayload.backendRecordID(from: userInfo)
-        let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo)
-
-        if recordID != nil || questionCreatedAt != nil {
-            appState.prepareToOpenQuestionFromNotification()
-            let didHandle = await handleRemoteNotification(
-                userInfo: userInfo,
-                openStudy: true,
-                replyText: replyText
-            )
-
-            if didHandle {
-                return true
-            }
-        } else if let route = StudyNotificationPayload.appRoute(from: userInfo) {
-            appState.logRemoteNotificationEvent("Push 딥링크 route를 열었습니다. route=\(route)")
-            return appState.openRouteFromNotification(route)
-        }
-
-        if let questionCreatedAt {
-            return appState.openRecordFromNotification(
-                recordID: recordID,
-                questionCreatedAt: questionCreatedAt,
-                replyText: replyText
-            )
-        }
-
-        if let route = StudyNotificationPayload.appRoute(from: userInfo) {
-            appState.logRemoteNotificationEvent("Push 딥링크 fallback route를 열었습니다. route=\(route)")
-            return appState.openRouteFromNotification(route)
-        }
-
-        appState.logRemoteNotificationEvent(
-            "CloudKit push 알림 payload를 라우팅하지 못했습니다. keys=\(StudyNotificationPayload.keySummary(from: userInfo))",
-            isWarning: true
-        )
-        return false
+        return await appState.notificationLandingCoordinator.land(userInfo: userInfo, replyText: replyText)
     }
 
     @discardableResult
@@ -1154,6 +1118,9 @@ final class StudyRemoteNotificationBridge {
         }
 
         if let recordID = StudyNotificationPayload.backendRecordID(from: userInfo) {
+            if openStudy {
+                return await appState.notificationLandingCoordinator.land(recordID: recordID, replyText: replyText)
+            }
             return await appState.handleBackendRecordPush(
                 recordID: recordID,
                 openStudy: openStudy,

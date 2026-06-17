@@ -1005,9 +1005,7 @@ private struct MobileNotificationsView: View {
                     Button {
                         Task {
                             await appState.markNotificationRead(notification)
-                            if let deepLink = notification.deepLink,
-                               let url = URL(string: deepLink),
-                               let route = AppRoute(url: url) {
+                            if let route = await appState.notificationLandingCoordinator.routeForNotificationListSelection(notification) {
                                 forwardedRoute = NotificationForwardRoute(route: route)
                             }
                         }

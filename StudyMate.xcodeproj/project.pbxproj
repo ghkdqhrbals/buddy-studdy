@@ -13,6 +13,7 @@
 		110000000000000000000105 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000005 /* OpenAIClient.swift */; };
 		110000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		110000000000000000000172 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
+		110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		110000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
 		110000000000000000000177 /* StudyRoomStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* StudyRoomStateStore.swift */; };
 		110000000000000000000178 /* RecordsStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000022 /* RecordsStateStore.swift */; };
@@ -48,6 +49,7 @@
 		120000000000000000000105 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000005 /* OpenAIClient.swift */; };
 		120000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		120000000000000000000113 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
+		120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		120000000000000000000115 /* GoogleOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* GoogleOAuthService.swift */; };
 		120000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
 		120000000000000000000119 /* StudyRoomStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* StudyRoomStateStore.swift */; };
@@ -120,6 +122,7 @@
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
+		110000000000000000000180 /* NotificationLandingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationLandingCoordinator.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* GoogleOAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthService.swift; sourceTree = "<group>"; };
 		11000000000000000000001C /* SearchSafeRefreshControlOffset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchSafeRefreshControlOffset.swift; sourceTree = "<group>"; };
@@ -224,6 +227,7 @@
 				110000000000000000000004 /* SettingsStore.swift */,
 				110000000000000000000005 /* OpenAIClient.swift */,
 				110000000000000000000006 /* NotificationService.swift */,
+				110000000000000000000180 /* NotificationLandingCoordinator.swift */,
 				110000000000000000000016 /* CloudSyncService.swift */,
 				110000000000000000000019 /* RemotePushBackendClient.swift */,
 				11000000000000000000001B /* GoogleOAuthService.swift */,
@@ -463,6 +467,7 @@
 				110000000000000000000104 /* SettingsStore.swift in Sources */,
 				110000000000000000000105 /* OpenAIClient.swift in Sources */,
 				110000000000000000000106 /* NotificationService.swift in Sources */,
+				110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */,
 				110000000000000000000172 /* RemotePushBackendClient.swift in Sources */,
 				110000000000000000000107 /* AppState.swift in Sources */,
 				110000000000000000000177 /* StudyRoomStateStore.swift in Sources */,
@@ -506,6 +511,7 @@
 				120000000000000000000104 /* SettingsStore.swift in Sources */,
 				120000000000000000000105 /* OpenAIClient.swift in Sources */,
 				120000000000000000000106 /* NotificationService.swift in Sources */,
+				120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */,
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
 				120000000000000000000115 /* GoogleOAuthService.swift in Sources */,
 				120000000000000000000107 /* AppState.swift in Sources */,

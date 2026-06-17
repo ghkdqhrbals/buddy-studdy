@@ -15,11 +15,14 @@ private enum QuestionGenerationSkip: Error {
 
 private enum AppStateError: LocalizedError {
     case backendStudyMissing
+    case missingRemotePushRegistration
 
     var errorDescription: String? {
         switch self {
         case .backendStudyMissing:
             return "학습 정보를 동기화한 뒤 다시 시도하세요."
+        case .missingRemotePushRegistration:
+            return "기기 등록 정보를 동기화한 뒤 다시 시도하세요."
         }
     }
 }
@@ -542,6 +545,7 @@ final class AppState: ObservableObject {
     private var backendUnauthorizedCancellable: AnyCancellable?
     private var lastAPIKeyUpdatedAt: Date?
     private var lastLocalSettingsMutationAt: Date?
+    lazy var notificationLandingCoordinator = NotificationLandingCoordinator(appState: self)
 
     var strings: AppStrings {
         AppStrings(language: settings.appLanguage)
@@ -4418,7 +4422,16 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func openNotificationRecord(_ record: StudyRecord) -> Bool {
+    func notificationRoute(for record: StudyRecord) -> AppRoute {
+        if record.gradingResult == nil {
+            return .studyRoom(categoryID: categoryID(forTopic: record.topic))
+        }
+
+        return .recordDetail(recordID: record.id)
+    }
+
+    @discardableResult
+    func openNotificationRecord(_ record: StudyRecord) -> Bool {
         if record.gradingResult == nil {
             selectStudyRecord(record)
             return true
@@ -4471,6 +4484,44 @@ final class AppState: ObservableObject {
         return openRecordFromNotification(questionCreatedAt: questionCreatedAt, replyText: replyText)
     }
 
+    func fetchBackendNotificationRecord(recordID: String, replyText: String? = nil) async throws -> StudyRecord {
+        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
+            log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
+            throw AppStateError.missingRemotePushRegistration
+        }
+
+        var record = try await remotePushBackendClient.fetchRecord(
+            registration: registration,
+            recordID: recordID
+        )
+
+        let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedReply.isEmpty, record.gradingResult == nil {
+            record = try await remotePushBackendClient.saveRecordAnswer(
+                registration: registration,
+                recordID: recordID,
+                answer: trimmedReply
+            )
+        }
+
+        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        reloadStudyRecordsFromStore()
+        let didApplyRecordToStudyRoom = studyRoomState.applyIncomingRecord(record)
+        if !didApplyRecordToStudyRoom, record.gradingResult == nil {
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        }
+
+        if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
+            lastAnswer = record.answer ?? lastAnswer
+            gradingResult = record.gradingResult
+            settingsStore.saveLastAnswer(lastAnswer)
+            settingsStore.saveGradingResult(gradingResult)
+        }
+
+        return record
+    }
+
     @discardableResult
     func openRecordFromNotification(questionCreatedAt: TimeInterval?, replyText: String? = nil) -> Bool {
         reloadStudyRecordsFromStore()
@@ -4518,40 +4569,9 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func handleBackendRecordPush(recordID: String, openStudy: Bool, replyText: String? = nil) async -> Bool {
-        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
-            log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
-            return false
-        }
-
         do {
-            var record = try await remotePushBackendClient.fetchRecord(
-                registration: registration,
-                recordID: recordID
-            )
-
+            let record = try await fetchBackendNotificationRecord(recordID: recordID, replyText: replyText)
             let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !trimmedReply.isEmpty, record.gradingResult == nil {
-                record = try await remotePushBackendClient.saveRecordAnswer(
-                    registration: registration,
-                    recordID: recordID,
-                    answer: trimmedReply
-                )
-            }
-
-            settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
-            reloadStudyRecordsFromStore()
-            let didApplyRecordToStudyRoom = studyRoomState.applyIncomingRecord(record)
-            if !didApplyRecordToStudyRoom, record.gradingResult == nil {
-                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-            }
-
-            if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
-                lastAnswer = record.answer ?? lastAnswer
-                gradingResult = record.gradingResult
-                settingsStore.saveLastAnswer(lastAnswer)
-                settingsStore.saveGradingResult(gradingResult)
-            }
 
             if openStudy {
                 _ = openNotificationRecord(record)
@@ -4732,7 +4752,7 @@ final class AppState: ObservableObject {
         return true
     }
 
-    private func showNotificationQuestionUnavailable(preserveCurrentQuestion: Bool) {
+    func showNotificationQuestionUnavailable(preserveCurrentQuestion: Bool) {
         showStudyScreen(categoryID: nil)
         errorMessage = nil
 
