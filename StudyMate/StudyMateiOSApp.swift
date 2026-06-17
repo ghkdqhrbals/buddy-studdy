@@ -106,22 +106,31 @@ private struct StartupPixelFoxSplashView: View {
     private let frameNames = [
         "PixelFoxBackpackWalkFrame1",
         "PixelFoxBackpackWalkFrame2",
-        "PixelFoxBackpackWalkFrame3",
-        "PixelFoxBackpackWalkFrame4",
-        "PixelFoxBackpackWalkFrame5"
+        "PixelFoxBackpackWalkFrame3"
     ]
 
     var body: some View {
         ZStack {
-            Color(.systemBackground)
+            Color(red: 0.02, green: 0.35, blue: 0.95)
                 .ignoresSafeArea()
 
-            Image(frameNames[frameIndex])
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 220, height: 220)
-                .accessibilityHidden(true)
+            VStack(spacing: 18) {
+                Image(frameNames[frameIndex])
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 220, height: 220)
+                    .accessibilityHidden(true)
+
+                Text("BuddyStuddy @ghkdqhrbals")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospaced()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .accessibilityLabel("BuddyStuddy by ghkdqhrbals")
+            }
+            .padding(.horizontal, 24)
         }
         .task {
             await playFrames()
