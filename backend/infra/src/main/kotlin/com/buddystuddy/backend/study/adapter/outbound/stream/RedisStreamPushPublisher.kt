@@ -56,13 +56,11 @@ class RedisStreamPushPublisher(
             createdAt = request.createdAt,
         )
         val fields = event.toRedisStreamFields()
-        val partitionKey = event.deviceId.ifBlank { event.userId?.toString() ?: event.recordId.toString() }
         logger.info(
-            "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",
+            "redis_stream_publish_started prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",
             properties.streams.pushPrefix,
             fields["eventId"],
             fields["eventType"],
-            partitionKey,
             event.recordId,
             event.deviceId,
             event.userId,
@@ -71,17 +69,16 @@ class RedisStreamPushPublisher(
         )
         return try {
             val published = publisher.publish(
-                partitionKey,
+                null,
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
             logger.info(
-                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={}",
+                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={}",
                 published.streamKey,
                 published.recordId,
                 fields["eventId"],
                 fields["eventType"],
-                partitionKey,
                 event.recordId,
                 event.deviceId,
                 event.userId,
@@ -89,11 +86,10 @@ class RedisStreamPushPublisher(
             true
         } catch (error: Exception) {
             logger.warn(
-                "redis_stream_publish_failed prefix={} eventId={} eventType={} partitionKey={} recordId={} deviceId={} userId={} error={}",
+                "redis_stream_publish_failed prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
                 properties.streams.pushPrefix,
                 fields["eventId"],
                 fields["eventType"],
-                partitionKey,
                 event.recordId,
                 event.deviceId,
                 event.userId,

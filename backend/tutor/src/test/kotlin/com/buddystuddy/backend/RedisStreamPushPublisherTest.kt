@@ -35,14 +35,14 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event publishes with device id as stream key hint`(output: CapturedOutput) {
+    fun `push event publishes without partition key`(output: CapturedOutput) {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, pushPublisher = publisher)
 
         assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.key).isEqualTo("device-1")
+        assertThat(request.key).isNull()
         assertThat(request.fields).containsEntry("eventType", "QUESTION_PUSH_REQUESTED")
         assertThat(request.fields).containsKey("payload")
         assertThat(request.fields["payload"])
@@ -66,13 +66,13 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event falls back to record id when device id and user id are blank`() {
+    fun `push event keeps partition key empty when device id and user id are blank`() {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, pushPublisher = publisher)
 
         assertThat(service.publishPush(pushEvent(deviceId = "", userId = null))).isTrue()
 
-        assertThat(publisher.requests.single().key).isEqualTo("10")
+        assertThat(publisher.requests.single().key).isNull()
     }
 
     @Test
