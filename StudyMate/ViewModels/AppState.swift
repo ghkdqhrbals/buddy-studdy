@@ -292,6 +292,61 @@ final class AppState: ObservableObject {
         }
     }
 
+    var notifications: [BackendAppNotification] {
+        get {
+            notificationState.notifications
+        }
+        set {
+            var nextState = notificationState
+            nextState.notifications = newValue
+            notificationState = nextState
+        }
+    }
+
+    var notificationUnreadCount: Int {
+        get {
+            notificationState.unreadCount
+        }
+        set {
+            updateNotificationState { state in
+                state.unreadCount = max(0, newValue)
+            }
+        }
+    }
+
+    var notificationTotalCount: Int {
+        get {
+            notificationState.totalCount
+        }
+        set {
+            var nextState = notificationState
+            nextState.totalCount = max(0, newValue)
+            notificationState = nextState
+        }
+    }
+
+    var isLoadingNotifications: Bool {
+        get {
+            notificationState.isLoading
+        }
+        set {
+            var nextState = notificationState
+            nextState.isLoading = newValue
+            notificationState = nextState
+        }
+    }
+
+    var notificationErrorMessage: String? {
+        get {
+            notificationState.errorMessage
+        }
+        set {
+            var nextState = notificationState
+            nextState.errorMessage = newValue
+            notificationState = nextState
+        }
+    }
+
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
         return synchronized.studyCategories
@@ -308,15 +363,7 @@ final class AppState: ObservableObject {
     @Published var communityProfile: CommunityUserProfile?
     @Published var isUpdatingCommunityProfile = false
     @Published var isWithdrawingCommunityAccount = false
-    @Published var notifications: [BackendAppNotification] = []
-    @Published var notificationUnreadCount = 0 {
-        didSet {
-            updateApplicationIconBadge(notificationUnreadCount)
-        }
-    }
-    @Published var notificationTotalCount = 0
-    @Published var isLoadingNotifications = false
-    @Published var notificationErrorMessage: String?
+    @Published private var notificationState = NotificationStateStore()
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published var profileAvatarSymbolName: String
     @Published var profileAvatarImageData: Data?
@@ -1131,14 +1178,21 @@ final class AppState: ObservableObject {
     func refreshNotificationUnreadCount() async {
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-count") else {
-            notificationUnreadCount = 0
+            updateNotificationState { state in
+                state.applyUnreadCount(0)
+            }
             return
         }
 
         do {
-            notificationUnreadCount = try await remotePushBackendClient.fetchNotificationUnreadCount(registration: registration)
+            let unreadCount = try await remotePushBackendClient.fetchNotificationUnreadCount(registration: registration)
+            updateNotificationState { state in
+                state.applyUnreadCount(unreadCount)
+            }
         } catch {
-            notificationUnreadCount = 0
+            updateNotificationState { state in
+                state.applyUnreadCount(0)
+            }
             log(.warning, "알림 개수 조회 실패: \(error.localizedDescription)")
         }
     }
@@ -1153,10 +1207,13 @@ final class AppState: ObservableObject {
             return
         }
 
-        isLoadingNotifications = true
-        notificationErrorMessage = nil
+        updateNotificationState { state in
+            state.beginLoading()
+        }
         defer {
-            isLoadingNotifications = false
+            updateNotificationState { state in
+                state.finishLoading()
+            }
         }
 
         let offset = reset ? 0 : notifications.count
@@ -1166,28 +1223,26 @@ final class AppState: ObservableObject {
                 limit: 30,
                 offset: offset
             )
-            notificationUnreadCount = page.unreadCount
-            notificationTotalCount = page.totalCount
-            if reset {
-                notifications = page.notifications
-            } else {
-                let existing = Set(notifications.map(\.id))
-                notifications.append(contentsOf: page.notifications.filter { !existing.contains($0.id) })
+            updateNotificationState { state in
+                state.applyPage(page, reset: reset)
             }
         } catch {
+            let message: String
             if let backendError = error as? RemotePushBackendError,
                backendError.isPageAccessDenied {
-                notificationErrorMessage = strings.myStudyLoginHelp
+                message = strings.myStudyLoginHelp
             } else {
-                notificationErrorMessage = error.localizedDescription
+                message = error.localizedDescription
+            }
+            updateNotificationState { state in
+                state.applyError(message)
             }
             log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
         }
     }
 
     func loadMoreNotificationsIfNeeded(current notification: BackendAppNotification) async {
-        guard notification.id == notifications.last?.id,
-              notifications.count < notificationTotalCount else {
+        guard notificationState.canLoadMore(current: notification) else {
             return
         }
         await loadNotifications(reset: false)
@@ -1201,11 +1256,8 @@ final class AppState: ObservableObject {
 
         do {
             try await remotePushBackendClient.markNotificationRead(registration: registration, notificationID: notification.id)
-            if let index = notifications.firstIndex(where: { $0.id == notification.id }),
-               !notifications[index].isRead {
-                notifications[index].isRead = true
-                notifications[index].readAt = Date()
-                notificationUnreadCount = max(0, notificationUnreadCount - 1)
+            updateNotificationState { state in
+                state.markRead(notificationID: notification.id, at: Date())
             }
         } catch {
             log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
@@ -1220,12 +1272,8 @@ final class AppState: ObservableObject {
 
         do {
             try await remotePushBackendClient.deleteNotification(registration: registration, notificationID: notification.id)
-            if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
-                let removed = notifications.remove(at: index)
-                notificationTotalCount = max(0, notificationTotalCount - 1)
-                if !removed.isRead {
-                    notificationUnreadCount = max(0, notificationUnreadCount - 1)
-                }
+            updateNotificationState { state in
+                state.delete(notificationID: notification.id)
             }
         } catch {
             log(.warning, "알림 삭제 실패: \(error.localizedDescription)")
@@ -1240,11 +1288,22 @@ final class AppState: ObservableObject {
 
         do {
             try await remotePushBackendClient.deleteAllNotifications(registration: registration)
-            notifications = []
-            notificationTotalCount = 0
-            notificationUnreadCount = 0
+            updateNotificationState { state in
+                state.deleteAll()
+            }
         } catch {
             log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func updateNotificationState(_ mutate: (inout NotificationStateStore) -> Void) {
+        let previousUnreadCount = notificationState.unreadCount
+        var nextState = notificationState
+        mutate(&nextState)
+        notificationState = nextState
+
+        if nextState.unreadCount != previousUnreadCount {
+            updateApplicationIconBadge(nextState.unreadCount)
         }
     }
 
