@@ -42,6 +42,65 @@ guard let sourceImage = NSImage(contentsOf: sourceIconURL) else {
     fatalError("Missing source icon at \(sourceIconURL.path)")
 }
 
+func foregroundImage(from sourceImage: NSImage) -> CGImage? {
+    guard let sourceCGImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        return nil
+    }
+
+    let width = sourceCGImage.width
+    let height = sourceCGImage.height
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        return nil
+    }
+
+    context.draw(sourceCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    for index in stride(from: 0, to: pixels.count, by: bytesPerPixel) {
+        let red = Int(pixels[index])
+        let green = Int(pixels[index + 1])
+        let blue = Int(pixels[index + 2])
+        let isWarmBackground = red >= 244 && green >= 239 && blue >= 225 && abs(red - green) <= 18
+
+        if isWarmBackground {
+            pixels[index + 3] = 0
+        }
+    }
+
+    guard let provider = CGDataProvider(data: Data(pixels) as CFData) else {
+        return nil
+    }
+
+    return CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+    )
+}
+
+guard let foregroundCGImage = foregroundImage(from: sourceImage) else {
+    fatalError("Failed to prepare foreground icon")
+}
+
 func pngData(from sourceImage: NSImage, size: Int) -> Data? {
     let dimension = CGFloat(size)
     guard let context = CGContext(
@@ -56,15 +115,47 @@ func pngData(from sourceImage: NSImage, size: Int) -> Data? {
         return nil
     }
 
-    context.setFillColor(NSColor(calibratedRed: 1.0, green: 0.992, blue: 0.972, alpha: 1.0).cgColor)
-    context.fill(CGRect(x: 0, y: 0, width: dimension, height: dimension))
+    let background = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [
+            NSColor(calibratedRed: 0.055, green: 0.17, blue: 0.145, alpha: 1.0).cgColor,
+            NSColor(calibratedRed: 0.105, green: 0.31, blue: 0.255, alpha: 1.0).cgColor
+        ] as CFArray,
+        locations: [0.0, 1.0]
+    )
 
-    guard let cgImage = sourceImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-        return nil
+    if let background {
+        context.drawLinearGradient(
+            background,
+            start: CGPoint(x: 0, y: dimension),
+            end: CGPoint(x: dimension, y: 0),
+            options: []
+        )
+    } else {
+        context.setFillColor(NSColor(calibratedRed: 0.055, green: 0.17, blue: 0.145, alpha: 1.0).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: dimension, height: dimension))
     }
 
-    context.interpolationQuality = .high
-    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: dimension, height: dimension))
+    context.setFillColor(NSColor(calibratedWhite: 1.0, alpha: 0.08).cgColor)
+    context.fillEllipse(in: CGRect(x: dimension * 0.10, y: dimension * 0.09, width: dimension * 0.80, height: dimension * 0.80))
+
+    context.setFillColor(NSColor(calibratedWhite: 0.0, alpha: 0.18).cgColor)
+    context.fillEllipse(in: CGRect(x: dimension * 0.24, y: dimension * 0.10, width: dimension * 0.58, height: dimension * 0.10))
+
+    context.setFillColor(NSColor(calibratedWhite: 1.0, alpha: 0.08).cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: dimension, height: dimension))
+
+    context.interpolationQuality = .none
+    let imageInset = -dimension * 0.03
+    context.draw(
+        foregroundCGImage,
+        in: CGRect(
+            x: imageInset,
+            y: imageInset,
+            width: dimension - imageInset * 2,
+            height: dimension - imageInset * 2
+        )
+    )
 
     guard let renderedImage = context.makeImage() else {
         return nil
