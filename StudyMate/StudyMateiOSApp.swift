@@ -61,16 +61,26 @@ struct StudyMateiOSApp: App {
 private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
+    @State private var isShowingStartupSplash = true
 
     var body: some View {
-        Group {
+        ZStack {
             if let appState {
                 MobileRootView()
                     .environmentObject(appState)
             } else {
                 Color(.systemBackground)
             }
+
+            if isShowingStartupSplash {
+                StartupPixelFoxSplashView {
+                    isShowingStartupSplash = false
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
+        .animation(.easeOut(duration: 0.25), value: isShowingStartupSplash)
         .background(Color(.systemBackground))
         .task {
             guard !didBootstrap else {
@@ -85,6 +95,46 @@ private struct StudyMateiOSBootstrapView: View {
             appState = state
             await state.start()
         }
+    }
+}
+
+private struct StartupPixelFoxSplashView: View {
+    var onFinished: () -> Void
+
+    @State private var frameIndex = 0
+
+    private let frameNames = [
+        "PixelFoxBackpackWalkFrame1",
+        "PixelFoxBackpackWalkFrame2",
+        "PixelFoxBackpackWalkFrame3",
+        "PixelFoxBackpackWalkFrame4",
+        "PixelFoxBackpackWalkFrame5"
+    ]
+
+    var body: some View {
+        ZStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+
+            Image(frameNames[frameIndex])
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: 220, height: 220)
+                .accessibilityHidden(true)
+        }
+        .task {
+            await playFrames()
+        }
+    }
+
+    private func playFrames() async {
+        for index in frameNames.indices {
+            frameIndex = index
+            try? await Task.sleep(for: .seconds(1))
+        }
+
+        onFinished()
     }
 }
 
