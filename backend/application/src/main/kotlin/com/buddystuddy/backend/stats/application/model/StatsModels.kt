@@ -3,6 +3,7 @@ package com.buddystuddy.backend.stats.application.model
 import com.buddystuddy.backend.common.application.model.PageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
 import java.time.Instant
+import java.time.LocalDate
 
 data class StatsQuery(
     val search: String? = null,
@@ -42,3 +43,18 @@ data class StatsResponse(
     override val offset: Int,
     val generatedAt: Instant,
 ) : PageResponse
+
+data class StatsActivityDayResponse(
+    val date: LocalDate,
+    val answerCount: Int,
+    val topicCount: Int,
+    val topics: List<String>,
+    val bestLevel: Double?,
+)
+
+data class StatsActivityResponse(
+    val days: List<StatsActivityDayResponse>,
+    val streakDays: Int,
+    val monthAnswerCount: Int,
+    val generatedAt: Instant,
+)

@@ -258,12 +258,24 @@ final class AppState: ObservableObject {
         statsState.stats
     }
 
+    var backendStatsActivity: BackendStatsActivity? {
+        statsState.activity
+    }
+
     var isBackendStatsLoading: Bool {
         statsState.isLoading
     }
 
+    var isBackendStatsActivityLoading: Bool {
+        statsState.isActivityLoading
+    }
+
     var backendStatsErrorMessage: String? {
         statsState.errorMessage
+    }
+
+    var backendStatsActivityErrorMessage: String? {
+        statsState.activityErrorMessage
     }
 
     var backendAccessState: BackendAccessState {
@@ -1788,6 +1800,35 @@ final class AppState: ObservableObject {
         statsState = nextState
     }
 
+    private func beginBackendStatsActivityRequest() -> UUID {
+        var nextState = statsState
+        let requestID = nextState.beginActivityRequest()
+        statsState = nextState
+        return requestID
+    }
+
+    private func isCurrentBackendStatsActivityRequest(_ requestID: UUID) -> Bool {
+        statsState.isCurrentActivityRequest(requestID)
+    }
+
+    private func finishBackendStatsActivityRequest(_ requestID: UUID) {
+        var nextState = statsState
+        nextState.finishActivityRequest(requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStatsActivity(_ activity: BackendStatsActivity, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyActivity(activity, requestID: requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStatsActivityError(_ message: String, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyActivityError(message, requestID: requestID)
+        statsState = nextState
+    }
+
     func fetchBackendStats(
         period: BackendStatsPeriod = .all,
         sort: BackendStatsSort = .level,
@@ -1844,6 +1885,51 @@ final class AppState: ObservableObject {
 
             applyBackendStatsError(backendErrorDisplayMessage(error, fallback: "통계 조회 실패"), requestID: requestID)
             log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func fetchBackendStatsActivity(startAt: Date? = nil, endAt: Date? = nil) async {
+        let requestID = beginBackendStatsActivityRequest()
+        defer {
+            finishBackendStatsActivityRequest(requestID)
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats-activity") else {
+            applyBackendStatsActivityError("백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요.", requestID: requestID)
+            log(.warning, "통계 활동 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
+            return
+        }
+
+        do {
+            let activity = try await remotePushBackendClient.fetchStatsActivity(
+                registration: registration,
+                startAt: startAt,
+                endAt: endAt
+            )
+
+            guard isCurrentBackendStatsActivityRequest(requestID) else {
+                return
+            }
+
+            applyBackendStatsActivity(activity, requestID: requestID)
+            log(.info, "통계 활동 조회 완료. days=\(activity.days.count), streak=\(activity.streakDays), month=\(activity.monthAnswerCount)")
+        } catch {
+            guard isCurrentBackendStatsActivityRequest(requestID) else {
+                return
+            }
+
+            if Self.isCancellationLikeError(error) {
+                log(.info, "통계 활동 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
+                return
+            }
+
+            if handlePageAccessError(error, page: .statistics) {
+                applyBackendStatsActivityError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
+                return
+            }
+
+            applyBackendStatsActivityError(backendErrorDisplayMessage(error, fallback: "통계 활동 조회 실패"), requestID: requestID)
+            log(.warning, "백엔드 통계 활동 조회 실패: \(error.localizedDescription)")
         }
     }
 

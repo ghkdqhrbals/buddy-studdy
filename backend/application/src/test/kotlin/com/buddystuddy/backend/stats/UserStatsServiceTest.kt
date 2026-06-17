@@ -113,6 +113,64 @@ class UserStatsServiceTest {
     }
 
     @Test
+    fun `activity returns compact daily counts and streak`() {
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today.minusDays(2),
+            topicKey = "redis",
+            topic = "Redis",
+            difficultyLevel = 4,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 160,
+            bestScore = 90,
+            correctCount = 2,
+            latestAt = Instant.now().minusSeconds(172_800),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today.minusDays(1),
+            topicKey = "redis",
+            topic = "Redis",
+            difficultyLevel = 4,
+            responseCount = 1,
+            scoreCount = 1,
+            scoreSum = 80,
+            bestScore = 80,
+            correctCount = 1,
+            latestAt = Instant.now().minusSeconds(86_400),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today,
+            topicKey = "swiftui",
+            topic = "SwiftUI",
+            difficultyLevel = 6,
+            responseCount = 3,
+            scoreCount = 3,
+            scoreSum = 150,
+            bestScore = 60,
+            correctCount = 1,
+            latestAt = Instant.now(),
+        )
+
+        val response = service.activity(
+            principal,
+            startAt = today.minusDays(3).atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+            endAt = today.plusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+        )
+
+        assertThat(response.days).hasSize(4)
+        assertThat(response.days.map { it.answerCount }).containsExactly(0, 2, 1, 3)
+        assertThat(response.days.last().topics).containsExactly("SwiftUI")
+        assertThat(response.days.last().bestLevel).isEqualTo(6.0)
+        assertThat(response.streakDays).isEqualTo(3)
+        assertThat(response.monthAnswerCount).isGreaterThanOrEqualTo(6)
+        assertThat(userStats.findByUserCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `level range averages estimates across multiple levels by score count`() {
         userStats.rows += UserStatsEntity(
             userId = 7,

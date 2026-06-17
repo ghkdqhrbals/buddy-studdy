@@ -102,8 +102,8 @@ struct StatisticsView: View {
                         StatsOverviewSection(
                             totalResponses: count,
                             totalTopics: totalTopicCount,
-                            records: visibleStatRecords,
-                            activityDateRange: activityDateRange,
+                            activity: appState.backendStatsActivity,
+                            isActivityLoading: appState.isBackendStatsActivityLoading,
                             strings: strings
                         )
 
@@ -156,6 +156,7 @@ struct StatisticsView: View {
         }
         .onAppear {
             loadStats()
+            loadActivity()
         }
     }
 
@@ -165,51 +166,6 @@ struct StatisticsView: View {
 
     private var selectedPeriodEndAt: Date? {
         periodBounds(for: selectedPeriod).endAt
-    }
-
-    private var activityDateRange: ClosedRange<Date> {
-        Self.activityDateRange(
-            for: selectedPeriod,
-            customStartDate: customStartDate,
-            customEndDate: customEndDate,
-            records: visibleStatRecords
-        )
-    }
-
-    private static func activityDateRange(
-        for period: StatisticsPeriod,
-        customStartDate: Date,
-        customEndDate: Date,
-        records: [StudyRecord]
-    ) -> ClosedRange<Date> {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-
-        func rangeFrom(daysIncludingToday dayCount: Int) -> ClosedRange<Date> {
-            let start = calendar.date(byAdding: .day, value: -(max(dayCount, 1) - 1), to: today) ?? today
-            return start...today
-        }
-
-        switch period {
-        case .today:
-            return today...today
-        case .last7Days:
-            return rangeFrom(daysIncludingToday: 7)
-        case .last30Days:
-            return rangeFrom(daysIncludingToday: 30)
-        case .last90Days:
-            return rangeFrom(daysIncludingToday: 90)
-        case .custom:
-            let start = calendar.startOfDay(for: min(customStartDate, customEndDate))
-            let end = calendar.startOfDay(for: max(customStartDate, customEndDate))
-            return start...end
-        case .all:
-            let recordDates = records.map { calendar.startOfDay(for: statsDate(for: $0)) }
-            guard let earliest = recordDates.min(), let latest = recordDates.max() else {
-                return rangeFrom(daysIncludingToday: 35)
-            }
-            return earliest...max(latest, today)
-        }
     }
 
     private func periodBounds(for period: StatisticsPeriod) -> (startAt: Date?, endAt: Date?) {
@@ -233,6 +189,12 @@ struct StatisticsView: View {
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
+    }
+
+    private func loadActivity() {
+        Task {
+            await appState.fetchBackendStatsActivity()
+        }
     }
 
     private func loadStats(
@@ -270,6 +232,7 @@ struct StatisticsView: View {
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
+        await appState.fetchBackendStatsActivity()
     }
 
     private func resetTopicPaging() {
@@ -1013,50 +976,48 @@ private extension TopicLevelRange {
 private struct StatsOverviewSection: View {
     var totalResponses: Int
     var totalTopics: Int
-    var records: [StudyRecord]
-    var activityDateRange: ClosedRange<Date>
+    var activity: BackendStatsActivity?
+    var isActivityLoading: Bool
     var strings: AppStrings
-
-    private var latestRecordDate: Date? {
-        records.map(Self.statsDate(for:)).max()
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
                 StatsHeroMetric(value: "\(totalResponses)", label: strings.responses)
                 StatsHeroMetric(value: "\(totalTopics)", label: strings.activeTopics)
+                StatsHeroMetric(value: "\(activity?.streakDays ?? 0)", label: strings.studyStreak)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(strings.recentActivity)
+                    Text(strings.studyGrass)
                         .font(.headline.weight(.semibold))
                     Spacer()
-                    if let latestRecordDate {
-                        Text(latestRecordDate, formatter: Self.relativeDateFormatter)
+                    if let activity {
+                        Text("\(strings.thisMonth) \(activity.monthAnswerCount)")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                StatsActivityGrid(records: records, dateRange: activityDateRange)
+                if let activity {
+                    StatsYearGrass(activity: activity, strings: strings)
+                } else if isActivityLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, minHeight: 78)
+                } else {
+                    Text(strings.noActivityYet)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 78, alignment: .center)
+                }
             }
         }
         .padding(14)
         .background(Color.secondary.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
-
-    private static func statsDate(for record: StudyRecord) -> Date {
-        record.answeredAt ?? record.question.createdAt
-    }
-
-    private static let relativeDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d"
-        return formatter
-    }()
 }
 
 private struct StatsHeroMetric: View {
@@ -1078,55 +1039,65 @@ private struct StatsHeroMetric: View {
     }
 }
 
-private struct StatsActivityGrid: View {
-    var records: [StudyRecord]
-    var dateRange: ClosedRange<Date>
-    @State private var selectedDay: ActivityDay?
-
-    private var days: [ActivityDay] {
-        let calendar = Calendar.current
-        let startDate = calendar.startOfDay(for: dateRange.lowerBound)
-        let endDate = calendar.startOfDay(for: max(dateRange.upperBound, dateRange.lowerBound))
-        let dayCount = max(calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0, 0)
-        let counts = Dictionary(grouping: records) { record in
-            calendar.startOfDay(for: record.answeredAt ?? record.question.createdAt)
-        }
-        .mapValues(\.count)
-
-        return (0...dayCount).map { offset in
-            let date = calendar.date(byAdding: .day, value: offset, to: startDate) ?? startDate
-            return ActivityDay(date: date, count: counts[date] ?? 0)
-        }
-    }
+private struct StatsYearGrass: View {
+    var activity: BackendStatsActivity
+    var strings: AppStrings
+    @State private var selectedDay: BackendStatsActivityDay?
 
     var body: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
+        let weeks = Self.weeks(from: activity.days)
 
         VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 5) {
-                ForEach(days) { day in
-                    Button {
-                        withAnimation(.smooth(duration: 0.18)) {
-                            selectedDay = day
-                        }
-                    } label: {
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(color(for: day.count))
-                            .frame(height: 20)
-                            .overlay {
-                                if selectedDay?.id == day.id {
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .stroke(Color.primary.opacity(0.72), lineWidth: 1.5)
-                                }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .top, spacing: Self.cellSpacing) {
+                            ForEach(weeks) { week in
+                                Text(week.monthLabel)
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: Self.cellSize, alignment: .leading)
                             }
+                        }
+
+                        HStack(alignment: .top, spacing: Self.cellSpacing) {
+                            ForEach(weeks) { week in
+                                VStack(spacing: Self.cellSpacing) {
+                                    ForEach(week.days) { day in
+                                        Button {
+                                            withAnimation(.smooth(duration: 0.16)) {
+                                                selectedDay = day
+                                            }
+                                        } label: {
+                                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                .fill(color(for: day.answerCount))
+                                                .frame(width: Self.cellSize, height: Self.cellSize)
+                                                .overlay {
+                                                    if selectedDay?.id == day.id {
+                                                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                            .stroke(Color.primary.opacity(0.75), lineWidth: 1)
+                                                    }
+                                                }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel(accessibilityText(for: day))
+                                    }
+                                }
+                                .id(week.id)
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Self.accessibilityText(for: day))
+                    .padding(.vertical, 2)
+                }
+                .onAppear {
+                    if let lastID = weeks.last?.id {
+                        proxy.scrollTo(lastID, anchor: .trailing)
+                    }
                 }
             }
 
             if let selectedDay {
-                Text(Self.displayText(for: selectedDay))
+                Text(displayText(for: selectedDay))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1137,26 +1108,57 @@ private struct StatsActivityGrid: View {
 
     private func color(for count: Int) -> Color {
         switch count {
-        case 4...:
+        case 6...:
             return .accentColor
-        case 3:
+        case 4...5:
             return .accentColor.opacity(0.78)
-        case 2:
+        case 2...3:
             return .accentColor.opacity(0.54)
         case 1:
-            return .accentColor.opacity(0.28)
+            return .accentColor.opacity(0.32)
         default:
             return Color.secondary.opacity(0.13)
         }
     }
 
-    private static func displayText(for day: ActivityDay) -> String {
-        "\(dateFormatter.string(from: day.date)) · \(day.count)"
+    private func displayText(for day: BackendStatsActivityDay) -> String {
+        var parts = ["\(Self.dateFormatter.string(from: day.date))", "\(day.answerCount) \(strings.answersUnit)"]
+        if let bestLevel = day.bestLevel {
+            parts.append("\(strings.level) \(String(format: "%.1f", bestLevel))")
+        }
+        if let topic = day.topics.first {
+            parts.append(topic)
+        }
+        return parts.joined(separator: " · ")
     }
 
-    private static func accessibilityText(for day: ActivityDay) -> String {
-        "\(dateFormatter.string(from: day.date)), \(day.count)"
+    private func accessibilityText(for day: BackendStatsActivityDay) -> String {
+        "\(Self.dateFormatter.string(from: day.date)), \(day.answerCount) \(strings.answersUnit)"
     }
+
+    private static func weeks(from days: [BackendStatsActivityDay]) -> [ActivityWeek] {
+        let calendar = Calendar.current
+        let sortedDays = days.sorted { $0.date < $1.date }
+        guard let first = sortedDays.first else {
+            return []
+        }
+        let weekday = calendar.component(.weekday, from: first.date)
+        let leadingEmptyCount = max(weekday - calendar.firstWeekday, 0)
+        let emptyDays = (0..<leadingEmptyCount).compactMap { offset -> BackendStatsActivityDay? in
+            guard let date = calendar.date(byAdding: .day, value: -(leadingEmptyCount - offset), to: first.date) else {
+                return nil
+            }
+            return BackendStatsActivityDay(date: date, answerCount: 0, topicCount: 0, topics: [], bestLevel: nil)
+        }
+        let paddedDays = emptyDays + sortedDays
+        return stride(from: 0, to: paddedDays.count, by: 7).map { start in
+            let slice = Array(paddedDays[start..<min(start + 7, paddedDays.count)])
+            return ActivityWeek(days: slice)
+        }
+    }
+
+    private static let cellSize: CGFloat = 9
+    private static let cellSpacing: CGFloat = 3
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1165,11 +1167,30 @@ private struct StatsActivityGrid: View {
     }()
 }
 
-private struct ActivityDay: Identifiable {
-    var date: Date
-    var count: Int
+private struct ActivityWeek: Identifiable {
+    var days: [BackendStatsActivityDay]
 
-    var id: Date { date }
+    var id: Date {
+        days.first?.date ?? Date.distantPast
+    }
+
+    var monthLabel: String {
+        guard let first = days.first else {
+            return ""
+        }
+        let calendar = Calendar.current
+        let containsEarlyMonthDay = days.contains { calendar.component(.day, from: $0.date) <= 7 }
+        guard containsEarlyMonthDay else {
+            return ""
+        }
+        return Self.monthFormatter.string(from: first.date)
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM"
+        return formatter
+    }()
 }
 
 private struct TopicBrowserSection: View {

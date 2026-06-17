@@ -3,6 +3,7 @@ package com.buddystuddy.backend.study.adapter.inbound.web
 import com.buddystuddy.backend.auth.application.permission.Permissions
 import com.buddystuddy.backend.auth.application.permission.RequirePermission
 import com.buddystuddy.backend.stats.application.model.StatsQuery
+import com.buddystuddy.backend.stats.application.model.StatsActivityResponse
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystuddy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
@@ -200,6 +201,18 @@ class StudyController(
         authentication: Authentication,
     ): StatsResponse =
         study.stats(limit, offset, StatsQuery(search = query, period = period, startAt = startAt, endAt = endAt), authentication)
+
+    @Operation(summary = "Fetch daily study activity", description = "Returns compact daily activity for the authenticated user. The app uses this to render a one-year contribution-style activity graph.")
+    @GetMapping("/stats/activity")
+    @RequirePermission(Permissions.STATS_READ)
+    fun statsActivity(
+        @Parameter(description = "Optional inclusive UTC start timestamp. Defaults to 365 days including today.", example = "2025-06-18T00:00:00Z")
+        @RequestParam(required = false) startAt: Instant?,
+        @Parameter(description = "Optional exclusive UTC end timestamp. Defaults to tomorrow UTC.", example = "2026-06-19T00:00:00Z")
+        @RequestParam(required = false) endAt: Instant?,
+        authentication: Authentication,
+    ): StatsActivityResponse =
+        study.statsActivity(startAt, endAt, authentication)
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/studies/{studyId}/questions")

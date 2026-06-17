@@ -1,6 +1,8 @@
 package com.buddystuddy.backend.stats
 
 import com.buddystuddy.backend.auth.Principal
+import com.buddystuddy.backend.stats.application.model.StatsActivityDayResponse
+import com.buddystuddy.backend.stats.application.model.StatsActivityResponse
 import com.buddystuddy.backend.stats.application.model.StatsQuery
 import com.buddystuddy.backend.stats.application.model.StatsResponse
 import com.buddystuddy.backend.stats.application.model.TopicLevelRangeResponse
@@ -38,6 +40,51 @@ class StatsService(
 ) : GetStudyStatsUseCase {
     override fun stats(principal: Principal, limit: Int, offset: Int, query: StatsQuery): StatsResponse =
         stats(principal.userId, limit, offset, query)
+
+    override fun activity(principal: Principal, startAt: Instant?, endAt: Instant?): StatsActivityResponse {
+        val now = Instant.now()
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val startDate = startAt?.atZone(ZoneOffset.UTC)?.toLocalDate() ?: today.minusDays(364)
+        val exclusiveEndDate = endAt?.atZone(ZoneOffset.UTC)?.toLocalDate() ?: today.plusDays(1)
+        val safeStartDate = minOf(startDate, exclusiveEndDate.minusDays(1))
+        val rows = userStats.findByUser(principal.userId, safeStartDate, exclusiveEndDate, null)
+        val rowsByDate = rows.groupBy { it.statDate }
+        val days = generateSequence(safeStartDate) { current ->
+            current.plusDays(1).takeIf { it.isBefore(exclusiveEndDate) }
+        }.map { date ->
+            val dayRows = rowsByDate[date].orEmpty()
+            StatsActivityDayResponse(
+                date = date,
+                answerCount = dayRows.sumOf { it.responseCount },
+                topicCount = dayRows.map { it.topicKey }.distinct().size,
+                topics = dayRows
+                    .sortedByDescending { it.responseCount }
+                    .map { it.topic }
+                    .distinct()
+                    .take(4),
+                bestLevel = dayRows
+                    .filter { it.scoreCount > 0 }
+                    .maxOfOrNull { row ->
+                        estimatedLevel(row.difficultyLevel, row.scoreSum.toDouble() / row.scoreCount.toDouble())
+                    },
+            )
+        }.toList()
+        val countsByDate = days.associate { it.date to it.answerCount }
+        val streakDays = generateSequence(today) { it.minusDays(1) }
+            .takeWhile { (countsByDate[it] ?: 0) > 0 }
+            .count()
+        val monthStart = today.withDayOfMonth(1)
+        val monthAnswerCount = days
+            .asSequence()
+            .filter { !it.date.isBefore(monthStart) && !it.date.isAfter(today) }
+            .sumOf { it.answerCount }
+        return StatsActivityResponse(
+            days = days,
+            streakDays = streakDays,
+            monthAnswerCount = monthAnswerCount,
+            generatedAt = now,
+        )
+    }
 
     private fun stats(userId: Long, limit: Int, offset: Int, query: StatsQuery): StatsResponse {
         val bounds = query.dateBounds()
@@ -123,6 +170,9 @@ class StatsService(
 
 }
 
+private fun estimatedLevel(difficultyLevel: Int, score: Double): Double =
+    (difficultyLevel.toDouble() + ((score.coerceIn(0.0, 100.0) - 50.0) / 30.0)).coerceIn(1.0, 10.0)
+
 class TopicStatsAssembler {
     fun assemble(rows: List<UserStatsEntity>, records: List<StudyRecordResponse>): TopicStatsResponse {
         require(rows.isNotEmpty()) { "Topic stats rows must not be empty." }
@@ -136,10 +186,7 @@ class TopicStatsAssembler {
             .filter { it.scoreCount > 0 }
             .map { row ->
                 val rowAverage = row.scoreSum.toDouble() / row.scoreCount.toDouble()
-                LevelEstimate(
-                    value = estimatedLevel(row.difficultyLevel, rowAverage),
-                    weight = row.scoreCount,
-                )
+                LevelEstimate(value = estimatedLevel(row.difficultyLevel, rowAverage), weight = row.scoreCount)
             }
         val center = weightedCenter(estimates) ?: rows.first().difficultyLevel.toDouble()
         val level = center.roundToInt().coerceIn(1, 10)
@@ -165,11 +212,6 @@ class TopicStatsAssembler {
             latestAt = rows.maxOf { it.latestAt },
             records = records,
         )
-    }
-
-    private fun estimatedLevel(difficultyLevel: Int, score: Double): Double {
-        // Product rule: 50 points means "fits this level", 80 points means "ready for +1 level".
-        return (difficultyLevel.toDouble() + ((score.coerceIn(0.0, 100.0) - 50.0) / 30.0)).coerceIn(1.0, 10.0)
     }
 
     private fun weightedCenter(estimates: List<LevelEstimate>): Double? {

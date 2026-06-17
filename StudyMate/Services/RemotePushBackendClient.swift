@@ -231,6 +231,12 @@ protocol RemotePushBackendClientProtocol {
         offset: Int
     ) async throws -> BackendStats
 
+    func fetchStatsActivity(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStatsActivity
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -738,6 +744,33 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStats.self, from: data)
+    }
+
+    func fetchStatsActivity(
+        registration: RemotePushRegistration,
+        startAt: Date? = nil,
+        endAt: Date? = nil
+    ) async throws -> BackendStatsActivity {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "stats", "activity"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems: [URLQueryItem] = []
+        if let startAt {
+            queryItems.append(URLQueryItem(name: "startAt", value: Self.dateFormatter.string(from: startAt)))
+        }
+        if let endAt {
+            queryItems.append(URLQueryItem(name: "endAt", value: Self.dateFormatter.string(from: endAt)))
+        }
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStatsActivity.self, from: data)
     }
 
     func fetchPublicQuestions(
@@ -1563,6 +1596,23 @@ struct BackendStats: Decodable, Equatable {
     var generatedAt: Date
 }
 
+struct BackendStatsActivity: Decodable, Equatable {
+    var days: [BackendStatsActivityDay]
+    var streakDays: Int
+    var monthAnswerCount: Int
+    var generatedAt: Date
+}
+
+struct BackendStatsActivityDay: Decodable, Equatable, Identifiable {
+    var date: Date
+    var answerCount: Int
+    var topicCount: Int
+    var topics: [String]
+    var bestLevel: Double?
+
+    var id: Date { date }
+}
+
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var id: String
     var question: String
@@ -1929,6 +1979,7 @@ private extension RemotePushBackendClient {
 
         let value = try container.decode(String.self)
         if let date = backendDateFormatterWithFractionalSeconds.date(from: value) ??
+            backendDateOnlyFormatter.date(from: value) ??
             backendDateFormatter.date(from: value) {
             return date
         }
@@ -1948,6 +1999,15 @@ private extension RemotePushBackendClient {
     nonisolated static var backendDateFormatterWithFractionalSeconds: ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }
+
+    nonisolated static var backendDateOnlyFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }
 }

@@ -13,6 +13,7 @@ import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
+import java.time.Instant
 import kotlin.math.max
 import kotlin.math.min
 
@@ -53,6 +54,9 @@ class StudyWebAdapter(
 
     override fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication) =
         statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
+
+    override fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
+        statsUseCase.activity(authentication.principalOrThrow(), startAt, endAt)
 
     override fun createQuestion(studyId: Long, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)

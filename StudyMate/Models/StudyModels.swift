@@ -1846,6 +1846,11 @@ struct AppStrings {
     }
     var responses: String { text("응답", "Responses") }
     var responsesShort: String { text("응답", "Resp") }
+    var studyGrass: String { text("학습 잔디", "Study Grass") }
+    var studyStreak: String { text("연속 학습", "Streak") }
+    var thisMonth: String { text("이번 달", "This Month") }
+    var answersUnit: String { text("개", "answers") }
+    var noActivityYet: String { text("아직 활동이 없습니다", "No activity yet") }
     var average: String { text("평균", "Avg") }
     var best: String { text("최고", "Best") }
     var lowest: String { text("최저", "Low") }
