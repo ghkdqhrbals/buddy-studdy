@@ -43,7 +43,10 @@ data class BuddyStuddyProperties(
         var viewPublisherConcurrency: Int = 4,
     )
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
-    data class Translation(var baseUrl: String = "http://localhost:5001")
+    data class Translation(
+        var baseUrl: String = "http://localhost:5001",
+        var supportedLanguages: List<String> = listOf("ko", "en"),
+    )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
 }
 

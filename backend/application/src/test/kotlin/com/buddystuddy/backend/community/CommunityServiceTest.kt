@@ -33,6 +33,7 @@ class CommunityServiceTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
+    private val search = FakeQuestionSearchPort()
     private val notificationPublisher = FakeNotificationPublisher()
     private val service = CommunityService(
         users = users,
@@ -42,7 +43,7 @@ class CommunityServiceTest {
         comments = FakeQuestionCommentPort(),
         reports = FakeReportPort(),
         reactions = FakeReactionPublisher(),
-        search = FakeQuestionSearchPort(),
+        search = search,
         notifications = notificationPublisher,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
@@ -68,6 +69,37 @@ class CommunityServiceTest {
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
         assertThat(likes.existsCalls).isZero()
         assertThat(likes.findLikedQuestionIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `public question v2 overlays translated search text in response`() {
+        users.rows += UserEntity(id = 7, providerId = "viewer", displayName = "Viewer", appLanguage = "en")
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "원본 주제")
+        search.rows += QuestionSearchEntity(
+            questionId = 100,
+            language = "en",
+            userId = 10,
+            topic = "Translated topic",
+            question = "Translated question",
+            answer = "Translated answer",
+            feedback = "Translated feedback",
+            explanation = "Translated explanation",
+            authorDisplayName = "Author",
+            publicQuestion = true,
+            score = 90,
+            answeredAt = Instant.parse("2026-06-10T01:00:00Z"),
+            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
+        )
+
+        val response = service.getPublicQuestionsV2(principal, query = null, limit = 20, offset = 0)
+
+        val question = response.questions.single()
+        assertThat(question.topic).isEqualTo("Translated topic")
+        assertThat(question.question).isEqualTo("Translated question")
+        assertThat(question.answer).isEqualTo("Translated answer")
+        assertThat(question.gradingResult?.feedback).isEqualTo("Translated feedback")
+        assertThat(question.gradingResult?.explanation).isEqualTo("Translated explanation")
     }
 
     @Test
@@ -260,9 +292,17 @@ class CommunityServiceTest {
     }
 
     private class FakeQuestionSearchPort : QuestionSearchPort {
-        override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
+        val rows = mutableListOf<QuestionSearchEntity>()
+        override fun save(entity: QuestionSearchEntity): QuestionSearchEntity {
+            rows += entity
+            return entity
+        }
         override fun deleteByQuestionId(questionId: Long): Long = 0
-        override fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+        override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
+            SearchResult(rows.filter { it.language == language }.map { it.questionId }, rows.count { it.language == language }.toLong())
+
+        override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+            rows.firstOrNull { it.questionId == questionId && it.language == language }
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

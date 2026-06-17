@@ -26,7 +26,7 @@ interface QuestionPushOutboxJpaRepository : JpaRepository<QuestionPushOutboxEnti
 class QuestionPushOutboxPersistenceAdapter(
     private val outbox: QuestionPushOutboxJpaRepository,
 ) : QuestionPushOutboxPort {
-    override fun enqueue(request: QuestionPushRequest, now: Instant) {
+    override fun enqueue(request: QuestionPushRequest, now: Instant): Long =
         outbox.save(
             QuestionPushOutboxEntity(
                 recordId = request.recordId,
@@ -46,6 +46,5 @@ class QuestionPushOutboxPersistenceAdapter(
                 createdAt = request.createdAt,
                 updatedAt = now,
             )
-        )
-    }
+        ).id
 }

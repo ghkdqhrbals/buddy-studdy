@@ -13,6 +13,7 @@ import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
@@ -51,9 +52,10 @@ class StudyServiceTest {
             questions = questions,
             questionStats = questionStats,
             pushOutbox = FakePushOutboxPort(),
+            pushOutboxDispatch = FakePushOutboxDispatchPort(),
             questionCreatedPublisher = FakeQuestionCreatedPublisher(),
         ),
-        questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
+        questionSearch = QuestionSearchSyncManager(BuddyStuddyProperties(), questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -288,7 +290,11 @@ class StudyServiceTest {
     }
 
     private class FakePushOutboxPort : QuestionPushOutboxPort {
-        override fun enqueue(request: QuestionPushRequest, now: Instant) = Unit
+        override fun enqueue(request: QuestionPushRequest, now: Instant): Long = 1
+    }
+
+    private class FakePushOutboxDispatchPort : QuestionPushOutboxDispatchPort {
+        override fun dispatchOutbox(outboxId: Long) = Unit
     }
 
     private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
@@ -311,7 +317,8 @@ class StudyServiceTest {
     private class FakeQuestionSearchPort : QuestionSearchPort {
         override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
         override fun deleteByQuestionId(questionId: Long): Long = 0
-        override fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+        override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+        override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
     }
 
 }

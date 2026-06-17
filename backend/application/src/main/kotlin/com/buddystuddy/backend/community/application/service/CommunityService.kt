@@ -15,6 +15,7 @@ import com.buddystuddy.backend.community.application.port.outbound.ReportPort
 import com.buddystuddy.community.domain.entity.QuestionCommentEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.community.domain.entity.QuestionLikeEntity
+import com.buddystuddy.community.domain.entity.QuestionSearchEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.community.domain.entity.ReportEntity
 import com.buddystuddy.backend.community.application.model.CommunityCommentResponse
@@ -69,14 +70,18 @@ class CommunityService(
 
     @Transactional(readOnly = true)
     override fun getPublicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
-        val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, limit, offset)
+        val language = responseLanguage(principal)
+        val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, language, limit, offset)
         if (result.questionIds.isEmpty()) {
             return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
         }
         val questionsById = questions.findPublicAnsweredByIds(result.questionIds).associateBy { it.id }
+        val translatedById = result.questionIds.mapNotNull { id ->
+            search.findPublicByQuestionIdAndLanguage(id, language)?.let { id to it }
+        }.toMap()
         val orderedQuestions = result.questionIds.mapNotNull { questionsById[it] }
         val context = communityContext(orderedQuestions, principal)
-        val rows = orderedQuestions.map { community(it, context) }
+        val rows = orderedQuestions.map { community(it, context, translatedById[it.id]) }
         return CommunityQuestionsResponse(rows, result.totalCount, limit, offset)
     }
 
@@ -84,7 +89,7 @@ class CommunityService(
     override fun getPublicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
         reactions.publishViewed(id, principal?.userId)
-        return community(q, communityContext(listOf(q), principal))
+        return community(q, communityContext(listOf(q), principal), search.findPublicByQuestionIdAndLanguage(id, responseLanguage(principal)))
     }
 
     @Transactional
@@ -195,11 +200,14 @@ class CommunityService(
         )
     }
 
-    private fun community(q: QuestionEntity, context: CommunityContext): CommunityQuestionResponse {
+    private fun community(q: QuestionEntity, context: CommunityContext, translated: QuestionSearchEntity? = null): CommunityQuestionResponse {
         val author = q.userId?.let { context.authorsById[it]?.toAuthorProjection() }
         val stats = context.statsByQuestionId[q.id]
         val liked = q.id in context.likedQuestionIds
-        return PublicQuestion.of(q.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked).toProjection().toCommunityQuestionResponse()
+        return PublicQuestion.of(q.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked)
+            .toProjection()
+            .toCommunityQuestionResponse()
+            .withTranslatedText(translated)
     }
 
     private fun publicAnsweredQuestion(id: Long): QuestionEntity =
@@ -240,6 +248,12 @@ class CommunityService(
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
     }.toProfile()
 
+    private fun responseLanguage(principal: Principal?): String =
+        principal
+            ?.let { users.findById(it.userId).orElse(null)?.appLanguage }
+            ?.takeIf { it.isNotBlank() }
+            ?: "ko"
+
     private fun publishThreadNotification(
         ownerUserId: Long?,
         actorUserId: Long,
@@ -266,6 +280,19 @@ class CommunityService(
             )
         )
     }
+}
+
+private fun CommunityQuestionResponse.withTranslatedText(translated: QuestionSearchEntity?): CommunityQuestionResponse {
+    if (translated == null) return this
+    return copy(
+        question = translated.question,
+        answer = translated.answer,
+        gradingResult = gradingResult?.copy(
+            feedback = translated.feedback ?: gradingResult.feedback,
+            explanation = translated.explanation ?: gradingResult.explanation,
+        ),
+        topic = translated.topic,
+    )
 }
 
 private data class CommunityContext(

@@ -109,7 +109,7 @@ class CommunityStudyServiceTest {
         val private = answeredPublicQuestion(author, "Private", createdAt = now.plusSeconds(3), publicQuestion = false)
         val pending = pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(4))
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden", createdAt = now.plusSeconds(5))
-        listOf(newest, older, private, pending, hidden).forEach { questionSearch.syncQuestion(it) }
+        listOf(newest, older, private, pending, hidden).forEach { questionSearch.refreshIndexedQuestion(it) }
 
         val response = community.getPublicQuestionsV2(principal = null, query = null, limit = 10, offset = 0)
 

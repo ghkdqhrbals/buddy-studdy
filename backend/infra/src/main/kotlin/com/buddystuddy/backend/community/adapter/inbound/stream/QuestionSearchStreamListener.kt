@@ -38,7 +38,7 @@ class QuestionSearchStreamListener(
                 payload.questionId,
                 payload.language,
             )
-            questionSearch.syncQuestion(payload.questionId)
+            questionSearch.indexCreatedQuestion(payload.questionId)
             message.ack()
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={}",

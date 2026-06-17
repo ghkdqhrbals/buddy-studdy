@@ -11,6 +11,7 @@ import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
@@ -39,6 +40,7 @@ class QuestionSchedulerTest {
     private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
     private val pushOutbox = FakePushOutboxPort()
+    private val pushOutboxDispatch = FakePushOutboxDispatchPort()
     private val properties = BuddyStuddyProperties(
         scheduler = BuddyStuddyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
         openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
@@ -54,6 +56,7 @@ class QuestionSchedulerTest {
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         openAI = openAI,
         pushOutbox = pushOutbox,
+        pushOutboxDispatch = pushOutboxDispatch,
     )
 
     @Test
@@ -436,8 +439,16 @@ class QuestionSchedulerTest {
 
     private class FakePushOutboxPort : QuestionPushOutboxPort {
         val requests = mutableListOf<QuestionPushRequest>()
-        override fun enqueue(request: QuestionPushRequest, now: Instant) {
+        override fun enqueue(request: QuestionPushRequest, now: Instant): Long {
             requests += request
+            return requests.size.toLong()
+        }
+    }
+
+    private class FakePushOutboxDispatchPort : QuestionPushOutboxDispatchPort {
+        val outboxIds = mutableListOf<Long>()
+        override fun dispatchOutbox(outboxId: Long) {
+            outboxIds += outboxId
         }
     }
 

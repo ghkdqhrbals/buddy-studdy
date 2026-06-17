@@ -2,6 +2,7 @@ package com.buddystuddy.backend.community.application.service
 
 import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
+import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
@@ -14,26 +15,39 @@ import java.time.Instant
 
 @Component
 class QuestionSearchSyncManager(
+    private val properties: BuddyStuddyProperties,
     private val questions: QuestionPort,
     private val users: UserPort,
     private val search: QuestionSearchPort,
     private val translator: QuestionSearchTranslationPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val supportedLanguages = listOf("ko", "en")
 
-    fun syncQuestion(question: QuestionEntity) {
-        val user = question.userId?.let { users.findById(it).orElse(null) }
-        syncQuestion(question, user)
+    fun indexCreatedQuestion(questionId: Long) {
+        val question = questions.findQuestionById(questionId).orElse(null)
+        if (question == null) {
+            search.deleteByQuestionId(questionId)
+            return
+        }
+        refreshIndexedQuestion(question)
     }
 
-    fun syncQuestion(question: QuestionEntity, user: UserEntity?) {
+    fun refreshIndexedQuestion(question: QuestionEntity) {
+        val user = question.userId?.let { users.findById(it).orElse(null) }
+        refreshIndexedQuestion(question, user)
+    }
+
+    fun refreshIndexedQuestion(question: QuestionEntity, user: UserEntity?) {
         if (user == null) {
             search.deleteByQuestionId(question.id)
             return
         }
         val sourceLanguage = question.language.normalizedSearchLanguage()
-        supportedLanguages.forEach { language ->
+        val targetLanguages = properties.translation.supportedLanguages
+            .map { it.normalizedSearchLanguage() }
+            .toSet()
+            .plus(sourceLanguage)
+        targetLanguages.forEach { language ->
             val translated = if (language == sourceLanguage) {
                 question.toSearchText()
             } else {
@@ -43,16 +57,7 @@ class QuestionSearchSyncManager(
         }
     }
 
-    fun syncQuestion(questionId: Long) {
-        val question = questions.findQuestionById(questionId).orElse(null)
-        if (question == null) {
-            search.deleteByQuestionId(questionId)
-            return
-        }
-        syncQuestion(question)
-    }
-
-    fun deleteQuestion(questionId: Long) {
+    fun removeIndexedQuestion(questionId: Long) {
         search.deleteByQuestionId(questionId)
     }
 

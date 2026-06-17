@@ -64,7 +64,11 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Ques
         """,
         nativeQuery = true,
     )
-    fun searchPublic(@Param("query") query: String, @Param("limit") limit: Int, @Param("offset") offset: Int): List<Number>
+    fun searchPublic(
+        @Param("query") query: String,
+        @Param("limit") limit: Int,
+        @Param("offset") offset: Int,
+    ): List<Number>
 
     @Query(
         value = """
@@ -80,6 +84,8 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Ques
         nativeQuery = true,
     )
     fun countSearchPublic(@Param("query") query: String): Long
+
+    fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
 }
 
 @Repository
@@ -91,7 +97,7 @@ class QuestionSearchRepository(
     @Transactional
     override fun deleteByQuestionId(questionId: Long): Long = jpa.deleteSearchRow(questionId)
 
-    override fun searchPublic(query: String?, limit: Int, offset: Int): SearchResult {
+    override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult {
         val safeLimit = limit.coerceIn(1, 100)
         val safeOffset = maxOf(offset, 0)
         val ids = if (query.isNullOrBlank()) {
@@ -102,4 +108,12 @@ class QuestionSearchRepository(
         val total = if (query.isNullOrBlank()) jpa.countPublic() else jpa.countSearchPublic(query)
         return SearchResult(ids, total)
     }
+
+    override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? {
+        val row = jpa.findByQuestionIdAndLanguage(questionId, language.normalizedSearchLanguage()) ?: return null
+        return row.takeIf { it.publicQuestion && it.score != null && it.deletedAt == null }
+    }
+
+    private fun String.normalizedSearchLanguage(): String =
+        if (lowercase().startsWith("en")) "en" else "ko"
 }

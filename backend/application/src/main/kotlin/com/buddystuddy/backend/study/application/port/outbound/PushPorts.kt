@@ -52,7 +52,11 @@ data class QuestionPushOutboxCommand(
 }
 
 interface QuestionPushOutboxPort {
-    fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now())
+    fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
+}
+
+interface QuestionPushOutboxDispatchPort {
+    fun dispatchOutbox(outboxId: Long)
 }
 
 enum class PushMessageType {

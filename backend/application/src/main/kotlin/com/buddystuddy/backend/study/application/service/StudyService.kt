@@ -126,7 +126,7 @@ class StudyService(
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
         }
-        questionSearch.syncQuestion(q, user)
+        questionSearch.refreshIndexedQuestion(q, user)
         return q.toStudyRecord(questionStats.findById(q.id).orElse(null)).toProjection().toRecordResponse()
     }
 
@@ -163,7 +163,7 @@ class StudyService(
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         q.apply(q.toStudyRecord().skip())
-        questionSearch.syncQuestion(q)
+        questionSearch.refreshIndexedQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 
@@ -173,7 +173,7 @@ class StudyService(
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         val now = Instant.now()
         questions.softDelete(id, principal.userId, now)
-        questionSearch.deleteQuestion(id)
+        questionSearch.removeIndexedQuestion(id)
     }
 
     @Transactional
@@ -181,7 +181,7 @@ class StudyService(
         val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         q.apply(q.toStudyRecord().restrictPublicity(isPublic))
-        questionSearch.syncQuestion(q)
+        questionSearch.refreshIndexedQuestion(q)
         return q.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
     }
 

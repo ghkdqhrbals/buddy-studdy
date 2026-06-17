@@ -8,6 +8,7 @@ import com.buddystuddy.backend.study.application.port.inbound.RunQuestionSchedul
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -23,6 +24,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant
 
 @Service
@@ -37,6 +40,7 @@ class ScheduledQuestionService(
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
     private val pushOutbox: QuestionPushOutboxPort,
+    private val pushOutboxDispatch: QuestionPushOutboxDispatchPort,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -49,6 +53,7 @@ class ScheduledQuestionService(
         cipher = cipher,
         openAI = openAI,
         pushOutbox = pushOutbox,
+        pushOutboxDispatch = pushOutboxDispatch,
         backoffPolicy = backoffPolicy,
         log = log,
     )
@@ -130,6 +135,7 @@ class ScheduledQuestionCreator(
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
     private val pushOutbox: QuestionPushOutboxPort,
+    private val pushOutboxDispatch: QuestionPushOutboxDispatchPort,
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
 ) {
@@ -162,14 +168,31 @@ class ScheduledQuestionCreator(
             val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
             val saved = questions.save(study.toScheduledQuestion(job, generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
-            questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
-            pushOutbox.enqueue(study.toPushRequest(saved.id, generated.question, generated.hint, appLanguage, now), now)
+            val outboxId = pushOutbox.enqueue(study.toPushRequest(saved.id, generated.question, generated.hint, appLanguage, now), now)
             job.markCompleted(saved.id, now)
+            afterCommit {
+                questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
+                pushOutboxDispatch.dispatchOutbox(outboxId)
+            }
             log.info("scheduled_question_created deviceId={} userId={} studyId={} jobId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, job.id, study.topic, saved.id)
         } catch (error: Exception) {
             job.markScheduled(error.message ?: error.javaClass.simpleName, backoffPolicy.failureNextDueAt(now), now)
             log.warn("scheduled_question_failed deviceId={} userId={} studyId={} jobId={} topic={} error={}", study.deviceId, study.userId, study.id, job.id, study.topic, error.message)
         }
+    }
+
+    private fun afterCommit(action: () -> Unit) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action()
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(
+            object : TransactionSynchronization {
+                override fun afterCommit() {
+                    action()
+                }
+            }
+        )
     }
 
     private fun StudyEntity.toScheduledQuestion(

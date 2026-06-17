@@ -2,6 +2,7 @@ package com.buddystuddy.backend.study.adapter.inbound.scheduler
 
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.study.domain.entity.QuestionPushOutboxEntity
@@ -16,7 +17,7 @@ class QuestionPushOutboxDispatcher(
     private val properties: BuddyStuddyProperties,
     private val outbox: QuestionPushOutboxJpaRepository,
     private val streams: QuestionPushPublishPort,
-) {
+) : QuestionPushOutboxDispatchPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Scheduled(fixedDelayString = "\${buddystuddy.scheduler.poll-ms:30000}")
@@ -30,6 +31,7 @@ class QuestionPushOutboxDispatcher(
     }
 
     fun dispatchItem(item: QuestionPushOutboxEntity, now: Instant = Instant.now()) {
+        if (item.status != "PENDING") return
         val published = runCatching { streams.publishPush(item.toRequest()) }
             .onFailure { error -> log.warn("question_push_outbox_publish_failed outboxId={} recordId={} error={}", item.id, item.recordId, error.message) }
             .getOrElse { error ->
@@ -41,6 +43,15 @@ class QuestionPushOutboxDispatcher(
         } else {
             markRetry(item, now, "Push stream publish failed.")
         }
+    }
+
+    override fun dispatchOutbox(outboxId: Long) {
+        if (!properties.scheduler.enabled || !properties.streams.enabled) return
+        val item = outbox.findById(outboxId).orElse(null) ?: run {
+            log.warn("question_push_outbox_missing outboxId={}", outboxId)
+            return
+        }
+        dispatchItem(item, Instant.now())
     }
 
     private fun markPublished(item: QuestionPushOutboxEntity, now: Instant) {
