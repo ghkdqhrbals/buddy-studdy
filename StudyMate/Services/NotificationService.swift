@@ -601,7 +601,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             return
         }
 
-        appState.openRoute(route)
+        appState.openRouteFromNotification(route)
     }
 
     @MainActor
@@ -613,7 +613,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let routes = pendingAppRoutes
         pendingAppRoutes.removeAll()
         for route in routes {
-            appState.openRoute(route)
+            appState.openRouteFromNotification(route)
         }
     }
 
@@ -1098,7 +1098,7 @@ final class StudyRemoteNotificationBridge {
 
         if let route = StudyNotificationPayload.appRoute(from: userInfo) {
             appState.logRemoteNotificationEvent("Push 딥링크 route를 열었습니다. route=\(route)")
-            return appState.openRoute(route)
+            return appState.openRouteFromNotification(route)
         }
 
         appState.prepareToOpenQuestionFromNotification()

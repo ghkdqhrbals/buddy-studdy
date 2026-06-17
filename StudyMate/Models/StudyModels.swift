@@ -359,9 +359,15 @@ enum AppRoute: Equatable, Hashable {
     }
 }
 
+enum AppRoutePresentation: Equatable {
+    case direct
+    case notificationInbox
+}
+
 struct AppRouteRequest: Identifiable, Equatable {
     let id = UUID()
     var route: AppRoute
+    var presentation: AppRoutePresentation = .direct
 }
 
 struct FocusedRecordRequest: Equatable {

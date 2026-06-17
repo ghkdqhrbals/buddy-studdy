@@ -215,6 +215,11 @@ private struct CommunityQuestionRoute: Identifiable, Hashable {
     var id: String
 }
 
+private struct NotificationForwardRoute: Identifiable, Hashable {
+    let id = UUID()
+    var route: AppRoute
+}
+
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
@@ -223,6 +228,7 @@ private struct MobileHomeView: View {
     @State private var editingStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
+    @State private var notificationForwardRoute: NotificationForwardRoute?
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
@@ -307,7 +313,7 @@ private struct MobileHomeView: View {
             focus: $isSearchFocused
         )
         .navigationDestination(isPresented: $isShowingNotifications) {
-            MobileNotificationsView()
+            MobileNotificationsView(forwardedRoute: $notificationForwardRoute)
                 .padding(.horizontal, 16)
                 .mobileTabTitle(strings.notificationInbox)
         }
@@ -457,6 +463,13 @@ private struct MobileHomeView: View {
 
     private func handleAppRouteRequest(_ request: AppRouteRequest?) {
         guard let request else {
+            return
+        }
+
+        if request.presentation == .notificationInbox {
+            notificationForwardRoute = NotificationForwardRoute(route: request.route)
+            isShowingNotifications = true
+            appState.appRouteRequest = nil
             return
         }
 
@@ -959,6 +972,7 @@ private enum HomeFeedScope: String, CaseIterable, Identifiable {
 
 private struct MobileNotificationsView: View {
     @EnvironmentObject private var appState: AppState
+    @Binding var forwardedRoute: NotificationForwardRoute?
 
     private var strings: AppStrings {
         appState.strings
@@ -990,8 +1004,9 @@ private struct MobileNotificationsView: View {
                         Task {
                             await appState.markNotificationRead(notification)
                             if let deepLink = notification.deepLink,
-                               let url = URL(string: deepLink) {
-                                appState.openDeepLink(url)
+                               let url = URL(string: deepLink),
+                               let route = AppRoute(url: url) {
+                                forwardedRoute = NotificationForwardRoute(route: route)
                             }
                         }
                     } label: {
@@ -1029,6 +1044,9 @@ private struct MobileNotificationsView: View {
         .task {
             await appState.loadNotifications(reset: true)
         }
+        .navigationDestination(item: $forwardedRoute) { route in
+            NotificationRouteDestination(route: route.route)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(strings.deleteAllNotifications) {
@@ -1039,6 +1057,192 @@ private struct MobileNotificationsView: View {
                 .disabled(appState.notifications.isEmpty)
             }
         }
+    }
+}
+
+private struct NotificationRouteDestination: View {
+    @EnvironmentObject private var appState: AppState
+    var route: AppRoute
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        switch route {
+        case .studyRoom(let categoryID):
+            StudyView(preferredCategoryID: categoryID)
+                .padding(.horizontal, 16)
+                .navigationTitle(studyTitle(for: categoryID))
+                .navigationBarTitleDisplayMode(.inline)
+        case .recordDetail(let recordID):
+            NotificationRecordDestination(recordID: recordID)
+        case .publicQuestion(let id):
+            NotificationCommunityQuestionDestination(questionID: id)
+        case .records:
+            HistoryView()
+                .padding(.horizontal, 16)
+                .navigationTitle(strings.tabRecords)
+                .navigationBarTitleDisplayMode(.inline)
+        case .publicQuestions:
+            NotificationPublicQuestionsDestination()
+        case .studyList:
+            NotificationStudyListDestination()
+        case .statistics:
+            StatisticsView()
+                .padding(.horizontal, 16)
+                .navigationTitle(strings.tabStatistics)
+                .navigationBarTitleDisplayMode(.inline)
+        case .settings, .settingsOpenAI:
+            MobileSettingsView()
+                .navigationTitle(strings.tabSettings)
+                .navigationBarTitleDisplayMode(.inline)
+        case .profile:
+            MobileProfileSettingsSheet()
+        case .home:
+            NotificationStudyListDestination()
+        }
+    }
+
+    private func studyTitle(for categoryID: String?) -> String {
+        if let categoryID,
+           let category = appState.settings.category(for: categoryID) {
+            return category.title
+        }
+        return strings.tabStudy
+    }
+}
+
+private struct NotificationRecordDestination: View {
+    @EnvironmentObject private var appState: AppState
+    var recordID: String
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        Group {
+            if let record = appState.studyRecords.first(where: { $0.id == recordID }) {
+                if let question = record.asCommunityQuestion(author: appState.communityProfile) {
+                    CommunityQuestionDetailView(question: question)
+                } else {
+                    StudyRecordDetailView(record: record)
+                        .padding(.horizontal, 16)
+                }
+            } else {
+                ContentUnavailableView(
+                    strings.notificationQuestionMissingTitle,
+                    systemImage: "trash",
+                    description: Text(strings.notificationQuestionUnavailableHelp)
+                )
+            }
+        }
+        .navigationTitle(strings.recordDetail)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if !appState.studyRecords.contains(where: { $0.id == recordID }) {
+                await appState.refreshBackendRecords()
+            }
+        }
+    }
+}
+
+private struct NotificationCommunityQuestionDestination: View {
+    @EnvironmentObject private var appState: AppState
+    var questionID: String
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        Group {
+            if let question = appState.communityQuestions.first(where: { $0.id == questionID }) {
+                CommunityQuestionDetailView(question: question)
+            } else {
+                ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
+            }
+        }
+        .navigationTitle(strings.browseQuestions)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if !appState.communityQuestions.contains(where: { $0.id == questionID }) {
+                await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+            }
+        }
+    }
+}
+
+private struct NotificationPublicQuestionsDestination: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var selectedQuestionRoute: CommunityQuestionRoute?
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
+                MobileCommunityEmptyState(strings: strings)
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(appState.communityQuestions) { question in
+                    Button {
+                        selectedQuestionRoute = CommunityQuestionRoute(id: question.id)
+                    } label: {
+                        MobileCommunityQuestionRow(question: question)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .navigationTitle(strings.browseQuestions)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selectedQuestionRoute) { route in
+            if let question = appState.communityQuestions.first(where: { $0.id == route.id }) {
+                CommunityQuestionDetailView(question: question)
+            } else {
+                ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
+            }
+        }
+        .task {
+            if appState.communityQuestions.isEmpty {
+                await appState.loadCommunityQuestions(reset: true, userInitiated: false)
+            }
+        }
+    }
+}
+
+private struct NotificationStudyListDestination: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List(appState.studyCategoriesForDisplay) { category in
+            NavigationLink {
+                StudyView(preferredCategoryID: category.id)
+                    .padding(.horizontal, 16)
+                    .navigationTitle(category.title)
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                MobileHomeCategoryRow(
+                    category: category,
+                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
+                    strings: strings
+                )
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .navigationTitle(strings.tabStudy)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
