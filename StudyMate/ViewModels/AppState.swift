@@ -347,6 +347,72 @@ final class AppState: ObservableObject {
         }
     }
 
+    var communityProfile: CommunityUserProfile? {
+        get {
+            communityProfileState.profile
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.profile = newValue
+            communityProfileState = nextState
+        }
+    }
+
+    var isUpdatingCommunityProfile: Bool {
+        get {
+            communityProfileState.isUpdating
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.isUpdating = newValue
+            communityProfileState = nextState
+        }
+    }
+
+    var isWithdrawingCommunityAccount: Bool {
+        get {
+            communityProfileState.isWithdrawing
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.isWithdrawing = newValue
+            communityProfileState = nextState
+        }
+    }
+
+    var profileAvatarSymbolName: String {
+        get {
+            communityProfileState.avatarSymbolName
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.avatarSymbolName = newValue
+            communityProfileState = nextState
+        }
+    }
+
+    var profileAvatarImageData: Data? {
+        get {
+            communityProfileState.avatarImageData
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.avatarImageData = newValue
+            communityProfileState = nextState
+        }
+    }
+
+    var profileAvatarColorSeed: String {
+        get {
+            communityProfileState.avatarColorSeed
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.avatarColorSeed = newValue
+            communityProfileState = nextState
+        }
+    }
+
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
         return synchronized.studyCategories
@@ -360,14 +426,9 @@ final class AppState: ObservableObject {
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
     @Published private var communityFeedState = CommunityFeedStateStore()
-    @Published var communityProfile: CommunityUserProfile?
-    @Published var isUpdatingCommunityProfile = false
-    @Published var isWithdrawingCommunityAccount = false
+    @Published private var communityProfileState = CommunityProfileStateStore()
     @Published private var notificationState = NotificationStateStore()
     @Published var pageAccessPrompt: PageAccessPrompt?
-    @Published var profileAvatarSymbolName: String
-    @Published var profileAvatarImageData: Data?
-    @Published var profileAvatarColorSeed: String
 
     private let settingsStore: SettingsStore
     private var remotePushBackendClient: RemotePushBackendClientProtocol
@@ -951,16 +1012,22 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCloudSyncEnabled(false)
         }
         self.isCommunitySignedIn = loadedIsCommunitySignedIn
-        self.profileAvatarSymbolName = settingsStore.loadProfileAvatarSymbolName()
-        self.profileAvatarImageData = settingsStore.loadProfileAvatarImageData()
+        let loadedAvatarSymbolName = settingsStore.loadProfileAvatarSymbolName()
+        let loadedAvatarImageData = settingsStore.loadProfileAvatarImageData()
+        let effectiveAvatarColorSeed: String
         if let loadedAvatarColorSeed = settingsStore.loadProfileAvatarColorSeed(),
            !loadedAvatarColorSeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            self.profileAvatarColorSeed = loadedAvatarColorSeed
+            effectiveAvatarColorSeed = loadedAvatarColorSeed
         } else {
             let generatedSeed = UUID().uuidString
-            self.profileAvatarColorSeed = generatedSeed
+            effectiveAvatarColorSeed = generatedSeed
             settingsStore.saveProfileAvatarColorSeed(generatedSeed)
         }
+        self.communityProfileState = CommunityProfileStateStore(
+            avatarSymbolName: loadedAvatarSymbolName,
+            avatarImageData: loadedAvatarImageData,
+            avatarColorSeed: effectiveAvatarColorSeed
+        )
         self.cloudLastSyncedAt = loadedCloudLastSyncedAt
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
@@ -2178,9 +2245,9 @@ final class AppState: ObservableObject {
 
     private func resetCommunitySignInState() {
         isCommunitySignedIn = false
-        communityProfile = nil
-        profileAvatarSymbolName = "pixel-fox-scholar"
-        profileAvatarImageData = nil
+        var nextState = communityProfileState
+        nextState.resetSignedOutProfile()
+        communityProfileState = nextState
         backendAccessState = .signedOut
         settingsStore.saveIsCommunitySignedIn(false)
         settingsStore.saveProfileAvatarSymbolName(profileAvatarSymbolName)
@@ -2190,17 +2257,23 @@ final class AppState: ObservableObject {
     }
 
     func updateProfileAvatarSymbolName(_ symbolName: String) {
-        profileAvatarSymbolName = symbolName
+        var nextState = communityProfileState
+        nextState.updateAvatar(symbolName: symbolName)
+        communityProfileState = nextState
         settingsStore.saveProfileAvatarSymbolName(symbolName)
     }
 
     func updateProfileAvatarColorSeed(_ seed: String) {
-        profileAvatarColorSeed = seed
+        var nextState = communityProfileState
+        nextState.updateAvatar(colorSeed: seed)
+        communityProfileState = nextState
         settingsStore.saveProfileAvatarColorSeed(seed)
     }
 
     func updateProfileAvatarImageData(_ data: Data?) {
-        profileAvatarImageData = data
+        var nextState = communityProfileState
+        nextState.setAvatarImageData(data)
+        communityProfileState = nextState
         settingsStore.saveProfileAvatarImageData(data)
     }
 
@@ -2301,11 +2374,13 @@ final class AppState: ObservableObject {
                 pageAccess: profile.pageAccess
             )
             : profile
-        communityProfile = resolvedProfile
+        var nextState = communityProfileState
+        nextState.applyProfile(resolvedProfile)
+        communityProfileState = nextState
         settingsStore.saveCommunityProfileID(resolvedProfile.id)
         settingsStore.saveCommunityProfileDisplayName(resolvedProfile.displayName)
-        updateProfileAvatarSymbolName(profile.avatarSymbolName)
-        updateProfileAvatarColorSeed(profile.avatarColorSeed)
+        settingsStore.saveProfileAvatarSymbolName(resolvedProfile.avatarSymbolName)
+        settingsStore.saveProfileAvatarColorSeed(resolvedProfile.avatarColorSeed)
     }
 
     func withdrawCommunityAccount() async {
