@@ -11,6 +11,7 @@ struct StatisticsView: View {
     @State private var customEndDate = Date()
     @State private var topicPage = 0
     @State private var isPullRefreshing = false
+    @State private var selectedActivityYear = Calendar.current.component(.year, from: Date())
 
     private static let topicPageSize = 8
 
@@ -58,10 +59,19 @@ struct StatisticsView: View {
             }
     }
 
+    private var activityYearOptions: [Int] {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: Date())
+        let joinedYear = appState.backendAccessState.user.createdAt
+            .map { calendar.component(.year, from: $0) } ?? currentYear
+        return Array(Array(min(joinedYear, currentYear)...currentYear).reversed())
+    }
+
     var body: some View {
         let strings = appState.strings
         let count = responseCount
         let pageCount = topicPageCount
+        let years = activityYearOptions
 
         VStack(spacing: 0) {
             ScrollView {
@@ -69,6 +79,12 @@ struct StatisticsView: View {
                     MobileRootLargeTitle(strings.tabStatistics)
                         .padding(.top, 6)
                         .padding(.bottom, 8)
+
+                    StatsYearSelector(
+                        selectedYear: $selectedActivityYear,
+                        years: years,
+                        strings: strings
+                    )
 
                     StatisticsPeriodControls(
                         selectedPeriod: $selectedPeriod,
@@ -103,6 +119,7 @@ struct StatisticsView: View {
                             topics: topicStats,
                             activity: appState.backendStatsActivity,
                             isActivityLoading: appState.isBackendStatsActivityLoading,
+                            selectedYear: selectedActivityYear,
                             strings: strings
                         )
 
@@ -153,7 +170,19 @@ struct StatisticsView: View {
                 loadStats()
             }
         }
+        .onChange(of: selectedActivityYear) {
+            loadActivity()
+        }
+        .onChange(of: appState.backendAccessState.user.createdAt) {
+            let years = activityYearOptions
+            if let newest = years.first, !years.contains(selectedActivityYear) {
+                selectedActivityYear = newest
+            }
+        }
         .onAppear {
+            if let newest = activityYearOptions.first, !activityYearOptions.contains(selectedActivityYear) {
+                selectedActivityYear = newest
+            }
             loadStats()
             loadActivity()
         }
@@ -191,8 +220,9 @@ struct StatisticsView: View {
     }
 
     private func loadActivity() {
+        let bounds = activityYearBounds(for: selectedActivityYear)
         Task {
-            await appState.fetchBackendStatsActivity()
+            await appState.fetchBackendStatsActivity(startAt: bounds.startAt, endAt: bounds.endAt)
         }
     }
 
@@ -231,11 +261,27 @@ struct StatisticsView: View {
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
-        await appState.fetchBackendStatsActivity()
+        let bounds = activityYearBounds(for: selectedActivityYear)
+        await appState.fetchBackendStatsActivity(startAt: bounds.startAt, endAt: bounds.endAt)
     }
 
     private func resetTopicPaging() {
         topicPage = 0
+    }
+
+    private func activityYearBounds(for year: Int) -> (startAt: Date?, endAt: Date?) {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = year
+        components.month = 1
+        components.day = 1
+        let calendar = components.calendar ?? Calendar.current
+        guard let startAt = calendar.date(from: components),
+              let endAt = calendar.date(byAdding: .year, value: 1, to: startAt) else {
+            return (nil, nil)
+        }
+        return (startAt, endAt)
     }
 
     private static func statsDate(for record: StudyRecord) -> Date {
@@ -784,6 +830,43 @@ private struct StatisticsPeriodControls: View {
 
 }
 
+private struct StatsYearSelector: View {
+    @Binding var selectedYear: Int
+    var years: [Int]
+    var strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(strings.year)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(years, id: \.self) { year in
+                        Button {
+                            selectedYear = year
+                        } label: {
+                            Text(String(year))
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(selectedYear == year ? Color.white : Color.primary)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(selectedYear == year ? Color.accentColor : Color.secondary.opacity(0.11))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+}
+
 private struct TopicStat: Identifiable {
     var topicKey: String
     var topic: String
@@ -976,10 +1059,11 @@ private struct StatsOverviewSection: View {
     var topics: [TopicStat]
     var activity: BackendStatsActivity?
     var isActivityLoading: Bool
+    var selectedYear: Int
     var strings: AppStrings
 
     var body: some View {
-        let achievements = StatsAchievementSnapshot(activity: activity, topics: topics, strings: strings)
+        let achievements = StatsAchievementSnapshot(activity: activity, topics: topics, selectedYear: selectedYear, strings: strings)
 
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 8) {
@@ -994,7 +1078,7 @@ private struct StatsOverviewSection: View {
                     caption: achievements.growthCaption
                 )
                 StatsAchievementCard(
-                    title: strings.thisMonth,
+                    title: achievements.periodTitle,
                     value: achievements.monthValue,
                     caption: achievements.monthCaption
                 )
@@ -1005,11 +1089,9 @@ private struct StatsOverviewSection: View {
                     Text(strings.studyGrass)
                         .font(.headline.weight(.semibold))
                     Spacer()
-                    if let activity {
-                        Text("\(strings.thisMonth) \(activity.monthAnswerCount)")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(String(selectedYear))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
 
                 if let activity {
@@ -1067,13 +1149,18 @@ private struct StatsAchievementSnapshot {
     var streakCaption: String
     var growthValue: String
     var growthCaption: String
+    var periodTitle: String
     var monthValue: String
     var monthCaption: String
 
-    init(activity: BackendStatsActivity?, topics: [TopicStat], strings: AppStrings) {
-        let streakDays = activity?.streakDays ?? 0
+    init(activity: BackendStatsActivity?, topics: [TopicStat], selectedYear: Int, strings: AppStrings) {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let isCurrentYear = selectedYear == currentYear
+        let streakDays = isCurrentYear ? (activity?.streakDays ?? 0) : Self.longestStreak(from: activity)
         streakValue = strings.streakValue(streakDays)
-        streakCaption = streakDays > 0 ? strings.streakKeepGoing : strings.streakStartToday
+        streakCaption = isCurrentYear
+            ? (streakDays > 0 ? strings.streakKeepGoing : strings.streakStartToday)
+            : strings.longestStreak
 
         if let growth = Self.bestGrowth(from: topics) {
             growthValue = growth.delta >= 0 ? "+\(Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0")" : Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0"
@@ -1086,13 +1173,16 @@ private struct StatsAchievementSnapshot {
             growthCaption = strings.noActivityYet
         }
 
-        let monthAnswers = activity?.monthAnswerCount ?? 0
-        monthValue = "\(monthAnswers)"
-        let activeDays = Self.currentMonthActiveDays(from: activity)
-        if let focusTopic = Self.currentMonthTopTopic(from: activity) {
-            monthCaption = strings.monthSummaryWithTopic(days: activeDays, topic: focusTopic)
+        periodTitle = isCurrentYear ? strings.thisMonth : strings.selectedYear
+        monthValue = "\(isCurrentYear ? (activity?.monthAnswerCount ?? 0) : Self.yearAnswerCount(from: activity))"
+        let activeDays = isCurrentYear ? Self.currentMonthActiveDays(from: activity) : Self.yearActiveDays(from: activity)
+        let focusTopic = isCurrentYear ? Self.currentMonthTopTopic(from: activity) : Self.yearTopTopic(from: activity)
+        if let focusTopic {
+            monthCaption = isCurrentYear
+                ? strings.monthSummaryWithTopic(days: activeDays, topic: focusTopic)
+                : strings.yearSummaryWithTopic(days: activeDays, topic: focusTopic)
         } else {
-            monthCaption = strings.monthSummary(days: activeDays)
+            monthCaption = isCurrentYear ? strings.monthSummary(days: activeDays) : strings.yearSummary(days: activeDays)
         }
     }
 
@@ -1151,6 +1241,45 @@ private struct StatsAchievementSnapshot {
             .forEach { counts[$0, default: 0] += 1 }
 
         return counts.max { $0.value < $1.value }?.key
+    }
+
+    private static func yearAnswerCount(from activity: BackendStatsActivity?) -> Int {
+        activity?.days.reduce(0) { $0 + $1.answerCount } ?? 0
+    }
+
+    private static func yearActiveDays(from activity: BackendStatsActivity?) -> Int {
+        activity?.days.filter { $0.answerCount > 0 }.count ?? 0
+    }
+
+    private static func yearTopTopic(from activity: BackendStatsActivity?) -> String? {
+        guard let activity else {
+            return nil
+        }
+
+        var counts: [String: Int] = [:]
+        activity.days
+            .flatMap(\.topics)
+            .forEach { counts[$0, default: 0] += 1 }
+
+        return counts.max { $0.value < $1.value }?.key
+    }
+
+    private static func longestStreak(from activity: BackendStatsActivity?) -> Int {
+        guard let activity else {
+            return 0
+        }
+
+        var best = 0
+        var current = 0
+        for day in activity.days.sorted(by: { $0.date < $1.date }) {
+            if day.answerCount > 0 {
+                current += 1
+                best = max(best, current)
+            } else {
+                current = 0
+            }
+        }
+        return best
     }
 
     private static func statsDate(for record: StudyRecord) -> Date {

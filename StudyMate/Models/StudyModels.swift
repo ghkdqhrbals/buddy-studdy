@@ -1848,15 +1848,22 @@ struct AppStrings {
     var responsesShort: String { text("응답", "Resp") }
     var studyGrass: String { text("학습 잔디", "Study Grass") }
     var studyStreak: String { text("연속 학습", "Streak") }
+    var longestStreak: String { text("해당 연도 최장 기록", "Best streak that year") }
     var streakKeepGoing: String { text("오늘도 이어가세요", "Keep it going today") }
     var streakStartToday: String { text("오늘 시작해보세요", "Start today") }
     var topicGrowth: String { text("성장 주제", "Growth") }
     var thisMonth: String { text("이번 달", "This Month") }
+    var selectedYear: String { text("선택 연도", "Selected Year") }
+    var year: String { text("연도", "Year") }
     var answersUnit: String { text("개", "answers") }
     var noActivityYet: String { text("아직 활동이 없습니다", "No activity yet") }
     func streakValue(_ days: Int) -> String { text("\(days)일", "\(days)d") }
     func monthSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days") }
     func monthSummaryWithTopic(days: Int, topic: String) -> String {
+        text("\(days)일 · \(topic)", "\(days)d · \(topic)")
+    }
+    func yearSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days") }
+    func yearSummaryWithTopic(days: Int, topic: String) -> String {
         text("\(days)일 · \(topic)", "\(days)d · \(topic)")
     }
     var average: String { text("평균", "Avg") }

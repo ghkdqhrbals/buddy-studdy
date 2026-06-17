@@ -2021,7 +2021,7 @@ struct BackendAccessState: Codable, Equatable {
     var pageAccess: BackendPageAccess
 
     static let signedOut = BackendAccessState(
-        user: BackendAccessUser(id: 0, status: "ANONYMOUS", displayName: "Buddy"),
+        user: BackendAccessUser(id: 0, status: "ANONYMOUS", displayName: "Buddy", createdAt: nil),
         pageAccess: .signedOut
     )
 }
@@ -2030,6 +2030,7 @@ struct BackendAccessUser: Codable, Equatable {
     var id: Int64
     var status: String
     var displayName: String
+    var createdAt: Date?
 }
 
 struct BackendPageAccess: Codable, Equatable {

@@ -27,7 +27,7 @@ class AccessService(
         }
         val granted = permissions.permissionsForUser(principal.userId).associateBy { it.code }
         return AccessResponse(
-            user = AccessUserResponse(user.id, user.status, user.displayName),
+            user = AccessUserResponse(user.id, user.status, user.displayName, user.createdAt),
             pageAccess = PageAccessResponse(
                 home = true,
                 publicQuestions = can(granted, user.status, Permissions.PUBLIC_QUESTION_READ),

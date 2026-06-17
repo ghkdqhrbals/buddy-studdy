@@ -1,9 +1,12 @@
 package com.buddystuddy.backend.auth.application.model
 
+import java.time.Instant
+
 data class AccessUserResponse(
     val id: Long,
     val status: String,
     val displayName: String,
+    val createdAt: Instant,
 )
 
 data class PageAccessResponse(
