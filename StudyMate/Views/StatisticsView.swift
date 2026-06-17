@@ -1049,45 +1049,58 @@ private struct StatsYearGrass: View {
 
         VStack(alignment: .leading, spacing: 8) {
             ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .top, spacing: Self.cellSpacing) {
-                            ForEach(weeks) { week in
-                                Text(week.monthLabel)
-                                    .font(.system(size: 8, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: Self.cellSize, alignment: .leading)
-                            }
-                        }
-
-                        HStack(alignment: .top, spacing: Self.cellSpacing) {
-                            ForEach(weeks) { week in
-                                VStack(spacing: Self.cellSpacing) {
-                                    ForEach(week.days) { day in
-                                        Button {
-                                            withAnimation(.smooth(duration: 0.16)) {
-                                                selectedDay = day
-                                            }
-                                        } label: {
-                                            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                                .fill(color(for: day.answerCount))
-                                                .frame(width: Self.cellSize, height: Self.cellSize)
-                                                .overlay {
-                                                    if selectedDay?.id == day.id {
-                                                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                                            .stroke(Color.primary.opacity(0.75), lineWidth: 1)
-                                                    }
-                                                }
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel(accessibilityText(for: day))
-                                    }
-                                }
-                                .id(week.id)
-                            }
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(spacing: Self.cellSpacing) {
+                        Color.clear
+                            .frame(width: Self.weekdayLabelWidth, height: Self.monthLabelHeight)
+                        ForEach(Self.weekdayLabels, id: \.self) { label in
+                            Text(label)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .frame(width: Self.weekdayLabelWidth, height: Self.cellSize, alignment: .trailing)
                         }
                     }
-                    .padding(.vertical, 2)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .top, spacing: Self.cellSpacing) {
+                                ForEach(weeks) { week in
+                                    Text(week.monthLabel)
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: Self.cellSize, height: Self.monthLabelHeight, alignment: .leading)
+                                }
+                            }
+
+                            HStack(alignment: .top, spacing: Self.cellSpacing) {
+                                ForEach(weeks) { week in
+                                    VStack(spacing: Self.cellSpacing) {
+                                        ForEach(week.days) { day in
+                                            Button {
+                                                withAnimation(.smooth(duration: 0.16)) {
+                                                    selectedDay = day
+                                                }
+                                            } label: {
+                                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                    .fill(color(for: day.answerCount))
+                                                    .frame(width: Self.cellSize, height: Self.cellSize)
+                                                    .overlay {
+                                                        if selectedDay?.id == day.id {
+                                                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                                .stroke(Color.primary.opacity(0.75), lineWidth: 1)
+                                                        }
+                                                    }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel(accessibilityText(for: day))
+                                        }
+                                    }
+                                    .id(week.id)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
                 .onAppear {
                     if let lastID = weeks.last?.id {
@@ -1137,20 +1150,30 @@ private struct StatsYearGrass: View {
     }
 
     private static func weeks(from days: [BackendStatsActivityDay]) -> [ActivityWeek] {
-        let calendar = Calendar.current
+        let calendar = Self.weekCalendar
         let sortedDays = days.sorted { $0.date < $1.date }
         guard let first = sortedDays.first else {
             return []
         }
         let weekday = calendar.component(.weekday, from: first.date)
-        let leadingEmptyCount = max(weekday - calendar.firstWeekday, 0)
+        let leadingEmptyCount = (weekday - calendar.firstWeekday + 7) % 7
         let emptyDays = (0..<leadingEmptyCount).compactMap { offset -> BackendStatsActivityDay? in
             guard let date = calendar.date(byAdding: .day, value: -(leadingEmptyCount - offset), to: first.date) else {
                 return nil
             }
             return BackendStatsActivityDay(date: date, answerCount: 0, topicCount: 0, topics: [], bestLevel: nil)
         }
-        let paddedDays = emptyDays + sortedDays
+        var paddedDays = emptyDays + sortedDays
+        let trailingEmptyCount = (7 - (paddedDays.count % 7)) % 7
+        if let last = paddedDays.last, trailingEmptyCount > 0 {
+            let trailingDays = (1...trailingEmptyCount).compactMap { offset -> BackendStatsActivityDay? in
+                guard let date = calendar.date(byAdding: .day, value: offset, to: last.date) else {
+                    return nil
+                }
+                return BackendStatsActivityDay(date: date, answerCount: 0, topicCount: 0, topics: [], bestLevel: nil)
+            }
+            paddedDays.append(contentsOf: trailingDays)
+        }
         return stride(from: 0, to: paddedDays.count, by: 7).map { start in
             let slice = Array(paddedDays[start..<min(start + 7, paddedDays.count)])
             return ActivityWeek(days: slice)
@@ -1159,6 +1182,16 @@ private struct StatsYearGrass: View {
 
     private static let cellSize: CGFloat = 9
     private static let cellSpacing: CGFloat = 3
+    private static let monthLabelHeight: CGFloat = 10
+    private static let weekdayLabelWidth: CGFloat = 16
+    private static let weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"]
+    private static var weekCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "ko_KR")
+        calendar.timeZone = .current
+        calendar.firstWeekday = 2
+        return calendar
+    }
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1178,19 +1211,21 @@ private struct ActivityWeek: Identifiable {
         guard let first = days.first else {
             return ""
         }
-        let calendar = Calendar.current
+        let calendar = Self.weekCalendar
         let containsEarlyMonthDay = days.contains { calendar.component(.day, from: $0.date) <= 7 }
         guard containsEarlyMonthDay else {
             return ""
         }
-        return Self.monthFormatter.string(from: first.date)
+        return "\(calendar.component(.month, from: first.date))"
     }
 
-    private static let monthFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM"
-        return formatter
-    }()
+    private static var weekCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "ko_KR")
+        calendar.timeZone = .current
+        calendar.firstWeekday = 2
+        return calendar
+    }
 }
 
 private struct TopicBrowserSection: View {
