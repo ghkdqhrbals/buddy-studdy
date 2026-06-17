@@ -1068,7 +1068,10 @@ private struct StatsYearGrass: View {
                                     Text(week.monthLabel)
                                         .font(.system(size: 8, weight: .medium))
                                         .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
                                         .frame(width: Self.cellSize, height: Self.monthLabelHeight, alignment: .leading)
+                                        .zIndex(week.monthLabel.isEmpty ? 0 : 1)
                                 }
                             }
 
