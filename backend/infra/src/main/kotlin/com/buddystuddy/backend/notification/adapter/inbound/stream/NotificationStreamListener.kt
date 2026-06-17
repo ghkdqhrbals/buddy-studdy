@@ -109,18 +109,19 @@ class NotificationStreamListener(
             )
             return
         }
-        val userDevicesWithTokens = devices.findAllByUserId(command.userId)
-            .filter { it.apnsToken.isNotBlank() }
-        val targetDevices = userDevicesWithTokens.filter { userDevices.hasActiveSession(command.userId, it.deviceId) }
+        val currentSession = userDevices.findActiveByUserId(command.userId).firstOrNull()
+        val targetDevice = currentSession
+            ?.let { devices.findByDeviceId(it.deviceId) }
+            ?.takeIf { it.apnsToken.isNotBlank() }
         logger.info(
-            "notification_push_targets_resolved notificationId={} eventId={} userId={} apnsDeviceCount={} activeDeviceCount={}",
+            "notification_push_targets_resolved notificationId={} eventId={} userId={} currentDeviceId={} hasApnsToken={}",
             notificationId,
             command.eventId,
             command.userId,
-            userDevicesWithTokens.size,
-            targetDevices.size,
+            currentSession?.deviceId,
+            targetDevice != null,
         )
-        if (targetDevices.isEmpty()) {
+        if (targetDevice == null) {
             notifications.markPushFailed(notificationId, "No active APNs target.", Instant.now())
             logger.info(
                 "notification_push_failed reason=no_active_apns_target notificationId={} eventId={} userId={}",
@@ -132,45 +133,42 @@ class NotificationStreamListener(
         }
         try {
             val metadata = NotificationPushMetadata.from(command.metadataJson)
-            val failedDeviceIds = targetDevices.mapNotNull { device ->
-                val published = pushPublisher.publishPush(
-                    QuestionPushRequest(
-                        recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
-                        studyId = metadata.studyId,
-                        deviceId = device.deviceId,
-                        userId = command.userId,
-                        question = command.body,
-                        expectedAnswerHint = null,
-                        topic = metadata.topic ?: command.threadType ?: "notification",
-                        difficultyLevel = metadata.difficultyLevel ?: 1,
-                        language = metadata.language ?: "ko",
-                        sound = metadata.sound ?: "default",
-                        intervalMinutes = metadata.intervalMinutes ?: 0,
-                        title = command.title,
-                        body = command.body,
-                        deepLink = command.deepLink ?: "buddystuddy://notifications/$notificationId",
-                    )
+            val published = pushPublisher.publishPush(
+                QuestionPushRequest(
+                    recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
+                    studyId = metadata.studyId,
+                    deviceId = targetDevice.deviceId,
+                    userId = command.userId,
+                    question = command.body,
+                    expectedAnswerHint = null,
+                    topic = metadata.topic ?: command.threadType ?: "notification",
+                    difficultyLevel = metadata.difficultyLevel ?: 1,
+                    language = metadata.language ?: "ko",
+                    sound = metadata.sound ?: "default",
+                    intervalMinutes = metadata.intervalMinutes ?: 0,
+                    title = command.title,
+                    body = command.body,
+                    deepLink = command.deepLink ?: "buddystuddy://notifications/$notificationId",
                 )
-                if (published) null else device.deviceId
-            }
-            if (failedDeviceIds.isNotEmpty()) {
-                notifications.markPushFailed(notificationId, "Push publish failed for devices: ${failedDeviceIds.joinToString(",")}", Instant.now())
+            )
+            if (!published) {
+                notifications.markPushFailed(notificationId, "Push publish failed for device: ${targetDevice.deviceId}", Instant.now())
                 logger.warn(
-                    "notification_push_failed reason=push_stream_publish_failed notificationId={} eventId={} userId={} failedDeviceIds={}",
+                    "notification_push_failed reason=push_stream_publish_failed notificationId={} eventId={} userId={} deviceId={}",
                     notificationId,
                     command.eventId,
                     command.userId,
-                    failedDeviceIds,
+                    targetDevice.deviceId,
                 )
                 return
             }
             notifications.markPushSent(notificationId, Instant.now())
             logger.info(
-                "notification_push_published notificationId={} eventId={} userId={} deviceCount={}",
+                "notification_push_published notificationId={} eventId={} userId={} deviceId={}",
                 notificationId,
                 command.eventId,
                 command.userId,
-                targetDevices.size,
+                targetDevice.deviceId,
             )
         } catch (error: Exception) {
             notifications.markPushFailed(notificationId, error.message ?: error.javaClass.simpleName, Instant.now())

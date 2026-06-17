@@ -2,7 +2,6 @@ package com.buddystuddy.backend.study.application.port.outbound
 
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
-import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -17,16 +16,7 @@ interface StudyPort {
     fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity>
     fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
     fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity>
-}
-
-interface StudyQuestionJobPort {
-    fun save(entity: StudyQuestionJobEntity): StudyQuestionJobEntity
-    fun saveBatch(entities: Iterable<StudyQuestionJobEntity>): List<StudyQuestionJobEntity>
-    fun findLatestByStudyId(studyId: Long): StudyQuestionJobEntity?
-    fun findLatestByStudyIds(studyIds: Collection<Long>): List<StudyQuestionJobEntity>
-    fun claimDue(now: Instant, limit: Int): List<StudyQuestionJobEntity>
-    fun cancelScheduledByStudyId(studyId: Long, now: Instant): Int
-    fun recoverStaleProcessing(before: Instant, now: Instant): Int
+    fun claimDue(now: Instant, limit: Int): List<StudyEntity>
 }
 
 interface QuestionPort {

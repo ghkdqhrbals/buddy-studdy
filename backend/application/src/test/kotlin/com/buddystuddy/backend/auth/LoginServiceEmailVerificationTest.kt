@@ -22,6 +22,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.time.Instant
 import java.util.Optional
 
 class LoginServiceEmailVerificationTest {
@@ -83,6 +84,42 @@ class LoginServiceEmailVerificationTest {
 
         assertThat(devices.findByDeviceId(device.deviceId)?.apnsToken).isEqualTo("apns-token")
         assertThat(users.findByIdCalls).isZero()
+    }
+
+    @Test
+    fun `push token update keeps only current user device token and login keeps one active session`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "first-token", language = "ko"))
+        devices.save(
+            DeviceEntity(
+                deviceId = "dev-old",
+                userId = 1,
+                clientSecretHash = "old-secret",
+                apnsToken = "old-token",
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                lastSeenAt = Instant.now(),
+            )
+        )
+        userDevices.save(
+            UserDeviceEntity(
+                userId = 1,
+                deviceId = "dev-old",
+                lastLoginAt = Instant.now(),
+                lastSeenAt = Instant.now(),
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+            )
+        )
+
+        login.updatePushToken(
+            Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS"),
+            PushTokenCommand(apnsToken = "current-token", apnsEnvironment = "sandbox"),
+        )
+        login.token(device.deviceId, device.clientSecret)
+
+        assertThat(devices.findByDeviceId(device.deviceId)?.apnsToken).isEqualTo("current-token")
+        assertThat(devices.findByDeviceId("dev-old")?.apnsToken).isBlank()
+        assertThat(userDevices.findActiveByUserId(1).map { it.deviceId }).containsExactly(device.deviceId)
     }
 
     @Test

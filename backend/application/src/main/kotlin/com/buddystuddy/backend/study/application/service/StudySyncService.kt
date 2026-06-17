@@ -10,7 +10,6 @@ import com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystuddy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
-import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.study.domain.StudyRoomSettings
 import com.buddystuddy.study.domain.StudyRoomSettingsCommand
@@ -22,8 +21,6 @@ import com.buddystuddy.study.domain.StudyRecordState
 import com.buddystuddy.study.domain.StudyRecordStats
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
-import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
-import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -33,7 +30,6 @@ import java.time.Instant
 @Service
 class StudySyncService(
     private val studies: StudyPort,
-    private val jobs: StudyQuestionJobPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
 ) : StudySyncUseCase {
@@ -73,7 +69,7 @@ class StudySyncService(
         val isNewStudy = study.id == 0L
         val previousEnabled = study.enabled
         val previousIntervalMinutes = study.intervalMinutes
-        val latestJobBeforeSave = if (isNewStudy) null else jobs.findLatestByStudyId(study.id)
+        val previousNextDueAt = study.nextDueAt
 
         study.topic = topic
         study.deviceId = principal.deviceId
@@ -95,20 +91,14 @@ class StudySyncService(
         )
 
         val saved = studies.save(study)
-        if (saved.shouldRescheduleQuestionJob(isNewStudy, previousEnabled, previousIntervalMinutes, latestJobBeforeSave)) {
-            saved.rescheduleQuestionJob(now)
+        if (saved.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+            saved.reschedule(now)
         }
-        val latestJob = jobs.findLatestByStudyId(saved.id)
-        return if (isNewStudy) {
-            saved.toStudyRoomResponse(latestJob = latestJob)
-        } else {
-            saved.toStudyRoomResponse(latestJob = latestJob)
-        }
+        return saved.toStudyRoomResponse()
     }
 
     private fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
         if (isEmpty()) return emptyList()
-        val latestJobsByStudyId = jobs.findLatestByStudyIds(map { it.id }).associateBy { it.studyId }
         val pendingByStudyId = questions.findLatestPendingByStudyIds(map { it.id }).associateBy { it.studyId }
         val statsByQuestionId = pendingByStudyId.values
             .map { it.id }
@@ -119,7 +109,6 @@ class StudySyncService(
             study.toStudyRoomResponse(
                 pendingQuestion = pendingByStudyId[study.id],
                 statsByQuestionId = statsByQuestionId,
-                latestJob = latestJobsByStudyId[study.id],
             )
         }
     }
@@ -127,7 +116,6 @@ class StudySyncService(
     private fun StudyEntity.toStudyRoomResponse(
         pendingQuestion: QuestionEntity? = null,
         statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
-        latestJob: StudyQuestionJobEntity? = null,
     ): StudyRoomResponse {
         val pending = pendingQuestion?.let { question ->
             question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
@@ -143,9 +131,9 @@ class StudySyncService(
         customPrompt = customPrompt,
         openaiModel = openaiModel,
         maxHistoryCount = maxHistoryCount,
-        nextDueAt = latestJob?.takeIf { it.status == StudyQuestionJobStatus.SCHEDULED }?.scheduledAt,
+        nextDueAt = nextDueAt,
         lastSentAt = lastSentAt,
-        lastError = latestJob?.lastError ?: lastError,
+        lastError = lastError,
         pendingQuestion = pending,
         createdAt = createdAt,
         updatedAt = updatedAt,
@@ -168,32 +156,21 @@ class StudySyncService(
         updatedAt = update.updatedAt
     }
 
-    private fun StudyEntity.rescheduleQuestionJob(now: Instant) {
-        jobs.cancelScheduledByStudyId(id, now)
-        if (!enabled) return
-        jobs.save(
-            StudyQuestionJobEntity(
-                studyId = id,
-                deviceId = deviceId,
-                userId = userId,
-                scheduledAt = now.plusSeconds(intervalMinutes.toLong() * 60),
-                status = StudyQuestionJobStatus.SCHEDULED,
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
+    private fun StudyEntity.reschedule(now: Instant) {
+        nextDueAt = if (enabled) now.plusSeconds(intervalMinutes.toLong() * 60) else null
+        updatedAt = now
     }
 
-    private fun StudyEntity.shouldRescheduleQuestionJob(
+    private fun StudyEntity.shouldReschedule(
         isNewStudy: Boolean,
         previousEnabled: Boolean,
         previousIntervalMinutes: Int,
-        latestJob: StudyQuestionJobEntity?,
+        previousNextDueAt: Instant?,
     ): Boolean =
         isNewStudy ||
             previousEnabled != enabled ||
             previousIntervalMinutes != intervalMinutes ||
-            (enabled && latestJob?.status !in setOf(StudyQuestionJobStatus.SCHEDULED, StudyQuestionJobStatus.PROCESSING))
+            (enabled && previousNextDueAt == null)
 
     private fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
         StudyRecordState(

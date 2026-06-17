@@ -124,6 +124,8 @@ class LoginService(
                 device.toAccountDevice(),
             ).updatePushToken(command.apnsToken, command.apnsEnvironment)
         )
+        devices.save(device)
+        clearOtherPushTokens(principal.userId, principal.deviceId, device.updatedAt)
     }
 
     @Transactional
@@ -249,6 +251,16 @@ class LoginService(
         apnsToken = update.apnsToken
         apnsEnvironment = update.apnsEnvironment
         updatedAt = update.updatedAt
+    }
+
+    private fun clearOtherPushTokens(userId: Long, currentDeviceId: String, now: Instant) {
+        devices.findAllByUserId(userId)
+            .filter { it.deviceId != currentDeviceId && it.apnsToken.isNotBlank() }
+            .forEach { device ->
+                device.apnsToken = ""
+                device.updatedAt = now
+                devices.save(device)
+            }
     }
 
     private fun DeviceEntity.apply(attachment: DeviceAttachment) {

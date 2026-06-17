@@ -61,7 +61,19 @@ class AccountSessionManager(
         session.sessionExpiresAt = expiresAt
         session.loggedOutAt = null
         session.revokedAt = null
-        return userDevices.save(session)
+        val saved = userDevices.save(session)
+        revokeOtherActiveSessions(userId, saved.deviceId, now)
+        return saved
+    }
+
+    private fun revokeOtherActiveSessions(userId: Long, currentDeviceId: String, now: Instant) {
+        userDevices.findActiveByUserId(userId)
+            .filter { it.deviceId != currentDeviceId }
+            .forEach { session ->
+                session.revokedAt = now
+                session.updatedAt = now
+                userDevices.save(session)
+            }
     }
 
     private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)

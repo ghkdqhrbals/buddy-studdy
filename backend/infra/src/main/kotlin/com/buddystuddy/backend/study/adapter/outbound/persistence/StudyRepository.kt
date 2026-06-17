@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.time.Instant
 
 interface StudyRepository : JpaRepository<StudyEntity, Long>, StudyPort {
     override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
@@ -42,5 +43,20 @@ interface StudyRepository : JpaRepository<StudyEntity, Long>, StudyPort {
         @Param("query") query: String,
         pageable: Pageable,
     ): Page<StudyEntity>
+
+    @Query(
+        value = """
+        select *
+        from studies
+        where enabled = true
+          and next_due_at is not null
+          and next_due_at <= :now
+        order by next_due_at asc, id asc
+        limit :limit
+        for update skip locked
+        """,
+        nativeQuery = true,
+    )
+    override fun claimDue(@Param("now") now: Instant, @Param("limit") limit: Int): List<StudyEntity>
 
 }

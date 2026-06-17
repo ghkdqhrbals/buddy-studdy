@@ -8,10 +8,7 @@ import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystuddy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystuddy.backend.settings.application.service.SettingsService
-import com.buddystuddy.backend.study.application.port.outbound.StudyQuestionJobPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
-import com.buddystuddy.study.domain.entity.StudyQuestionJobEntity
-import com.buddystuddy.study.domain.entity.StudyQuestionJobStatus
 import com.buddystuddy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -23,11 +20,9 @@ import java.util.Optional
 
 class SettingsServiceTest {
     private val studies = FakeStudyPort()
-    private val jobs = FakeStudyQuestionJobPort()
     private val users = FakeUserPort()
     private val service = SettingsService(
         studies = studies,
-        jobs = jobs,
         users = users,
         cipher = KeyCipher(BuddyStuddyProperties(crypto = BuddyStuddyProperties.Crypto(masterKey = "test-master-key"))),
     )
@@ -52,7 +47,7 @@ class SettingsServiceTest {
         assertThat(studies.findByUserIdAndTopicsCalls).isEqualTo(1)
         assertThat(studies.findByUserIdAndTopicCalls).isEqualTo(0)
         assertThat(studies.saved.map { it.topic }).containsExactly("Kotlin", "Swift")
-        assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.SCHEDULED }.map { it.studyId }).containsExactly(11, 12)
+        assertThat(studies.saved.map { it.nextDueAt }).allSatisfy { assertThat(it).isNotNull() }
     }
 
     @Test
@@ -66,16 +61,7 @@ class SettingsServiceTest {
             topic = "Kotlin",
             intervalMinutes = 5,
             enabled = true,
-        )
-        jobs.rows += StudyQuestionJobEntity(
-            id = 21,
-            studyId = 11,
-            userId = 7,
-            deviceId = "dev-1",
-            scheduledAt = existingDueAt,
-            status = StudyQuestionJobStatus.SCHEDULED,
-            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
-            updatedAt = Instant.parse("2026-06-10T00:00:00Z"),
+            nextDueAt = existingDueAt,
         )
 
         val response = service.upsertSchedule(
@@ -88,9 +74,7 @@ class SettingsServiceTest {
         )
 
         assertThat(response.nextDueAt).isEqualTo(existingDueAt)
-        assertThat(jobs.rows).hasSize(1)
-        assertThat(jobs.rows.single().status).isEqualTo(StudyQuestionJobStatus.SCHEDULED)
-        assertThat(jobs.rows.single().scheduledAt).isEqualTo(existingDueAt)
+        assertThat(studies.rows.single().nextDueAt).isEqualTo(existingDueAt)
     }
 
     @Test
@@ -104,16 +88,7 @@ class SettingsServiceTest {
             topic = "Kotlin",
             intervalMinutes = 5,
             enabled = true,
-        )
-        jobs.rows += StudyQuestionJobEntity(
-            id = 21,
-            studyId = 11,
-            userId = 7,
-            deviceId = "dev-1",
-            scheduledAt = existingDueAt,
-            status = StudyQuestionJobStatus.SCHEDULED,
-            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
-            updatedAt = Instant.parse("2026-06-10T00:00:00Z"),
+            nextDueAt = existingDueAt,
         )
 
         service.upsertSchedule(
@@ -125,8 +100,7 @@ class SettingsServiceTest {
             ),
         )
 
-        assertThat(jobs.rows.map { it.status }).containsExactly(StudyQuestionJobStatus.CANCELED, StudyQuestionJobStatus.SCHEDULED)
-        assertThat(jobs.rows.last().scheduledAt).isAfter(existingDueAt)
+        assertThat(studies.rows.single().nextDueAt).isAfter(existingDueAt)
     }
 
     private class FakeStudyPort : StudyPort {
@@ -161,30 +135,7 @@ class SettingsServiceTest {
             PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
         override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId && it.topic.contains(query) }, pageable, 0)
-    }
-
-    private class FakeStudyQuestionJobPort : StudyQuestionJobPort {
-        val rows = mutableListOf<StudyQuestionJobEntity>()
-        override fun save(entity: StudyQuestionJobEntity): StudyQuestionJobEntity {
-            if (entity.id == 0L) {
-                entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
-                rows += entity
-            }
-            return entity
-        }
-        override fun saveBatch(entities: Iterable<StudyQuestionJobEntity>): List<StudyQuestionJobEntity> =
-            entities.map { save(it) }
-        override fun findLatestByStudyId(studyId: Long): StudyQuestionJobEntity? =
-            rows.filter { it.studyId == studyId }.maxByOrNull { it.id }
-        override fun findLatestByStudyIds(studyIds: Collection<Long>): List<StudyQuestionJobEntity> =
-            rows.filter { it.studyId in studyIds }
-        override fun claimDue(now: Instant, limit: Int): List<StudyQuestionJobEntity> = emptyList()
-        override fun cancelScheduledByStudyId(studyId: Long, now: Instant): Int {
-            val targets = rows.filter { it.studyId == studyId && it.status == StudyQuestionJobStatus.SCHEDULED }
-            targets.forEach { it.status = StudyQuestionJobStatus.CANCELED }
-            return targets.size
-        }
-        override fun recoverStaleProcessing(before: Instant, now: Instant): Int = 0
+        override fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
     }
 
     private class FakeUserPort : UserPort {
