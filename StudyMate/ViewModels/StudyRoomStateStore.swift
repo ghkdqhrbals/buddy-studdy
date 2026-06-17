@@ -82,7 +82,7 @@ struct StudyRoomStateStore {
             }
 
             var nextRoom = room
-            nextRoom.pendingQuestion = Self.isPendingQuestion(record) ? record : nil
+            nextRoom.pendingQuestion = record
             return nextRoom
         }
     }
