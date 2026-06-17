@@ -86,6 +86,31 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `logout marks current device session as logged out and clears active user from device`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
+
+        login.logout(principal)
+
+        val session = userDevices.findByIdAndUserId(1, 1)
+        assertThat(session?.loggedOutAt).isNotNull()
+        assertThat(devices.findByDeviceId(device.deviceId)?.userId).isNull()
+    }
+
+    @Test
+    fun `logged in devices returns active sessions only`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", platform = "ios", language = "ko", timezone = "Asia/Seoul"))
+        val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
+
+        val response = login.loggedInDevices(principal)
+
+        assertThat(response.devices).hasSize(1)
+        assertThat(response.devices.first().deviceId).isEqualTo(device.deviceId)
+        assertThat(response.devices.first().current).isTrue()
+        assertThat(response.devices.first().platform).isEqualTo("ios")
+    }
+
+    @Test
     fun `new email user is created only when verification code matches`() {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         login.emailCode("new@example.com")
@@ -215,6 +240,12 @@ class LoginServiceEmailVerificationTest {
 
         override fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
             sessions[id]?.takeIf { it.userId == userId }
+
+        override fun findActiveByUserId(userId: Long): List<UserDeviceEntity> =
+            sessions.values.filter { it.userId == userId && it.isActive() }
+
+        override fun hasActiveSession(userId: Long, deviceId: String): Boolean =
+            sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
     }
 
     private class InMemoryRoleAssignmentPort : RoleAssignmentPort {

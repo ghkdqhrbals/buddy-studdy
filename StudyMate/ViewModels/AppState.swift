@@ -1875,14 +1875,30 @@ final class AppState: ObservableObject {
     }
 
     func signOutFromCommunity() {
+        let registrationForLogout = settingsStore.loadRemotePushRegistration()
         isCommunitySignedIn = false
         communityProfile = nil
         settingsStore.saveIsCommunitySignedIn(false)
+        if var registration = registrationForLogout {
+            registration.accessToken = nil
+            registration.accessTokenExpiresAt = nil
+            settingsStore.saveRemotePushRegistration(registration)
+        }
         communityQuestions = []
         communityOffset = 0
         communityTotalCount = 0
         communityErrorMessage = nil
         backendAccessState = .signedOut
+        if let registrationForLogout {
+            Task {
+                do {
+                    try await remotePushBackendClient.logout(registration: registrationForLogout)
+                    log(.info, "백엔드 로그아웃을 완료했습니다. deviceID=\(registrationForLogout.deviceID)")
+                } catch {
+                    log(.warning, "백엔드 로그아웃 실패: \(error.localizedDescription)")
+                }
+            }
+        }
         if settings.isQuestionPublic || draftSettings.isQuestionPublic {
             settings = settings.withQuestionPrivacy(false)
             draftSettings = draftSettings.withQuestionPrivacy(false)

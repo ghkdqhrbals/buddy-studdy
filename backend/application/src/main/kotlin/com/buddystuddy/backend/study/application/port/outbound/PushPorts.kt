@@ -110,6 +110,9 @@ data class FcmQuestionMessage(
 
 interface PushNotificationPort {
     fun sendQuestion(message: PushQuestionMessage)
+    fun pushForAll(messages: Iterable<PushQuestionMessage>) {
+        messages.forEach(::sendQuestion)
+    }
 }
 
 interface PushQuestionSender {

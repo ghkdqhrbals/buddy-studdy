@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.study.adapter.inbound.stream
 
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystuddy.backend.study.application.port.outbound.ApnsAps
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionPayload
@@ -22,6 +23,7 @@ import org.slf4j.LoggerFactory
 class PushStreamListener(
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
+    private val userDevices: UserDevicePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -48,7 +50,23 @@ class PushStreamListener(
                 message.fields["userId"],
                 message.fields.keys,
             )
-            val device = PushEventPayloadParser.deviceId(message.fields)?.let { devices.findByDeviceId(it) }
+            val deviceId = PushEventPayloadParser.deviceId(message.fields)
+            val userId = PushEventPayloadParser.userId(message.fields)
+            if (deviceId != null && userId != null && !userDevices.hasActiveSession(userId, deviceId)) {
+                logger.info(
+                    "redis_stream_consume_skipped_inactive_session listener={} stream={} redisRecordId={} eventId={} recordId={} deviceId={} userId={}",
+                    "buddystuddy-push-listener",
+                    message.streamKey,
+                    message.recordId,
+                    message.fields["eventId"],
+                    message.fields["recordId"],
+                    deviceId,
+                    userId,
+                )
+                message.ack()
+                return
+            }
+            val device = deviceId?.let { devices.findByDeviceId(it) }
             val pushMessage = PushEventPayloadParser.toPushQuestionMessage(
                 fields = message.fields,
                 apnsToken = message.fields["apnsToken"] ?: device?.apnsToken ?: "",
@@ -92,6 +110,9 @@ internal object PushEventPayloadParser {
 
     fun deviceId(fields: Map<String, String>): String? =
         payload(fields)?.deviceId ?: fields["deviceId"]?.takeIf(String::isNotBlank)
+
+    fun userId(fields: Map<String, String>): Long? =
+        payload(fields)?.userId ?: fields["userId"]?.toLongOrNull()
 
     fun toPushQuestionMessage(
         fields: Map<String, String>,

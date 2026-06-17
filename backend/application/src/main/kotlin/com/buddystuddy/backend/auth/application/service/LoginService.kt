@@ -30,6 +30,8 @@ import com.buddystuddy.backend.auth.application.model.AccessTokenResponse
 import com.buddystuddy.backend.auth.application.model.DeviceRegisterResponse
 import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
 import com.buddystuddy.backend.auth.application.model.GoogleLoginResponse
+import com.buddystuddy.backend.auth.application.model.LoggedInDeviceResponse
+import com.buddystuddy.backend.auth.application.model.LoggedInDevicesResponse
 import com.buddystuddy.backend.profile.application.model.toProfile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -121,6 +123,43 @@ class LoginService(
                 AccountUser(id = principal.userId, status = principal.status),
                 device.toAccountDevice(),
             ).updatePushToken(command.apnsToken, command.apnsEnvironment)
+        )
+    }
+
+    @Transactional
+    override fun logout(principal: Principal) {
+        val now = Instant.now()
+        val session = sessions.findSession(principal.sessionId, principal.userId)
+        if (session != null && session.deviceId == principal.deviceId && session.loggedOutAt == null) {
+            session.loggedOutAt = now
+            session.updatedAt = now
+            session.lastSeenAt = now
+            sessions.saveSessionState(session)
+        }
+
+        val device = sessions.device(principal.deviceId)
+        if (device.userId == principal.userId) {
+            device.userId = null
+            device.updatedAt = now
+        }
+    }
+
+    @Transactional(readOnly = true)
+    override fun loggedInDevices(principal: Principal): LoggedInDevicesResponse {
+        val deviceById = devices.findAllByUserId(principal.userId).associateBy { it.deviceId }
+        return LoggedInDevicesResponse(
+            sessions.activeSessions(principal.userId).mapNotNull { session ->
+                val device = deviceById[session.deviceId] ?: return@mapNotNull null
+                LoggedInDeviceResponse(
+                    deviceId = session.deviceId,
+                    platform = device.platform,
+                    apnsEnvironment = device.apnsEnvironment,
+                    timezone = device.timezone,
+                    lastLoginAt = session.lastLoginAt,
+                    lastSeenAt = session.lastSeenAt,
+                    current = session.id == principal.sessionId,
+                )
+            }
         )
     }
 

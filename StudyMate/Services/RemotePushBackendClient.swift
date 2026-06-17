@@ -167,6 +167,8 @@ protocol RemotePushBackendClientProtocol {
 
     func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
+    func logout(registration: RemotePushRegistration) async throws
+
     func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState
 
     func fetchNotifications(
@@ -450,6 +452,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             accessToken: response.accessToken,
             accessTokenExpiresAt: response.accessTokenExpiresAt
         )
+    }
+
+    func logout(registration: RemotePushRegistration) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "logout")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
     }
 
     func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
@@ -1275,7 +1286,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private func loginRequest(registration: RemotePushRegistration, url: URL) -> URLRequest {
-        authenticatedRequest(registration: registration, url: url)
+        var request = URLRequest(url: url)
+        request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
+        request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        return request
     }
 
     private static let dateFormatter = ISO8601DateFormatter()

@@ -31,6 +31,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
@@ -87,6 +88,17 @@ class AuthController(
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
     ) = auth.email(body, authentication, deviceId, clientSecret)
 
+    @Operation(summary = "Sign out current session", description = "Logs out the current user-device session. iOS should delete the stored access token after calling this endpoint.")
+    @PostMapping("/auth/logout")
+    fun logout(authentication: Authentication): ResponseEntity<Unit> =
+        auth.logout(authentication)
+
+    @Operation(summary = "List logged-in devices", description = "Returns active device sessions for the authenticated user.")
+    @GetMapping("/me/devices")
+    @RequirePermission(Permissions.PROFILE_READ)
+    fun loggedInDevices(authentication: Authentication) =
+        auth.loggedInDevices(authentication)
+
     @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
     @PutMapping("/push-token")
     @RequirePermission(Permissions.PROFILE_UPDATE)
@@ -100,6 +112,8 @@ interface AuthWebPort {
     fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
     fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
     fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
+    fun logout(authentication: Authentication): ResponseEntity<Unit>
+    fun loggedInDevices(authentication: Authentication): Any
     fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit>
 }
 
@@ -125,23 +139,30 @@ class AuthWebAdapter(
     override fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
         login.emailLogin(loginPrincipal(authentication, deviceId, clientSecret), body.toCommand())
 
+    override fun logout(authentication: Authentication): ResponseEntity<Unit> {
+        login.logout(authentication.principalOrThrow())
+        return ResponseEntity.noContent().build()
+    }
+
+    override fun loggedInDevices(authentication: Authentication) =
+        login.loggedInDevices(authentication.principalOrThrow())
+
     override fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> {
         updatePushToken.updatePushToken(authentication.principalOrThrow(), body.toCommand())
         return ResponseEntity.noContent().build()
     }
 
     private fun loginPrincipal(authentication: Authentication?, deviceId: String?, clientSecret: String?): Principal =
-        authentication.optionalPrincipal()
-            ?: run {
-                if (deviceId.isNullOrBlank() || clientSecret.isNullOrBlank()) {
-                    throw ApiException(
-                        HttpStatus.UNAUTHORIZED,
-                        ApiErrorCode.AUTH_DEVICE_CREDENTIALS_REQUIRED,
-                        "Device credentials are required.",
-                    )
-                }
-                issueDeviceToken.authenticateDevice(deviceId, clientSecret)
-            }
+        if (!deviceId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
+            issueDeviceToken.authenticateDevice(deviceId, clientSecret)
+        } else {
+            authentication.optionalPrincipal()
+                ?: throw ApiException(
+                    HttpStatus.UNAUTHORIZED,
+                    ApiErrorCode.AUTH_DEVICE_CREDENTIALS_REQUIRED,
+                    "Device credentials are required.",
+                )
+        }
 }
 
 private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(

@@ -25,6 +25,15 @@ class AccountSessionManager(
     fun device(deviceId: String): DeviceEntity = devices.findByDeviceId(deviceId)
         ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.DEVICE_NOT_FOUND, "Device not found.")
 
+    fun findSession(sessionId: Long, userId: Long): UserDeviceEntity? =
+        userDevices.findByIdAndUserId(sessionId, userId)
+
+    fun saveSessionState(session: UserDeviceEntity): UserDeviceEntity =
+        userDevices.save(session)
+
+    fun activeSessions(userId: Long): List<UserDeviceEntity> =
+        userDevices.findActiveByUserId(userId)
+
     fun ensureAnonymousUser(device: DeviceEntity): UserEntity {
         val now = Instant.now()
         val user = users.save(
@@ -49,6 +58,8 @@ class AccountSessionManager(
         session.lastSeenAt = now
         session.updatedAt = now
         session.sessionExpiresAt = expiresAt
+        session.loggedOutAt = null
+        session.revokedAt = null
         return userDevices.save(session)
     }
 

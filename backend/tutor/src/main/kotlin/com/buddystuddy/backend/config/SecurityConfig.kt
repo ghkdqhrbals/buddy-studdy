@@ -121,6 +121,9 @@ class BearerTokenFilter(
         val principal = tokenProvider.parse(rawToken)
         val session = userDevices.findByIdAndUserId(principal.sessionId, principal.userId)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Access token principal is no longer valid.")
+        if (!session.isActive()) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Access token session is no longer active.")
+        }
         if (session.deviceId != principal.deviceId) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_DEVICE_MISMATCH, "Access token device is no longer valid.")
         }

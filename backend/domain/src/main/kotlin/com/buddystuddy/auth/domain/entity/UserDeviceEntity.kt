@@ -30,10 +30,19 @@ class UserDeviceEntity(
     var sessionExpiresAt: Instant? = null,
     @Column(name = "last_login_at")
     var lastLoginAt: Instant? = null,
+    @Column(name = "logged_out_at")
+    var loggedOutAt: Instant? = null,
+    @Column(name = "revoked_at")
+    var revokedAt: Instant? = null,
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
     @Column(name = "last_seen_at", nullable = false)
     var lastSeenAt: Instant = Instant.now(),
-)
+) {
+    fun isActive(now: Instant = Instant.now()): Boolean =
+        loggedOutAt == null &&
+            revokedAt == null &&
+            (sessionExpiresAt == null || sessionExpiresAt!!.isAfter(now))
+}

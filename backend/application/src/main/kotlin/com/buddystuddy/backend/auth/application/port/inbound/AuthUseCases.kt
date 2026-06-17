@@ -5,6 +5,7 @@ import com.buddystuddy.backend.auth.application.model.AccessTokenResponse
 import com.buddystuddy.backend.auth.application.model.DeviceRegisterResponse
 import com.buddystuddy.backend.auth.application.model.EmailVerificationCodeResponse
 import com.buddystuddy.backend.auth.application.model.GoogleLoginResponse
+import com.buddystuddy.backend.auth.application.model.LoggedInDevicesResponse
 
 interface RegisterDeviceUseCase {
     fun register(command: RegisterDeviceCommand): DeviceRegisterResponse
@@ -19,6 +20,8 @@ interface LoginUseCase {
     fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse
     fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse
     fun emailCode(email: String): EmailVerificationCodeResponse
+    fun logout(principal: Principal)
+    fun loggedInDevices(principal: Principal): LoggedInDevicesResponse
 }
 
 interface UpdatePushTokenUseCase {

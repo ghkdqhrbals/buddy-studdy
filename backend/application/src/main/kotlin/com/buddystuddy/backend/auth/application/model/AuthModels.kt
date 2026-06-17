@@ -14,3 +14,17 @@ data class AccessTokenResponse(val accessToken: String, val accessTokenExpiresAt
 data class EmailVerificationCodeResponse(val email: String, val expiresInSeconds: Long)
 data class GoogleLoginResponse(val profile: UserProfileResponse, val accessToken: String, val accessTokenExpiresAt: Instant)
 typealias EmailLoginResponse = GoogleLoginResponse
+
+data class LoggedInDeviceResponse(
+    val deviceId: String,
+    val platform: String,
+    val apnsEnvironment: String,
+    val timezone: String,
+    val lastLoginAt: Instant?,
+    val lastSeenAt: Instant,
+    val current: Boolean,
+)
+
+data class LoggedInDevicesResponse(
+    val devices: List<LoggedInDeviceResponse>,
+)

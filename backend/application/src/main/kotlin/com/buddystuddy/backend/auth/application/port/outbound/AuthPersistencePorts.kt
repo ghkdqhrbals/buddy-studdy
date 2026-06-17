@@ -24,6 +24,8 @@ interface UserDevicePort {
     fun save(entity: UserDeviceEntity): UserDeviceEntity
     fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity?
     fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
+    fun findActiveByUserId(userId: Long): List<UserDeviceEntity>
+    fun hasActiveSession(userId: Long, deviceId: String): Boolean
 }
 
 interface EmailVerificationCodePort {
