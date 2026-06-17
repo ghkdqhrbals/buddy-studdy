@@ -125,7 +125,7 @@ final class AppState: ObservableObject {
     @Published var isGeneratingQuestion = false
     @Published var isGradingAnswer = false
     @Published var isRunning: Bool
-    @Published var studyRecords: [StudyRecord]
+    @Published private var recordsState = RecordsStateStore()
     @Published private var studyRoomState = StudyRoomStateStore()
     @Published var backendStats: BackendStats?
     @Published var isBackendStatsLoading = false
@@ -159,6 +159,10 @@ final class AppState: ObservableObject {
 
     var backendStudyRooms: [BackendStudyRoom] {
         studyRoomState.rooms
+    }
+
+    var studyRecords: [StudyRecord] {
+        recordsState.records
     }
 
     var studyCategoriesForDisplay: [StudyCategory] {
@@ -682,22 +686,14 @@ final class AppState: ObservableObject {
     }
 
     private var pendingRecordsIncludingCurrent: [StudyRecord] {
-        var records = studyRecords.filter { $0.gradingResult == nil }
-
-        if let currentQuestion,
-           gradingResult == nil,
-           !records.contains(where: { studyRecordMatches($0, question: currentQuestion) }) {
-            records.append(
-                StudyRecord(
-                    question: currentQuestion,
-                    answer: lastAnswer.isEmpty ? nil : lastAnswer,
-                    topic: settings.topic,
-                    difficulty: settings.difficulty
-                )
-            )
-        }
-
-        return records
+        recordsState.pendingRecordsIncludingCurrent(
+            currentQuestion: currentQuestion,
+            gradingResult: gradingResult,
+            lastAnswer: lastAnswer,
+            fallbackTopic: settings.topic,
+            fallbackDifficulty: settings.difficulty,
+            matches: studyRecordMatches
+        )
     }
 
     var canSkipCurrentQuestion: Bool {
@@ -771,7 +767,7 @@ final class AppState: ObservableObject {
         if shouldRecoverLegacyRunningState {
             settingsStore.saveIsRunning(true)
         }
-        self.studyRecords = settingsStore.loadStudyRecords()
+        self.recordsState = RecordsStateStore(records: settingsStore.loadStudyRecords())
         self.backendStats = nil
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
@@ -1578,8 +1574,7 @@ final class AppState: ObservableObject {
             mergeBackendRecord(pendingRecord, into: records)
         }
         settingsStore.replaceBackendStudyRecords(mergedRecords)
-        studyRecords = settingsStore.loadStudyRecords()
-        refreshBackendStudyRoomsFromRecords()
+        reloadStudyRecordsFromStore(refreshRooms: true)
 
         guard updateVisibleQuestion else {
             if preserveLocalQuestionState {
@@ -1621,7 +1616,7 @@ final class AppState: ObservableObject {
         lastAnswer = settingsStore.loadLastAnswer()
         gradingResult = settingsStore.loadGradingResult()
         isRunning = settingsStore.loadIsRunning()
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore(refreshRooms: true)
         apiKey = loadedAPIKey
         savedSettings = synchronizedLoadedSettings
         savedAPIKey = loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1650,7 +1645,14 @@ final class AppState: ObservableObject {
         currentQuestion = settingsStore.loadQuestion()
         lastAnswer = settingsStore.loadLastAnswer()
         gradingResult = settingsStore.loadGradingResult()
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore(refreshRooms: true)
+    }
+
+    private func reloadStudyRecordsFromStore(refreshRooms: Bool = false) {
+        recordsState.replace(with: settingsStore.loadStudyRecords())
+        if refreshRooms {
+            refreshBackendStudyRoomsFromRecords()
+        }
     }
 
     private func showPendingQuestionLimitStatus(reason: String) {
@@ -2984,7 +2986,7 @@ final class AppState: ObservableObject {
         statusMessage = "답변을 채점 중입니다."
         settingsStore.saveAnswerDraft(submittedAnswer, recordID: record.id)
         settingsStore.updateStudyRecordAnswer(question: record.question, answer: submittedAnswer, onlyIfUngraded: true)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         refreshBackendStudyRoomsFromRecords()
         log(.info, "학습룸 질문 답변 채점 요청을 전송합니다. recordID=\(record.id)")
 
@@ -3228,7 +3230,7 @@ final class AppState: ObservableObject {
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
         savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         if trimmedAPIKey.isEmpty {
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
@@ -3361,7 +3363,7 @@ final class AppState: ObservableObject {
         settings.intervalMinutes = min(max(minutes, 1), 240)
         settingsStore.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         statusMessage = "질문 간격을 \(settings.intervalMinutes)분으로 설정했습니다."
         log(.info, "질문 간격을 \(settings.intervalMinutes)분으로 변경했습니다.")
         markCloudDataChanged()
@@ -3399,7 +3401,7 @@ final class AppState: ObservableObject {
         updateAppLanguage(language)
         settingsStore.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         StudyNotificationDelegate.shared.register(language: language)
         statusMessage = language == .korean ? "앱 언어를 한국어로 설정했습니다." : "App language set to English."
         log(.info, "앱 언어를 \(language.rawValue)로 변경했습니다.")
@@ -3464,7 +3466,7 @@ final class AppState: ObservableObject {
             )
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
-            studyRecords = settingsStore.loadStudyRecords()
+            reloadStudyRecordsFromStore()
             studyRoomState.setPendingQuestion(record, forStudyID: studyID)
 
             let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
@@ -3750,7 +3752,7 @@ final class AppState: ObservableObject {
         lastAnswer = answerToGrade
         settingsStore.saveLastAnswer(answerToGrade)
         settingsStore.updateStudyRecordAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-current-answer") else {
@@ -3790,7 +3792,7 @@ final class AppState: ObservableObject {
         settingsStore.saveGradingResult(record.gradingResult)
         settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         notificationService.cancelQuestionNotification(for: record.question)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         hasAPIKeyError = false
         statusMessage = "채점이 완료됐습니다."
         log(.info, "백엔드에서 답변을 채점했습니다. score=\(record.gradingResult?.score ?? 0)")
@@ -3799,7 +3801,7 @@ final class AppState: ObservableObject {
     private func applyStudyRoomRecord(_ record: StudyRecord, answer: String) {
         settingsStore.deleteAnswerDraft(recordID: record.id)
         settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         studyRoomState.applyAnsweredRecord(record)
         notificationService.cancelQuestionNotification(for: record.question)
         hasAPIKeyError = false
@@ -3883,7 +3885,7 @@ final class AppState: ObservableObject {
         }
 
         settingsStore.deleteAnswerDraft(recordID: record.id)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         studyRoomState.clearPendingQuestion(recordID: record.id)
 
         if matchesCurrentQuestion {
@@ -4014,12 +4016,7 @@ final class AppState: ObservableObject {
     }
 
     private func updateLoadedStudyRecordAnswer(question: QuestionItem, answer: String) {
-        guard let index = studyRecords.lastIndex(where: { studyRecordMatches($0, question: question) }),
-              studyRecords[index].gradingResult == nil else {
-            return
-        }
-
-        studyRecords[index].answer = answer
+        recordsState.updateAnswer(for: question, answer: answer, matches: studyRecordMatches)
     }
 
     func selectStudyRecord(_ record: StudyRecord) {
@@ -4082,7 +4079,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRecordFromNotification(questionCreatedAt: TimeInterval?, replyText: String? = nil) -> Bool {
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
 
         let matchingRecord = recordMatching(questionCreatedAt: questionCreatedAt)
         let record = matchingRecord
@@ -4112,7 +4109,7 @@ final class AppState: ObservableObject {
             settingsStore.updateStudyRecordAnswer(question: record.question, answer: trimmedReply)
         }
 
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         let refreshedRecord = recordMatching(questionCreatedAt: questionCreatedAt) ??
             studyRecords.first { $0.id == record.id } ??
             record
@@ -4147,7 +4144,7 @@ final class AppState: ObservableObject {
             }
 
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
-            studyRecords = settingsStore.loadStudyRecords()
+            reloadStudyRecordsFromStore()
 
             if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
                 lastAnswer = record.answer ?? lastAnswer
@@ -4196,7 +4193,7 @@ final class AppState: ObservableObject {
             return true
         }
 
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmedReply.isEmpty else {
@@ -4224,7 +4221,7 @@ final class AppState: ObservableObject {
             settingsStore.saveLastAnswer(trimmedReply)
         }
 
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         markCloudDataChanged()
         return true
     }
@@ -4325,7 +4322,7 @@ final class AppState: ObservableObject {
             settingsStore.saveLastAnswer(trimmedReply)
         }
 
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         if showStatus {
             statusMessage = "알림 답장을 기록에 저장했습니다."
         }
@@ -4359,7 +4356,8 @@ final class AppState: ObservableObject {
     func clearStudyRecords() {
         notificationService.cancelQuestionNotifications(for: studyRecords.map(\.question))
         settingsStore.clearStudyRecords()
-        studyRecords = []
+        recordsState.clear()
+        refreshBackendStudyRoomsFromRecords()
         notificationLandingMessage = nil
         statusMessage = "학습 기록을 삭제했습니다."
         log(.warning, "학습 기록을 모두 삭제했습니다.")
@@ -4382,7 +4380,7 @@ final class AppState: ObservableObject {
     func deleteStudyRecord(_ record: StudyRecord) {
         notificationService.cancelQuestionNotification(for: record.question)
         settingsStore.deleteStudyRecord(record)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         notificationLandingMessage = nil
 
         if SettingsStore.normalizedQuestionText(currentQuestion?.question ?? "") ==
@@ -4426,7 +4424,7 @@ final class AppState: ObservableObject {
             isPublic: isPublic
         )
         settingsStore.saveStudyRecord(updatedRecord)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         markCloudDataChanged()
 
         guard let registration = settingsStore.loadRemotePushRegistration() else {
@@ -4444,7 +4442,7 @@ final class AppState: ObservableObject {
                     isPublic: isPublic
                 )
                 settingsStore.saveStudyRecord(backendRecord)
-                studyRecords = settingsStore.loadStudyRecords()
+                reloadStudyRecordsFromStore()
             } catch {
                 log(.warning, "기록 공개 상태 변경 실패: \(error.localizedDescription)")
             }
@@ -5105,7 +5103,7 @@ final class AppState: ObservableObject {
 
         settingsStore.appendQuestionToHistory(push.question)
         settingsStore.appendStudyRecord(question: push.question, settings: pushSettings)
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         return true
     }
 
@@ -5911,7 +5909,7 @@ final class AppState: ObservableObject {
         )
         settingsStore.saveCloudSyncStateUpdatedAt(nextCloudSyncTimestamp)
 
-        studyRecords = settingsStore.loadStudyRecords()
+        reloadStudyRecordsFromStore()
         savedSettings = effectiveSettings
         cloudLastSyncedAt = nextCloudSyncTimestamp
         restartTimer()
@@ -6261,32 +6259,11 @@ final class AppState: ObservableObject {
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {
-        guard let questionCreatedAt else {
-            return nil
-        }
-
-        return studyRecords
-            .map {
-                (
-                    record: $0,
-                    distance: abs($0.question.createdAt.timeIntervalSince1970 - questionCreatedAt)
-                )
-            }
-            .filter { $0.distance < 1 }
-            .min { $0.distance < $1.distance }?
-            .record
+        recordsState.record(questionCreatedAt: questionCreatedAt)
     }
 
     private func studyRecord(matching question: QuestionItem?) -> StudyRecord? {
-        guard let question else {
-            return nil
-        }
-
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
-        return studyRecords.last {
-            $0.question.createdAt == question.createdAt ||
-                SettingsStore.normalizedQuestionText($0.question.question) == normalizedQuestion
-        }
+        recordsState.record(matching: question, matches: studyRecordMatches)
     }
 
     nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
