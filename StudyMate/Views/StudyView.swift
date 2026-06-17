@@ -23,18 +23,18 @@ struct StudyView: View {
 
                 Divider()
 
-                if selectedCurrentQuestion != nil,
+                if selectedStudyRecord != nil,
                    let notificationLandingMessage = appState.notificationLandingMessage {
                     notificationLandingInlineView(message: notificationLandingMessage, strings: strings)
                 }
 
                 Group {
-                    if let question = selectedCurrentQuestion {
+                    if let record = selectedStudyRecord {
                         StudyConversationSection(
-                            question: question,
+                            question: record.question,
                             draftAnswer: $draftAnswer,
                             showsHint: $showsHint,
-                            gradingResult: appState.gradingResult,
+                            gradingResult: record.gradingResult,
                             isGradingAnswer: appState.isGradingAnswer,
                             canSubmitAnswer: canSubmitAnswer,
                             strings: strings,
@@ -42,7 +42,9 @@ struct StudyView: View {
                                 answerEditor()
                             },
                             onSubmit: submitCurrentAnswer,
-                            onSkip: appState.skipCurrentQuestion
+                            onSkip: {
+                                appState.skipStudyRoomRecord(record)
+                            }
                         )
                     } else {
                         noQuestionView(strings: strings)
@@ -74,7 +76,7 @@ struct StudyView: View {
             Text(strings.pendingQuestionLimitMessage)
         }
         .onAppear {
-            draftAnswer = appState.lastAnswer
+            draftAnswer = appState.answerDraft(for: selectedStudyRecord)
         }
         .task(id: preferredCategoryID) {
             await appState.prepareStudyRoom(categoryID: preferredCategoryID)
@@ -83,44 +85,30 @@ struct StudyView: View {
             appState.flushPendingAnswerDraftSave()
         }
         .onChange(of: draftAnswer) {
-            if draftAnswer != appState.lastAnswer {
-                appState.updateAnswer(draftAnswer)
+            if let selectedStudyRecord,
+               draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
+                appState.updateAnswer(draftAnswer, for: selectedStudyRecord)
             }
         }
-        .onChange(of: appState.lastAnswer) {
-            if draftAnswer != appState.lastAnswer {
-                draftAnswer = appState.lastAnswer
-            }
-        }
-        .onChange(of: appState.currentQuestion?.createdAt) {
+        .onChange(of: selectedStudyRecord?.id) {
             showsHint = false
-            draftAnswer = appState.lastAnswer
+            draftAnswer = appState.answerDraft(for: selectedStudyRecord)
+        }
+        .onChange(of: selectedStudyRecord?.answer) {
+            if draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
+                draftAnswer = appState.answerDraft(for: selectedStudyRecord)
+            }
         }
     }
 
     private var canSubmitAnswer: Bool {
-        selectedCurrentQuestion != nil &&
+        selectedStudyRecord?.gradingResult == nil &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !appState.isGradingAnswer
     }
 
-    private var selectedCurrentQuestion: QuestionItem? {
-        guard let currentQuestion = appState.currentQuestion else {
-            return nil
-        }
-
-        guard preferredCategoryID != nil else {
-            return currentQuestion
-        }
-
-        let selectedTopicKey = normalizedTopicKey(selectedTopic)
-        if let currentRecord = appState.studyRecords.last(where: { record in
-            questionMatches(record.question, currentQuestion)
-        }) {
-            return normalizedTopicKey(currentRecord.topic) == selectedTopicKey ? currentQuestion : nil
-        }
-
-        return normalizedTopicKey(appState.settings.topic) == selectedTopicKey ? currentQuestion : nil
+    private var selectedStudyRecord: StudyRecord? {
+        appState.backendStudyRoom(categoryID: preferredCategoryID)?.pendingQuestion
     }
 
     private var selectedDifficulty: Difficulty {
@@ -162,11 +150,6 @@ struct StudyView: View {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined()
-    }
-
-    private func questionMatches(_ lhs: QuestionItem, _ rhs: QuestionItem) -> Bool {
-        lhs.createdAt == rhs.createdAt ||
-            SettingsStore.normalizedQuestionText(lhs.question) == SettingsStore.normalizedQuestionText(rhs.question)
     }
 
     @ViewBuilder
@@ -315,12 +298,16 @@ struct StudyView: View {
     }
 
     private func submitCurrentAnswer() {
+        guard let selectedStudyRecord else {
+            return
+        }
+
         #if os(iOS)
         isAnswerEditorFocused = false
         #endif
 
         Task {
-            await appState.gradeCurrentAnswer(answer: draftAnswer)
+            await appState.gradeStudyRoomRecord(selectedStudyRecord, answer: draftAnswer)
         }
     }
 }

@@ -11,6 +11,7 @@ final class SettingsStore {
         static let studyRecords = "studyRecords"
         static let gradingResult = "gradingResult"
         static let lastAnswer = "lastAnswer"
+        static let answerDraftsByRecordID = "answerDraftsByRecordID"
         static let isRunning = "isRunning"
         static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
         static let apiKey = "openAIAPIKey"
@@ -334,6 +335,40 @@ final class SettingsStore {
 
     func saveLastAnswer(_ answer: String) {
         defaults.set(answer, forKey: Keys.lastAnswer)
+    }
+
+    func loadAnswerDraft(recordID: String) -> String {
+        loadAnswerDraftsByRecordID()[recordID] ?? ""
+    }
+
+    func saveAnswerDraft(_ answer: String, recordID: String) {
+        var drafts = loadAnswerDraftsByRecordID()
+        if answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            drafts.removeValue(forKey: recordID)
+        } else {
+            drafts[recordID] = answer
+        }
+        saveAnswerDraftsByRecordID(drafts)
+    }
+
+    func deleteAnswerDraft(recordID: String) {
+        var drafts = loadAnswerDraftsByRecordID()
+        drafts.removeValue(forKey: recordID)
+        saveAnswerDraftsByRecordID(drafts)
+    }
+
+    private func loadAnswerDraftsByRecordID() -> [String: String] {
+        guard let data = defaults.data(forKey: Keys.answerDraftsByRecordID),
+              let drafts = try? decoder.decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return drafts
+    }
+
+    private func saveAnswerDraftsByRecordID(_ drafts: [String: String]) {
+        if let data = try? encoder.encode(drafts) {
+            defaults.set(data, forKey: Keys.answerDraftsByRecordID)
+        }
     }
 
     func loadIsRunning() -> Bool {

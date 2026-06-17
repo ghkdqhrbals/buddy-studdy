@@ -126,6 +126,7 @@ final class AppState: ObservableObject {
     @Published var isGradingAnswer = false
     @Published var isRunning: Bool
     @Published var studyRecords: [StudyRecord]
+    @Published var backendStudyRooms: [BackendStudyRoom] = []
     @Published var backendStats: BackendStats?
     @Published var isBackendStatsLoading = false
     @Published var backendStatsErrorMessage: String?
@@ -220,6 +221,7 @@ final class AppState: ObservableObject {
 
     private struct PendingAnswerDraft {
         var question: QuestionItem?
+        var recordID: String? = nil
         var answer: String
     }
     private var apiTrafficLogCancellable: AnyCancellable?
@@ -1235,6 +1237,7 @@ final class AppState: ObservableObject {
     }
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
+        backendStudyRooms = studyPage.studies
         guard !isEditingSettings, !studyPage.studies.isEmpty else {
             return
         }
@@ -1288,6 +1291,19 @@ final class AppState: ObservableObject {
         savedSettings = nextSettings
         draftSettings = nextSettings
         settingsStore.saveSettings(nextSettings)
+    }
+
+    private func refreshBackendStudyRoomsFromRecords() {
+        backendStudyRooms = backendStudyRooms.map { room in
+            guard let pendingQuestion = room.pendingQuestion,
+                  let refreshedRecord = studyRecords.first(where: { $0.id == pendingQuestion.id }) else {
+                return room
+            }
+
+            var nextRoom = room
+            nextRoom.pendingQuestion = refreshedRecord
+            return nextRoom
+        }
     }
 
     func searchBackendStudies(query: String) async {
@@ -1560,6 +1576,7 @@ final class AppState: ObservableObject {
         }
         settingsStore.replaceBackendStudyRecords(mergedRecords)
         studyRecords = settingsStore.loadStudyRecords()
+        refreshBackendStudyRoomsFromRecords()
 
         guard updateVisibleQuestion else {
             if preserveLocalQuestionState {
@@ -2916,6 +2933,103 @@ final class AppState: ObservableObject {
         applyPreferredPendingRecord(for: refreshedCategory)
     }
 
+    func backendStudyRoom(categoryID: String?) -> BackendStudyRoom? {
+        if let categoryID,
+           let studyID = Int(categoryID),
+           let room = backendStudyRooms.first(where: { $0.id == studyID }) {
+            return room
+        }
+
+        if let categoryID,
+           let category = settings.category(for: categoryID),
+           let room = backendStudyRooms.first(where: {
+               Self.normalizedCategoryText(for: $0.topic) == Self.normalizedCategoryText(for: category.title)
+           }) {
+            return room
+        }
+
+        if let selectedCategoryID = settings.selectedStudyCategoryID,
+           let studyID = Int(selectedCategoryID),
+           let room = backendStudyRooms.first(where: { $0.id == studyID }) {
+            return room
+        }
+
+        return backendStudyRooms.first
+    }
+
+    func answerDraft(for record: StudyRecord?) -> String {
+        guard let record else {
+            return ""
+        }
+
+        let draft = settingsStore.loadAnswerDraft(recordID: record.id)
+        return draft.isEmpty
+            ? record.answer ?? ""
+            : draft
+    }
+
+    func updateAnswer(_ answer: String, for record: StudyRecord) {
+        pendingAnswerDraft = PendingAnswerDraft(question: record.question, recordID: record.id, answer: answer)
+        answerDraftSaveTask?.cancel()
+        answerDraftSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 450_000_000)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                self?.persistPendingAnswerDraft()
+            }
+        }
+    }
+
+    func gradeStudyRoomRecord(_ record: StudyRecord, answer submittedAnswer: String) async {
+        flushPendingAnswerDraftSave()
+
+        let trimmedAnswer = submittedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAnswer.isEmpty else {
+            errorMessage = "답변을 입력하세요."
+            return
+        }
+
+        isGradingAnswer = true
+        defer {
+            isGradingAnswer = false
+        }
+
+        errorMessage = nil
+        statusMessage = "답변을 채점 중입니다."
+        settingsStore.saveAnswerDraft(submittedAnswer, recordID: record.id)
+        settingsStore.updateStudyRecordAnswer(question: record.question, answer: submittedAnswer, onlyIfUngraded: true)
+        studyRecords = settingsStore.loadStudyRecords()
+        refreshBackendStudyRoomsFromRecords()
+        log(.info, "학습룸 질문 답변 채점 요청을 전송합니다. recordID=\(record.id)")
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-study-room-answer") else {
+            errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
+            statusMessage = nil
+            log(.warning, "백엔드 등록이 없어 학습룸 질문 채점을 중단했습니다.")
+            return
+        }
+
+        do {
+            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+                registration: registration,
+                recordID: record.id,
+                answer: trimmedAnswer
+            )
+            applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
+            await syncRemotePushScheduleIfPossible(reason: "grade")
+        } catch {
+            handleOpenAIError(error)
+            statusMessage = nil
+        }
+    }
+
+    func skipStudyRoomRecord(_ record: StudyRecord) {
+        skipPendingQuestion(record, shouldOpenNextQuestion: false)
+    }
+
     func deleteStudyCategory(id: String) {
         guard let index = studyCategoriesForDisplay.firstIndex(where: { $0.id == id }) else {
             return
@@ -3368,6 +3482,15 @@ final class AppState: ObservableObject {
             settingsStore.appendQuestionToHistory(record.question)
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             studyRecords = settingsStore.loadStudyRecords()
+            backendStudyRooms = backendStudyRooms.map { room in
+                guard room.id == studyID else {
+                    return room
+                }
+
+                var nextRoom = room
+                nextRoom.pendingQuestion = record
+                return nextRoom
+            }
 
             let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
             if shouldActivateQuestion {
@@ -3698,6 +3821,25 @@ final class AppState: ObservableObject {
         log(.info, "백엔드에서 답변을 채점했습니다. score=\(record.gradingResult?.score ?? 0)")
     }
 
+    private func applyStudyRoomRecord(_ record: StudyRecord, answer: String) {
+        settingsStore.deleteAnswerDraft(recordID: record.id)
+        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        studyRecords = settingsStore.loadStudyRecords()
+        backendStudyRooms = backendStudyRooms.map { room in
+            guard room.pendingQuestion?.id == record.id else {
+                return room
+            }
+
+            var nextRoom = room
+            nextRoom.pendingQuestion = record
+            return nextRoom
+        }
+        notificationService.cancelQuestionNotification(for: record.question)
+        hasAPIKeyError = false
+        statusMessage = "채점이 완료됐습니다."
+        log(.info, "학습룸 답변을 채점했습니다. recordID=\(record.id), score=\(record.gradingResult?.score ?? 0)")
+    }
+
     func gradeRecord(_ record: StudyRecord, answer: String) async {
         let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAnswer.isEmpty else {
@@ -3747,10 +3889,10 @@ final class AppState: ObservableObject {
             difficulty: settings.difficulty
         )
 
-        skipPendingQuestion(skippedRecord)
+        skipPendingQuestion(skippedRecord, shouldOpenNextQuestion: true)
     }
 
-    func skipPendingQuestion(_ record: StudyRecord) {
+    func skipPendingQuestion(_ record: StudyRecord, shouldOpenNextQuestion: Bool = true) {
         guard record.gradingResult == nil else {
             return
         }
@@ -3773,12 +3915,34 @@ final class AppState: ObservableObject {
             return
         }
 
+        settingsStore.deleteAnswerDraft(recordID: record.id)
         studyRecords = settingsStore.loadStudyRecords()
+        backendStudyRooms = backendStudyRooms.map { room in
+            guard room.pendingQuestion?.id == record.id else {
+                return room
+            }
+
+            var nextRoom = room
+            nextRoom.pendingQuestion = nil
+            return nextRoom
+        }
 
         if matchesCurrentQuestion {
             self.currentQuestion = nil
             lastAnswer = ""
             gradingResult = nil
+
+            guard shouldOpenNextQuestion else {
+                settingsStore.saveQuestion(nil)
+                settingsStore.saveLastAnswer("")
+                settingsStore.saveGradingResult(nil)
+                statusMessage = "질문을 넘겼습니다."
+                errorMessage = nil
+                log(.info, "미제출 질문을 넘겼습니다.")
+                sendRemoteSkip(for: record)
+                markCloudDataChanged(syncDelaySeconds: 0)
+                return
+            }
 
             let remainingPendingRecords = studyRecords
                 .filter { $0.gradingResult == nil }
@@ -3804,6 +3968,11 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         log(.info, "미제출 질문을 넘겼습니다.")
+        sendRemoteSkip(for: record)
+        markCloudDataChanged(syncDelaySeconds: 0)
+    }
+
+    private func sendRemoteSkip(for record: StudyRecord) {
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
                 do {
@@ -3818,7 +3987,6 @@ final class AppState: ObservableObject {
                 }
             }
         }
-        markCloudDataChanged(syncDelaySeconds: 0)
     }
 
     func openOldestPendingQuestion() {
@@ -3864,6 +4032,10 @@ final class AppState: ObservableObject {
     }
 
     private func persistAnswerDraft(_ draft: PendingAnswerDraft) {
+        if let recordID = draft.recordID {
+            settingsStore.saveAnswerDraft(draft.answer, recordID: recordID)
+        }
+
         guard let question = draft.question else {
             lastAnswer = draft.answer
             settingsStore.saveLastAnswer(draft.answer)
