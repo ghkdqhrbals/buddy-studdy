@@ -642,7 +642,11 @@ final class AppState: ObservableObject {
     }
 
     var pendingQuestionCount: Int {
-        pendingRecordsIncludingCurrent.count
+        if !backendStudyRooms.isEmpty {
+            return backendStudyRooms.filter { Self.isPendingStudyRoomQuestion($0.pendingQuestion) }.count
+        }
+
+        return pendingRecordsIncludingCurrent.count
     }
 
     var hasReachedPendingQuestionLimit: Bool {
@@ -651,17 +655,25 @@ final class AppState: ObservableObject {
 
     func pendingQuestionCount(for category: StudyCategory) -> Int {
         let categoryKey = Self.normalizedCategoryText(for: category.title)
-        let backendPendingCount = backendStudyRooms.filter {
-            Self.normalizedCategoryText(for: $0.topic) == categoryKey && $0.pendingQuestion?.gradingResult == nil
-        }.count
+        let matchingBackendRooms = backendStudyRooms.filter {
+            Self.normalizedCategoryText(for: $0.topic) == categoryKey
+        }
 
-        guard backendPendingCount == 0 else {
-            return backendPendingCount
+        if !matchingBackendRooms.isEmpty {
+            return matchingBackendRooms.filter { Self.isPendingStudyRoomQuestion($0.pendingQuestion) }.count
         }
 
         return pendingRecordsIncludingCurrent.filter {
             Self.normalizedCategoryText(for: $0.topic) == categoryKey
         }.count
+    }
+
+    private static func isPendingStudyRoomQuestion(_ record: StudyRecord?) -> Bool {
+        guard let record else {
+            return false
+        }
+
+        return record.gradingResult == nil
     }
 
     func hasReachedPendingQuestionLimit(for category: StudyCategory?) -> Bool {
