@@ -18,6 +18,7 @@
 		110000000000000000000178 /* RecordsStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000022 /* RecordsStateStore.swift */; };
 		110000000000000000000179 /* SearchStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000023 /* SearchStateStore.swift */; };
 		11000000000000000000017A /* BackendRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000024 /* BackendRuntimeStateStore.swift */; };
+		11000000000000000000017B /* StatsStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000025 /* StatsStateStore.swift */; };
 		110000000000000000000108 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000008 /* RootView.swift */; };
 		110000000000000000000109 /* StudyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000009 /* StudyView.swift */; };
 		11000000000000000000010A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000A /* SettingsView.swift */; };
@@ -49,6 +50,7 @@
 		12000000000000000000011A /* RecordsStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000022 /* RecordsStateStore.swift */; };
 		12000000000000000000011B /* SearchStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000023 /* SearchStateStore.swift */; };
 		12000000000000000000011C /* BackendRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000024 /* BackendRuntimeStateStore.swift */; };
+		12000000000000000000011D /* StatsStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000025 /* StatsStateStore.swift */; };
 		120000000000000000000109 /* StudyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000009 /* StudyView.swift */; };
 		12000000000000000000010E /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000E /* HistoryView.swift */; };
 		12000000000000000000010F /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000F /* StatisticsView.swift */; };
@@ -119,6 +121,7 @@
 		110000000000000000000022 /* RecordsStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsStateStore.swift; sourceTree = "<group>"; };
 		110000000000000000000023 /* SearchStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchStateStore.swift; sourceTree = "<group>"; };
 		110000000000000000000024 /* BackendRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendRuntimeStateStore.swift; sourceTree = "<group>"; };
+		110000000000000000000025 /* StatsStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsStateStore.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -225,6 +228,7 @@
 				110000000000000000000022 /* RecordsStateStore.swift */,
 				110000000000000000000023 /* SearchStateStore.swift */,
 				110000000000000000000024 /* BackendRuntimeStateStore.swift */,
+				110000000000000000000025 /* StatsStateStore.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -449,6 +453,7 @@
 				110000000000000000000178 /* RecordsStateStore.swift in Sources */,
 				110000000000000000000179 /* SearchStateStore.swift in Sources */,
 				11000000000000000000017A /* BackendRuntimeStateStore.swift in Sources */,
+				11000000000000000000017B /* StatsStateStore.swift in Sources */,
 				110000000000000000000108 /* RootView.swift in Sources */,
 				110000000000000000000109 /* StudyView.swift in Sources */,
 				11000000000000000000010E /* HistoryView.swift in Sources */,
@@ -488,6 +493,7 @@
 				12000000000000000000011A /* RecordsStateStore.swift in Sources */,
 				12000000000000000000011B /* SearchStateStore.swift in Sources */,
 				12000000000000000000011C /* BackendRuntimeStateStore.swift in Sources */,
+				12000000000000000000011D /* StatsStateStore.swift in Sources */,
 				120000000000000000000109 /* StudyView.swift in Sources */,
 				12000000000000000000010E /* HistoryView.swift in Sources */,
 				12000000000000000000010F /* StatisticsView.swift in Sources */,

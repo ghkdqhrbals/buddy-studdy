@@ -127,9 +127,7 @@ final class AppState: ObservableObject {
     @Published var isRunning: Bool
     @Published private var recordsState = RecordsStateStore()
     @Published private var studyRoomState = StudyRoomStateStore()
-    @Published var backendStats: BackendStats?
-    @Published var isBackendStatsLoading = false
-    @Published var backendStatsErrorMessage: String?
+    @Published private var statsState = StatsStateStore()
     @Published var hasAPIKeyError = false
     @Published var isValidatingAPIKey = false
     @Published var appLogs: [AppLogEntry]
@@ -170,6 +168,18 @@ final class AppState: ObservableObject {
 
     var recordSearchResults: [StudyRecord]? {
         searchState.recordResults
+    }
+
+    var backendStats: BackendStats? {
+        statsState.stats
+    }
+
+    var isBackendStatsLoading: Bool {
+        statsState.isLoading
+    }
+
+    var backendStatsErrorMessage: String? {
+        statsState.errorMessage
     }
 
     var backendAccessState: BackendAccessState {
@@ -281,7 +291,6 @@ final class AppState: ObservableObject {
     private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
     private var didReceiveCloudStateWhileEditing = false
-    private var backendStatsRequestID = UUID()
     private var communityQuestionLoadRequestID = UUID()
     private var backendHealthConsecutiveFailureCount = 0
 
@@ -826,7 +835,7 @@ final class AppState: ObservableObject {
             settingsStore.saveIsRunning(true)
         }
         self.recordsState = RecordsStateStore(records: settingsStore.loadStudyRecords())
-        self.backendStats = nil
+        self.statsState = StatsStateStore()
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
         self.lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
@@ -1454,6 +1463,35 @@ final class AppState: ObservableObject {
         replaceRecordSearchResults(nil)
     }
 
+    private func beginBackendStatsRequest() -> UUID {
+        var nextState = statsState
+        let requestID = nextState.beginRequest()
+        statsState = nextState
+        return requestID
+    }
+
+    private func isCurrentBackendStatsRequest(_ requestID: UUID) -> Bool {
+        statsState.isCurrentRequest(requestID)
+    }
+
+    private func finishBackendStatsRequest(_ requestID: UUID) {
+        var nextState = statsState
+        nextState.finishRequest(requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStats(_ stats: BackendStats, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyStats(stats, requestID: requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStatsError(_ message: String, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyError(message, requestID: requestID)
+        statsState = nextState
+    }
+
     func fetchBackendStats(
         period: BackendStatsPeriod = .all,
         sort: BackendStatsSort = .level,
@@ -1462,26 +1500,17 @@ final class AppState: ObservableObject {
         limit: Int = 8,
         offset: Int = 0
     ) async {
-        let requestID = UUID()
-        backendStatsRequestID = requestID
-
-        backendStatsErrorMessage = nil
-        isBackendStatsLoading = true
+        let requestID = beginBackendStatsRequest()
         defer {
-            if backendStatsRequestID == requestID {
-                isBackendStatsLoading = false
-            }
+            finishBackendStatsRequest(requestID)
         }
 
         let normalizedLimit = max(1, min(limit, 100))
         let normalizedOffset = max(0, offset)
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats") else {
-            backendStatsErrorMessage = "백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요."
+            applyBackendStatsError("백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요.", requestID: requestID)
             log(.warning, "통계 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
-            if backendStatsRequestID == requestID {
-                isBackendStatsLoading = false
-            }
             return
         }
 
@@ -1496,14 +1525,14 @@ final class AppState: ObservableObject {
                 offset: normalizedOffset
             )
 
-            guard requestID == backendStatsRequestID else {
+            guard isCurrentBackendStatsRequest(requestID) else {
                 return
             }
 
-            backendStats = stats
+            applyBackendStats(stats, requestID: requestID)
             log(.info, "통계 조회 완료. topics=\(stats.topics.count), totalTopics=\(stats.totalTopics), totalResponses=\(stats.totalResponses), offset=\(stats.offset)")
         } catch {
-            guard requestID == backendStatsRequestID else {
+            guard isCurrentBackendStatsRequest(requestID) else {
                 return
             }
 
@@ -1513,11 +1542,11 @@ final class AppState: ObservableObject {
             }
 
             if handlePageAccessError(error, page: .statistics) {
-                backendStatsErrorMessage = strings.pageAccessDenied(strings.tabStatistics)
+                applyBackendStatsError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
                 return
             }
 
-            backendStatsErrorMessage = backendErrorDisplayMessage(error, fallback: "통계 조회 실패")
+            applyBackendStatsError(backendErrorDisplayMessage(error, fallback: "통계 조회 실패"), requestID: requestID)
             log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
         }
     }
