@@ -54,6 +54,8 @@ class CommunityServiceTest {
         users.rows += UserEntity(id = 11, providerId = "u11", displayName = "Author B")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
         questions.rows += publicQuestion(id = 101, userId = 11, topic = "SwiftUI")
+        search.rows += searchRow(questionId = 100, userId = 10, topic = "Redis")
+        search.rows += searchRow(questionId = 101, userId = 11, topic = "SwiftUI")
         questionStats.rows += QuestionStatsEntity(questionId = 100, likeCount = 2, commentCount = 1, viewCount = 20)
         questionStats.rows += QuestionStatsEntity(questionId = 101, likeCount = 3, commentCount = 2, viewCount = 30)
         likes.rows += QuestionLikeEntity(questionId = 101, userId = 7)
@@ -172,6 +174,22 @@ class CommunityServiceTest {
         publicQuestion = true,
         createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
         updatedAt = Instant.parse("2026-06-10T01:00:00Z"),
+    )
+
+    private fun searchRow(questionId: Long, userId: Long, topic: String) = QuestionSearchEntity(
+        questionId = questionId,
+        language = "ko",
+        userId = userId,
+        topic = topic,
+        question = "Question $topic",
+        answer = "Answer",
+        feedback = "Good",
+        explanation = "Because",
+        authorDisplayName = "Author",
+        publicQuestion = true,
+        score = 90,
+        answeredAt = Instant.parse("2026-06-10T01:00:00Z"),
+        createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(questionId),
     )
 
     private class FakeUserPort : UserPort {
@@ -299,7 +317,10 @@ class CommunityServiceTest {
         }
         override fun deleteByQuestionId(questionId: Long): Long = 0
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
-            SearchResult(rows.filter { it.language == language }.map { it.questionId }, rows.count { it.language == language }.toLong())
+            rows
+                .filter { it.language == language }
+                .sortedByDescending { it.createdAt }
+                .let { SearchResult(it.map { row -> row.questionId }, it.size.toLong()) }
 
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }

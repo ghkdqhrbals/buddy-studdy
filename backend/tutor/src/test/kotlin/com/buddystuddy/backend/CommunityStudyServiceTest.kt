@@ -79,8 +79,9 @@ class CommunityStudyServiceTest {
         pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         answeredPublicQuestion(hiddenAuthor, "SwiftUI", createdAt = now.plusSeconds(1))
         answeredPublicQuestion(author, "SwiftUI", createdAt = now, deletedAt = now.plusSeconds(10))
+        questionSearch.refreshIndexedQuestion(visible)
 
-        val response = community.getPublicQuestions(null, "swift", language = "ko", limit = 10, offset = 0)
+        val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(1)
         val result = response.questions.single()
@@ -95,6 +96,7 @@ class CommunityStudyServiceTest {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
+        listOf(newest, older).forEach { questionSearch.refreshIndexedQuestion(it) }
 
         val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
 

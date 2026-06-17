@@ -56,17 +56,7 @@ class CommunityService(
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
     override fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
-        val pageable = PageRequest.of(offset / limit, limit)
-        val search = query?.trim()?.takeIf { it.isNotEmpty() }
-        val page = if (search == null) {
-            questions.findPublicAnswered(pageable)
-        } else {
-            questions.findPublicAnsweredByQuery(search, pageable)
-        }
-        val context = communityContext(page.content, principal)
-        val translatedById = translatedRows(page.content.map { it.id }, language)
-        val rows = page.content.map { community(it, context, translatedById[it.id]) }
-        return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
+        return getPublicQuestionsV2(principal, query, language, limit, offset)
     }
 
     @Transactional(readOnly = true)
