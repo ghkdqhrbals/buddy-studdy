@@ -475,9 +475,7 @@ final class AppState: ObservableObject {
 
     func refreshPageAccess(reason: String = "manual") async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "page-access-\(reason)") else {
-            backendAccessState = .signedOut
-            isCommunitySignedIn = false
-            settingsStore.saveIsCommunitySignedIn(false)
+            resetCommunitySignInState()
             return
         }
 
@@ -490,9 +488,7 @@ final class AppState: ObservableObject {
         } catch {
             if Self.isUnauthorizedBackendError(error) {
                 clearStoredBackendAccessToken()
-                backendAccessState = .signedOut
-                isCommunitySignedIn = false
-                settingsStore.saveIsCommunitySignedIn(false)
+                resetCommunitySignInState()
             }
             log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
         }
@@ -1903,9 +1899,7 @@ final class AppState: ObservableObject {
 
     func signOutFromCommunity() {
         let registrationForLogout = settingsStore.loadRemotePushRegistration()
-        isCommunitySignedIn = false
-        communityProfile = nil
-        settingsStore.saveIsCommunitySignedIn(false)
+        resetCommunitySignInState()
         if var registration = registrationForLogout {
             registration.accessToken = nil
             registration.accessTokenExpiresAt = nil
@@ -1937,6 +1931,19 @@ final class AppState: ObservableObject {
             }
         }
         statusMessage = strings.communitySignedOut
+    }
+
+    private func resetCommunitySignInState() {
+        isCommunitySignedIn = false
+        communityProfile = nil
+        profileAvatarSymbolName = "pixel-fox-scholar"
+        profileAvatarImageData = nil
+        backendAccessState = .signedOut
+        settingsStore.saveIsCommunitySignedIn(false)
+        settingsStore.saveProfileAvatarSymbolName(profileAvatarSymbolName)
+        settingsStore.saveProfileAvatarImageData(nil)
+        settingsStore.saveCommunityProfileID(nil)
+        settingsStore.saveCommunityProfileDisplayName("")
     }
 
     func updateProfileAvatarSymbolName(_ symbolName: String) {
