@@ -154,8 +154,7 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
     @Published var backendAccessState: BackendAccessState = .signedOut
-    @Published var homeStudySearchResults: [StudyCategory]? = nil
-    @Published var recordSearchResults: [StudyRecord]? = nil
+    @Published private var searchState = SearchStateStore()
 
     var backendStudyRooms: [BackendStudyRoom] {
         studyRoomState.rooms
@@ -163,6 +162,25 @@ final class AppState: ObservableObject {
 
     var studyRecords: [StudyRecord] {
         recordsState.records
+    }
+
+    var homeStudySearchResults: [StudyCategory]? {
+        searchState.homeStudyResults
+    }
+
+    var recordSearchResults: [StudyRecord]? {
+        searchState.recordResults
+    }
+
+    var communitySearchText: String {
+        get {
+            searchState.communityQuery
+        }
+        set {
+            var nextState = searchState
+            nextState.communityQuery = newValue
+            searchState = nextState
+        }
     }
 
     var studyCategoriesForDisplay: [StudyCategory] {
@@ -181,7 +199,6 @@ final class AppState: ObservableObject {
     @Published var cloudLastSyncedAt: Date?
     @Published var isBackendOpenAIKeyConfigured = false
     @Published var communityQuestions: [CommunityQuestion] = []
-    @Published var communitySearchText = ""
     @Published var communityTotalCount = 0
     @Published var communityOffset = 0
     @Published var isLoadingCommunityQuestions = false
@@ -1305,16 +1322,28 @@ final class AppState: ObservableObject {
         studyRoomState.refreshPendingQuestions(from: studyRecords)
     }
 
+    private func replaceHomeStudySearchResults(_ results: [StudyCategory]?) {
+        var nextState = searchState
+        nextState.replaceHomeStudyResults(results)
+        searchState = nextState
+    }
+
+    private func replaceRecordSearchResults(_ results: [StudyRecord]?) {
+        var nextState = searchState
+        nextState.replaceRecordResults(results)
+        searchState = nextState
+    }
+
     func searchBackendStudies(query: String) async {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
-            homeStudySearchResults = nil
+            replaceHomeStudySearchResults(nil)
             return
         }
 
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "study-search") else {
-            homeStudySearchResults = []
+            replaceHomeStudySearchResults([])
             return
         }
 
@@ -1331,7 +1360,7 @@ final class AppState: ObservableObject {
                     result[key] = category
                 }
             }
-            homeStudySearchResults = page.studies.map { room in
+            replaceHomeStudySearchResults(page.studies.map { room in
                 let existing = existingCategoriesByTopic[Self.normalizedCategoryText(for: room.topic)]
                 return StudyCategory(
                     id: existing?.id ?? String(room.id),
@@ -1341,27 +1370,27 @@ final class AppState: ObservableObject {
                     openAIModel: room.openAIModel,
                     createdAt: existing?.createdAt ?? room.createdAt
                 )
-            }
+            })
         } catch {
-            homeStudySearchResults = []
+            replaceHomeStudySearchResults([])
             log(.warning, "학습 검색 실패: \(error.localizedDescription)")
         }
     }
 
     func clearBackendStudySearchResults() {
-        homeStudySearchResults = nil
+        replaceHomeStudySearchResults(nil)
     }
 
     func searchBackendRecords(query: String, limit: Int? = nil) async {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
-            recordSearchResults = nil
+            replaceRecordSearchResults(nil)
             return
         }
 
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
-            recordSearchResults = []
+            replaceRecordSearchResults([])
             return
         }
 
@@ -1373,15 +1402,15 @@ final class AppState: ObservableObject {
                 query: trimmedQuery,
                 language: settings.appLanguage
             )
-            recordSearchResults = page.records
+            replaceRecordSearchResults(page.records)
         } catch {
-            recordSearchResults = []
+            replaceRecordSearchResults([])
             log(.warning, "기록 검색 실패: \(error.localizedDescription)")
         }
     }
 
     func clearBackendRecordSearchResults() {
-        recordSearchResults = nil
+        replaceRecordSearchResults(nil)
     }
 
     func fetchBackendStats(
