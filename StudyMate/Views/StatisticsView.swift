@@ -1211,15 +1211,11 @@ private struct ActivityWeek: Identifiable {
     }
 
     var monthLabel: String {
-        guard let first = days.first else {
-            return ""
-        }
         let calendar = Self.weekCalendar
-        let containsEarlyMonthDay = days.contains { calendar.component(.day, from: $0.date) <= 7 }
-        guard containsEarlyMonthDay else {
+        guard let monthStart = days.first(where: { calendar.component(.day, from: $0.date) == 1 }) else {
             return ""
         }
-        return "\(calendar.component(.month, from: first.date))"
+        return "\(calendar.component(.month, from: monthStart.date))"
     }
 
     private static var weekCalendar: Calendar {
