@@ -51,8 +51,9 @@ class PushStreamListener(
     )
     fun onPushRequested(message: ConsumedRedisStreamMessage) {
         try {
+            logger.info("listen!!!!")
             logger.info(
-                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} fieldKeys={}",
+                " listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} fieldKeys={}",
                 "buddystuddy-push-listener",
                 message.streamKey,
                 message.recordId,

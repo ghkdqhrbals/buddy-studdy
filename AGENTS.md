@@ -2,7 +2,7 @@
 
 ## Project
 
-BuddyStuddy is a SwiftUI iOS app. It generates short study questions with OpenAI, stores records, syncs with the backend, and shows topic-level statistics. Current public release work targets only the iOS app; macOS menu bar, DMG, Sparkle, and macOS test/build work are out of scope unless explicitly requested. Internal Xcode targets and identifiers still use `StudyMate` for release continuity.
+BuddyStuddy is a SwiftUI iOS app. It generates short study questions with OpenAI, stores records, syncs with the backend, and shows topic-level statistics. The product target is iOS only. macOS menu bar, DMG, Sparkle, macOS schemes, macOS tests, and macOS build verification are out of scope unless the user explicitly asks for macOS in that turn. Internal Xcode targets and identifiers still use `StudyMate` for release continuity.
 
 Read these first:
 
@@ -17,7 +17,8 @@ Read these first:
 - Keep logs paginated and dense. Do not render all persisted logs at once.
 - Only the regular OpenAI API key is supported and synced.
 - Keep Korean and English strings in `AppStrings` for new UI labels.
-- Do not add or verify macOS app/release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
+- Do not add, modify, test, or verify macOS app/release/update work unless explicitly requested; iOS App Store Connect release is the active distribution path.
+- For app work, use the `StudyMateiOS` scheme and iOS destinations only. Do not run the `StudyMate` macOS scheme or macOS test target as a substitute for iOS verification.
 - After completing feature work, always create a git commit that includes the completed implementation and verification updates unless the user explicitly says not to commit.
 - On iOS 26 toolbars, avoid unintended shared capsule/glass backgrounds around custom toolbar controls. For custom search/profile toolbar items that already draw their own shape, apply `ToolbarItem.sharedBackgroundVisibility(.hidden)` with an iOS 26 availability guard instead of changing the inner view's `Capsule().stroke(...)`.
 - Do not connect to production servers directly with SSH. Backend deployment must go through GitHub Actions and the personal-deploy repository workflow unless the user explicitly re-allows direct SSH for a specific incident.
@@ -39,11 +40,9 @@ Read these first:
 - Use the existing study record store path through `SettingsStore`; do not add parallel record persistence.
 - Records can scale toward 10,000, so UI must paginate or lazily render lists.
 
-## CloudKit And Push
+## Push
 
-- CloudKit sync is state based.
-- Mac currently creates `StudyMateQuestionPush` records.
-- iPhone currently receives CloudKit/APNs push via `StudyRemoteNotificationBridge`.
+- iOS receives APNs push via `StudyRemoteNotificationBridge`.
 - Push arrival should sync quietly. Only explicit notification taps/replies should navigate to the pushed question.
 
 ## Verification
@@ -54,4 +53,4 @@ Run iOS generic build after shared UI, CloudKit, notification, or model changes:
 xcodebuild -project StudyMate.xcodeproj -scheme StudyMateiOS -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath build/iOSDeviceDerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
-Run real-device verification for push, iCloud, background refresh, and entitlement changes.
+Run real-device iPhone verification after user-visible iOS feature work and for push, background refresh, and entitlement changes.

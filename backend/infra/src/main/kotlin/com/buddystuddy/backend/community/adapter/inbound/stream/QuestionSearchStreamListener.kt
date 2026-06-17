@@ -27,6 +27,8 @@ class QuestionSearchStreamListener(
     )
     fun onQuestionCreated(message: ConsumedRedisStreamMessage) {
         try {
+
+            logger.info("question created consuming {}", message)
             val payload = QuestionCreatedPayloadParser.toPayload(message.fields)
             logger.debug(
                 "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} language={}",
