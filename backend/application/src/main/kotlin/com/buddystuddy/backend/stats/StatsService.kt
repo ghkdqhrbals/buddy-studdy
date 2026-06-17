@@ -25,6 +25,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 @Service
 class StatsService(
@@ -129,10 +132,18 @@ class TopicStatsAssembler {
         val avg = if (scoreCount == 0) 0 else scoreSum / scoreCount
         val best = rows.maxOfOrNull { it.bestScore } ?: 0
         val correctRate = if (scoreCount == 0) 0 else rows.sumOf { it.correctCount } * 100 / scoreCount
-        val dominantLevelRows = rows.groupBy { it.difficultyLevel }.maxByOrNull { it.value.sumOf(UserStatsEntity::responseCount) }
-        val level = dominantLevelRows?.key ?: rows.first().difficultyLevel
-        val center = level + ((avg - 50) / 100.0)
-        val uncertainty = 1.6 / max(1.0, scoreCount.toDouble()).coerceAtMost(4.0)
+        val estimates = rows
+            .filter { it.scoreCount > 0 }
+            .map { row ->
+                val rowAverage = row.scoreSum.toDouble() / row.scoreCount.toDouble()
+                LevelEstimate(
+                    value = estimatedLevel(row.difficultyLevel, rowAverage),
+                    weight = row.scoreCount,
+                )
+            }
+        val center = weightedCenter(estimates) ?: rows.first().difficultyLevel.toDouble()
+        val level = center.roundToInt().coerceIn(1, 10)
+        val uncertainty = uncertainty(estimates, center, scoreCount)
         val topicRows = rows.sortedByDescending { it.responseCount }
         val aliases = topicRows.map { it.topic }.distinct()
         return TopicStatsResponse(
@@ -155,6 +166,41 @@ class TopicStatsAssembler {
             records = records,
         )
     }
+
+    private fun estimatedLevel(difficultyLevel: Int, score: Double): Double {
+        // Product rule: 50 points means "fits this level", 80 points means "ready for +1 level".
+        return (difficultyLevel.toDouble() + ((score.coerceIn(0.0, 100.0) - 50.0) / 30.0)).coerceIn(1.0, 10.0)
+    }
+
+    private fun weightedCenter(estimates: List<LevelEstimate>): Double? {
+        val weightSum = estimates.sumOf { it.weight }
+        if (weightSum <= 0) return null
+        return estimates.sumOf { it.value * it.weight.toDouble() } / weightSum.toDouble()
+    }
+
+    private fun uncertainty(estimates: List<LevelEstimate>, center: Double, sampleCount: Int): Double {
+        val weightSum = estimates.sumOf { it.weight }
+        val variance = if (weightSum > 1) {
+            estimates.sumOf { it.weight.toDouble() * (it.value - center).pow(2) } / weightSum.toDouble()
+        } else {
+            0.0
+        }
+        val sampleUncertainty = 0.9 / sqrt(max(sampleCount, 1).toDouble())
+        val conflictUncertainty = sqrt(variance) * 0.55
+        return minOf(4.0, max(minimumHalfWidth(sampleCount), sampleUncertainty + conflictUncertainty))
+    }
+
+    private fun minimumHalfWidth(sampleCount: Int): Double =
+        when {
+            sampleCount >= 8 -> 0.3
+            sampleCount >= 4 -> 0.45
+            else -> 0.65
+        }
+
+    private data class LevelEstimate(
+        val value: Double,
+        val weight: Int,
+    )
 }
 
 @Service

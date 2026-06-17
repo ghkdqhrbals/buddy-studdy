@@ -81,11 +81,73 @@ class UserStatsServiceTest {
         assertThat(response.totalTopics).isEqualTo(1)
         assertThat(response.topics.map { it.topic }).containsExactly("SwiftUI")
         assertThat(response.topics.single().average).isEqualTo(90)
-        assertThat(response.topics.single().levelRange.level).isEqualTo(6)
+        assertThat(response.topics.single().levelRange.level).isEqualTo(7)
         assertThat(userStats.findByUserCalls).isZero()
         assertThat(userStats.overviewByUserCalls).isEqualTo(1)
         assertThat(userStats.findTopicKeysByUserCalls).isEqualTo(1)
         assertThat(userStats.findByUserAndTopicKeysCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `level range treats 50 as current level and 80 as plus one level`() {
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "redis",
+            topic = "Redis",
+            difficultyLevel = 5,
+            responseCount = 4,
+            scoreCount = 4,
+            scoreSum = 320,
+            bestScore = 80,
+            correctCount = 4,
+            latestAt = Instant.parse("2026-06-10T08:00:00Z"),
+        )
+
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
+        val range = response.topics.single().levelRange
+
+        assertThat(range.average).isEqualTo(80)
+        assertThat(range.centerLevel).isEqualTo(6.0)
+        assertThat(range.level).isEqualTo(6)
+    }
+
+    @Test
+    fun `level range averages estimates across multiple levels by score count`() {
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-10"),
+            topicKey = "architecture",
+            topic = "Architecture",
+            difficultyLevel = 5,
+            responseCount = 10,
+            scoreCount = 10,
+            scoreSum = 800,
+            bestScore = 90,
+            correctCount = 10,
+            latestAt = Instant.parse("2026-06-10T08:00:00Z"),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = LocalDate.parse("2026-06-11"),
+            topicKey = "architecture",
+            topic = "Architecture",
+            difficultyLevel = 9,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 10,
+            bestScore = 5,
+            correctCount = 0,
+            latestAt = Instant.parse("2026-06-11T08:00:00Z"),
+        )
+
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
+        val range = response.topics.single().levelRange
+
+        assertThat(range.centerLevel).isBetween(6.2, 6.3)
+        assertThat(range.level).isEqualTo(6)
+        assertThat(range.lowerBound).isLessThan(range.centerLevel)
+        assertThat(range.upperBound).isGreaterThan(range.centerLevel)
     }
 
     @Test
@@ -104,7 +166,7 @@ class UserStatsServiceTest {
             latestAt = Instant.parse("2026-06-10T08:00:00Z"),
         )
 
-        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
         val range = response.topics.single().levelRange
 
         assertThat(range.level).isEqualTo(10)
@@ -147,7 +209,7 @@ class UserStatsServiceTest {
         questionStats.rows += QuestionStatsEntity(questionId = 1, likeCount = 2, commentCount = 1, viewCount = 10)
         questionStats.rows += QuestionStatsEntity(questionId = 2, likeCount = 3, commentCount = 2, viewCount = 20)
 
-        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
 
         assertThat(response.topics).hasSize(2)
         assertThat(questions.findGradedByUserAndTopicsCalls).isZero()
@@ -196,7 +258,7 @@ class UserStatsServiceTest {
         }
         questions.rows += gradedQuestion(topic = "Redis", difficultyLevel = 4, score = 90, correct = true, answeredAt = "2026-06-09T08:00:00Z")
 
-        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
 
         assertThat(response.topics.single { it.topic == "Redis" }.records).hasSize(1)
         assertThat(questions.findLatestGradedByUserAndTopicsCalls).isEqualTo(1)
@@ -219,7 +281,7 @@ class UserStatsServiceTest {
             latestAt = Instant.parse("2026-06-10T08:00:00Z"),
         )
 
-        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
 
         assertThat(response.topics.single().records).isEmpty()
         assertThat(questions.findLatestGradedByUserAndTopicsCalls).isEqualTo(1)
@@ -228,7 +290,7 @@ class UserStatsServiceTest {
 
     @Test
     fun `stats skips topic detail lookup when no topics are selected`() {
-        val response = service.stats(principal, limit = 10, offset = 0, query = StatsQuery(period = "last7"))
+        val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
 
         assertThat(response.topics).isEmpty()
         assertThat(response.totalResponses).isZero()
@@ -262,6 +324,11 @@ class UserStatsServiceTest {
         gradedAt = Instant.parse(answeredAt),
         createdAt = Instant.parse(answeredAt),
         updatedAt = Instant.parse(answeredAt),
+    )
+
+    private fun fixtureStatsQuery() = StatsQuery(
+        startAt = Instant.parse("2026-06-01T00:00:00Z"),
+        endAt = Instant.parse("2026-06-20T00:00:00Z"),
     )
 
     private class FakeUserStatsPort : UserStatsPort {

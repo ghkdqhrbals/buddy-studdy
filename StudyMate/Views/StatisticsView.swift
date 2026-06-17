@@ -956,7 +956,8 @@ struct TopicLevelRange: Equatable {
 
     private static func estimatedLevel(difficulty: Difficulty, score: Int) -> Double {
         let clampedScore = min(max(score, 0), 100)
-        let levelValue = Double(difficulty.level) + (Double(clampedScore) - 70) / 35
+        // Product rule: 50 points stays at the current level, 80 points moves to +1 level.
+        let levelValue = Double(difficulty.level) + (Double(clampedScore) - 50) / 30
         return min(max(levelValue, 1), 10)
     }
 
@@ -985,13 +986,12 @@ struct TopicLevelRange: Equatable {
 private extension TopicLevelRange {
     static func from(_ backendRange: BackendTopicLevelRange) -> TopicLevelRange {
         let average = min(max(backendRange.average, 0), 100)
-        let centerDifficulty = Difficulty(level: backendRange.level)
-        let centerLevel = estimatedLevel(difficulty: centerDifficulty, score: average)
+        let centerLevel = min(max(backendRange.centerLevel, 1), 10)
         let lowerBound = normalizeProgress(backendRange.lowerBound)
         let upperBound = normalizeProgress(backendRange.upperBound)
 
         return TopicLevelRange(
-            level: Difficulty(level: Int(centerLevel.rounded())),
+            level: Difficulty(level: backendRange.level),
             average: average,
             sampleCount: max(backendRange.sampleCount, 1),
             centerLevel: centerLevel,
