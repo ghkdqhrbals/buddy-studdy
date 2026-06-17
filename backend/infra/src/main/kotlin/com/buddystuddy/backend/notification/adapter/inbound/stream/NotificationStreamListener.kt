@@ -52,8 +52,25 @@ class NotificationStreamListener(
             )
             val command = NotificationPayloadParser.toCommand(message.fields)
             val notificationId = processor.process(command)
+            logger.info(
+                "notification_event_processed notificationId={} eventId={} userId={} shouldPush={} threadType={} threadId={} deepLink={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+                command.shouldPush,
+                command.threadType,
+                command.threadId,
+                command.deepLink,
+            )
             if (command.shouldPush) {
                 sendPushIfClaimed(notificationId, command)
+            } else {
+                logger.info(
+                    "notification_push_skipped reason=should_push_false notificationId={} eventId={} userId={}",
+                    notificationId,
+                    command.eventId,
+                    command.userId,
+                )
             }
             message.ack()
             logger.debug(
@@ -84,13 +101,33 @@ class NotificationStreamListener(
     private fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
         val now = Instant.now()
         if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
+            logger.info(
+                "notification_push_skipped reason=claim_not_acquired notificationId={} eventId={} userId={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+            )
             return
         }
-        val targetDevices = devices.findAllByUserId(command.userId)
+        val userDevicesWithTokens = devices.findAllByUserId(command.userId)
             .filter { it.apnsToken.isNotBlank() }
-            .filter { userDevices.hasActiveSession(command.userId, it.deviceId) }
+        val targetDevices = userDevicesWithTokens.filter { userDevices.hasActiveSession(command.userId, it.deviceId) }
+        logger.info(
+            "notification_push_targets_resolved notificationId={} eventId={} userId={} apnsDeviceCount={} activeDeviceCount={}",
+            notificationId,
+            command.eventId,
+            command.userId,
+            userDevicesWithTokens.size,
+            targetDevices.size,
+        )
         if (targetDevices.isEmpty()) {
             notifications.markPushFailed(notificationId, "No active APNs target.", Instant.now())
+            logger.info(
+                "notification_push_failed reason=no_active_apns_target notificationId={} eventId={} userId={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+            )
             return
         }
         try {
@@ -118,11 +155,32 @@ class NotificationStreamListener(
             }
             if (failedDeviceIds.isNotEmpty()) {
                 notifications.markPushFailed(notificationId, "Push publish failed for devices: ${failedDeviceIds.joinToString(",")}", Instant.now())
+                logger.warn(
+                    "notification_push_failed reason=push_stream_publish_failed notificationId={} eventId={} userId={} failedDeviceIds={}",
+                    notificationId,
+                    command.eventId,
+                    command.userId,
+                    failedDeviceIds,
+                )
                 return
             }
             notifications.markPushSent(notificationId, Instant.now())
+            logger.info(
+                "notification_push_published notificationId={} eventId={} userId={} deviceCount={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+                targetDevices.size,
+            )
         } catch (error: Exception) {
             notifications.markPushFailed(notificationId, error.message ?: error.javaClass.simpleName, Instant.now())
+            logger.warn(
+                "notification_push_failed reason=exception notificationId={} eventId={} userId={} error={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+                error.message,
+            )
         }
     }
 }
