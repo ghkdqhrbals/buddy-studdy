@@ -1,6 +1,7 @@
 package com.buddystuddy.backend.notification.adapter.inbound.stream
 
 import com.buddystuddy.backend.auth.application.port.outbound.DevicePort
+import com.buddystuddy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystuddy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystuddy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystuddy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
@@ -22,6 +23,7 @@ class NotificationStreamListener(
     private val processor: ProcessNotificationEventUseCase,
     private val notifications: NotificationPersistencePort,
     private val devices: DevicePort,
+    private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -84,9 +86,11 @@ class NotificationStreamListener(
         if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
             return
         }
-        val targetDevices = devices.findAllByUserId(command.userId).filter { it.apnsToken.isNotBlank() }
+        val targetDevices = devices.findAllByUserId(command.userId)
+            .filter { it.apnsToken.isNotBlank() }
+            .filter { userDevices.hasActiveSession(command.userId, it.deviceId) }
         if (targetDevices.isEmpty()) {
-            notifications.markPushFailed(notificationId, "No APNs token.", Instant.now())
+            notifications.markPushFailed(notificationId, "No active APNs target.", Instant.now())
             return
         }
         try {
