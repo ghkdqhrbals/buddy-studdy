@@ -206,8 +206,5 @@ internal object PushEventPayloadParser {
 
 internal object PushDeepLinkFactory {
     fun studyRoomOrRecord(studyId: String?, recordId: String): String =
-        studyId
-            ?.takeIf(String::isNotBlank)
-            ?.let { "buddystuddy://studies/$it" }
-            ?: "buddystuddy://records/$recordId"
+        "buddystuddy://records/$recordId"
 }

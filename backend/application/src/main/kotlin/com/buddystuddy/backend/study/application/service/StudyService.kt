@@ -227,7 +227,7 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         body = question,
         threadType = "study_question",
         threadId = id.toString(),
-        deepLink = "buddystuddy://studies/${study.id}",
+        deepLink = "buddystuddy://records/$id",
         metadataJson = studyNotificationMapper.writeValueAsString(
             QuestionNotificationMetadata(
                 recordId = id,

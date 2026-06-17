@@ -4417,6 +4417,21 @@ final class AppState: ObservableObject {
         markCloudDataChanged(syncDelaySeconds: 4)
     }
 
+    @discardableResult
+    private func openNotificationRecord(_ record: StudyRecord) -> Bool {
+        if record.gradingResult == nil {
+            selectStudyRecord(record)
+            return true
+        }
+
+        if openRoute(.recordDetail(recordID: record.id)) {
+            notificationLandingMessage = nil
+            return true
+        }
+
+        return false
+    }
+
     func prepareToOpenQuestionFromNotification() {
         guard requirePageAccess(.studyDetail) else {
             return
@@ -4492,9 +4507,11 @@ final class AppState: ObservableObject {
         let refreshedRecord = recordMatching(questionCreatedAt: questionCreatedAt) ??
             studyRecords.first { $0.id == record.id } ??
             record
-        selectStudyRecord(refreshedRecord)
+        _ = openNotificationRecord(refreshedRecord)
         notificationLandingMessage = nil
-        statusMessage = trimmedReply.isEmpty ? "알림에서 열린 질문입니다." : "알림 답장을 기록에 저장했습니다."
+        statusMessage = trimmedReply.isEmpty
+            ? (refreshedRecord.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
+            : "알림 답장을 기록에 저장했습니다."
         markCloudDataChanged()
         return true
     }
@@ -4537,9 +4554,11 @@ final class AppState: ObservableObject {
             }
 
             if openStudy {
-                selectStudyRecord(record)
+                _ = openNotificationRecord(record)
                 notificationLandingMessage = nil
-                statusMessage = trimmedReply.isEmpty ? "알림에서 열린 질문입니다." : "알림 답장을 기록에 저장했습니다."
+                statusMessage = trimmedReply.isEmpty
+                    ? (record.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
+                    : "알림 답장을 기록에 저장했습니다."
             } else if !trimmedReply.isEmpty {
                 statusMessage = "알림 답장을 기록에 저장했습니다."
             }

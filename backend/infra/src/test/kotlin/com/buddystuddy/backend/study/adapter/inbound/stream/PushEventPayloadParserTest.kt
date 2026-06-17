@@ -44,7 +44,7 @@ class PushEventPayloadParserTest {
         assertThat(apns.payload.aps.alert.title).isEqualTo("BuddyStuddy")
         assertThat(apns.payload.aps.alert.body).isEqualTo("What is SwiftUI?")
         assertThat(apns.payload.aps.sound).isEqualTo("ping.aiff")
-        assertThat(apns.payload.deepLink).isEqualTo("buddystuddy://studies/77")
+        assertThat(apns.payload.deepLink).isEqualTo("buddystuddy://records/10")
     }
 
     @Test
@@ -63,6 +63,6 @@ class PushEventPayloadParserTest {
 
         val apns = message as ApnsQuestionMessage
         assertThat(apns.payload.aps.alert.body).isEqualTo("Legacy question")
-        assertThat(apns.payload.deepLink).isEqualTo("buddystuddy://studies/77")
+        assertThat(apns.payload.deepLink).isEqualTo("buddystuddy://records/10")
     }
 }
