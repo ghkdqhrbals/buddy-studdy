@@ -22,6 +22,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      libretranslate:
+        condition: service_started
     ports:
       - "8080:8080"
     env_file:
@@ -35,6 +37,20 @@ services:
       OPENAPI_ACCESS_TOKEN: "local-openapi"
       GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
       REACTION_STREAM_ENABLED: "false"
+      BUDDYSTUDDY_TRANSLATION_BASE_URL: http://libretranslate:5000
+    restart: unless-stopped
+
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    user: root
+    ports:
+      - "5001:5000"
+    environment:
+      LT_LOAD_ONLY: en,ko
+      LT_DISABLE_WEB_UI: "true"
+      LT_WORKERS: "1"
+    volumes:
+      - buddystuddy-libretranslate-data:/home/libretranslate/.local/share
     restart: unless-stopped
 
   backup:
@@ -64,3 +80,4 @@ services:
 volumes:
   buddystuddy-postgres-data:
   buddystuddy-db-backups:
+  buddystuddy-libretranslate-data:

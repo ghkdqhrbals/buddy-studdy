@@ -51,7 +51,7 @@ class ApnsPushNotificationAdapter(
     internal fun buildRequest(message: ApnsQuestionMessage, jwt: String): HttpRequest {
         val environment = message.environment.lowercase()
         val host = if (environment == "sandbox") "api.sandbox.push.apple.com" else "api.push.apple.com"
-        val body = message.payload.toJson()
+        val body = buildPayloadJson(message)
         return HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/${message.token}"))
             .timeout(timeout)
@@ -62,6 +62,8 @@ class ApnsPushNotificationAdapter(
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
     }
+
+    internal fun buildPayloadJson(message: ApnsQuestionMessage): String = message.payload.toJson()
 
     private fun apnsJwt(): String {
         if (properties.apns.teamId.isBlank() || properties.apns.keyId.isBlank() || properties.apns.authKeyP8.isBlank()) {
@@ -98,8 +100,10 @@ class ApnsPushNotificationAdapter(
             }
         }.joinToString("") + "\""
 
-    private fun ApnsQuestionPayload.toJson(): String =
-        """
-            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}},"deepLink":${jsonString(deepLink)}}
+    private fun ApnsQuestionPayload.toJson(): String {
+        val badge = aps.badge?.let { ""","badge":$it""" }.orEmpty()
+        return """
+            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}$badge},"deepLink":${jsonString(deepLink)}}
         """.trimIndent()
+    }
 }

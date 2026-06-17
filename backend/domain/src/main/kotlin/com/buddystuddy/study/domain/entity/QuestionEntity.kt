@@ -36,6 +36,8 @@ class QuestionEntity(
     var hint: String? = null,
     @Column(nullable = false, length = 255)
     var topic: String = "",
+    @Column(nullable = false, length = 16)
+    var language: String = "ko",
     @Column(name = "difficulty_level", nullable = false)
     var difficultyLevel: Int = 5,
     @Column(name = "scheduled_for", nullable = false)

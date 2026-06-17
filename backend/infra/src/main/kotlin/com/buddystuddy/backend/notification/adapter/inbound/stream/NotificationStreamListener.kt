@@ -93,6 +93,10 @@ class NotificationStreamListener(
             return
         }
         try {
+            val unreadCount = notifications
+                .countByUserIdAndReadAtIsNullAndDeletedAtIsNull(command.userId)
+                .toInt()
+                .coerceAtLeast(1)
             targetDevices.forEach { device ->
                 pushNotifications.sendQuestion(
                     ApnsQuestionMessage(
@@ -104,6 +108,7 @@ class NotificationStreamListener(
                             aps = ApnsAps(
                                 alert = ApnsAlert(title = command.title, body = command.body),
                                 sound = "default",
+                                badge = unreadCount,
                             ),
                             deepLink = command.deepLink ?: "buddystuddy://notifications/$notificationId",
                         ),

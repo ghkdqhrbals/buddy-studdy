@@ -33,4 +33,28 @@ class ApnsPushNotificationAdapterTest {
 
         assertThat(request.timeout()).hasValue(Duration.ofSeconds(5))
     }
+
+    @Test
+    fun `apns payload includes unread badge when provided`() {
+        val adapter = ApnsPushNotificationAdapter(BuddyStuddyProperties())
+
+        val body = adapter.buildPayloadJson(
+            ApnsQuestionMessage(
+                recordId = "10",
+                topic = "Swift",
+                token = "apns-token",
+                environment = "sandbox",
+                payload = ApnsQuestionPayload(
+                    aps = ApnsAps(
+                        alert = ApnsAlert("BuddyStuddy", "New comment"),
+                        sound = "default",
+                        badge = 7,
+                    ),
+                    deepLink = "buddystuddy://notifications/10",
+                ),
+            )
+        )
+
+        assertThat(body).contains(""""badge":7""")
+    }
 }

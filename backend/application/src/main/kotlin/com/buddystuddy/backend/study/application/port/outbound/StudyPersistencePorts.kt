@@ -62,3 +62,27 @@ interface QuestionStatsPort {
     fun incrementComment(questionId: Long, delta: Int, now: Instant): Int
     fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
 }
+
+interface QuestionCreatedPublishPort {
+    fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant = Instant.now()): Boolean
+}
+
+interface QuestionSearchTranslationPort {
+    fun translateSearchText(
+        sourceLanguage: String,
+        targetLanguage: String,
+        topic: String,
+        question: String,
+        answer: String?,
+        feedback: String?,
+        explanation: String?,
+    ): TranslatedQuestionSearchText
+}
+
+data class TranslatedQuestionSearchText(
+    val topic: String,
+    val question: String,
+    val answer: String?,
+    val feedback: String?,
+    val explanation: String?,
+)

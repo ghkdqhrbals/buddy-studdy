@@ -9,6 +9,7 @@ import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -35,6 +36,7 @@ class QuestionSchedulerTest {
     private val users = FakeUserPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
+    private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
     private val pushOutbox = FakePushOutboxPort()
     private val properties = BuddyStuddyProperties(
@@ -48,6 +50,7 @@ class QuestionSchedulerTest {
         users = users,
         questions = questions,
         questionStats = questionStats,
+        questionCreatedPublisher = questionCreatedPublisher,
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         openAI = openAI,
         pushOutbox = pushOutbox,
@@ -86,6 +89,7 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).hasSize(2)
+        assertThat(questionCreatedPublisher.questionIds).containsExactly(1, 2)
         assertThat(pushOutbox.requests).hasSize(2)
         assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.COMPLETED }).hasSize(2)
         assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.SCHEDULED }).hasSize(2)
@@ -434,6 +438,14 @@ class QuestionSchedulerTest {
         val requests = mutableListOf<QuestionPushRequest>()
         override fun enqueue(request: QuestionPushRequest, now: Instant) {
             requests += request
+        }
+    }
+
+    private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
+        val questionIds = mutableListOf<Long>()
+        override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
+            questionIds += questionId
+            return true
         }
     }
 }

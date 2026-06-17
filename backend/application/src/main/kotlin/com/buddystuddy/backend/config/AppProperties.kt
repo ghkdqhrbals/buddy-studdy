@@ -12,6 +12,7 @@ data class BuddyStuddyProperties(
     var apns: Apns = Apns(),
     var streams: Streams = Streams(),
     var email: Email = Email(),
+    var translation: Translation = Translation(),
     var openapi: OpenApi = OpenApi(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
@@ -36,11 +37,13 @@ data class BuddyStuddyProperties(
         var pushPrefix: String = "push-v1",
         var viewPrefix: String = "view-v1",
         var notificationPrefix: String = "notification-v1",
+        var createQuestionPrefix: String = "create-question-v1",
         var maxLen: Long = 100_000,
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,
     )
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
+    data class Translation(var baseUrl: String = "http://localhost:5001")
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
 }
 

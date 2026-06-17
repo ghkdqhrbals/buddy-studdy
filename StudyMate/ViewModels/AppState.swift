@@ -4,6 +4,7 @@ import Combine
 import AppKit
 #elseif os(iOS)
 import UIKit
+import UserNotifications
 import UniformTypeIdentifiers
 #endif
 
@@ -180,7 +181,11 @@ final class AppState: ObservableObject {
     @Published var isUpdatingCommunityProfile = false
     @Published var isWithdrawingCommunityAccount = false
     @Published var notifications: [BackendAppNotification] = []
-    @Published var notificationUnreadCount = 0
+    @Published var notificationUnreadCount = 0 {
+        didSet {
+            updateApplicationIconBadge(notificationUnreadCount)
+        }
+    }
     @Published var notificationTotalCount = 0
     @Published var isLoadingNotifications = false
     @Published var notificationErrorMessage: String?
@@ -1109,6 +1114,19 @@ final class AppState: ObservableObject {
         } catch {
             log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
         }
+    }
+
+    private func updateApplicationIconBadge(_ count: Int) {
+        #if os(iOS)
+        Task { @MainActor in
+            let badgeCount = max(0, count)
+            if #available(iOS 17.0, *) {
+                try? await UNUserNotificationCenter.current().setBadgeCount(badgeCount)
+            } else {
+                UIApplication.shared.applicationIconBadgeNumber = badgeCount
+            }
+        }
+        #endif
     }
 
     private func loadOpenAIModelOptions() async {

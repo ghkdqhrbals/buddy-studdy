@@ -11,11 +11,14 @@ import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
+import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.port.outbound.TranslatedQuestionSearchText
 import com.buddystuddy.backend.study.application.service.QuestionCreationWriteManager
 import com.buddystuddy.backend.study.application.service.StudyService
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
@@ -48,9 +51,9 @@ class StudyServiceTest {
             questions = questions,
             questionStats = questionStats,
             pushOutbox = FakePushOutboxPort(),
-            questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
+            questionCreatedPublisher = FakeQuestionCreatedPublisher(),
         ),
-        questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort()),
+        questionSearch = QuestionSearchSyncManager(questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -286,6 +289,23 @@ class StudyServiceTest {
 
     private class FakePushOutboxPort : QuestionPushOutboxPort {
         override fun enqueue(request: QuestionPushRequest, now: Instant) = Unit
+    }
+
+    private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
+        override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean = true
+    }
+
+    private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {
+        override fun translateSearchText(
+            sourceLanguage: String,
+            targetLanguage: String,
+            topic: String,
+            question: String,
+            answer: String?,
+            feedback: String?,
+            explanation: String?,
+        ): TranslatedQuestionSearchText =
+            TranslatedQuestionSearchText(topic, question, answer, feedback, explanation)
     }
 
     private class FakeQuestionSearchPort : QuestionSearchPort {

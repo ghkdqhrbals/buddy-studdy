@@ -329,39 +329,39 @@ private struct MobileHomeView: View {
             }
 
             if #available(iOS 26.0, *) {
+                if !isHomeSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        notificationToolbarButton(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+
+                if shouldShowHomeAddToolbarButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeAddToolbarButton(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     homeToolbarSearchControl(strings: strings)
                 }
                 .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
-
+            } else {
                 if !isHomeSearchActive {
                     ToolbarItem(placement: .topBarTrailing) {
                         notificationToolbarButton(strings: strings)
                     }
-                    .sharedBackgroundVisibility(.hidden)
                 }
 
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeAddToolbarButton(strings: strings)
                     }
-                    .sharedBackgroundVisibility(.hidden)
                 }
-            } else {
+
                 ToolbarItem(placement: .topBarTrailing) {
                     homeToolbarSearchControl(strings: strings)
-                }
-
-                if !isHomeSearchActive {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
-                    }
-                }
-
-                if shouldShowHomeAddToolbarButton {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        homeAddToolbarButton(strings: strings)
-                    }
                 }
             }
             #else

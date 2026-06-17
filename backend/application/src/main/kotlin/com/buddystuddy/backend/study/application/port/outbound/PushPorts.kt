@@ -77,6 +77,7 @@ data class ApnsAlert(
 data class ApnsAps(
     val alert: ApnsAlert,
     val sound: String,
+    val badge: Int? = null,
 )
 
 data class ApnsQuestionPayload(

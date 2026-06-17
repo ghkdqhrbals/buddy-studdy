@@ -97,7 +97,6 @@ class StudyService(
                     intervalMinutes = study.intervalMinutes,
                 ),
                 now,
-                user,
             )
         }
 

@@ -4,8 +4,11 @@ import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
 import com.buddystuddy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
+import com.buddystuddy.backend.study.application.port.outbound.TranslatedQuestionSearchText
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
 import com.buddystuddy.study.domain.entity.QuestionEntity
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.Instant
 
@@ -14,7 +17,11 @@ class QuestionSearchSyncManager(
     private val questions: QuestionPort,
     private val users: UserPort,
     private val search: QuestionSearchPort,
+    private val translator: QuestionSearchTranslationPort,
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+    private val supportedLanguages = listOf("ko", "en")
+
     fun syncQuestion(question: QuestionEntity) {
         val user = question.userId?.let { users.findById(it).orElse(null) }
         syncQuestion(question, user)
@@ -25,7 +32,15 @@ class QuestionSearchSyncManager(
             search.deleteByQuestionId(question.id)
             return
         }
-        search.save(question.toSearchEntity(user))
+        val sourceLanguage = question.language.normalizedSearchLanguage()
+        supportedLanguages.forEach { language ->
+            val translated = if (language == sourceLanguage) {
+                question.toSearchText()
+            } else {
+                translateOrFallback(question, sourceLanguage, language)
+            }
+            search.save(question.toSearchEntity(user, language, translated))
+        }
     }
 
     fun syncQuestion(questionId: Long) {
@@ -41,15 +56,20 @@ class QuestionSearchSyncManager(
         search.deleteByQuestionId(questionId)
     }
 
-    private fun QuestionEntity.toSearchEntity(user: UserEntity): QuestionSearchEntity =
+    private fun QuestionEntity.toSearchEntity(
+        user: UserEntity,
+        language: String,
+        text: TranslatedQuestionSearchText,
+    ): QuestionSearchEntity =
         QuestionSearchEntity(
             questionId = id,
+            language = language,
             userId = user.id,
-            topic = topic,
-            question = question,
-            answer = answer,
-            feedback = feedback,
-            explanation = explanation,
+            topic = text.topic,
+            question = text.question,
+            answer = text.answer,
+            feedback = text.feedback,
+            explanation = text.explanation,
             authorDisplayName = user.displayName,
             publicQuestion = publicQuestion,
             score = score,
@@ -58,4 +78,41 @@ class QuestionSearchSyncManager(
             createdAt = createdAt,
             updatedAt = Instant.now(),
         )
+
+    private fun translateOrFallback(
+        question: QuestionEntity,
+        sourceLanguage: String,
+        targetLanguage: String,
+    ): TranslatedQuestionSearchText {
+        return runCatching {
+            translator.translateSearchText(
+                sourceLanguage = sourceLanguage,
+                targetLanguage = targetLanguage,
+                topic = question.topic,
+                question = question.question,
+                answer = question.answer,
+                feedback = question.feedback,
+                explanation = question.explanation,
+            )
+        }.onFailure { error ->
+            logger.warn(
+                "question_search_translation_failed questionId={} targetLanguage={} error={}",
+                question.id,
+                targetLanguage,
+                error.message,
+            )
+        }.getOrElse { question.toSearchText() }
+    }
+
+    private fun QuestionEntity.toSearchText(): TranslatedQuestionSearchText =
+        TranslatedQuestionSearchText(
+            topic = topic,
+            question = question,
+            answer = answer,
+            feedback = feedback,
+            explanation = explanation,
+        )
+
+    private fun String.normalizedSearchLanguage(): String =
+        if (lowercase().startsWith("en")) "en" else "ko"
 }

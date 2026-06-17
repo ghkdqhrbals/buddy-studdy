@@ -1,8 +1,7 @@
 package com.buddystuddy.backend.study.application.service
 
-import com.buddystuddy.account.domain.entity.UserEntity
-import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxCommand
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -17,23 +16,18 @@ class QuestionCreationWriteManager(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val pushOutbox: QuestionPushOutboxPort,
-    private val questionSearch: QuestionSearchSyncManager,
+    private val questionCreatedPublisher: QuestionCreatedPublishPort,
 ) {
     @Transactional
     fun saveQuestionWithOutbox(
         question: QuestionEntity,
         push: QuestionPushOutboxCommand,
         now: Instant,
-        user: UserEntity? = null,
     ): QuestionEntity {
         val savedQuestion = questions.save(question)
         questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id, updatedAt = now))
         pushOutbox.enqueue(push.toRequest(savedQuestion.id), now)
-        if (user == null) {
-            questionSearch.syncQuestion(savedQuestion)
-        } else {
-            questionSearch.syncQuestion(savedQuestion, user)
-        }
+        questionCreatedPublisher.publishQuestionCreated(savedQuestion.id, savedQuestion.language, now)
         return savedQuestion
     }
 }

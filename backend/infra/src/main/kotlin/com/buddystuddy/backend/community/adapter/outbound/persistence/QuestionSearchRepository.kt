@@ -3,6 +3,7 @@ package com.buddystuddy.backend.community.adapter.outbound.persistence
 import com.buddystuddy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystuddy.backend.community.application.port.outbound.SearchResult
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
+import com.buddystuddy.community.domain.entity.QuestionSearchId
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -11,7 +12,7 @@ import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 
 @Repository
-interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Long> {
+interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, QuestionSearchId> {
     @Modifying
     @Query("delete from QuestionSearchEntity q where q.questionId = :questionId")
     fun deleteSearchRow(@Param("questionId") questionId: Long): Long
@@ -25,7 +26,8 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Long
               and qs.score is not null
               and qs.deleted_at is null
               and u.allow_public_questions = true
-            order by qs.created_at desc
+            group by qs.question_id
+            order by max(qs.created_at) desc
             limit :limit offset :offset
         """,
         nativeQuery = true,
@@ -34,7 +36,7 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Long
 
     @Query(
         value = """
-            select count(*)
+            select count(distinct qs.question_id)
             from question_search qs
             join users u on u.id = qs.user_id
             where qs.public_question = true
@@ -56,7 +58,8 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Long
               and qs.deleted_at is null
               and u.allow_public_questions = true
               and qs.search_vector @@ websearch_to_tsquery('simple', :query)
-            order by ts_rank_cd(qs.search_vector, websearch_to_tsquery('simple', :query)) desc, qs.created_at desc
+            group by qs.question_id
+            order by max(ts_rank_cd(qs.search_vector, websearch_to_tsquery('simple', :query))) desc, max(qs.created_at) desc
             limit :limit offset :offset
         """,
         nativeQuery = true,
@@ -65,7 +68,7 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Long
 
     @Query(
         value = """
-            select count(*)
+            select count(distinct qs.question_id)
             from question_search qs
             join users u on u.id = qs.user_id
             where qs.public_question = true

@@ -7,6 +7,7 @@ import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -32,6 +33,7 @@ class ScheduledQuestionService(
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
     private val pushOutbox: QuestionPushOutboxPort,
@@ -43,6 +45,7 @@ class ScheduledQuestionService(
         users = users,
         questions = questions,
         questionStats = questionStats,
+        questionCreatedPublisher = questionCreatedPublisher,
         cipher = cipher,
         openAI = openAI,
         pushOutbox = pushOutbox,
@@ -123,6 +126,7 @@ class ScheduledQuestionCreator(
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
     private val pushOutbox: QuestionPushOutboxPort,
@@ -156,8 +160,9 @@ class ScheduledQuestionCreator(
                 questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
             }
             val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
-            val saved = questions.save(study.toScheduledQuestion(job, generated.question, generated.hint, now))
+            val saved = questions.save(study.toScheduledQuestion(job, generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
+            questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
             pushOutbox.enqueue(study.toPushRequest(saved.id, generated.question, generated.hint, appLanguage, now), now)
             job.markCompleted(saved.id, now)
             log.info("scheduled_question_created deviceId={} userId={} studyId={} jobId={} topic={} questionId={} pushOutbox=true", study.deviceId, userId, study.id, job.id, study.topic, saved.id)
@@ -167,7 +172,13 @@ class ScheduledQuestionCreator(
         }
     }
 
-    private fun StudyEntity.toScheduledQuestion(job: StudyQuestionJobEntity, question: String, hint: String?, now: Instant): QuestionEntity =
+    private fun StudyEntity.toScheduledQuestion(
+        job: StudyQuestionJobEntity,
+        question: String,
+        hint: String?,
+        appLanguage: String,
+        now: Instant,
+    ): QuestionEntity =
         QuestionEntity(
             deviceId = deviceId,
             userId = userId,
@@ -175,6 +186,7 @@ class ScheduledQuestionCreator(
             question = question,
             hint = hint,
             topic = topic,
+            language = appLanguage,
             difficultyLevel = difficultyLevel,
             scheduledFor = job.scheduledAt,
             sentAt = now,
