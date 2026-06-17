@@ -73,7 +73,7 @@ private struct StudyMateiOSBootstrapView: View {
             }
 
             if isShowingStartupSplash {
-                StartupPixelFoxSplashView {
+                StartupTextSplashView {
                     isShowingStartupSplash = false
                 }
                 .transition(.opacity)
@@ -98,43 +98,23 @@ private struct StudyMateiOSBootstrapView: View {
     }
 }
 
-private struct StartupPixelFoxSplashView: View {
+private struct StartupTextSplashView: View {
     var onFinished: () -> Void
-
-    @State private var frameIndex = 0
-
-    private let frameNames = [
-        "PixelFoxBackpackWalkFrame1",
-        "PixelFoxBackpackWalkFrame2",
-        "PixelFoxBackpackWalkFrame3",
-        "PixelFoxBackpackWalkFrame4",
-        "PixelFoxBackpackWalkFrame5"
-    ]
 
     var body: some View {
         ZStack {
             Color(.systemBackground)
                 .ignoresSafeArea()
 
-            Image(frameNames[frameIndex])
-                .resizable()
-                .interpolation(.none)
-                .scaledToFit()
-                .frame(width: 220, height: 220)
-                .accessibilityHidden(true)
+            Text("BuddyStuddy")
+                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
         }
         .task {
-            await playFrames()
+            try? await Task.sleep(for: .seconds(2))
+            onFinished()
         }
-    }
-
-    private func playFrames() async {
-        for index in frameNames.indices {
-            frameIndex = index
-            try? await Task.sleep(for: .seconds(1))
-        }
-
-        onFinished()
     }
 }
 
