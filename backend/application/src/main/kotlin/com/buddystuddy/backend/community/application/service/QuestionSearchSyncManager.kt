@@ -61,6 +61,9 @@ class QuestionSearchSyncManager(
         search.deleteByQuestionId(questionId)
     }
 
+    fun findIndexedQuestion(questionId: Long, language: String): QuestionSearchEntity? =
+        search.findByQuestionIdAndLanguage(questionId, language)
+
     private fun QuestionEntity.toSearchEntity(
         user: UserEntity,
         language: String,

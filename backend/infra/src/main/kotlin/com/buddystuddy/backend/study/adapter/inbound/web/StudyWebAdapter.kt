@@ -26,13 +26,13 @@ class StudyWebAdapter(
     override fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
         studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
 
-    override fun records(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query)
+    override fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
+        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query, language)
 
     override fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
-    override fun record(id: Long, authentication: Authentication) =
-        recordsUseCase.record(authentication.principalOrThrow(), id)
+    override fun record(id: Long, language: String, authentication: Authentication) =
+        recordsUseCase.record(authentication.principalOrThrow(), id, language)
 
     override fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
         studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = false)

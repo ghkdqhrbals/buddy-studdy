@@ -6,6 +6,7 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.community.application.service.QuestionSearchSyncManager
+import com.buddystuddy.community.domain.entity.QuestionSearchEntity
 import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.study.application.model.RecordsPageResponse
 import com.buddystuddy.backend.study.application.model.StudyRecordResponse
@@ -131,7 +132,7 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override fun records(principal: Principal, limit: Int, offset: Int, query: String?): RecordsPageResponse {
+    override fun records(principal: Principal, limit: Int, offset: Int, query: String?, language: String): RecordsPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
@@ -139,7 +140,7 @@ class StudyService(
         } else {
             questions.findVisibleByUserAndQuery(principal.userId, includePending = false, search, pageable)
         }
-        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.toRecordResponses(language), page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
@@ -149,13 +150,16 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override fun record(principal: Principal, id: Long): StudyRecordResponse {
+    override fun record(principal: Principal, id: Long, language: String): StudyRecordResponse {
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         if (question.skippedAt != null) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         }
-        return question.toStudyRecord(questionStats.findById(id).orElse(null)).toProjection().toRecordResponse()
+        return question.toStudyRecord(questionStats.findById(id).orElse(null))
+            .toProjection()
+            .toRecordResponse()
+            .withTranslatedText(questionSearch.findIndexedQuestion(question.id, language))
     }
 
     @Transactional
@@ -196,11 +200,30 @@ class StudyService(
     private fun recentQuestions(principal: Principal): List<String> =
         questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
 
-    private fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
+    private fun List<QuestionEntity>.toRecordResponses(language: String = "ko"): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
+        val translatedByQuestionId = associate { question ->
+            question.id to questionSearch.findIndexedQuestion(question.id, language)
+        }
         return map { question ->
-            question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+            question.toStudyRecord(statsByQuestionId[question.id])
+                .toProjection()
+                .toRecordResponse()
+                .withTranslatedText(translatedByQuestionId[question.id])
         }
     }
+}
+
+private fun StudyRecordResponse.withTranslatedText(translated: QuestionSearchEntity?): StudyRecordResponse {
+    if (translated == null) return this
+    return copy(
+        question = question.copy(question = translated.question),
+        answer = translated.answer ?: answer,
+        gradingResult = gradingResult?.copy(
+            feedback = translated.feedback ?: gradingResult.feedback,
+            explanation = translated.explanation ?: gradingResult.explanation,
+        ),
+        topic = translated.topic,
+    )
 }

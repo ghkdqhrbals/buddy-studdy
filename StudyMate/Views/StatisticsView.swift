@@ -9,13 +9,8 @@ struct StatisticsView: View {
     @State private var selectedPeriod: StatisticsPeriod = .all
     @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
     @State private var customEndDate = Date()
-    @State private var topicSearch = ""
     @State private var topicPage = 0
-    @State private var statsSearchDebounceTask: Task<Void, Never>?
     @State private var isPullRefreshing = false
-    @State private var isSearchVisible = false
-    @State private var searchFocusTask: Task<Void, Never>?
-    @FocusState private var isSearchFocused: Bool
 
     private static let topicPageSize = 8
 
@@ -142,35 +137,7 @@ struct StatisticsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .mobileToolbarSearchable(
-            isPresented: isSearchVisible || !topicSearch.isEmpty,
-            text: $topicSearch,
-            prompt: strings.topicSearch,
-            focus: $isSearchFocused
-        )
-        .toolbar {
-            #if os(iOS)
-            if #available(iOS 26.0, *) {
-                ToolbarItem(placement: .topBarTrailing) {
-                    statsToolbarSearchControl(strings: strings)
-                }
-                .sharedBackgroundVisibility(isStatsSearchActive ? .hidden : .automatic)
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    statsToolbarSearchControl(strings: strings)
-                }
-            }
-            #else
-            ToolbarItem(placement: .primaryAction) {
-                statsSearchToolbarButton(strings: strings)
-            }
-            #endif
-        }
         .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
-        .onChange(of: topicSearch) {
-            resetTopicPaging()
-            scheduleDebouncedStatsReload()
-        }
         .onChange(of: selectedPeriod) {
             resetTopicPaging()
             loadStats()
@@ -189,97 +156,6 @@ struct StatisticsView: View {
         }
         .onAppear {
             loadStats()
-        }
-        .onDisappear {
-            statsSearchDebounceTask?.cancel()
-            statsSearchDebounceTask = nil
-            searchFocusTask?.cancel()
-            searchFocusTask = nil
-        }
-        .onChange(of: isSearchFocused) { _, isFocused in
-            guard !isFocused,
-                  topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-
-            closeStatsSearch(clearText: false)
-        }
-    }
-
-    private var isStatsSearchActive: Bool {
-        isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func statsToolbarSearchControl(strings: AppStrings) -> some View {
-        #if os(iOS)
-        MobileExpandingToolbarSearch(
-            isExpanded: isStatsSearchActive,
-            text: $topicSearch,
-            prompt: strings.topicSearch,
-            focus: $isSearchFocused,
-            closeAccessibilityLabel: strings.clearSearch,
-            width: min(UIScreen.main.bounds.width - 32, 430),
-            onClose: {
-                closeStatsSearch(clearText: true)
-            }
-        ) {
-            statsSearchToolbarButton(strings: strings)
-        }
-        #else
-        TextField(strings.topicSearch, text: $topicSearch)
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 220)
-        #endif
-    }
-
-    private func statsSearchToolbarButton(strings: AppStrings) -> some View {
-        Button {
-            showStatsSearch()
-        } label: {
-            #if os(iOS)
-            MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
-            #else
-            Image(systemName: "magnifyingglass")
-            #endif
-        }
-        .accessibilityLabel(strings.search)
-        .buttonStyle(.plain)
-    }
-
-    @MainActor
-    private func showStatsSearch() {
-        if isSearchVisible || !topicSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            isSearchFocused = false
-            closeStatsSearch(clearText: true)
-            return
-        }
-
-        withAnimation(.smooth(duration: 0.28)) {
-            isSearchVisible = true
-        }
-        searchFocusTask?.cancel()
-        searchFocusTask = Task { @MainActor in
-            await Task.yield()
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled else {
-                return
-            }
-            isSearchFocused = true
-        }
-    }
-
-    @MainActor
-    private func closeStatsSearch(clearText: Bool) {
-        searchFocusTask?.cancel()
-        searchFocusTask = nil
-        isSearchFocused = false
-
-        if clearText {
-            topicSearch = ""
-        }
-
-        withAnimation(.smooth(duration: 0.22)) {
-            isSearchVisible = false
         }
     }
 
@@ -352,7 +228,6 @@ struct StatisticsView: View {
     private func loadStats() {
         loadStats(
             period: selectedPeriod,
-            search: topicSearch,
             startAt: selectedPeriodStartAt,
             endAt: selectedPeriodEndAt,
             limit: Self.topicPageSize,
@@ -362,7 +237,6 @@ struct StatisticsView: View {
 
     private func loadStats(
         period: StatisticsPeriod = .all,
-        search: String = "",
         startAt: Date? = nil,
         endAt: Date? = nil,
         limit: Int = Self.topicPageSize,
@@ -372,7 +246,6 @@ struct StatisticsView: View {
         Task {
             await appState.fetchBackendStats(
                 period: period.backendPeriod,
-                search: search,
                 sort: .count,
                 startAt: startAt,
                 endAt: endAt,
@@ -391,36 +264,12 @@ struct StatisticsView: View {
 
         await appState.fetchBackendStats(
             period: selectedPeriod.backendPeriod,
-            search: topicSearch,
             sort: .count,
             startAt: selectedPeriodStartAt,
             endAt: selectedPeriodEndAt,
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
-    }
-
-    private func scheduleDebouncedStatsReload() {
-        statsSearchDebounceTask?.cancel()
-        let period = selectedPeriod
-        let search = topicSearch
-        statsSearchDebounceTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: 220_000_000)
-                await MainActor.run {
-                    loadStats(
-                        period: period,
-                        search: search,
-                        startAt: periodBounds(for: period).startAt,
-                        endAt: periodBounds(for: period).endAt,
-                        limit: Self.topicPageSize,
-                        offset: max(topicPage * Self.topicPageSize, 0)
-                    )
-                }
-            } catch {
-                return
-            }
-        }
     }
 
     private func resetTopicPaging() {

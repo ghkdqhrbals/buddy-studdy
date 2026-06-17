@@ -319,6 +319,7 @@ class StudyServiceTest {
         override fun deleteByQuestionId(questionId: Long): Long = 0
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
+        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
     }
 
 }

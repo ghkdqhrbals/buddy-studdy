@@ -209,7 +209,8 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendRecordsPage
 
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
@@ -225,7 +226,6 @@ protocol RemotePushBackendClientProtocol {
         period: BackendStatsPeriod,
         startAt: Date?,
         endAt: Date?,
-        search: String,
         sort: BackendStatsSort,
         limit: Int,
         offset: Int
@@ -236,12 +236,14 @@ protocol RemotePushBackendClientProtocol {
         query: String?,
         limit: Int,
         offset: Int,
-        excludeDeviceID: String?
+        excludeDeviceID: String?,
+        language: AppLanguage
     ) async throws -> CommunityQuestionsResponse
 
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
-        questionID: String
+        questionID: String,
+        language: AppLanguage
     ) async throws -> CommunityQuestion
 
     func loginWithGoogle(
@@ -575,7 +577,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int = 100,
         offset: Int = 0,
-        query: String = ""
+        query: String = "",
+        language: AppLanguage = .korean
     ) async throws -> BackendRecordsPage {
         var components = URLComponents(
             url: endpoint("api", "v1", "records"),
@@ -584,7 +587,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
-            URLQueryItem(name: "query", value: query)
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "language", value: language.backendCode)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -705,7 +709,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         period: BackendStatsPeriod = .all,
         startAt: Date? = nil,
         endAt: Date? = nil,
-        search: String = "",
         sort: BackendStatsSort = .level,
         limit: Int = 8,
         offset: Int = 0
@@ -716,7 +719,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var queryItems = [
             URLQueryItem(name: "period", value: period.rawValue),
-            URLQueryItem(name: "query", value: search),
             URLQueryItem(name: "sort", value: sort.rawValue),
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)")
@@ -743,7 +745,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         query: String?,
         limit: Int = 20,
         offset: Int = 0,
-        excludeDeviceID: String? = nil
+        excludeDeviceID: String? = nil,
+        language: AppLanguage = .korean
     ) async throws -> CommunityQuestionsResponse {
         let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let apiVersion = normalizedQuery.isEmpty ? "v1" : "v2"
@@ -754,7 +757,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         var queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
-            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+            URLQueryItem(name: "offset", value: "\(max(0, offset))"),
+            URLQueryItem(name: "language", value: language.backendCode)
         ]
         if !normalizedQuery.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
@@ -776,12 +780,21 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
-        questionID: String
+        questionID: String,
+        language: AppLanguage = .korean
     ) async throws -> CommunityQuestion {
-        var request = authenticatedRequest(
-            registration: registration,
-            url: endpoint("api", "v1", "public", "questions", questionID)
+        var components = URLComponents(
+            url: endpoint("api", "v1", "public", "questions", questionID),
+            resolvingAgainstBaseURL: false
         )
+        components?.queryItems = [
+            URLQueryItem(name: "language", value: language.backendCode)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestion.self, from: data)

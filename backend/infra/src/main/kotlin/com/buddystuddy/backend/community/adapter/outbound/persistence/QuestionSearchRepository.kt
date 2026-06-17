@@ -109,6 +109,9 @@ class QuestionSearchRepository(
         return SearchResult(ids, total)
     }
 
+    override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+        jpa.findByQuestionIdAndLanguage(questionId, language.normalizedSearchLanguage())
+
     override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? {
         val row = jpa.findByQuestionIdAndLanguage(questionId, language.normalizedSearchLanguage()) ?: return null
         return row.takeIf { it.publicQuestion && it.score != null && it.deletedAt == null }

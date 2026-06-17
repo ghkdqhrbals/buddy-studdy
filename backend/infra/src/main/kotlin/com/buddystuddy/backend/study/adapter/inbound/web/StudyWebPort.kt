@@ -14,9 +14,9 @@ import org.springframework.security.core.Authentication
 
 interface StudyWebPort {
     fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): StudyPageResponse
-    fun records(limit: Int, offset: Int, query: String?, authentication: Authentication): RecordsPageResponse
+    fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication): RecordsPageResponse
     fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
-    fun record(id: Long, authentication: Authentication): StudyRecordResponse
+    fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse
     fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
     fun grade(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
     fun skip(id: Long, authentication: Authentication): StudyRecordResponse

@@ -89,9 +89,11 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed record search query.", example = "actor")
         @RequestParam(required = false) query: String?,
+        @Parameter(description = "Response/search language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication,
     ): RecordsPageResponse =
-        study.records(limit, offset, query, authentication)
+        study.records(limit, offset, query, language, authentication)
 
     @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
     @ApiResponses(
@@ -113,8 +115,10 @@ class StudyController(
     fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
+        @Parameter(description = "Response language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication,
-    ): StudyRecordResponse = study.record(id, authentication)
+    ): StudyRecordResponse = study.record(id, language, authentication)
 
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/records/{id}/answer")

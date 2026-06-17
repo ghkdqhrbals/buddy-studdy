@@ -978,7 +978,8 @@ final class AppState: ObservableObject {
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0,
-                query: ""
+                query: "",
+                language: settings.appLanguage
             )
             let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
             applyBackendRecordsPage(
@@ -1203,7 +1204,8 @@ final class AppState: ObservableObject {
                 registration: registration,
                 limit: settings.sanitizedMaxHistoryCount,
                 offset: 0,
-                query: ""
+                query: "",
+                language: settings.appLanguage
             )
             let studyPage = try await remotePushBackendClient.fetchStudy(
                 registration: registration,
@@ -1349,7 +1351,8 @@ final class AppState: ObservableObject {
                 registration: registration,
                 limit: limit ?? settings.sanitizedMaxHistoryCount,
                 offset: 0,
-                query: trimmedQuery
+                query: trimmedQuery,
+                language: settings.appLanguage
             )
             recordSearchResults = page.records
         } catch {
@@ -1364,7 +1367,6 @@ final class AppState: ObservableObject {
 
     func fetchBackendStats(
         period: BackendStatsPeriod = .all,
-        search: String = "",
         sort: BackendStatsSort = .level,
         startAt: Date? = nil,
         endAt: Date? = nil,
@@ -1382,7 +1384,6 @@ final class AppState: ObservableObject {
             }
         }
 
-        let trimmedSearch = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedLimit = max(1, min(limit, 100))
         let normalizedOffset = max(0, offset)
 
@@ -1401,7 +1402,6 @@ final class AppState: ObservableObject {
                 period: period,
                 startAt: startAt,
                 endAt: endAt,
-                search: trimmedSearch,
                 sort: sort,
                 limit: normalizedLimit,
                 offset: normalizedOffset
@@ -1465,7 +1465,8 @@ final class AppState: ObservableObject {
                 query: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
                 offset: normalizedOffset,
-                excludeDeviceID: nil
+                excludeDeviceID: nil,
+                language: settings.appLanguage
             )
 
             guard communityQuestionLoadRequestID == requestID else {
@@ -2153,7 +2154,8 @@ final class AppState: ObservableObject {
         do {
             let question = try await remotePushBackendClient.fetchPublicQuestion(
                 registration: registration,
-                questionID: questionID
+                questionID: questionID,
+                language: settings.appLanguage
             )
             if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                 communityQuestions[index] = question

@@ -58,7 +58,7 @@ class CommunityServiceTest {
         questionStats.rows += QuestionStatsEntity(questionId = 101, likeCount = 3, commentCount = 2, viewCount = 30)
         likes.rows += QuestionLikeEntity(questionId = 101, userId = 7)
 
-        val response = service.getPublicQuestions(principal, query = null, limit = 20, offset = 0)
+        val response = service.getPublicQuestions(principal, query = null, language = "ko", limit = 20, offset = 0)
 
         assertThat(response.questions.map { it.author?.displayName }).containsExactly("Author B", "Author A")
         assertThat(response.questions.map { it.viewCount }).containsExactly(30, 20)
@@ -92,7 +92,7 @@ class CommunityServiceTest {
             createdAt = Instant.parse("2026-06-10T00:00:00Z"),
         )
 
-        val response = service.getPublicQuestionsV2(principal, query = null, limit = 20, offset = 0)
+        val response = service.getPublicQuestionsV2(principal, query = null, language = "en", limit = 20, offset = 0)
 
         val question = response.questions.single()
         assertThat(question.topic).isEqualTo("Translated topic")
@@ -302,6 +302,9 @@ class CommunityServiceTest {
             SearchResult(rows.filter { it.language == language }.map { it.questionId }, rows.count { it.language == language }.toLong())
 
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+            rows.firstOrNull { it.questionId == questionId && it.language == language }
+
+        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }
     }
 

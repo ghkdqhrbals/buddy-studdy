@@ -80,7 +80,7 @@ class CommunityStudyServiceTest {
         answeredPublicQuestion(hiddenAuthor, "SwiftUI", createdAt = now.plusSeconds(1))
         answeredPublicQuestion(author, "SwiftUI", createdAt = now, deletedAt = now.plusSeconds(10))
 
-        val response = community.getPublicQuestions(null, "swift", limit = 10, offset = 0)
+        val response = community.getPublicQuestions(null, "swift", language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(1)
         val result = response.questions.single()
@@ -96,7 +96,7 @@ class CommunityStudyServiceTest {
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
 
-        val response = community.getPublicQuestions(null, null, limit = 10, offset = 0)
+        val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
@@ -111,7 +111,7 @@ class CommunityStudyServiceTest {
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden", createdAt = now.plusSeconds(5))
         listOf(newest, older, private, pending, hidden).forEach { questionSearch.refreshIndexedQuestion(it) }
 
-        val response = community.getPublicQuestionsV2(principal = null, query = null, limit = 10, offset = 0)
+        val response = community.getPublicQuestionsV2(principal = null, query = null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
@@ -123,7 +123,7 @@ class CommunityStudyServiceTest {
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 7, commentCount = 2, viewCount = 11))
         likes.save(QuestionLikeEntity(questionId = q.id, userId = viewer.id))
 
-        val response = community.getPublicQuestion(principal, q.id)
+        val response = community.getPublicQuestion(principal, q.id, language = "ko")
 
         assertThat(response.id).isEqualTo(q.id.toString())
         assertThat(response.author?.displayName).isEqualTo("Author")
@@ -141,7 +141,7 @@ class CommunityStudyServiceTest {
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden")
 
         listOf(privateQuestion, pending, deleted, hidden).forEach {
-            assertRecordNotFound { community.getPublicQuestion(principal, it.id) }
+            assertRecordNotFound { community.getPublicQuestion(principal, it.id, language = "ko") }
         }
     }
 

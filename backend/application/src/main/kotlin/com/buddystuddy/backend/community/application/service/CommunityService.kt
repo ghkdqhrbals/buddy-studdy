@@ -55,7 +55,7 @@ class CommunityService(
     private val notifications: PublishNotificationUseCase,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override fun getPublicQuestions(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val page = if (search == null) {
@@ -64,21 +64,19 @@ class CommunityService(
             questions.findPublicAnsweredByQuery(search, pageable)
         }
         val context = communityContext(page.content, principal)
-        val rows = page.content.map { community(it, context) }
+        val translatedById = translatedRows(page.content.map { it.id }, language)
+        val rows = page.content.map { community(it, context, translatedById[it.id]) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
-    override fun getPublicQuestionsV2(principal: Principal?, query: String?, limit: Int, offset: Int): CommunityQuestionsResponse {
-        val language = responseLanguage(principal)
+    override fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, language, limit, offset)
         if (result.questionIds.isEmpty()) {
             return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
         }
         val questionsById = questions.findPublicAnsweredByIds(result.questionIds).associateBy { it.id }
-        val translatedById = result.questionIds.mapNotNull { id ->
-            search.findPublicByQuestionIdAndLanguage(id, language)?.let { id to it }
-        }.toMap()
+        val translatedById = translatedRows(result.questionIds, language)
         val orderedQuestions = result.questionIds.mapNotNull { questionsById[it] }
         val context = communityContext(orderedQuestions, principal)
         val rows = orderedQuestions.map { community(it, context, translatedById[it.id]) }
@@ -86,10 +84,10 @@ class CommunityService(
     }
 
     @Transactional
-    override fun getPublicQuestion(principal: Principal?, id: Long): CommunityQuestionResponse {
+    override fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
         reactions.publishViewed(id, principal?.userId)
-        return community(q, communityContext(listOf(q), principal), search.findPublicByQuestionIdAndLanguage(id, responseLanguage(principal)))
+        return community(q, communityContext(listOf(q), principal), search.findPublicByQuestionIdAndLanguage(id, language))
     }
 
     @Transactional
@@ -248,11 +246,10 @@ class CommunityService(
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
     }.toProfile()
 
-    private fun responseLanguage(principal: Principal?): String =
-        principal
-            ?.let { users.findById(it.userId).orElse(null)?.appLanguage }
-            ?.takeIf { it.isNotBlank() }
-            ?: "ko"
+    private fun translatedRows(questionIds: Collection<Long>, language: String): Map<Long, QuestionSearchEntity> =
+        questionIds.mapNotNull { id ->
+            search.findPublicByQuestionIdAndLanguage(id, language)?.let { id to it }
+        }.toMap()
 
     private fun publishThreadNotification(
         ownerUserId: Long?,

@@ -49,16 +49,20 @@ class CommunityController(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Response/search language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestions(query ?: topic, limit, offset, authentication)
+    ) = community.getPublicQuestions(query ?: topic, language, limit, offset, authentication)
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
     fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
+        @Parameter(description = "Response language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestion(id, authentication)
+    ) = community.getPublicQuestion(id, language, authentication)
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
@@ -138,14 +142,16 @@ class CommunitySearchV2Controller(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Search and response language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestionsV2(query, limit, offset, authentication)
+    ) = community.getPublicQuestionsV2(query, language, limit, offset, authentication)
 }
 
 interface CommunityWebPort {
-    fun getPublicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun getPublicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun getPublicQuestion(id: Long, authentication: Authentication?): Any
+    fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    fun getPublicQuestion(id: Long, language: String, authentication: Authentication?): Any
     fun likePublicQuestion(id: Long, authentication: Authentication): Any
     fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
     fun getComments(id: Long, limit: Int, offset: Int): Any
@@ -158,13 +164,14 @@ interface CommunityWebPort {
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
 ) : CommunityWebPort {
-    override fun getPublicQuestions(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestions(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
+    override fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestions(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
 
-    override fun getPublicQuestionsV2(query: String?, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, safeLimit(limit, 100), max(0, offset))
+    override fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
 
-    override fun getPublicQuestion(id: Long, authentication: Authentication?) = community.getPublicQuestion(authentication.optionalPrincipal(), id)
+    override fun getPublicQuestion(id: Long, language: String, authentication: Authentication?) =
+        community.getPublicQuestion(authentication.optionalPrincipal(), id, language)
 
     override fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 

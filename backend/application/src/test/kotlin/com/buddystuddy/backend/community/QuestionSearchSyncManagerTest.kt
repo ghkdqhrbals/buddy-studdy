@@ -118,6 +118,9 @@ class QuestionSearchSyncManagerTest {
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }
+
+        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+            rows.firstOrNull { it.questionId == questionId && it.language == language }
     }
 
     private class FakeUserPort(private val user: UserEntity) : UserPort {

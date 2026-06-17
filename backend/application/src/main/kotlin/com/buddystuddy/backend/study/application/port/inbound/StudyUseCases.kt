@@ -26,9 +26,9 @@ interface StudyUseCase {
 }
 
 interface BrowseRecordsUseCase {
-    fun records(principal: Principal, limit: Int, offset: Int, query: String? = null): RecordsPageResponse
+    fun records(principal: Principal, limit: Int, offset: Int, query: String? = null, language: String = "ko"): RecordsPageResponse
     fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
-    fun record(principal: Principal, id: Long): StudyRecordResponse
+    fun record(principal: Principal, id: Long, language: String = "ko"): StudyRecordResponse
 }
 
 interface StudySyncUseCase {
