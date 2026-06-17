@@ -1051,12 +1051,22 @@ private struct MobileNotificationsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(strings.deleteAllNotifications) {
-                    Task {
-                        await appState.deleteAllNotifications()
+                Menu {
+                    Button(role: .destructive) {
+                        Task {
+                            await appState.deleteAllNotifications()
+                        }
+                    } label: {
+                        Label(strings.deleteAllNotifications, systemImage: "trash")
                     }
+                    .disabled(appState.notifications.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(strings.more)
                 }
-                .disabled(appState.notifications.isEmpty)
             }
         }
     }

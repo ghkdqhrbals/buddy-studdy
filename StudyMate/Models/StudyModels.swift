@@ -1821,6 +1821,7 @@ struct AppStrings {
     var needsImprovement: String { text("보완 필요", "Needs Work") }
 
     var clear: String { text("삭제", "Delete") }
+    var more: String { text("더보기", "More") }
     var searchRecords: String { text("기록 검색", "Search records") }
     func filteredRecordCount(_ shown: Int, total: Int) -> String {
         text("\(shown)/\(total)개 표시", "\(shown)/\(total) shown")
