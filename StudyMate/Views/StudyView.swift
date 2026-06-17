@@ -328,10 +328,27 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             StudyChatBubble(role: .tutor) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(question.question)
-                        .font(.body)
-                        .foregroundStyle(.white)
-                        .textSelection(.enabled)
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(question.question)
+                            .font(.body)
+                            .foregroundStyle(.white)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if gradingResult == nil {
+                            Button {
+                                onSkip()
+                            } label: {
+                                Image(systemName: "forward.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .frame(width: 30, height: 30)
+                                    .background(.white.opacity(0.16), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(strings.skipQuestion)
+                        }
+                    }
 
                     hintView
                 }
@@ -347,16 +364,6 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         onSubmit: onSubmit
                     )
                 }
-
-                Button {
-                    onSkip()
-                } label: {
-                    Label(strings.skipQuestion, systemImage: "forward")
-                        .font(.footnote.weight(.semibold))
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
             } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 StudyChatBubble(role: .learnerAnswer) {
                     Text(draftAnswer)

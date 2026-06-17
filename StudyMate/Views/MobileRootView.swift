@@ -335,16 +335,16 @@ private struct MobileHomeView: View {
             }
 
             if #available(iOS 26.0, *) {
-                if !isHomeSearchActive {
+                if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
+                        homeAddToolbarButton(strings: strings)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
 
-                if shouldShowHomeAddToolbarButton {
+                if !isHomeSearchActive {
                     ToolbarItem(placement: .topBarTrailing) {
-                        homeAddToolbarButton(strings: strings)
+                        notificationToolbarButton(strings: strings)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
@@ -354,15 +354,15 @@ private struct MobileHomeView: View {
                 }
                 .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
             } else {
-                if !isHomeSearchActive {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
-                    }
-                }
-
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeAddToolbarButton(strings: strings)
+                    }
+                }
+
+                if !isHomeSearchActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        notificationToolbarButton(strings: strings)
                     }
                 }
 
@@ -776,14 +776,6 @@ private struct MobileHomeView: View {
     @ViewBuilder
     private func homeToolbarItems(strings: AppStrings) -> some View {
         HStack(spacing: 16) {
-            Button {
-                showHomeSearch()
-            } label: {
-                MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(strings.search)
-
             if selectedHomeScope == .my, appState.isCommunitySignedIn {
                 Button {
                     isAddingStudyCategory = true
@@ -793,6 +785,16 @@ private struct MobileHomeView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(strings.newStudyCategory)
             }
+
+            notificationToolbarButton(strings: strings)
+
+            Button {
+                showHomeSearch()
+            } label: {
+                MobileToolbarIconButtonLabel(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.search)
         }
         .fixedSize()
     }
