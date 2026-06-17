@@ -7,6 +7,8 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.study.application.model.PushTestCommand
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystuddy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystuddy.backend.study.application.service.PushTestService
@@ -26,7 +28,7 @@ class PushTestServiceTest {
             )
         )
         val push = CapturingPushNotificationPort()
-        val service = PushTestService(devices, push)
+        val service = PushTestService(devices, push, FakePushEventPublisher())
 
         val response = service.sendTestPush(
             Principal(userId = 1, deviceId = "dev-1", sessionId = 10, anonymous = false),
@@ -58,6 +60,7 @@ class PushTestServiceTest {
         val service = PushTestService(
             FakeDevicePort(DeviceEntity(deviceId = "dev-1", userId = 1, apnsToken = "")),
             CapturingPushNotificationPort(),
+            FakePushEventPublisher(),
         )
 
         assertThatThrownBy {
@@ -71,7 +74,42 @@ class PushTestServiceTest {
             .isEqualTo(ApiErrorCode.VALIDATION_ERROR)
     }
 
-    private class FakeDevicePort(private val device: DeviceEntity?) : DevicePort {
+    @Test
+    fun `publish test push event sends request to push stream publisher`() {
+        val pushEvents = FakePushEventPublisher()
+        val service = PushTestService(FakeDevicePort(), CapturingPushNotificationPort(), pushEvents)
+        val response = service.publishTestPushEvent(
+            Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false),
+            PushTestCommand(
+                title = "Title",
+                body = "Body",
+                topic = "Redis",
+                recordId = "123",
+                studyId = 55,
+                difficultyLevel = 9,
+                language = "en",
+                sound = "default",
+                deepLink = "buddystuddy://studies/55",
+            )
+        )
+
+        assertThat(response.sent).isTrue()
+        assertThat(response.provider).isEqualTo("PUSH_STREAM")
+        assertThat(response.recordId).isEqualTo("123")
+        val request = pushEvents.requests.single()
+        assertThat(request.recordId).isEqualTo(123)
+        assertThat(request.studyId).isEqualTo(55)
+        assertThat(request.deviceId).isEqualTo("dev-1")
+        assertThat(request.userId).isEqualTo(7)
+        assertThat(request.topic).isEqualTo("Redis")
+        assertThat(request.difficultyLevel).isEqualTo(9)
+        assertThat(request.language).isEqualTo("en")
+        assertThat(request.title).isEqualTo("Title")
+        assertThat(request.body).isEqualTo("Body")
+        assertThat(request.deepLink).isEqualTo("buddystuddy://studies/55")
+    }
+
+    private class FakeDevicePort(private val device: DeviceEntity? = null) : DevicePort {
         override fun save(entity: DeviceEntity): DeviceEntity = entity
         override fun findByDeviceId(deviceId: String): DeviceEntity? = device?.takeIf { it.deviceId == deviceId }
         override fun findAllByUserId(userId: Long): List<DeviceEntity> =
@@ -83,6 +121,14 @@ class PushTestServiceTest {
 
         override fun sendQuestion(message: PushQuestionMessage) {
             this.message = message
+        }
+    }
+
+    private class FakePushEventPublisher : QuestionPushPublishPort {
+        val requests = mutableListOf<QuestionPushRequest>()
+        override fun publishPush(request: QuestionPushRequest): Boolean {
+            requests += request
+            return true
         }
     }
 }

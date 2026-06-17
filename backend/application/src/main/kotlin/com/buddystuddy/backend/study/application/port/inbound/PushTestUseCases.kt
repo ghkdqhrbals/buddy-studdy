@@ -6,4 +6,5 @@ import com.buddystuddy.backend.study.application.model.PushTestResponse
 
 interface SendTestPushUseCase {
     fun sendTestPush(principal: Principal, command: PushTestCommand): PushTestResponse
+    fun publishTestPushEvent(principal: Principal, command: PushTestCommand): PushTestResponse
 }

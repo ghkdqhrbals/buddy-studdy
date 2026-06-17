@@ -11,15 +11,19 @@ import com.buddystuddy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystuddy.backend.study.application.port.outbound.ApnsAps
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystuddy.backend.study.application.port.outbound.ApnsQuestionPayload
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystuddy.backend.study.application.port.outbound.PushMessageType
 import com.buddystuddy.backend.study.application.port.outbound.PushNotificationPort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
+import java.time.Instant
 
 @Service
 class PushTestService(
     private val devices: DevicePort,
     private val pushNotifications: PushNotificationPort,
+    private val pushEvents: QuestionPushPublishPort,
 ) : SendTestPushUseCase {
     override fun sendTestPush(principal: Principal, command: PushTestCommand): PushTestResponse {
         val device = devices.findByDeviceId(principal.deviceId)
@@ -51,6 +55,35 @@ class PushTestService(
             deviceId = principal.deviceId,
             topic = message.topic,
             recordId = message.recordId,
+        )
+    }
+
+    override fun publishTestPushEvent(principal: Principal, command: PushTestCommand): PushTestResponse {
+        val recordId = command.recordId.toLongOrNull() ?: 0L
+        val request = QuestionPushRequest(
+            recordId = recordId,
+            studyId = command.studyId,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            question = command.body.ifBlank { "BuddyStuddy test push." },
+            expectedAnswerHint = null,
+            topic = command.topic.ifBlank { "Test" },
+            difficultyLevel = command.difficultyLevel.coerceIn(1, 10),
+            language = command.language.ifBlank { "ko" },
+            sound = command.sound.ifBlank { "default" },
+            intervalMinutes = 0,
+            title = command.title.ifBlank { "BuddyStuddy" },
+            body = command.body.ifBlank { "BuddyStuddy test push." },
+            deepLink = command.deepLink.ifBlank { "buddystuddy://test-push" },
+            createdAt = Instant.now(),
+        )
+        val published = pushEvents.publishPush(request)
+        return PushTestResponse(
+            sent = published,
+            provider = "PUSH_STREAM",
+            deviceId = principal.deviceId,
+            topic = request.topic,
+            recordId = request.recordId.toString(),
         )
     }
 }

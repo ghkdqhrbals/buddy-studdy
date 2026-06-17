@@ -5,6 +5,9 @@ data class PushTestRequest(
     val body: String? = null,
     val topic: String? = null,
     val recordId: String? = null,
+    val studyId: Long? = null,
+    val difficultyLevel: Int? = null,
+    val language: String? = null,
     val sound: String? = null,
     val deepLink: String? = null,
 )

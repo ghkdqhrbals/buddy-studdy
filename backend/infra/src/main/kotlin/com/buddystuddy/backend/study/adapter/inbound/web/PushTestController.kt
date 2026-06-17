@@ -39,10 +39,25 @@ class PushTestController(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
     ): PushTestResponse = pushTest.send(body ?: PushTestRequest(), authentication)
+
+    @Operation(
+        summary = "Publish a test push event",
+        description = "Publishes one test event to the push stream. The push listener will consume it and send the notification if the device has a valid push token.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Test push event published."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+    )
+    @PostMapping("/test/push-event")
+    fun publishEvent(
+        @RequestBody(required = false) body: PushTestRequest?,
+        authentication: Authentication,
+    ): PushTestResponse = pushTest.publishEvent(body ?: PushTestRequest(), authentication)
 }
 
 interface PushTestWebPort {
     fun send(body: PushTestRequest, authentication: Authentication): PushTestResponse
+    fun publishEvent(body: PushTestRequest, authentication: Authentication): PushTestResponse
 }
 
 @Component
@@ -51,6 +66,9 @@ class PushTestWebAdapter(
 ) : PushTestWebPort {
     override fun send(body: PushTestRequest, authentication: Authentication) =
         sendTestPush.sendTestPush(authentication.principalOrThrow(), body.toCommand())
+
+    override fun publishEvent(body: PushTestRequest, authentication: Authentication) =
+        sendTestPush.publishTestPushEvent(authentication.principalOrThrow(), body.toCommand())
 }
 
 private fun PushTestRequest.toCommand() = PushTestCommand(
@@ -58,6 +76,9 @@ private fun PushTestRequest.toCommand() = PushTestCommand(
     body = body ?: "BuddyStuddy test push.",
     topic = topic ?: "Test",
     recordId = recordId ?: "test",
+    studyId = studyId,
+    difficultyLevel = difficultyLevel ?: 1,
+    language = language ?: "ko",
     sound = sound ?: "default",
     deepLink = deepLink ?: "buddystuddy://test-push",
 )
