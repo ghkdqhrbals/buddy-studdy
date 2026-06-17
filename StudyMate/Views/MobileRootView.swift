@@ -975,6 +975,7 @@ private enum HomeFeedScope: String, CaseIterable, Identifiable {
 private struct MobileNotificationsView: View {
     @EnvironmentObject private var appState: AppState
     @Binding var forwardedRoute: NotificationForwardRoute?
+    @State private var openedAt = Date()
 
     private var strings: AppStrings {
         appState.strings
@@ -1010,7 +1011,7 @@ private struct MobileNotificationsView: View {
                             }
                         }
                     } label: {
-                        MobileNotificationRow(notification: notification, strings: strings)
+                        MobileNotificationRow(notification: notification, referenceDate: openedAt, strings: strings)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1042,6 +1043,7 @@ private struct MobileNotificationsView: View {
             await appState.loadNotifications(reset: true)
         }
         .task {
+            openedAt = Date()
             await appState.loadNotifications(reset: true)
         }
         .navigationDestination(item: $forwardedRoute) { route in
@@ -1258,6 +1260,7 @@ private struct NotificationStudyListDestination: View {
 
 private struct MobileNotificationRow: View {
     var notification: BackendAppNotification
+    var referenceDate: Date
     var strings: AppStrings
 
     var body: some View {
@@ -1276,7 +1279,7 @@ private struct MobileNotificationRow: View {
 
                     Spacer(minLength: 8)
 
-                    Text(notification.createdAt, style: .relative)
+                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: notification.createdAt, relativeTo: referenceDate))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
