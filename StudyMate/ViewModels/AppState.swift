@@ -2896,6 +2896,26 @@ final class AppState: ObservableObject {
         }
     }
 
+    func prepareStudyRoom(categoryID: String?) async {
+        guard let initialCategory = studyCategoryForRoom(categoryID) else {
+            return
+        }
+
+        applyPreferredPendingRecord(for: initialCategory)
+
+        guard preferredPendingRecord(for: initialCategory) == nil else {
+            return
+        }
+
+        let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        guard didRefresh,
+              let refreshedCategory = studyCategoryForRoom(categoryID) ?? studyCategoryMatchingTopic(initialCategory.title) else {
+            return
+        }
+
+        applyPreferredPendingRecord(for: refreshedCategory)
+    }
+
     func deleteStudyCategory(id: String) {
         guard let index = studyCategoriesForDisplay.firstIndex(where: { $0.id == id }) else {
             return
@@ -3584,6 +3604,28 @@ final class AppState: ObservableObject {
         settingsStore.saveQuestion(record.question)
         settingsStore.saveLastAnswer(record.answer ?? "")
         settingsStore.saveGradingResult(record.gradingResult)
+    }
+
+    private func studyCategoryForRoom(_ categoryID: String?) -> StudyCategory? {
+        let categories = synchronizedTopicCategories(for: settings).studyCategories
+        if let categoryID,
+           let category = categories.first(where: { $0.id == categoryID }) {
+            return category
+        }
+
+        if let selectedCategoryID = settings.selectedStudyCategoryID,
+           let category = categories.first(where: { $0.id == selectedCategoryID }) {
+            return category
+        }
+
+        return categories.first
+    }
+
+    private func studyCategoryMatchingTopic(_ topic: String) -> StudyCategory? {
+        let topicKey = Self.normalizedCategoryText(for: topic)
+        return synchronizedTopicCategories(for: settings).studyCategories.first {
+            Self.normalizedCategoryText(for: $0.title) == topicKey
+        }
     }
 
     func gradeCurrentAnswer(answer submittedAnswer: String? = nil) async {

@@ -76,6 +76,9 @@ struct StudyView: View {
         .onAppear {
             draftAnswer = appState.lastAnswer
         }
+        .task(id: preferredCategoryID) {
+            await appState.prepareStudyRoom(categoryID: preferredCategoryID)
+        }
         .onDisappear {
             appState.flushPendingAnswerDraftSave()
         }
