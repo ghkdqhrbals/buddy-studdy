@@ -36,17 +36,18 @@ class AccountSessionManager(
 
     fun ensureAnonymousUser(device: DeviceEntity): UserEntity {
         val now = Instant.now()
-        val user = users.save(
-            UserEntity(
-                provider = "ANONYMOUS",
-                providerId = device.deviceId,
-                status = "ANONYMOUS",
-                displayName = "Buddy",
-                avatarColorSeed = "avatar-color-gray",
-                createdAt = now,
-                updatedAt = now,
+        val user = users.findByProviderAndProviderId("ANONYMOUS", device.deviceId)
+            ?: users.save(
+                UserEntity(
+                    provider = "ANONYMOUS",
+                    providerId = device.deviceId,
+                    status = "ANONYMOUS",
+                    displayName = "Buddy",
+                    avatarColorSeed = "avatar-color-gray",
+                    createdAt = now,
+                    updatedAt = now,
+                )
             )
-        )
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
         return user
     }

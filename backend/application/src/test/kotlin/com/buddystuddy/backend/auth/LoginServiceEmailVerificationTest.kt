@@ -98,6 +98,20 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `device token reissue after logout reuses existing anonymous user`() {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
+        login.logout(principal)
+
+        val response = login.token(device.deviceId, device.clientSecret)
+
+        assertThat(response.accessToken).isNotBlank()
+        assertThat(devices.findByDeviceId(device.deviceId)?.userId).isEqualTo(1)
+        assertThat(users.countByProviderAndProviderId("ANONYMOUS", device.deviceId)).isEqualTo(1)
+        assertThat(roles.grantRoleCallsFor(1, "ANONYMOUS_USER")).isEqualTo(2)
+    }
+
+    @Test
     fun `logged in devices returns active sessions only`() {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", platform = "ios", language = "ko", timezone = "Asia/Seoul"))
         val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
@@ -204,6 +218,9 @@ class LoginServiceEmailVerificationTest {
 
         override fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
             users.values.firstOrNull { it.email == email && it.provider == provider }
+
+        fun countByProviderAndProviderId(provider: String, providerId: String): Int =
+            users.values.count { it.provider == provider && it.providerId == providerId }
     }
 
     private class InMemoryDevicePort : DevicePort {
