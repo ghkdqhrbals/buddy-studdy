@@ -4524,6 +4524,10 @@ final class AppState: ObservableObject {
 
             settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
             reloadStudyRecordsFromStore()
+            let didApplyRecordToStudyRoom = studyRoomState.applyIncomingRecord(record)
+            if !didApplyRecordToStudyRoom, record.gradingResult == nil {
+                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            }
 
             if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
                 lastAnswer = record.answer ?? lastAnswer

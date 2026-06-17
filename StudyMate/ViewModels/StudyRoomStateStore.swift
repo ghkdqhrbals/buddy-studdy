@@ -87,6 +87,25 @@ struct StudyRoomStateStore {
         }
     }
 
+    mutating func applyIncomingRecord(_ record: StudyRecord) -> Bool {
+        var didApply = false
+        rooms = rooms.map { room in
+            let matchesExistingQuestion = room.pendingQuestion?.id == record.id
+            let matchesTopic = Self.normalizedText(room.topic) == Self.normalizedText(record.topic)
+            guard matchesExistingQuestion || matchesTopic else {
+                return room
+            }
+
+            var nextRoom = room
+            if Self.isPendingQuestion(record) || matchesExistingQuestion {
+                nextRoom.pendingQuestion = record
+                didApply = true
+            }
+            return nextRoom
+        }
+        return didApply
+    }
+
     mutating func clearPendingQuestion(recordID: String) {
         rooms = rooms.map { room in
             guard room.pendingQuestion?.id == recordID else {
