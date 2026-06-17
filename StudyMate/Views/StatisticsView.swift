@@ -100,8 +100,7 @@ struct StatisticsView: View {
                         .frame(maxWidth: .infinity, minHeight: 280)
                     } else {
                         StatsOverviewSection(
-                            totalResponses: count,
-                            totalTopics: totalTopicCount,
+                            topics: topicStats,
                             activity: appState.backendStatsActivity,
                             isActivityLoading: appState.isBackendStatsActivityLoading,
                             strings: strings
@@ -974,18 +973,31 @@ private extension TopicLevelRange {
 }
 
 private struct StatsOverviewSection: View {
-    var totalResponses: Int
-    var totalTopics: Int
+    var topics: [TopicStat]
     var activity: BackendStatsActivity?
     var isActivityLoading: Bool
     var strings: AppStrings
 
     var body: some View {
+        let achievements = StatsAchievementSnapshot(activity: activity, topics: topics, strings: strings)
+
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 10) {
-                StatsHeroMetric(value: "\(totalResponses)", label: strings.responses)
-                StatsHeroMetric(value: "\(totalTopics)", label: strings.activeTopics)
-                StatsHeroMetric(value: "\(activity?.streakDays ?? 0)", label: strings.studyStreak)
+            HStack(alignment: .top, spacing: 8) {
+                StatsAchievementCard(
+                    title: strings.studyStreak,
+                    value: achievements.streakValue,
+                    caption: achievements.streakCaption
+                )
+                StatsAchievementCard(
+                    title: strings.topicGrowth,
+                    value: achievements.growthValue,
+                    caption: achievements.growthCaption
+                )
+                StatsAchievementCard(
+                    title: strings.thisMonth,
+                    value: achievements.monthValue,
+                    caption: achievements.monthCaption
+                )
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -1020,23 +1032,137 @@ private struct StatsOverviewSection: View {
     }
 }
 
-private struct StatsHeroMetric: View {
+private struct StatsAchievementCard: View {
+    var title: String
     var value: String
-    var label: String
+    var caption: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-            Text(label)
-                .font(.subheadline.weight(.medium))
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+
+            Text(caption)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
+}
+
+private struct StatsAchievementSnapshot {
+    var streakValue: String
+    var streakCaption: String
+    var growthValue: String
+    var growthCaption: String
+    var monthValue: String
+    var monthCaption: String
+
+    init(activity: BackendStatsActivity?, topics: [TopicStat], strings: AppStrings) {
+        let streakDays = activity?.streakDays ?? 0
+        streakValue = strings.streakValue(streakDays)
+        streakCaption = streakDays > 0 ? strings.streakKeepGoing : strings.streakStartToday
+
+        if let growth = Self.bestGrowth(from: topics) {
+            growthValue = growth.delta >= 0 ? "+\(Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0")" : Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0"
+            growthCaption = growth.topic
+        } else if let topTopic = topics.max(by: { $0.count < $1.count }) {
+            growthValue = "\(strings.level) \(Self.levelFormatter.string(from: NSNumber(value: topTopic.levelRange.centerLevel)) ?? "\(topTopic.levelRange.level.level)")"
+            growthCaption = topTopic.topic
+        } else {
+            growthValue = "-"
+            growthCaption = strings.noActivityYet
+        }
+
+        let monthAnswers = activity?.monthAnswerCount ?? 0
+        monthValue = "\(monthAnswers)"
+        let activeDays = Self.currentMonthActiveDays(from: activity)
+        if let focusTopic = Self.currentMonthTopTopic(from: activity) {
+            monthCaption = strings.monthSummaryWithTopic(days: activeDays, topic: focusTopic)
+        } else {
+            monthCaption = strings.monthSummary(days: activeDays)
+        }
+    }
+
+    private static func bestGrowth(from topics: [TopicStat]) -> (topic: String, delta: Double)? {
+        topics
+            .compactMap { stat -> (topic: String, delta: Double)? in
+                let records = stat.records
+                    .filter { $0.gradingResult?.score != nil }
+                    .sorted { statsDate(for: $0) < statsDate(for: $1) }
+                guard records.count >= 2 else {
+                    return nil
+                }
+
+                let splitIndex = max(1, records.count / 2)
+                guard
+                    let startRange = TopicLevelRange.calculate(records: Array(records.prefix(splitIndex))),
+                    let endRange = TopicLevelRange.calculate(records: records)
+                else {
+                    return nil
+                }
+
+                return (stat.topic, endRange.centerLevel - startRange.centerLevel)
+            }
+            .max { $0.delta < $1.delta }
+    }
+
+    private static func currentMonthActiveDays(from activity: BackendStatsActivity?) -> Int {
+        guard let activity else {
+            return 0
+        }
+
+        let calendar = Calendar.current
+        let now = Date()
+        return activity.days.filter { day in
+            day.answerCount > 0
+                && calendar.component(.year, from: day.date) == calendar.component(.year, from: now)
+                && calendar.component(.month, from: day.date) == calendar.component(.month, from: now)
+        }
+        .count
+    }
+
+    private static func currentMonthTopTopic(from activity: BackendStatsActivity?) -> String? {
+        guard let activity else {
+            return nil
+        }
+
+        let calendar = Calendar.current
+        let now = Date()
+        var counts: [String: Int] = [:]
+        activity.days
+            .filter {
+                calendar.component(.year, from: $0.date) == calendar.component(.year, from: now)
+                    && calendar.component(.month, from: $0.date) == calendar.component(.month, from: now)
+            }
+            .flatMap(\.topics)
+            .forEach { counts[$0, default: 0] += 1 }
+
+        return counts.max { $0.value < $1.value }?.key
+    }
+
+    private static func statsDate(for record: StudyRecord) -> Date {
+        record.answeredAt ?? record.question.createdAt
+    }
+
+    private static let levelFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
+        return formatter
+    }()
 }
 
 private struct StatsYearGrass: View {
