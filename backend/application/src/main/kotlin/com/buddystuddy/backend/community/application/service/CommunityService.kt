@@ -278,7 +278,6 @@ private fun CommunityQuestionResponse.withTranslatedText(translated: QuestionSea
             feedback = translated.feedback ?: gradingResult.feedback,
             explanation = translated.explanation ?: gradingResult.explanation,
         ),
-        topic = translated.topic,
     )
 }
 

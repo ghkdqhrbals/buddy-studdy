@@ -73,7 +73,7 @@ class QuestionSearchSyncManager(
             questionId = id,
             language = language,
             userId = user.id,
-            topic = text.topic,
+            topic = topic,
             question = text.question,
             answer = text.answer,
             feedback = text.feedback,

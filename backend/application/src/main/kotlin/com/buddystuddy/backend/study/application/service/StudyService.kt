@@ -224,6 +224,5 @@ private fun StudyRecordResponse.withTranslatedText(translated: QuestionSearchEnt
             feedback = translated.feedback ?: gradingResult.feedback,
             explanation = translated.explanation ?: gradingResult.explanation,
         ),
-        topic = translated.topic,
     )
 }

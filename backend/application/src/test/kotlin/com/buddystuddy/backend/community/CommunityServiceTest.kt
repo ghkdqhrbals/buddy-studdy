@@ -97,7 +97,7 @@ class CommunityServiceTest {
         val response = service.getPublicQuestionsV2(principal, query = null, language = "en", limit = 20, offset = 0)
 
         val question = response.questions.single()
-        assertThat(question.topic).isEqualTo("Translated topic")
+        assertThat(question.topic).isEqualTo("원본 주제")
         assertThat(question.question).isEqualTo("Translated question")
         assertThat(question.answer).isEqualTo("Translated answer")
         assertThat(question.gradingResult?.feedback).isEqualTo("Translated feedback")
