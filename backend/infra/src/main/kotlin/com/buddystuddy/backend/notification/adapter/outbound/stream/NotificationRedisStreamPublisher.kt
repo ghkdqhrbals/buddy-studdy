@@ -44,28 +44,25 @@ class NotificationRedisStreamPublisher(
         )
         val fields = event.toRedisStreamFields()
         return try {
-            val partitionKey = command.userId.toString()
             logger.debug(
-                "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} userId={} fieldKeys={}",
+                "redis_stream_publish_started prefix={} eventId={} eventType={} userId={} fieldKeys={}",
                 properties.streams.notificationPrefix,
                 fields["eventId"],
                 fields["eventType"],
-                partitionKey,
                 command.userId,
                 fields.keys,
             )
             val published = publisher!!.publish(
-                partitionKey,
+                null,
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
             logger.debug(
-                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} userId={}",
+                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} userId={}",
                 published.streamKey,
                 published.recordId,
                 fields["eventId"],
                 fields["eventType"],
-                partitionKey,
                 command.userId,
             )
             true

@@ -33,7 +33,7 @@ class RedisStreamQuestionCreatedPublisher(
         val fields = event.toRedisStreamFields()
         return try {
             val published = requireNotNull(publisher).publish(
-                questionId.toString(),
+                null,
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
