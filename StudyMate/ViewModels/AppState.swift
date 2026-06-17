@@ -651,6 +651,14 @@ final class AppState: ObservableObject {
 
     func pendingQuestionCount(for category: StudyCategory) -> Int {
         let categoryKey = Self.normalizedCategoryText(for: category.title)
+        let backendPendingCount = backendStudyRooms.filter {
+            Self.normalizedCategoryText(for: $0.topic) == categoryKey && $0.pendingQuestion?.gradingResult == nil
+        }.count
+
+        guard backendPendingCount == 0 else {
+            return backendPendingCount
+        }
+
         return pendingRecordsIncludingCurrent.filter {
             Self.normalizedCategoryText(for: $0.topic) == categoryKey
         }.count
