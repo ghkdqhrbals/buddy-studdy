@@ -237,6 +237,61 @@ final class AppState: ObservableObject {
         }
     }
 
+    var communityQuestions: [CommunityQuestion] {
+        get {
+            communityFeedState.questions
+        }
+        set {
+            var nextState = communityFeedState
+            nextState.questions = newValue
+            communityFeedState = nextState
+        }
+    }
+
+    var communityTotalCount: Int {
+        get {
+            communityFeedState.totalCount
+        }
+        set {
+            var nextState = communityFeedState
+            nextState.totalCount = newValue
+            communityFeedState = nextState
+        }
+    }
+
+    var communityOffset: Int {
+        get {
+            communityFeedState.offset
+        }
+        set {
+            var nextState = communityFeedState
+            nextState.offset = newValue
+            communityFeedState = nextState
+        }
+    }
+
+    var isLoadingCommunityQuestions: Bool {
+        get {
+            communityFeedState.isLoading
+        }
+        set {
+            var nextState = communityFeedState
+            nextState.isLoading = newValue
+            communityFeedState = nextState
+        }
+    }
+
+    var communityErrorMessage: String? {
+        get {
+            communityFeedState.errorMessage
+        }
+        set {
+            var nextState = communityFeedState
+            nextState.errorMessage = newValue
+            communityFeedState = nextState
+        }
+    }
+
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
         return synchronized.studyCategories
@@ -249,11 +304,7 @@ final class AppState: ObservableObject {
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
-    @Published var communityQuestions: [CommunityQuestion] = []
-    @Published var communityTotalCount = 0
-    @Published var communityOffset = 0
-    @Published var isLoadingCommunityQuestions = false
-    @Published var communityErrorMessage: String?
+    @Published private var communityFeedState = CommunityFeedStateStore()
     @Published var communityProfile: CommunityUserProfile?
     @Published var isUpdatingCommunityProfile = false
     @Published var isWithdrawingCommunityAccount = false
@@ -291,7 +342,6 @@ final class AppState: ObservableObject {
     private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
     private var didReceiveCloudStateWhileEditing = false
-    private var communityQuestionLoadRequestID = UUID()
     private var backendHealthConsecutiveFailureCount = 0
 
     private struct PendingAnswerDraft {
@@ -1463,6 +1513,39 @@ final class AppState: ObservableObject {
         replaceRecordSearchResults(nil)
     }
 
+    private func beginCommunityFeedLoad() -> UUID {
+        var nextState = communityFeedState
+        let requestID = nextState.beginLoading()
+        communityFeedState = nextState
+        return requestID
+    }
+
+    private func isCurrentCommunityFeedLoad(_ requestID: UUID) -> Bool {
+        communityFeedState.isCurrentRequest(requestID)
+    }
+
+    private func finishCommunityFeedLoad(_ requestID: UUID) {
+        var nextState = communityFeedState
+        nextState.finishLoading(requestID)
+        communityFeedState = nextState
+    }
+
+    private func applyCommunityFeedPage(
+        _ response: CommunityQuestionsResponse,
+        offset: Int,
+        reset: Bool
+    ) {
+        var nextState = communityFeedState
+        nextState.applyPage(response, offset: offset, reset: reset)
+        communityFeedState = nextState
+    }
+
+    private func clearCommunityFeedPage() {
+        var nextState = communityFeedState
+        nextState.clearPage()
+        communityFeedState = nextState
+    }
+
     private func beginBackendStatsRequest() -> UUID {
         var nextState = statsState
         let requestID = nextState.beginRequest()
@@ -1552,7 +1635,6 @@ final class AppState: ObservableObject {
     }
 
     func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
-        let requestID = UUID()
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
         let limit = Self.communityQuestionPageSize
@@ -1561,13 +1643,9 @@ final class AppState: ObservableObject {
             return
         }
 
-        communityQuestionLoadRequestID = requestID
-        isLoadingCommunityQuestions = true
-        communityErrorMessage = nil
+        let requestID = beginCommunityFeedLoad()
         defer {
-            if communityQuestionLoadRequestID == requestID {
-                isLoadingCommunityQuestions = false
-            }
+            finishCommunityFeedLoad(requestID)
         }
 
         do {
@@ -1587,27 +1665,18 @@ final class AppState: ObservableObject {
                 language: settings.appLanguage
             )
 
-            guard communityQuestionLoadRequestID == requestID else {
+            guard isCurrentCommunityFeedLoad(requestID) else {
                 return
             }
 
-            if reset {
-                communityQuestions = response.questions
-            } else {
-                let existing = Set(communityQuestions.map(\.id))
-                communityQuestions.append(contentsOf: response.questions.filter { !existing.contains($0.id) })
-            }
-            communityTotalCount = response.totalCount
-            communityOffset = normalizedOffset + response.questions.count
+            applyCommunityFeedPage(response, offset: normalizedOffset, reset: reset)
             log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
         } catch {
-            guard communityQuestionLoadRequestID == requestID else {
+            guard isCurrentCommunityFeedLoad(requestID) else {
                 return
             }
             if reset {
-                communityQuestions = []
-                communityOffset = 0
-                communityTotalCount = 0
+                clearCommunityFeedPage()
             }
             if userInitiated {
                 communityErrorMessage = communityErrorMessage(for: error)
@@ -1647,11 +1716,7 @@ final class AppState: ObservableObject {
     }
 
     private func canLoadMoreCommunityQuestions(currentCount: Int) -> Bool {
-        if currentCount <= 0 {
-            return communityTotalCount == 0 ? !communityQuestions.isEmpty : true
-        }
-
-        return currentCount < communityTotalCount
+        communityFeedState.canLoadMore(currentCount: currentCount)
     }
 
     private func applyBackendRecordsPage(
@@ -2026,9 +2091,7 @@ final class AppState: ObservableObject {
             registration.accessTokenExpiresAt = nil
             settingsStore.saveRemotePushRegistration(registration)
         }
-        communityQuestions = []
-        communityOffset = 0
-        communityTotalCount = 0
+        clearCommunityFeedPage()
         communityErrorMessage = nil
         backendAccessState = .signedOut
         if let registrationForLogout {
