@@ -215,7 +215,7 @@ struct HistoryView: View {
         .onChange(of: searchText) {
             resetVisibleCount()
             selectedRecordID = nil
-            scheduleRecordSearchReload()
+            appState.clearBackendRecordSearchResults()
         }
         .onChange(of: appState.focusedRecordRequest) {
             showFocusedRecord()
@@ -275,6 +275,9 @@ struct HistoryView: View {
             closeAccessibilityLabel: strings.clearSearch,
             width: min(UIScreen.main.bounds.width - 32, 430),
             collapsedWidth: 34,
+            onSubmit: {
+                submitRecordSearch()
+            },
             onClose: {
                 closeRecordSearch(clearText: true)
             }
@@ -382,7 +385,7 @@ struct HistoryView: View {
         }
     }
 
-    private func scheduleRecordSearchReload() {
+    private func submitRecordSearch() {
         recordSearchDebounceTask?.cancel()
         let query = searchText
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -391,7 +394,6 @@ struct HistoryView: View {
         }
 
         recordSearchDebounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else {
                 return
             }
