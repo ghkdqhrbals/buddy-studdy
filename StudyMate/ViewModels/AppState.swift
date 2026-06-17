@@ -153,7 +153,7 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
-    @Published var backendAccessState: BackendAccessState = .signedOut
+    @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var searchState = SearchStateStore()
 
     var backendStudyRooms: [BackendStudyRoom] {
@@ -170,6 +170,50 @@ final class AppState: ObservableObject {
 
     var recordSearchResults: [StudyRecord]? {
         searchState.recordResults
+    }
+
+    var backendAccessState: BackendAccessState {
+        get {
+            backendRuntimeState.accessState
+        }
+        set {
+            var nextState = backendRuntimeState
+            nextState.accessState = newValue
+            backendRuntimeState = nextState
+        }
+    }
+
+    var isBackendUnderMaintenance: Bool {
+        get {
+            backendRuntimeState.isUnderMaintenance
+        }
+        set {
+            var nextState = backendRuntimeState
+            nextState.isUnderMaintenance = newValue
+            backendRuntimeState = nextState
+        }
+    }
+
+    var isLoadingBackendSettingsForEditing: Bool {
+        get {
+            backendRuntimeState.isLoadingSettingsForEditing
+        }
+        set {
+            var nextState = backendRuntimeState
+            nextState.isLoadingSettingsForEditing = newValue
+            backendRuntimeState = nextState
+        }
+    }
+
+    var isBackendOpenAIKeyConfigured: Bool {
+        get {
+            backendRuntimeState.isOpenAIKeyConfigured
+        }
+        set {
+            var nextState = backendRuntimeState
+            nextState.isOpenAIKeyConfigured = newValue
+            backendRuntimeState = nextState
+        }
     }
 
     var communitySearchText: String {
@@ -194,10 +238,7 @@ final class AppState: ObservableObject {
     }
     @Published var cloudSyncMessage: String?
     @Published var hasCloudSyncError = false
-    @Published var isBackendUnderMaintenance = false
-    @Published var isLoadingBackendSettingsForEditing = false
     @Published var cloudLastSyncedAt: Date?
-    @Published var isBackendOpenAIKeyConfigured = false
     @Published var communityQuestions: [CommunityQuestion] = []
     @Published var communityTotalCount = 0
     @Published var communityOffset = 0
