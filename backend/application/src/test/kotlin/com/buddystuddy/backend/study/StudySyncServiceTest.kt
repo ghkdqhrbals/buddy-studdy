@@ -61,6 +61,75 @@ class StudySyncServiceTest {
         assertThat(questionStats.findAllByIdsCalls).isZero()
     }
 
+    @Test
+    fun `saving existing study with same schedule keeps existing job due time`() {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        val existingStudy = study(id = 11, topic = "Postgres").apply {
+            intervalMinutes = 15
+            enabled = true
+        }
+        val existingDueAt = now.plusSeconds(600)
+        studies.rows += existingStudy
+        jobs.rows += StudyQuestionJobEntity(
+            id = 41,
+            studyId = existingStudy.id,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            scheduledAt = existingDueAt,
+            status = StudyQuestionJobStatus.SCHEDULED,
+            createdAt = now.minusSeconds(60),
+            updatedAt = now.minusSeconds(60),
+        )
+
+        val response = service.createStudy(
+            principal,
+            com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand(
+                topic = "Postgres",
+                intervalMinutes = 15,
+                enabled = true,
+                customPrompt = "Updated prompt only",
+            ),
+        )
+
+        assertThat(response.nextDueAt).isEqualTo(existingDueAt)
+        assertThat(jobs.rows).hasSize(1)
+        assertThat(jobs.rows.single().status).isEqualTo(StudyQuestionJobStatus.SCHEDULED)
+        assertThat(jobs.rows.single().scheduledAt).isEqualTo(existingDueAt)
+    }
+
+    @Test
+    fun `saving existing study with changed interval reschedules job`() {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        val existingStudy = study(id = 11, topic = "Postgres").apply {
+            intervalMinutes = 15
+            enabled = true
+        }
+        val existingDueAt = now.plusSeconds(600)
+        studies.rows += existingStudy
+        jobs.rows += StudyQuestionJobEntity(
+            id = 41,
+            studyId = existingStudy.id,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            scheduledAt = existingDueAt,
+            status = StudyQuestionJobStatus.SCHEDULED,
+            createdAt = now.minusSeconds(60),
+            updatedAt = now.minusSeconds(60),
+        )
+
+        service.createStudy(
+            principal,
+            com.buddystuddy.backend.study.application.port.inbound.CreateStudyCommand(
+                topic = "Postgres",
+                intervalMinutes = 30,
+                enabled = true,
+            ),
+        )
+
+        assertThat(jobs.rows.map { it.status }).containsExactly(StudyQuestionJobStatus.CANCELED, StudyQuestionJobStatus.SCHEDULED)
+        assertThat(jobs.rows.last().scheduledAt).isAfter(existingDueAt)
+    }
+
     private fun study(id: Long, topic: String) = StudyEntity(
         id = id,
         deviceId = principal.deviceId,

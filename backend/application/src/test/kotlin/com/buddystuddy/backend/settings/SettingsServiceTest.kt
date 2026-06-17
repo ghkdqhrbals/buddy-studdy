@@ -55,6 +55,80 @@ class SettingsServiceTest {
         assertThat(jobs.rows.filter { it.status == StudyQuestionJobStatus.SCHEDULED }.map { it.studyId }).containsExactly(11, 12)
     }
 
+    @Test
+    fun `upsert schedule with unchanged interval keeps existing due time`() {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
+        studies.rows += StudyEntity(
+            id = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            topic = "Kotlin",
+            intervalMinutes = 5,
+            enabled = true,
+        )
+        jobs.rows += StudyQuestionJobEntity(
+            id = 21,
+            studyId = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            scheduledAt = existingDueAt,
+            status = StudyQuestionJobStatus.SCHEDULED,
+            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
+            updatedAt = Instant.parse("2026-06-10T00:00:00Z"),
+        )
+
+        val response = service.upsertSchedule(
+            principal,
+            ScheduleCommand(
+                intervalMinutes = 5,
+                enabled = true,
+                schedules = listOf(ScheduleItemCommand(topic = "Kotlin", difficultyLevel = 6, customPrompt = "Prompt changed")),
+            ),
+        )
+
+        assertThat(response.nextDueAt).isEqualTo(existingDueAt)
+        assertThat(jobs.rows).hasSize(1)
+        assertThat(jobs.rows.single().status).isEqualTo(StudyQuestionJobStatus.SCHEDULED)
+        assertThat(jobs.rows.single().scheduledAt).isEqualTo(existingDueAt)
+    }
+
+    @Test
+    fun `upsert schedule with changed interval replaces existing scheduled job`() {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
+        studies.rows += StudyEntity(
+            id = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            topic = "Kotlin",
+            intervalMinutes = 5,
+            enabled = true,
+        )
+        jobs.rows += StudyQuestionJobEntity(
+            id = 21,
+            studyId = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            scheduledAt = existingDueAt,
+            status = StudyQuestionJobStatus.SCHEDULED,
+            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
+            updatedAt = Instant.parse("2026-06-10T00:00:00Z"),
+        )
+
+        service.upsertSchedule(
+            principal,
+            ScheduleCommand(
+                intervalMinutes = 10,
+                enabled = true,
+                schedules = listOf(ScheduleItemCommand(topic = "Kotlin", difficultyLevel = 6)),
+            ),
+        )
+
+        assertThat(jobs.rows.map { it.status }).containsExactly(StudyQuestionJobStatus.CANCELED, StudyQuestionJobStatus.SCHEDULED)
+        assertThat(jobs.rows.last().scheduledAt).isAfter(existingDueAt)
+    }
+
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         val saved = mutableListOf<StudyEntity>()

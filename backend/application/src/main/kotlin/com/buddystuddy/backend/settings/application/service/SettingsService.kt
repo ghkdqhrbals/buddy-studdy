@@ -55,6 +55,10 @@ class SettingsService(
             val study = studiesByTopic.getOrPut(item.topic) {
                 StudyEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
             }
+            val isNewStudy = study.id == 0L
+            val previousEnabled = study.enabled
+            val previousIntervalMinutes = study.intervalMinutes
+            val latestJobBeforeSave = if (isNewStudy) null else jobs.findLatestByStudyId(study.id)
             study.deviceId = principal.deviceId
             study.apply(StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
@@ -71,7 +75,9 @@ class SettingsService(
                 now = now,
             ))
             val saved = studies.save(study)
-            saved.rescheduleQuestionJob(now)
+            if (saved.shouldRescheduleQuestionJob(isNewStudy, previousEnabled, previousIntervalMinutes, latestJobBeforeSave)) {
+                saved.rescheduleQuestionJob(now)
+            }
             studiesByTopic[item.topic] = saved
             next = jobs.findLatestByStudyId(saved.id)?.takeIf { it.status == StudyQuestionJobStatus.SCHEDULED }?.scheduledAt
         }
@@ -97,6 +103,9 @@ class SettingsService(
         val now = Instant.now()
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
+        val previousEnabled = study.enabled
+        val previousIntervalMinutes = study.intervalMinutes
+        val latestJobBeforeSave = jobs.findLatestByStudyId(study.id)
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
         users.findById(principal.userId).orElse(null)?.let { user ->
             if (encryptedKey != null) {
@@ -124,7 +133,9 @@ class SettingsService(
         study.topic = command.topic.ifBlank { study.topic }
         study.deviceId = principal.deviceId
         val saved = studies.save(study)
-        saved.rescheduleQuestionJob(now)
+        if (saved.shouldRescheduleQuestionJob(false, previousEnabled, previousIntervalMinutes, latestJobBeforeSave)) {
+            saved.rescheduleQuestionJob(now)
+        }
         val latestJob = jobs.findLatestByStudyId(saved.id)
         return ScheduleResponse(principal.deviceId, saved.enabled, latestJob?.takeIf { it.status == StudyQuestionJobStatus.SCHEDULED }?.scheduledAt)
     }
@@ -160,4 +171,15 @@ class SettingsService(
             )
         )
     }
+
+    private fun StudyEntity.shouldRescheduleQuestionJob(
+        isNewStudy: Boolean,
+        previousEnabled: Boolean,
+        previousIntervalMinutes: Int,
+        latestJob: StudyQuestionJobEntity?,
+    ): Boolean =
+        isNewStudy ||
+            previousEnabled != enabled ||
+            previousIntervalMinutes != intervalMinutes ||
+            (enabled && latestJob?.status !in setOf(StudyQuestionJobStatus.SCHEDULED, StudyQuestionJobStatus.PROCESSING))
 }

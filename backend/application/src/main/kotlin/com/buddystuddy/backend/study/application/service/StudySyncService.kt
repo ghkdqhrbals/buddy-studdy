@@ -71,6 +71,9 @@ class StudySyncService(
                 createdAt = now,
             )
         val isNewStudy = study.id == 0L
+        val previousEnabled = study.enabled
+        val previousIntervalMinutes = study.intervalMinutes
+        val latestJobBeforeSave = if (isNewStudy) null else jobs.findLatestByStudyId(study.id)
 
         study.topic = topic
         study.deviceId = principal.deviceId
@@ -92,7 +95,9 @@ class StudySyncService(
         )
 
         val saved = studies.save(study)
-        saved.rescheduleQuestionJob(now)
+        if (saved.shouldRescheduleQuestionJob(isNewStudy, previousEnabled, previousIntervalMinutes, latestJobBeforeSave)) {
+            saved.rescheduleQuestionJob(now)
+        }
         val latestJob = jobs.findLatestByStudyId(saved.id)
         return if (isNewStudy) {
             saved.toStudyRoomResponse(latestJob = latestJob)
@@ -178,6 +183,17 @@ class StudySyncService(
             )
         )
     }
+
+    private fun StudyEntity.shouldRescheduleQuestionJob(
+        isNewStudy: Boolean,
+        previousEnabled: Boolean,
+        previousIntervalMinutes: Int,
+        latestJob: StudyQuestionJobEntity?,
+    ): Boolean =
+        isNewStudy ||
+            previousEnabled != enabled ||
+            previousIntervalMinutes != intervalMinutes ||
+            (enabled && latestJob?.status !in setOf(StudyQuestionJobStatus.SCHEDULED, StudyQuestionJobStatus.PROCESSING))
 
     private fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
         StudyRecordState(
