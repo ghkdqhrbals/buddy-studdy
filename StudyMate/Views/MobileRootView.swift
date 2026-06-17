@@ -3307,6 +3307,7 @@ private struct MobileSettingsView: View {
     @State private var showsAPIKey = false
 
     private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStuddy%20Feedback")!
+    private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
     var body: some View {
         let strings = appState.settingsEditorStrings
@@ -3436,7 +3437,18 @@ private struct MobileSettingsView: View {
                 }
             }
 
-            Link(strings.feedbackLink, destination: Self.feedbackURL)
+            HStack(spacing: 14) {
+                Link(strings.feedbackLink, destination: Self.feedbackURL)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Link(destination: Self.kofiTipURL) {
+                    Label(strings.tipMe, systemImage: "heart.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                .accessibilityLabel(strings.supportDeveloper)
+            }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
