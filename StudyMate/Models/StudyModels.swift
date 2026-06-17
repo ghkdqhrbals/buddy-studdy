@@ -1846,7 +1846,6 @@ struct AppStrings {
     }
     var responses: String { text("응답", "Responses") }
     var responsesShort: String { text("응답", "Resp") }
-    var studyGrass: String { text("학습 잔디", "Study Grass") }
     var studyStreak: String { text("연속 학습", "Streak") }
     var longestStreak: String { text("해당 연도 최장 기록", "Best streak that year") }
     var streakKeepGoing: String { text("오늘도 이어가세요", "Keep it going today") }

@@ -1086,8 +1086,6 @@ private struct StatsOverviewSection: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(strings.studyGrass)
-                        .font(.headline.weight(.semibold))
                     Spacer()
                     Text(String(selectedYear))
                         .font(.caption.weight(.medium))

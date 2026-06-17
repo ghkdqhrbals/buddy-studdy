@@ -53,6 +53,9 @@ struct CommunityQuestionStatsMeta: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if let score = question.gradingResult?.score {
+                scoreMetric(score)
+            }
             metric(systemImage: question.isLikedByMe ? "heart.fill" : "heart", value: question.likeCount)
                 .foregroundStyle(question.isLikedByMe ? .red : .secondary)
                 .transaction { transaction in
@@ -66,6 +69,15 @@ struct CommunityQuestionStatsMeta: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
         .lineLimit(1)
+    }
+
+    private func scoreMetric(_ score: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.seal")
+            Text("\(min(max(score, 0), 100))/100")
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func metric(systemImage: String, value: Int) -> some View {
