@@ -138,6 +138,7 @@ internal object PushEventPayloadParser {
         val common = if (payload != null) {
             QuestionPushMessageFields(
                 recordId = payload.recordId.toString(),
+                notificationId = payload.notificationId?.toString(),
                 studyId = payload.studyId?.toString(),
                 question = payload.question,
                 title = payload.title,
@@ -149,6 +150,7 @@ internal object PushEventPayloadParser {
         } else {
             QuestionPushMessageFields(
                 recordId = fields["recordId"] ?: "",
+                notificationId = fields["notificationId"]?.takeIf(String::isNotBlank),
                 studyId = fields["studyId"]?.takeIf(String::isNotBlank),
                 question = fields["question"] ?: "A new study question is ready.",
                 title = fields["title"],
@@ -162,6 +164,7 @@ internal object PushEventPayloadParser {
         return when (provider.uppercase()) {
             PushMessageType.FCM.name -> FcmQuestionMessage(
                 recordId = common.recordId,
+                notificationId = common.notificationId,
                 question = common.body ?: common.question,
                 topic = common.topic,
                 sound = common.sound,
@@ -170,6 +173,7 @@ internal object PushEventPayloadParser {
             )
             else -> ApnsQuestionMessage(
                 recordId = common.recordId,
+                notificationId = common.notificationId,
                 topic = common.topic,
                 token = apnsToken,
                 environment = apnsEnvironment,
@@ -182,6 +186,7 @@ internal object PushEventPayloadParser {
                         sound = common.sound ?: "default",
                     ),
                     deepLink = deepLink,
+                    notificationId = common.notificationId,
                 ),
             )
         }
@@ -194,6 +199,7 @@ internal object PushEventPayloadParser {
 
     private data class QuestionPushMessageFields(
         val recordId: String,
+        val notificationId: String?,
         val studyId: String?,
         val question: String,
         val title: String?,

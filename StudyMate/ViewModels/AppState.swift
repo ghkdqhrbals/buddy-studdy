@@ -1415,16 +1415,21 @@ final class AppState: ObservableObject {
     }
 
     func markNotificationRead(_ notification: BackendAppNotification) async {
+        await markNotificationRead(notificationID: notification.id)
+    }
+
+    func markNotificationRead(notificationID: String) async {
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-read") else {
             return
         }
 
         do {
-            try await remotePushBackendClient.markNotificationRead(registration: registration, notificationID: notification.id)
+            try await remotePushBackendClient.markNotificationRead(registration: registration, notificationID: notificationID)
             updateNotificationState { state in
-                state.markRead(notificationID: notification.id, at: Date())
+                state.markRead(notificationID: notificationID, at: Date())
             }
+            await refreshNotificationUnreadCount()
         } catch {
             log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
         }

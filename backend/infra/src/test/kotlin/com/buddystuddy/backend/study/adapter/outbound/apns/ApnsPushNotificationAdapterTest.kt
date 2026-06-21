@@ -57,4 +57,29 @@ class ApnsPushNotificationAdapterTest {
 
         assertThat(body).contains(""""badge":7""")
     }
+
+    @Test
+    fun `apns payload includes notification id when provided`() {
+        val adapter = ApnsPushNotificationAdapter(BuddyStuddyProperties())
+
+        val body = adapter.buildPayloadJson(
+            ApnsQuestionMessage(
+                recordId = "10",
+                notificationId = "99",
+                topic = "Swift",
+                token = "apns-token",
+                environment = "sandbox",
+                payload = ApnsQuestionPayload(
+                    aps = ApnsAps(
+                        alert = ApnsAlert("BuddyStuddy", "New comment"),
+                        sound = "default",
+                    ),
+                    deepLink = "buddystuddy://notifications/99",
+                    notificationId = "99",
+                ),
+            )
+        )
+
+        assertThat(body).contains(""""notificationId":"99"""")
+    }
 }

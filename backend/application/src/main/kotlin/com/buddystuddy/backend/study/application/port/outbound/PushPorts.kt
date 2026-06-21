@@ -4,6 +4,7 @@ import java.time.Instant
 
 data class QuestionPushRequest(
     val recordId: Long,
+    val notificationId: Long? = null,
     val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
@@ -70,6 +71,7 @@ enum class PushMessageType {
 sealed interface PushQuestionMessage {
     val type: PushMessageType
     val recordId: String
+    val notificationId: String?
     val question: String
     val topic: String
     val sound: String?
@@ -90,10 +92,12 @@ data class ApnsAps(
 data class ApnsQuestionPayload(
     val aps: ApnsAps,
     val deepLink: String,
+    val notificationId: String? = null,
 )
 
 data class ApnsQuestionMessage(
     override val recordId: String,
+    override val notificationId: String? = null,
     override val topic: String,
     val token: String,
     val environment: String,
@@ -107,6 +111,7 @@ data class ApnsQuestionMessage(
 
 data class FcmQuestionMessage(
     override val recordId: String,
+    override val notificationId: String? = null,
     override val question: String,
     override val topic: String,
     override val sound: String?,

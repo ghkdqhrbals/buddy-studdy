@@ -102,8 +102,9 @@ class ApnsPushNotificationAdapter(
 
     private fun ApnsQuestionPayload.toJson(): String {
         val badge = aps.badge?.let { ""","badge":$it""" }.orEmpty()
+        val notificationId = notificationId?.let { ""","notificationId":${jsonString(it)}""" }.orEmpty()
         return """
-            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}$badge},"deepLink":${jsonString(deepLink)}}
+            {"aps":{"alert":{"title":${jsonString(aps.alert.title)},"body":${jsonString(aps.alert.body)}},"sound":${jsonString(aps.sound)}$badge},"deepLink":${jsonString(deepLink)}$notificationId}
         """.trimIndent()
     }
 }

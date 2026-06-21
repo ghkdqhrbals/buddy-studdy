@@ -10,6 +10,10 @@ final class NotificationLandingCoordinator {
 
     @discardableResult
     func land(userInfo: [AnyHashable: Any], replyText: String? = nil) async -> Bool {
+        if let notificationID = StudyNotificationPayload.appNotificationID(from: userInfo) {
+            await appState.markNotificationRead(notificationID: notificationID)
+        }
+
         if let recordID = StudyNotificationPayload.backendRecordID(from: userInfo) {
             return await land(recordID: recordID, replyText: replyText)
         }

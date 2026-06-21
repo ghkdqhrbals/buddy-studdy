@@ -50,6 +50,33 @@ enum StudyNotificationRouting {
 }
 
 enum StudyNotificationPayload {
+    static func appNotificationID(from userInfo: [AnyHashable: Any]) -> String? {
+        let candidateKeys = [
+            "notificationId",
+            "notificationID",
+            "notification_id",
+            "appNotificationId",
+            "appNotificationID",
+            "app_notification_id"
+        ]
+
+        for key in candidateKeys {
+            if let value = stringValue(userInfo[key]) {
+                return value
+            }
+        }
+
+        for dictionary in cloudKitDictionaries(from: userInfo) {
+            for key in candidateKeys {
+                if let value = stringValue(dictionary[key]) {
+                    return value
+                }
+            }
+        }
+
+        return nil
+    }
+
     static func appRoute(from userInfo: [AnyHashable: Any]) -> AppRoute? {
         let dictionaries = cloudKitDictionaries(from: userInfo)
 

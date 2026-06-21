@@ -136,6 +136,7 @@ class NotificationStreamListener(
             val published = pushPublisher.publishPush(
                 QuestionPushRequest(
                     recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
+                    notificationId = notificationId,
                     studyId = metadata.studyId,
                     deviceId = targetDevice.deviceId,
                     userId = command.userId,

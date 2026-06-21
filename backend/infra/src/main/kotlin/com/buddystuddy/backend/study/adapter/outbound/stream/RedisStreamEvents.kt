@@ -21,6 +21,7 @@ abstract class BaseRedisStreamEvent(
 
 data class QuestionPushRequestedEvent(
     val recordId: Long,
+    val notificationId: Long? = null,
     val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
@@ -40,6 +41,7 @@ data class QuestionPushRequestedEvent(
 
 data class QuestionPushRequestedPayload(
     val recordId: Long,
+    val notificationId: Long? = null,
     val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
@@ -97,6 +99,7 @@ fun QuestionCreatedEvent.toRedisStreamFields(): Map<String, String> =
 private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
     QuestionPushRequestedPayload(
         recordId = recordId,
+        notificationId = notificationId,
         studyId = studyId,
         deviceId = deviceId,
         userId = userId,
