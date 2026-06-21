@@ -6,9 +6,6 @@ import UIKit
 struct StatisticsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecord: StudyRecord?
-    @State private var selectedPeriod: StatisticsPeriod = .all
-    @State private var customStartDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-    @State private var customEndDate = Date()
     @State private var topicPage = 0
     @State private var isPullRefreshing = false
     @State private var selectedActivityYear = Calendar.current.component(.year, from: Date())
@@ -86,13 +83,6 @@ struct StatisticsView: View {
                         strings: strings
                     )
 
-                    StatisticsPeriodControls(
-                        selectedPeriod: $selectedPeriod,
-                        customStartDate: $customStartDate,
-                        customEndDate: $customEndDate,
-                        strings: strings
-                    )
-
                     if count > 0, let statsErrorMessage = appState.backendStatsErrorMessage {
                         Text(statsErrorMessage)
                             .font(.caption2)
@@ -154,23 +144,9 @@ struct StatisticsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
-        .onChange(of: selectedPeriod) {
+        .onChange(of: selectedActivityYear) {
             resetTopicPaging()
             loadStats()
-        }
-        .onChange(of: customStartDate) {
-            resetTopicPaging()
-            if selectedPeriod == .custom {
-                loadStats()
-            }
-        }
-        .onChange(of: customEndDate) {
-            resetTopicPaging()
-            if selectedPeriod == .custom {
-                loadStats()
-            }
-        }
-        .onChange(of: selectedActivityYear) {
             loadActivity()
         }
         .onChange(of: appState.backendAccessState.user.createdAt) {
@@ -188,32 +164,11 @@ struct StatisticsView: View {
         }
     }
 
-    private var selectedPeriodStartAt: Date? {
-        periodBounds(for: selectedPeriod).startAt
-    }
-
-    private var selectedPeriodEndAt: Date? {
-        periodBounds(for: selectedPeriod).endAt
-    }
-
-    private func periodBounds(for period: StatisticsPeriod) -> (startAt: Date?, endAt: Date?) {
-        guard period == .custom else {
-            return (nil, nil)
-        }
-
-        let start = min(customStartDate, customEndDate)
-        let startAt = Calendar.current.startOfDay(for: start)
-        let end = max(customStartDate, customEndDate)
-        let dayStart = Calendar.current.startOfDay(for: end)
-        let endAt = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
-        return (startAt, endAt)
-    }
-
     private func loadStats() {
+        let bounds = activityYearBounds(for: selectedActivityYear)
         loadStats(
-            period: selectedPeriod,
-            startAt: selectedPeriodStartAt,
-            endAt: selectedPeriodEndAt,
+            startAt: bounds.startAt,
+            endAt: bounds.endAt,
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
@@ -227,7 +182,6 @@ struct StatisticsView: View {
     }
 
     private func loadStats(
-        period: StatisticsPeriod = .all,
         startAt: Date? = nil,
         endAt: Date? = nil,
         limit: Int = Self.topicPageSize,
@@ -236,7 +190,7 @@ struct StatisticsView: View {
         let requestOffset = max(offset, 0)
         Task {
             await appState.fetchBackendStats(
-                period: period.backendPeriod,
+                period: .all,
                 sort: .count,
                 startAt: startAt,
                 endAt: endAt,
@@ -253,15 +207,15 @@ struct StatisticsView: View {
             isPullRefreshing = false
         }
 
+        let bounds = activityYearBounds(for: selectedActivityYear)
         await appState.fetchBackendStats(
-            period: selectedPeriod.backendPeriod,
+            period: .all,
             sort: .count,
-            startAt: selectedPeriodStartAt,
-            endAt: selectedPeriodEndAt,
+            startAt: bounds.startAt,
+            endAt: bounds.endAt,
             limit: Self.topicPageSize,
             offset: max(topicPage * Self.topicPageSize, 0)
         )
-        let bounds = activityYearBounds(for: selectedActivityYear)
         await appState.fetchBackendStatsActivity(startAt: bounds.startAt, endAt: bounds.endAt)
     }
 
@@ -721,115 +675,6 @@ private extension String {
     }
 }
 
-private enum StatisticsPeriod: String, CaseIterable, Identifiable {
-    case all
-    case today
-    case last7Days
-    case last30Days
-    case last90Days
-    case custom
-
-    var id: String { rawValue }
-
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .all:
-            return strings.allPeriods
-        case .today:
-            return strings.today
-        case .last7Days:
-            return strings.last7Days
-        case .last30Days:
-            return strings.last30Days
-        case .last90Days:
-            return strings.last90Days
-        case .custom:
-            return strings.customPeriod
-        }
-    }
-
-    func shortTitle(strings: AppStrings) -> String {
-        switch self {
-        case .all:
-            return strings.allPeriods
-        case .today:
-            return strings.today
-        case .last7Days:
-            return strings.language == .korean ? "7일" : "7d"
-        case .last30Days:
-            return strings.language == .korean ? "30일" : "30d"
-        case .last90Days:
-            return strings.language == .korean ? "90일" : "90d"
-        case .custom:
-            return strings.language == .korean ? "직접" : "Custom"
-        }
-    }
-}
-
-private extension StatisticsPeriod {
-    var backendPeriod: BackendStatsPeriod {
-        switch self {
-        case .all:
-            return .all
-        case .today:
-            return .today
-        case .last7Days:
-            return .last7
-        case .last30Days:
-            return .last30
-        case .last90Days:
-            return .last90
-        case .custom:
-            return .all
-        }
-    }
-}
-
-private struct StatisticsPeriodControls: View {
-    @Binding var selectedPeriod: StatisticsPeriod
-    @Binding var customStartDate: Date
-    @Binding var customEndDate: Date
-    var strings: AppStrings
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker(strings.period, selection: $selectedPeriod) {
-                ForEach(StatisticsPeriod.allCases) { period in
-                    Text(period.shortTitle(strings: strings)).tag(period)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-
-            if selectedPeriod == .custom {
-                HStack(spacing: 10) {
-                    DatePicker(
-                        strings.startDate,
-                        selection: $customStartDate,
-                        displayedComponents: .date
-                    )
-
-                    DatePicker(
-                        strings.endDate,
-                        selection: $customEndDate,
-                        displayedComponents: .date
-                    )
-                }
-                .font(.caption)
-            }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .background(Color.secondary.opacity(0.04))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-}
-
 private struct StatsYearSelector: View {
     @Binding var selectedYear: Int
     var years: [Int]
@@ -1093,7 +938,7 @@ private struct StatsOverviewSection: View {
                 }
 
                 if let activity {
-                    StatsYearGrass(activity: activity, strings: strings)
+                    StatsYearGrass(activity: activity, selectedYear: selectedYear, strings: strings)
                 } else if isActivityLoading {
                     ProgressView()
                         .controlSize(.small)
@@ -1294,11 +1139,12 @@ private struct StatsAchievementSnapshot {
 
 private struct StatsYearGrass: View {
     var activity: BackendStatsActivity
+    var selectedYear: Int
     var strings: AppStrings
     @State private var selectedDay: BackendStatsActivityDay?
 
     var body: some View {
-        let weeks = Self.weeks(from: activity.days)
+        let weeks = Self.weeks(from: activity.days, selectedYear: selectedYear)
 
         VStack(alignment: .leading, spacing: 8) {
             ScrollViewReader { proxy in
@@ -1359,9 +1205,13 @@ private struct StatsYearGrass: View {
                     }
                 }
                 .onAppear {
-                    if let lastID = weeks.last?.id {
-                        proxy.scrollTo(lastID, anchor: .trailing)
-                    }
+                    scrollToLatestWeek(proxy, weeks: weeks)
+                }
+                .onChange(of: selectedYear) {
+                    scrollToLatestWeek(proxy, weeks: weeks)
+                }
+                .onChange(of: activity.days.count) {
+                    scrollToLatestWeek(proxy, weeks: weeks)
                 }
             }
 
@@ -1371,6 +1221,17 @@ private struct StatsYearGrass: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func scrollToLatestWeek(_ proxy: ScrollViewProxy, weeks: [ActivityWeek]) {
+        guard let lastID = weeks.last?.id else {
+            return
+        }
+        DispatchQueue.main.async {
+            withAnimation(.smooth(duration: 0.2)) {
+                proxy.scrollTo(lastID, anchor: .trailing)
             }
         }
     }
@@ -1405,21 +1266,51 @@ private struct StatsYearGrass: View {
         "\(Self.dateFormatter.string(from: day.date)), \(day.answerCount) \(strings.answersUnit)"
     }
 
-    private static func weeks(from days: [BackendStatsActivityDay]) -> [ActivityWeek] {
+    private static func weeks(from days: [BackendStatsActivityDay], selectedYear: Int) -> [ActivityWeek] {
         let calendar = Self.weekCalendar
-        let sortedDays = days.sorted { $0.date < $1.date }
-        guard let first = sortedDays.first else {
+
+        var yearStartComponents = DateComponents()
+        yearStartComponents.calendar = calendar
+        yearStartComponents.timeZone = calendar.timeZone
+        yearStartComponents.year = selectedYear
+        yearStartComponents.month = 1
+        yearStartComponents.day = 1
+
+        guard let yearStart = calendar.date(from: yearStartComponents),
+              let yearEnd = calendar.date(byAdding: DateComponents(year: 1, day: -1), to: yearStart) else {
             return []
         }
-        let weekday = calendar.component(.weekday, from: first.date)
+
+        let today = calendar.startOfDay(for: Date())
+        let currentYear = calendar.component(.year, from: today)
+        let lastContentDay = selectedYear == currentYear ? min(today, yearEnd) : yearEnd
+        guard yearStart <= lastContentDay else {
+            return []
+        }
+
+        let daysByStartOfDay = days.reduce(into: [Date: BackendStatsActivityDay]()) { result, day in
+            let key = calendar.startOfDay(for: day.date)
+            result[key] = day
+        }
+
+        let dayCount = calendar.dateComponents([.day], from: yearStart, to: lastContentDay).day ?? 0
+        let contentDays = (0...max(dayCount, 0)).compactMap { offset -> BackendStatsActivityDay? in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: yearStart) else {
+                return nil
+            }
+            return daysByStartOfDay[date] ?? BackendStatsActivityDay(date: date, answerCount: 0, topicCount: 0, topics: [], bestLevel: nil)
+        }
+
+        let weekday = calendar.component(.weekday, from: yearStart)
         let leadingEmptyCount = (weekday - calendar.firstWeekday + 7) % 7
         let emptyDays = (0..<leadingEmptyCount).compactMap { offset -> BackendStatsActivityDay? in
-            guard let date = calendar.date(byAdding: .day, value: -(leadingEmptyCount - offset), to: first.date) else {
+            guard let date = calendar.date(byAdding: .day, value: -(leadingEmptyCount - offset), to: yearStart) else {
                 return nil
             }
             return BackendStatsActivityDay(date: date, answerCount: 0, topicCount: 0, topics: [], bestLevel: nil)
         }
-        var paddedDays = emptyDays + sortedDays
+
+        var paddedDays = emptyDays + contentDays
         let trailingEmptyCount = (7 - (paddedDays.count % 7)) % 7
         if let last = paddedDays.last, trailingEmptyCount > 0 {
             let trailingDays = (1...trailingEmptyCount).compactMap { offset -> BackendStatsActivityDay? in
@@ -1432,7 +1323,7 @@ private struct StatsYearGrass: View {
         }
         return stride(from: 0, to: paddedDays.count, by: 7).map { start in
             let slice = Array(paddedDays[start..<min(start + 7, paddedDays.count)])
-            return ActivityWeek(days: slice)
+            return ActivityWeek(days: slice, selectedYear: selectedYear)
         }
     }
 
@@ -1458,6 +1349,7 @@ private struct StatsYearGrass: View {
 
 private struct ActivityWeek: Identifiable {
     var days: [BackendStatsActivityDay]
+    var selectedYear: Int
 
     var id: Date {
         days.first?.date ?? Date.distantPast
@@ -1465,7 +1357,10 @@ private struct ActivityWeek: Identifiable {
 
     var monthLabel: String {
         let calendar = Self.weekCalendar
-        guard let monthStart = days.first(where: { calendar.component(.day, from: $0.date) == 1 }) else {
+        guard let monthStart = days.first(where: {
+            calendar.component(.year, from: $0.date) == selectedYear &&
+                calendar.component(.day, from: $0.date) == 1
+        }) else {
             return ""
         }
         return "\(calendar.component(.month, from: monthStart.date))"
