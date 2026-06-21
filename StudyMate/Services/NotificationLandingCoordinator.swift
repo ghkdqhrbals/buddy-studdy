@@ -42,11 +42,6 @@ final class NotificationLandingCoordinator {
     @discardableResult
     func land(route: AppRoute, replyText: String? = nil) async -> Bool {
         if case .recordDetail(let recordID) = route {
-            let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !trimmedReply.isEmpty else {
-                appState.logRemoteNotificationEvent("알림 record route를 즉시 열었습니다. recordID=\(recordID)")
-                return appState.openRouteFromNotification(route)
-            }
             return await land(recordID: recordID, replyText: replyText)
         }
 
@@ -56,15 +51,10 @@ final class NotificationLandingCoordinator {
 
     @discardableResult
     func land(recordID: String, replyText: String? = nil) async -> Bool {
-        let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmedReply.isEmpty else {
-            appState.logRemoteNotificationEvent("알림 record를 즉시 열었습니다. recordID=\(recordID)")
-            return appState.openRouteFromNotification(.recordDetail(recordID: recordID))
-        }
-
         do {
             let record = try await appState.fetchBackendNotificationRecord(recordID: recordID, replyText: replyText)
             let didOpen = appState.openNotificationRecord(record)
+            let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             appState.notificationLandingMessage = nil
             appState.statusMessage = trimmedReply.isEmpty
                 ? (record.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
