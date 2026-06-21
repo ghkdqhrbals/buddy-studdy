@@ -1011,7 +1011,7 @@ private struct MobileNotificationsView: View {
                             }
                         }
                     } label: {
-                        MobileNotificationRow(notification: notification, referenceDate: openedAt, strings: strings)
+                        MobileNotificationRow(notification: notification, referenceDate: openedAt)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1261,7 +1261,6 @@ private struct NotificationStudyListDestination: View {
 private struct MobileNotificationRow: View {
     var notification: BackendAppNotification
     var referenceDate: Date
-    var strings: AppStrings
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -1289,12 +1288,6 @@ private struct MobileNotificationRow: View {
                     .font(.subheadline)
                     .foregroundStyle(notification.isRead ? .secondary : .primary)
                     .lineLimit(3)
-
-                if !notification.isRead {
-                    Text(strings.unreadNotification)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
             }
         }
         .padding(.vertical, 10)
