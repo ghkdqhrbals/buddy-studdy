@@ -693,10 +693,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRouteFromNotification(_ route: AppRoute) -> Bool {
-        selectedTab = .home
-        homeStudyRoute = nil
-        appRouteRequest = AppRouteRequest(route: route, presentation: .notificationInbox)
-        return true
+        openRoute(route)
     }
 
     @discardableResult
