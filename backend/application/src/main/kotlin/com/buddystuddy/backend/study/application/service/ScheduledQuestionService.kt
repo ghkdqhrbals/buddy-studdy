@@ -2,8 +2,9 @@ package com.buddystuddy.backend.study.application.service
 
 import com.buddystuddy.account.domain.entity.UserEntity
 import com.buddystuddy.backend.auth.application.port.outbound.UserPort
+import com.buddystuddy.backend.common.application.error.ApiErrorCode
+import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import com.buddystuddy.backend.crypto.KeyCipher
 import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
@@ -11,6 +12,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
@@ -33,8 +35,8 @@ class ScheduledQuestionService(
     private val questionStats: QuestionStatsPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
-    private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
+    private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
@@ -46,8 +48,8 @@ class ScheduledQuestionService(
         questionStats = questionStats,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
-        cipher = cipher,
         openAI = openAI,
+        questionKeys = questionKeys,
         questionPrompts = questionPrompts,
         backoffPolicy = backoffPolicy,
         log = log,
@@ -95,8 +97,8 @@ class ScheduledQuestionCreator(
     private val questionStats: QuestionStatsPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
-    private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
+    private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
@@ -117,12 +119,7 @@ class ScheduledQuestionCreator(
                 log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} topic={} pending={}", study.deviceId, userId, study.id, study.topic, pending)
                 return
             }
-            val apiKey = cipher.decrypt(user?.openaiApiKeyCipher) ?: properties.openai.apiKey
-            if (apiKey.isBlank()) {
-                study.markScheduled("No OpenAI API key configured for study.", backoffPolicy.missingApiKeyNextDueAt(now), now)
-                log.info("scheduled_question_skipped_missing_api_key deviceId={} userId={} studyId={} topic={}", study.deviceId, userId, study.id, study.topic)
-                return
-            }
+            val questionKey = questionKeys.resolveForQuestionGeneration(user)
             val recent = recentQuestionsByUserId.getOrPut(userId) {
                 questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
             }
@@ -133,9 +130,10 @@ class ScheduledQuestionCreator(
                 customPrompt = study.customPrompt,
                 recentQuestions = recent,
             )
-            val generated = openAI.generateQuestion(apiKey, study.openaiModel, prompt)
+            val generated = openAI.generateQuestion(questionKey.apiKey, study.openaiModel, prompt)
             val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
+            questionKeys.markQuestionCreated(questionKey, now)
             study.markCompleted(now)
             afterCommit {
                 questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
@@ -143,7 +141,12 @@ class ScheduledQuestionCreator(
             }
             log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} notification=true", study.deviceId, userId, study.id, study.topic, saved.id)
         } catch (error: Exception) {
-            study.markScheduled(error.message ?: error.javaClass.simpleName, backoffPolicy.failureNextDueAt(now), now)
+            val retryAt = if (error is ApiException && error.code == ApiErrorCode.OPENAI_API_KEY_MISSING) {
+                backoffPolicy.missingApiKeyNextDueAt(now)
+            } else {
+                backoffPolicy.failureNextDueAt(now)
+            }
+            study.markScheduled(error.message ?: error.javaClass.simpleName, retryAt, now)
             log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
         }
     }

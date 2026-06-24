@@ -19,6 +19,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTra
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.port.outbound.TranslatedQuestionSearchText
+import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.QuestionCreationWriteManager
@@ -41,14 +42,17 @@ class StudyServiceTest {
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
     private val serviceStudies = FakeStudyPort()
+    private val properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" }
+    private val cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" })
     private val service = StudyService(
-        properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" },
+        properties = properties,
         studies = serviceStudies,
         questions = questions,
         questionStats = questionStats,
         openAI = openAI,
         users = users,
-        cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
+        cipher = cipher,
+        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
         questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
@@ -145,6 +149,86 @@ class StudyServiceTest {
         assertThat(response.question.question).isEqualTo("Question")
         assertThat(openAI.generateCalls).isEqualTo(1)
         assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `create question uses system key and increments free usage when user key is missing`() {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = "ACTIVE",
+            appLanguage = "en",
+            freeSystemQuestionCount = 2,
+        )
+        serviceStudies.rows += StudyEntity(
+            id = 78,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis",
+            difficultyLevel = 5,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+
+        service.createQuestion(principal, studyId = 78)
+
+        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
+        assertThat(users.row?.freeSystemQuestionCount).isEqualTo(3)
+        assertThat(users.savedRows).contains(users.row)
+    }
+
+    @Test
+    fun `create question requires user key after free system question limit`() {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = "ACTIVE",
+            appLanguage = "en",
+            freeSystemQuestionCount = 3,
+        )
+        serviceStudies.rows += StudyEntity(
+            id = 79,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Postgres",
+            difficultyLevel = 5,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            service.createQuestion(principal, studyId = 79)
+        }
+            .isInstanceOf(com.buddystuddy.backend.common.application.error.ApiException::class.java)
+            .hasMessage("Free question limit reached. Add your OpenAI API key to continue.")
+
+        assertThat(openAI.generateCalls).isZero()
+    }
+
+    @Test
+    fun `create question uses user key without consuming free usage`() {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = "ACTIVE",
+            appLanguage = "en",
+            openaiApiKeyCipher = cipher.encrypt("sk-user"),
+            freeSystemQuestionCount = 3,
+        )
+        serviceStudies.rows += StudyEntity(
+            id = 80,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Kafka",
+            difficultyLevel = 5,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+
+        service.createQuestion(principal, studyId = 80)
+
+        assertThat(openAI.generatedApiKeys).containsExactly("sk-user")
+        assertThat(users.row?.freeSystemQuestionCount).isEqualTo(3)
     }
 
     @Test
@@ -263,8 +347,12 @@ class StudyServiceTest {
 
     private class FakeUserPort : UserPort {
         var row: UserEntity? = null
+        val savedRows = mutableListOf<UserEntity>()
         var findByIdCalls = 0
-        override fun save(entity: UserEntity): UserEntity = entity
+        override fun save(entity: UserEntity): UserEntity {
+            savedRows += entity
+            return entity
+        }
         override fun findById(id: Long): Optional<UserEntity> {
             findByIdCalls += 1
             return Optional.ofNullable(row?.takeIf { it.id == id })
@@ -279,11 +367,13 @@ class StudyServiceTest {
         var gradeCalls = 0
         var generateCalls = 0
         var generatedPrompt: QuestionGenerationPrompt? = null
+        val generatedApiKeys = mutableListOf<String>()
         override fun validate(apiKey: String) = Unit
         override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateCalls += 1
+            generatedApiKeys += apiKey
             generatedPrompt = prompt
-            assertThat(prompt.text).contains("Language: English")
+            assertThat(prompt.userPrompt).contains("Language: English")
             return GeneratedQuestion("Question", null)
         }
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {

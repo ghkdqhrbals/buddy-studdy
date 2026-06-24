@@ -22,6 +22,7 @@ import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,7 @@ class StudyService(
     private val openAI: OpenAIPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
+    private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
@@ -70,6 +72,7 @@ class StudyService(
         }
 
         val generatedQuestionDeferred = async(Dispatchers.IO) {
+            val questionKey = questionKeys.resolveForQuestionGeneration(user)
             val prompt = questionPrompts.buildQuestionGenerationPrompt(
                 topic = room.topic,
                 level = room.difficultyLevel,
@@ -77,14 +80,15 @@ class StudyService(
                 customPrompt = room.customPrompt,
                 recentQuestions = recentQuestionsDeferred.await(),
             )
-            openAI.generateQuestion(
-                apiKeyFor(user),
+            val generated = openAI.generateQuestion(
+                questionKey.apiKey,
                 study.openaiModel.ifBlank { properties.openai.model },
                 prompt,
             )
+            questionKey to generated
         }
 
-        val generated = generatedQuestionDeferred.await()
+        val (questionKey, generated) = generatedQuestionDeferred.await()
         val now = Instant.now()
 
         val questionDeferred = async(Dispatchers.IO) {
@@ -96,6 +100,7 @@ class StudyService(
         }
 
         val question = questionDeferred.await()
+        questionKeys.markQuestionCreated(questionKey, now)
         question.toStudyRecord().toProjection().toRecordResponse()
     }
 

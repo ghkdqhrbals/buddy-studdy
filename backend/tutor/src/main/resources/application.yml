@@ -68,6 +68,7 @@ buddystuddy:
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}
+    free-question-limit: ${OPENAI_FREE_QUESTION_LIMIT:3}
   apns:
     team-id: ${notificatoin.push.apns.team-id:${APNS_TEAM_ID:}}
     key-id: ${notificatoin.push.apns.key-id:${APNS_KEY_ID:}}
@@ -84,7 +85,7 @@ buddystuddy:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
   prompt:
-    question-security-context: ${QUESTION_PROMPT_SECURITY_CONTEXT:}
+    question-system-prompt: ${QUESTION_SYSTEM_PROMPT:${QUESTION_PROMPT_SECURITY_CONTEXT:}}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

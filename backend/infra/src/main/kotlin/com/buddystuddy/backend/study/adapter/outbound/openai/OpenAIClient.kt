@@ -22,7 +22,8 @@ class OpenAIClient : OpenAIPort {
     override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
         val body = mapOf(
             "model" to model,
-            "input" to prompt.text,
+            "instructions" to prompt.systemPrompt,
+            "input" to prompt.userPrompt,
             "text" to mapOf("format" to mapOf("type" to "json_object")),
         )
         val response = rest.post()

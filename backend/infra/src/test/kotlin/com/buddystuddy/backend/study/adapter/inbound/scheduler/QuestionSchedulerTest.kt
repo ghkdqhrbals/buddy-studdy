@@ -14,6 +14,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.ScheduledQuestionService
@@ -39,8 +40,9 @@ class QuestionSchedulerTest {
     private val notifications = FakeNotificationPublisher()
     private val properties = BuddyStuddyProperties(
         scheduler = BuddyStuddyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
-        openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
+        openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4", freeQuestionLimit = 100),
     )
+    private val cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" })
     private val scheduler = ScheduledQuestionService(
         properties = properties,
         studies = studies,
@@ -49,8 +51,8 @@ class QuestionSchedulerTest {
         questionStats = questionStats,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
-        cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         openAI = openAI,
+        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
         questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
     )
 
@@ -199,8 +201,25 @@ class QuestionSchedulerTest {
 
         assertThat(questions.savedRows).isEmpty()
         assertThat(openAI.generateQuestionCalls).isZero()
-        assertThat(study.lastError).isEqualTo("No OpenAI API key configured for study.")
+        assertThat(study.lastError).isEqualTo("OpenAI API key is not configured.")
         assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(1_750, 1_810)
+    }
+
+    @Test
+    fun `scheduled run stops using system key after free question limit`() {
+        properties.openai.freeQuestionLimit = 1
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        val user = UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        users.rows += user
+        studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
+        studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
+
+        scheduler.runDueQuestions()
+
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(101)
+        assertThat(user.freeSystemQuestionCount).isEqualTo(1)
+        assertThat(studies.rows.single { it.id == 102L }.lastError)
+            .isEqualTo("Free question limit reached. Add your OpenAI API key to continue.")
     }
 
     @Test
@@ -362,7 +381,7 @@ class QuestionSchedulerTest {
         override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateQuestionCalls += 1
             failure?.let { throw it }
-            val recentText = prompt.text
+            val recentText = prompt.userPrompt
                 .substringAfter("Avoid repeating these recent questions: ")
                 .substringBefore("\n")
                 .split("|")

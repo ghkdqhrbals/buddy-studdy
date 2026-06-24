@@ -45,6 +45,8 @@ class UserEntity(
     var appLanguage: String = "ko",
     @Column(name = "openai_api_key_cipher", columnDefinition = "text")
     var openaiApiKeyCipher: String? = null,
+    @Column(name = "free_system_question_count", nullable = false)
+    var freeSystemQuestionCount: Int = 0,
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)

@@ -26,7 +26,11 @@ data class BuddyStuddyProperties(
         var processingTimeoutSeconds: Long = 300,
         var workerId: String = "",
     )
-    data class OpenAI(var apiKey: String = "", var model: String = "gpt-5.4")
+    data class OpenAI(
+        var apiKey: String = "",
+        var model: String = "gpt-5.4",
+        var freeQuestionLimit: Int = 3,
+    )
     data class Apns(
         var teamId: String = "",
         var keyId: String = "",
@@ -49,6 +53,7 @@ data class BuddyStuddyProperties(
         var supportedLanguages: List<String> = listOf("ko", "en"),
     )
     data class Prompt(
+        var questionSystemPrompt: String = "",
         var questionSecurityContext: String = "",
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
