@@ -76,6 +76,7 @@ sealed interface PushQuestionMessage {
     val topic: String
     val sound: String?
     val deepLink: String
+    val createdAt: Instant?
 }
 
 data class ApnsAlert(
@@ -102,6 +103,7 @@ data class ApnsQuestionMessage(
     val token: String,
     val environment: String,
     val payload: ApnsQuestionPayload,
+    override val createdAt: Instant? = null,
 ) : PushQuestionMessage {
     override val type: PushMessageType = PushMessageType.APNS
     override val question: String get() = payload.aps.alert.body
@@ -117,6 +119,7 @@ data class FcmQuestionMessage(
     override val sound: String?,
     override val deepLink: String,
     val token: String,
+    override val createdAt: Instant? = null,
 ) : PushQuestionMessage {
     override val type: PushMessageType = PushMessageType.FCM
 }

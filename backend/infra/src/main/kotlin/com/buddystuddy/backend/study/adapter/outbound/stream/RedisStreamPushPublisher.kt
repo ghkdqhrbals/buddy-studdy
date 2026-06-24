@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
+import java.time.Duration
+import java.time.Instant
 
 @Component
 class RedisStreamPushPublisher(
@@ -57,8 +59,10 @@ class RedisStreamPushPublisher(
             createdAt = request.createdAt,
         )
         val fields = event.toRedisStreamFields()
+        val publishStartedAt = Instant.now()
+        val publishAgeMs = Duration.between(request.createdAt, publishStartedAt).toMillis()
         logger.info(
-            "redis_stream_publish_started prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} fieldKeys={}",
+            "redis_stream_publish_started prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishStartedAt={} publishAgeMs={} fieldKeys={}",
             properties.streams.pushPrefix,
             fields["eventId"],
             fields["eventType"],
@@ -66,6 +70,9 @@ class RedisStreamPushPublisher(
             event.deviceId,
             event.userId,
             event.topic,
+            request.createdAt,
+            publishStartedAt,
+            publishAgeMs,
             fields.keys,
         )
         return try {
@@ -74,8 +81,9 @@ class RedisStreamPushPublisher(
                 fields,
                 RedisStreamPublishOptions(properties.streams.maxLen, true),
             )
+            val publishedAt = Instant.now()
             logger.info(
-                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={}",
+                "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushCreatedAt={} publishedAt={} publishAgeMs={}",
                 published.streamKey,
                 published.recordId,
                 fields["eventId"],
@@ -83,6 +91,9 @@ class RedisStreamPushPublisher(
                 event.recordId,
                 event.deviceId,
                 event.userId,
+                request.createdAt,
+                publishedAt,
+                Duration.between(request.createdAt, publishedAt).toMillis(),
             )
             true
         } catch (error: Exception) {

@@ -17,6 +17,7 @@ import java.security.KeyFactory
 import java.security.interfaces.ECPrivateKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import java.util.Date
 
@@ -45,7 +46,17 @@ class ApnsPushNotificationAdapter(
         if (response.statusCode() !in 200..299) {
             throw IllegalStateException("APNs failed status=${response.statusCode()} body=${response.body()}")
         }
-        logger.info("apns_push_sent recordId={} topic={} status={}", message.recordId, message.topic, response.statusCode())
+        val sentAt = Instant.now()
+        val pushAgeMs = message.createdAt?.let { Duration.between(it, sentAt).toMillis() }
+        logger.info(
+            "apns_push_sent recordId={} topic={} status={} pushCreatedAt={} apnsSentAt={} pushAgeMs={}",
+            message.recordId,
+            message.topic,
+            response.statusCode(),
+            message.createdAt,
+            sentAt,
+            pushAgeMs,
+        )
     }
 
     internal fun buildRequest(message: ApnsQuestionMessage, jwt: String): HttpRequest {

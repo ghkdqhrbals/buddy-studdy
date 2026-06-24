@@ -19,6 +19,8 @@ import com.redisstream.consumer.StreamConfiguration
 import com.redisstream.consumer.StreamListener
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
+import java.time.Duration
+import java.time.Instant
 
 @StreamConfiguration
 class PushStreamListener(
@@ -87,9 +89,11 @@ class PushStreamListener(
                 apnsEnvironment = message.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production",
             )
             pushNotifications.sendQuestion(pushMessage)
+            val consumedAt = Instant.now()
+            val pushAgeMs = pushMessage.createdAt?.let { Duration.between(it, consumedAt).toMillis() }
             message.ack()
             logger.info(
-                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={}",
+                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} consumedAt={} pushAgeMs={}",
                 "buddystuddy-push-listener",
                 message.streamKey,
                 message.recordId,
@@ -99,6 +103,9 @@ class PushStreamListener(
                 message.fields["deviceId"],
                 message.fields["userId"],
                 message.fields["pushProvider"] ?: message.fields["provider"] ?: PushMessageType.APNS.name,
+                pushMessage.createdAt,
+                consumedAt,
+                pushAgeMs,
             )
         } catch (error: Exception) {
             logger.warn(
@@ -170,6 +177,7 @@ internal object PushEventPayloadParser {
                 sound = common.sound,
                 deepLink = deepLink,
                 token = fields["fcmToken"] ?: fields["pushToken"] ?: "",
+                createdAt = payload?.createdAt,
             )
             else -> ApnsQuestionMessage(
                 recordId = common.recordId,
@@ -188,6 +196,7 @@ internal object PushEventPayloadParser {
                     deepLink = deepLink,
                     notificationId = common.notificationId,
                 ),
+                createdAt = payload?.createdAt,
             )
         }
     }

@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
+import java.time.Duration
 import java.time.Instant
 
 @Component
@@ -59,12 +60,16 @@ class QuestionPushOutboxDispatcher(
         item.publishedAt = now
         item.lastError = null
         item.updatedAt = now
+        val outboxAgeMs = Duration.between(item.createdAt, now).toMillis()
         log.info(
-            "question_push_outbox_published outboxId={} recordId={} deviceId={} userId={}",
+            "question_push_outbox_published outboxId={} recordId={} deviceId={} userId={} pushCreatedAt={} outboxPublishedAt={} outboxAgeMs={}",
             item.id,
             item.recordId,
             item.deviceId,
             item.userId,
+            item.createdAt,
+            now,
+            outboxAgeMs,
         )
         outbox.save(item)
     }
@@ -74,12 +79,16 @@ class QuestionPushOutboxDispatcher(
         item.lastError = error
         item.nextAttemptAt = now.plusSeconds(retryDelaySeconds(item.attempts))
         item.updatedAt = now
+        val outboxAgeMs = Duration.between(item.createdAt, now).toMillis()
         log.warn(
-            "question_push_outbox_retry_scheduled outboxId={} recordId={} attempts={} nextAttemptAt={}",
+            "question_push_outbox_retry_scheduled outboxId={} recordId={} attempts={} pushCreatedAt={} retryScheduledAt={} nextAttemptAt={} outboxAgeMs={}",
             item.id,
             item.recordId,
             item.attempts,
+            item.createdAt,
+            now,
             item.nextAttemptAt,
+            outboxAgeMs,
         )
         outbox.save(item)
     }
