@@ -3923,9 +3923,6 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             admin: false
         )
     )
-
-    func checkHealth() async throws {}
-
     func registerDevice(
         apnsToken: String?,
         language: AppLanguage,

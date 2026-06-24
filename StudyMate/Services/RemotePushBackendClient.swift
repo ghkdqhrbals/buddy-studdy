@@ -150,8 +150,6 @@ struct BackendBaseURLConfiguration: Equatable {
 
 @MainActor
 protocol RemotePushBackendClientProtocol {
-    func checkHealth() async throws
-
     func registerDevice(
         apnsToken: String?,
         language: AppLanguage,
@@ -374,19 +372,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom(Self.decodeBackendDate)
         return decoder
-    }
-
-    func checkHealth() async throws {
-        let (data, response) = try await session.data(from: baseURL.appendingPathComponent("health"))
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw RemotePushBackendError.invalidResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let responseBodyText = String(data: data, encoding: .utf8) ?? ""
-            let backendError = Self.decodeBackendAPIError(from: data)
-            throw RemotePushBackendError.httpStatus(httpResponse.statusCode, responseBodyText, backendError)
-        }
     }
 
     func registerDevice(

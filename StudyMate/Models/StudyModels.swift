@@ -1411,14 +1411,6 @@ struct AppStrings {
     var tabRecords: String { text("기록", "Records") }
     var tabStatistics: String { text("통계", "Stats") }
     var loading: String { text("불러오는 중", "Loading") }
-    var backendMaintenanceTitle: String { text("점검중입니다.", "Maintenance in progress") }
-    var backendMaintenanceMessage: String {
-        text(
-            "서버에 연결할 수 없습니다. 잠시 후 자동으로 다시 확인합니다.",
-            "BuddyStuddy cannot reach the server. It will check again automatically."
-        )
-    }
-    var backendMaintenanceChecking: String { text("서버 상태 확인 중", "Checking server status") }
     var retry: String { text("다시 시도", "Retry") }
     func homePath(_ category: String) -> String {
         category
