@@ -2,17 +2,11 @@ import SwiftUI
 
 extension View {
     func searchSafeRefreshControlOffset(
-        offset: CGFloat = 46,
-        isRefreshing: Bool = false,
-        hidesSystemIndicator: Bool = false
+        offset: CGFloat = 46
     ) -> some View {
         #if os(iOS)
         background(
-            RefreshControlOffsetProbe(
-                offset: offset,
-                isRefreshing: isRefreshing,
-                hidesSystemIndicator: hidesSystemIndicator
-            )
+            RefreshControlOffsetProbe(offset: offset)
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
         )
@@ -27,8 +21,6 @@ import UIKit
 
 private struct RefreshControlOffsetProbe: UIViewRepresentable {
     var offset: CGFloat
-    var isRefreshing: Bool
-    var hidesSystemIndicator: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -40,9 +32,7 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
         view.isUserInteractionEnabled = false
         context.coordinator.scheduleApply(
             from: view,
-            offset: offset,
-            isRefreshing: isRefreshing,
-            hidesSystemIndicator: hidesSystemIndicator
+            offset: offset
         )
         return view
     }
@@ -50,9 +40,7 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.scheduleApply(
             from: view,
-            offset: offset,
-            isRefreshing: isRefreshing,
-            hidesSystemIndicator: hidesSystemIndicator
+            offset: offset
         )
     }
 
@@ -62,45 +50,32 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
         private weak var refreshControl: UIRefreshControl?
         private var retryCount = 0
         private var lastOffset: CGFloat = 0
-        private var lastIsRefreshing = false
-        private var lastHidesSystemIndicator = false
-        private var originalTintColor: UIColor?
 
         func scheduleApply(
             from view: UIView,
-            offset: CGFloat,
-            isRefreshing: Bool,
-            hidesSystemIndicator: Bool
+            offset: CGFloat
         ) {
             lastOffset = offset
-            lastIsRefreshing = isRefreshing
-            lastHidesSystemIndicator = hidesSystemIndicator
             Task { @MainActor [weak self, weak view] in
                 guard let self, let view else {
                     return
                 }
                 self.apply(
                     from: view,
-                    offset: offset,
-                    isRefreshing: isRefreshing,
-                    hidesSystemIndicator: hidesSystemIndicator
+                    offset: offset
                 )
             }
         }
 
         private func apply(
             from view: UIView,
-            offset: CGFloat,
-            isRefreshing: Bool,
-            hidesSystemIndicator: Bool
+            offset: CGFloat
         ) {
             let scrollView = self.scrollView ?? view.enclosingScrollView()
             guard let scrollView else {
                 retry(
                     from: view,
-                    offset: offset,
-                    isRefreshing: isRefreshing,
-                    hidesSystemIndicator: hidesSystemIndicator
+                    offset: offset
                 )
                 return
             }
@@ -110,34 +85,23 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
             guard let refreshControl = scrollView.refreshControl else {
                 retry(
                     from: view,
-                    offset: offset,
-                    isRefreshing: isRefreshing,
-                    hidesSystemIndicator: hidesSystemIndicator
+                    offset: offset
                 )
                 return
             }
 
             self.refreshControl = refreshControl
             retryCount = 0
-            if originalTintColor == nil {
-                originalTintColor = refreshControl.tintColor
-            }
 
             if refreshControl.transform.ty != offset {
                 refreshControl.transform = CGAffineTransform(translationX: 0, y: offset)
-            }
-            refreshControl.tintColor = hidesSystemIndicator ? .clear : originalTintColor
-            refreshControl.subviews.forEach { subview in
-                subview.alpha = hidesSystemIndicator ? 0 : 1
             }
             refreshControl.layer.zPosition = 1
         }
 
         private func retry(
             from view: UIView,
-            offset: CGFloat,
-            isRefreshing: Bool,
-            hidesSystemIndicator: Bool
+            offset: CGFloat
         ) {
             guard retryCount < 12 else {
                 return
@@ -151,9 +115,7 @@ private struct RefreshControlOffsetProbe: UIViewRepresentable {
                 }
                 self.apply(
                     from: view,
-                    offset: self.lastOffset == 0 ? offset : self.lastOffset,
-                    isRefreshing: self.lastIsRefreshing,
-                    hidesSystemIndicator: self.lastHidesSystemIndicator || hidesSystemIndicator
+                    offset: self.lastOffset == 0 ? offset : self.lastOffset
                 )
             }
         }

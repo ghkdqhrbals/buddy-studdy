@@ -7,7 +7,6 @@ struct StatisticsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecord: StudyRecord?
     @State private var topicPage = 0
-    @State private var isPullRefreshing = false
     @State private var selectedActivityYear = Calendar.current.component(.year, from: Date())
 
     private static let topicPageSize = 8
@@ -136,7 +135,7 @@ struct StatisticsView: View {
             .refreshable {
                 await refreshStats()
             }
-            .searchSafeRefreshControlOffset(isRefreshing: isPullRefreshing)
+            .searchSafeRefreshControlOffset()
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .navigationTitle("")
@@ -202,11 +201,6 @@ struct StatisticsView: View {
 
     @MainActor
     private func refreshStats() async {
-        isPullRefreshing = true
-        defer {
-            isPullRefreshing = false
-        }
-
         let bounds = activityYearBounds(for: selectedActivityYear)
         await appState.fetchBackendStats(
             period: .all,

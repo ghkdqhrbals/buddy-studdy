@@ -192,7 +192,6 @@ private struct MobileHomeView: View {
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
-    @State private var isPullRefreshing = false
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -256,7 +255,7 @@ private struct MobileHomeView: View {
             .refreshable {
                 await refreshHomeData()
             }
-            .searchSafeRefreshControlOffset(offset: 36, isRefreshing: isPullRefreshing)
+            .searchSafeRefreshControlOffset(offset: 36)
         }
         .background(Color(.systemBackground))
         .environment(\.editMode, $editMode)
@@ -834,11 +833,6 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func refreshHomeData() async {
-        isPullRefreshing = true
-        defer {
-            isPullRefreshing = false
-        }
-
         switch selectedHomeScope {
         case .my:
             await appState.refreshVisibleData()

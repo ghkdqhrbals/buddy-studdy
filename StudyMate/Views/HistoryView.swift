@@ -165,7 +165,7 @@ struct HistoryView: View {
             .refreshable {
                 await refreshRecords()
             }
-            .searchSafeRefreshControlOffset(isRefreshing: isRefreshing)
+            .searchSafeRefreshControlOffset()
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .navigationTitle("")
