@@ -22,6 +22,7 @@ import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -42,6 +43,7 @@ class StudyService(
     private val openAI: OpenAIPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
+    private val questionPrompts: QuestionPromptProvider,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
 ) : StudyUseCase, BrowseRecordsUseCase {
@@ -68,14 +70,17 @@ class StudyService(
         }
 
         val generatedQuestionDeferred = async(Dispatchers.IO) {
+            val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                topic = room.topic,
+                level = room.difficultyLevel,
+                language = room.appLanguage,
+                customPrompt = room.customPrompt,
+                recentQuestions = recentQuestionsDeferred.await(),
+            )
             openAI.generateQuestion(
                 apiKeyFor(user),
                 study.openaiModel.ifBlank { properties.openai.model },
-                room.topic,
-                room.difficultyLevel,
-                room.appLanguage,
-                room.customPrompt,
-                recentQuestionsDeferred.await(),
+                prompt,
             )
         }
 

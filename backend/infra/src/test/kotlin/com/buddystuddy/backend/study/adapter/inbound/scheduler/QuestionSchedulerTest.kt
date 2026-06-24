@@ -14,6 +14,8 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.ScheduledQuestionService
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
@@ -49,6 +51,7 @@ class QuestionSchedulerTest {
         notifications = notifications,
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
         openAI = openAI,
+        questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
     )
 
     @Test
@@ -356,11 +359,17 @@ class QuestionSchedulerTest {
         var generateQuestionCalls = 0
         var failure: RuntimeException? = null
         override fun validate(apiKey: String) = Unit
-        override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion {
+        override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateQuestionCalls += 1
             failure?.let { throw it }
-            recentArguments += recent
-            return GeneratedQuestion("Question for $topic", "Hint")
+            val recentText = prompt.text
+                .substringAfter("Avoid repeating these recent questions: ")
+                .substringBefore("\n")
+                .split("|")
+                .map { it.trim() }
+                .filter { it.isNotBlank() && it != "None" }
+            recentArguments += recentText
+            return GeneratedQuestion("Question for ${prompt.fallbackTopic}", "Hint")
         }
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
             GradedAnswer(100, true, "Good", "Because")

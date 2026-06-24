@@ -6,6 +6,7 @@ import com.buddystuddy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
@@ -391,12 +392,8 @@ class StudyApiIntegrationTest {
             override fun generateQuestion(
                 apiKey: String,
                 model: String,
-                topic: String,
-                level: Int,
-                language: String,
-                customPrompt: String,
-                recent: List<String>,
-            ) = GeneratedQuestion("Generated question for $topic", "Generated hint")
+                prompt: QuestionGenerationPrompt,
+            ) = GeneratedQuestion("Generated question for ${prompt.fallbackTopic}", "Generated hint")
 
             override fun grade(
                 apiKey: String,

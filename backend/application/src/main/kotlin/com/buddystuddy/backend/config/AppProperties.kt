@@ -13,6 +13,7 @@ data class BuddyStuddyProperties(
     var streams: Streams = Streams(),
     var email: Email = Email(),
     var translation: Translation = Translation(),
+    var prompt: Prompt = Prompt(),
     var openapi: OpenApi = OpenApi(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
@@ -46,6 +47,9 @@ data class BuddyStuddyProperties(
     data class Translation(
         var baseUrl: String = "http://localhost:5001",
         var supportedLanguages: List<String> = listOf("ko", "en"),
+    )
+    data class Prompt(
+        var questionSecurityContext: String = "",
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
 }

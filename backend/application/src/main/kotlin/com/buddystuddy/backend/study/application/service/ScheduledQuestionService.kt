@@ -11,6 +11,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
@@ -34,6 +35,7 @@ class ScheduledQuestionService(
     private val notifications: PublishNotificationUseCase,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
+    private val questionPrompts: QuestionPromptProvider,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -46,6 +48,7 @@ class ScheduledQuestionService(
         notifications = notifications,
         cipher = cipher,
         openAI = openAI,
+        questionPrompts = questionPrompts,
         backoffPolicy = backoffPolicy,
         log = log,
     )
@@ -94,6 +97,7 @@ class ScheduledQuestionCreator(
     private val notifications: PublishNotificationUseCase,
     private val cipher: KeyCipher,
     private val openAI: OpenAIPort,
+    private val questionPrompts: QuestionPromptProvider,
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
 ) {
@@ -122,7 +126,14 @@ class ScheduledQuestionCreator(
             val recent = recentQuestionsByUserId.getOrPut(userId) {
                 questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
             }
-            val generated = openAI.generateQuestion(apiKey, study.openaiModel, study.topic, study.difficultyLevel, appLanguage, study.customPrompt, recent)
+            val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                topic = study.topic,
+                level = study.difficultyLevel,
+                language = appLanguage,
+                customPrompt = study.customPrompt,
+                recentQuestions = recent,
+            )
+            val generated = openAI.generateQuestion(apiKey, study.openaiModel, prompt)
             val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
             study.markCompleted(now)

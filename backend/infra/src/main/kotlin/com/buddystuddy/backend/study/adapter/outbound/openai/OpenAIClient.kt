@@ -3,6 +3,7 @@ package com.buddystuddy.backend.study.adapter.outbound.openai
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -18,19 +19,10 @@ class OpenAIClient : OpenAIPort {
         rest.get().uri("/v1/models").header("Authorization", "Bearer $apiKey").retrieve().toBodilessEntity()
     }
 
-    override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion {
-        val prompt = """
-            Create one short study question.
-            Topic: $topic
-            Level: $level/10
-            Language: ${if (language == "en") "English" else "Korean"}
-            Avoid repeating these recent questions: ${recent.joinToString(" | ")}
-            Extra tutor prompt: $customPrompt
-            Return JSON only with keys question and expectedAnswerHint.
-        """.trimIndent()
+    override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
         val body = mapOf(
             "model" to model,
-            "input" to prompt,
+            "input" to prompt.text,
             "text" to mapOf("format" to mapOf("type" to "json_object")),
         )
         val response = rest.post()
@@ -42,7 +34,7 @@ class OpenAIClient : OpenAIPort {
         val text = extractOutputText(response)
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         return GeneratedQuestion(
-            question = parsed["question"]?.toString()?.takeIf { it.isNotBlank() } ?: "Explain one key idea about $topic.",
+            question = parsed["question"]?.toString()?.takeIf { it.isNotBlank() } ?: "Explain one key idea about ${prompt.fallbackTopic}.",
             hint = parsed["expectedAnswerHint"]?.toString(),
         )
     }

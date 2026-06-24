@@ -19,6 +19,8 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTra
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.port.outbound.TranslatedQuestionSearchText
+import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.QuestionCreationWriteManager
 import com.buddystuddy.backend.study.application.service.StudyService
 import com.buddystuddy.community.domain.entity.QuestionSearchEntity
@@ -47,6 +49,7 @@ class StudyServiceTest {
         openAI = openAI,
         users = users,
         cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" }),
+        questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
             questionStats = questionStats,
@@ -275,10 +278,12 @@ class StudyServiceTest {
     private class FakeOpenAI : OpenAIPort {
         var gradeCalls = 0
         var generateCalls = 0
+        var generatedPrompt: QuestionGenerationPrompt? = null
         override fun validate(apiKey: String) = Unit
-        override fun generateQuestion(apiKey: String, model: String, topic: String, level: Int, language: String, customPrompt: String, recent: List<String>): GeneratedQuestion {
+        override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateCalls += 1
-            assertThat(language).isEqualTo("en")
+            generatedPrompt = prompt
+            assertThat(prompt.text).contains("Language: English")
             return GeneratedQuestion("Question", null)
         }
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
