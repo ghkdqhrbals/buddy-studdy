@@ -101,21 +101,13 @@ private struct StudyMateiOSBootstrapView: View {
 private struct StartupPixelFoxSplashView: View {
     var onFinished: () -> Void
 
-    @State private var frameIndex = 0
-
-    private let frameNames = [
-        "PixelFoxBackpackWalkFrame1",
-        "PixelFoxBackpackWalkFrame2",
-        "PixelFoxBackpackWalkFrame3"
-    ]
-
     var body: some View {
         ZStack {
             Color(red: 0.02, green: 0.35, blue: 0.95)
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Image(frameNames[frameIndex])
+                Image("PixelFoxBackpackWalkFrame1")
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
@@ -133,17 +125,9 @@ private struct StartupPixelFoxSplashView: View {
             .padding(.horizontal, 24)
         }
         .task {
-            await playFrames()
-        }
-    }
-
-    private func playFrames() async {
-        for index in frameNames.indices {
-            frameIndex = index
             try? await Task.sleep(for: .seconds(1))
+            onFinished()
         }
-
-        onFinished()
     }
 }
 
