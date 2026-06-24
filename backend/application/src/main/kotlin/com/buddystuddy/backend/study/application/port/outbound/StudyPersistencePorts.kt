@@ -6,6 +6,7 @@ import com.buddystuddy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
+import java.time.YearMonth
 import java.util.Optional
 
 interface StudyPort {
@@ -51,6 +52,11 @@ interface QuestionStatsPort {
     fun incrementLike(questionId: Long, delta: Int, now: Instant): Int
     fun incrementComment(questionId: Long, delta: Int, now: Instant): Int
     fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
+}
+
+interface QuestionMembershipPort {
+    fun activeTierCodeForUser(userId: Long): String?
+    fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
 }
 
 interface QuestionCreatedPublishPort {

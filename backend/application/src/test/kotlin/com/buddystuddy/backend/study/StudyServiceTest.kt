@@ -14,6 +14,7 @@ import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -34,6 +35,7 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import java.time.Instant
+import java.time.YearMonth
 import java.util.Optional
 
 class StudyServiceTest {
@@ -42,6 +44,7 @@ class StudyServiceTest {
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
     private val serviceStudies = FakeStudyPort()
+    private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" })
     private val service = StudyService(
@@ -52,7 +55,7 @@ class StudyServiceTest {
         openAI = openAI,
         users = users,
         cipher = cipher,
-        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
+        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
         questionPrompts = QuestionPromptProvider(),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
@@ -152,14 +155,14 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question uses system key and increments free usage when user key is missing`() {
+    fun `create question uses system key and consumes monthly tier quota when user key is missing`() {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
             status = "ACTIVE",
             appLanguage = "en",
-            freeSystemQuestionCount = 2,
         )
+        memberships.usedCount = 2
         serviceStudies.rows += StudyEntity(
             id = 78,
             deviceId = principal.deviceId,
@@ -173,19 +176,19 @@ class StudyServiceTest {
         service.createQuestion(principal, studyId = 78)
 
         assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
-        assertThat(users.row?.freeSystemQuestionCount).isEqualTo(3)
-        assertThat(users.savedRows).contains(users.row)
+        assertThat(memberships.usedCount).isEqualTo(3)
+        assertThat(users.savedRows).isEmpty()
     }
 
     @Test
-    fun `create question requires user key after free system question limit`() {
+    fun `create question requires user key after monthly tier question limit`() {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
             status = "ACTIVE",
             appLanguage = "en",
-            freeSystemQuestionCount = 3,
         )
+        memberships.usedCount = 30
         serviceStudies.rows += StudyEntity(
             id = 79,
             deviceId = principal.deviceId,
@@ -200,21 +203,21 @@ class StudyServiceTest {
             service.createQuestion(principal, studyId = 79)
         }
             .isInstanceOf(com.buddystuddy.backend.common.application.error.ApiException::class.java)
-            .hasMessage("Free question limit reached. Add your OpenAI API key to continue.")
+            .hasMessage("Monthly question limit reached. Add your OpenAI API key to continue.")
 
         assertThat(openAI.generateCalls).isZero()
     }
 
     @Test
-    fun `create question uses user key without consuming free usage`() {
+    fun `create question uses user key without consuming monthly tier quota`() {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
             status = "ACTIVE",
             appLanguage = "en",
             openaiApiKeyCipher = cipher.encrypt("sk-user"),
-            freeSystemQuestionCount = 3,
         )
+        memberships.usedCount = 30
         serviceStudies.rows += StudyEntity(
             id = 80,
             deviceId = principal.deviceId,
@@ -228,7 +231,7 @@ class StudyServiceTest {
         service.createQuestion(principal, studyId = 80)
 
         assertThat(openAI.generatedApiKeys).containsExactly("sk-user")
-        assertThat(users.row?.freeSystemQuestionCount).isEqualTo(3)
+        assertThat(memberships.consumeCalls).isZero()
     }
 
     @Test
@@ -361,6 +364,19 @@ class StudyServiceTest {
             row?.takeIf { it.id in ids.toSet() }?.let { mutableListOf(it) } ?: mutableListOf()
         override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
         override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+    }
+
+    private class FakeQuestionMembershipPort : QuestionMembershipPort {
+        var tier: String? = null
+        var usedCount = 0
+        var consumeCalls = 0
+        override fun activeTierCodeForUser(userId: Long): String? = tier
+        override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+            consumeCalls += 1
+            if (usedCount >= limit) return false
+            usedCount += 1
+            return true
+        }
     }
 
     private class FakeOpenAI : OpenAIPort {

@@ -12,6 +12,7 @@ import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -28,6 +29,7 @@ import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import java.time.Duration
 import java.time.Instant
+import java.time.YearMonth
 import java.util.Optional
 
 class QuestionSchedulerTest {
@@ -38,9 +40,10 @@ class QuestionSchedulerTest {
     private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
+    private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStuddyProperties(
         scheduler = BuddyStuddyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
-        openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4", freeQuestionLimit = 100),
+        openai = BuddyStuddyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
     )
     private val cipher = KeyCipher(BuddyStuddyProperties().apply { crypto.masterKey = "test-key" })
     private val scheduler = ScheduledQuestionService(
@@ -52,7 +55,7 @@ class QuestionSchedulerTest {
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
-        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
+        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
         questionPrompts = QuestionPromptProvider(),
     )
 
@@ -206,20 +209,20 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run stops using system key after free question limit`() {
-        properties.openai.freeQuestionLimit = 1
+    fun `scheduled run stops using system key after monthly tier question limit`() {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val user = UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         users.rows += user
+        memberships.usedCount = 29
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101)
-        assertThat(user.freeSystemQuestionCount).isEqualTo(1)
+        assertThat(memberships.usedCount).isEqualTo(30)
         assertThat(studies.rows.single { it.id == 102L }.lastError)
-            .isEqualTo("Free question limit reached. Add your OpenAI API key to continue.")
+            .isEqualTo("Monthly question limit reached. Add your OpenAI API key to continue.")
     }
 
     @Test
@@ -306,6 +309,19 @@ class QuestionSchedulerTest {
         override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = rows.filter { it.id in ids.toSet() }.toMutableList()
         override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
         override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+    }
+
+    private class FakeQuestionMembershipPort : QuestionMembershipPort {
+        var tier: String? = null
+        var usedCount = 0
+        var consumeCalls = 0
+        override fun activeTierCodeForUser(userId: Long): String? = tier
+        override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+            consumeCalls += 1
+            if (usedCount >= limit) return false
+            usedCount += 1
+            return true
+        }
     }
 
     private class FakeQuestionPort : QuestionPort {

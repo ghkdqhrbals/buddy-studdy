@@ -28,7 +28,6 @@ data class BuddyStuddyProperties(
     data class OpenAI(
         var apiKey: String = "",
         var model: String = "gpt-5.4",
-        var freeQuestionLimit: Int = 3,
     )
     data class Apns(
         var teamId: String = "",

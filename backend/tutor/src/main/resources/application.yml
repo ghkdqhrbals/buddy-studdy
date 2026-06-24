@@ -77,7 +77,6 @@ buddystuddy:
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}
-    free-question-limit: ${OPENAI_FREE_QUESTION_LIMIT:3}
   apns:
     team-id: ${notificatoin.push.apns.team-id:${APNS_TEAM_ID:}}
     key-id: ${notificatoin.push.apns.key-id:${APNS_KEY_ID:}}
