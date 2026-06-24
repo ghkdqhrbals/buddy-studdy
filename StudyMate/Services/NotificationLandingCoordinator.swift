@@ -51,10 +51,17 @@ final class NotificationLandingCoordinator {
 
     @discardableResult
     func land(recordID: String, replyText: String? = nil) async -> Bool {
+        let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedReply.isEmpty else {
+            appState.notificationLandingMessage = nil
+            appState.statusMessage = appState.strings.openingNotificationQuestion
+            appState.logRemoteNotificationEvent("알림 record route를 즉시 열었습니다. recordID=\(recordID)")
+            return appState.openRouteFromNotification(.recordDetail(recordID: recordID))
+        }
+
         do {
             let record = try await appState.fetchBackendNotificationRecord(recordID: recordID, replyText: replyText)
             let didOpen = appState.openNotificationRecord(record)
-            let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             appState.notificationLandingMessage = nil
             appState.statusMessage = trimmedReply.isEmpty
                 ? (record.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
@@ -68,19 +75,9 @@ final class NotificationLandingCoordinator {
         }
     }
 
-    func routeForNotificationListSelection(_ notification: BackendAppNotification) async -> AppRoute? {
+    func routeForNotificationListSelection(_ notification: BackendAppNotification) -> AppRoute? {
         if let recordID = recordID(from: notification) {
-            do {
-                let record = try await appState.fetchBackendNotificationRecord(recordID: recordID)
-                if record.gradingResult == nil {
-                    _ = appState.openNotificationRecord(record)
-                    return nil
-                }
-                return appState.notificationRoute(for: record)
-            } catch {
-                appState.logRemoteNotificationEvent("알림함 record 라우팅 실패: \(error.localizedDescription)", isWarning: true)
-                return .recordDetail(recordID: recordID)
-            }
+            return .recordDetail(recordID: recordID)
         }
 
         guard let deepLink = notification.deepLink,

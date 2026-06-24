@@ -1006,7 +1006,7 @@ private struct MobileNotificationsView: View {
                     Button {
                         Task {
                             await appState.markNotificationRead(notification)
-                            if let route = await appState.notificationLandingCoordinator.routeForNotificationListSelection(notification) {
+                            if let route = appState.notificationLandingCoordinator.routeForNotificationListSelection(notification) {
                                 forwardedRoute = NotificationForwardRoute(route: route)
                             }
                         }
@@ -1128,20 +1128,24 @@ private struct NotificationRouteDestination: View {
 private struct NotificationRecordDestination: View {
     @EnvironmentObject private var appState: AppState
     var recordID: String
+    @State private var loadedRecord: StudyRecord?
+    @State private var isLoading = true
 
     private var strings: AppStrings {
         appState.strings
     }
 
+    private var record: StudyRecord? {
+        loadedRecord ?? appState.studyRecords.first(where: { $0.id == recordID })
+    }
+
     var body: some View {
         Group {
-            if let record = appState.studyRecords.first(where: { $0.id == recordID }) {
-                if let question = record.asCommunityQuestion(author: appState.communityProfile) {
-                    CommunityQuestionDetailView(question: question)
-                } else {
-                    StudyRecordDetailView(record: record)
-                        .padding(.horizontal, 16)
-                }
+            if let record {
+                recordContent(record)
+            } else if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
             } else {
                 ContentUnavailableView(
                     strings.notificationQuestionMissingTitle,
@@ -1153,9 +1157,35 @@ private struct NotificationRecordDestination: View {
         .navigationTitle(strings.recordDetail)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            if !appState.studyRecords.contains(where: { $0.id == recordID }) {
-                await appState.refreshBackendRecords()
-            }
+            await loadRecordIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private func recordContent(_ record: StudyRecord) -> some View {
+        if record.gradingResult == nil {
+            StudyView(preferredCategoryID: appState.categoryIDForStudyTopic(record.topic))
+                .padding(.horizontal, 16)
+        } else if let question = record.asCommunityQuestion(author: appState.communityProfile) {
+            CommunityQuestionDetailView(question: question)
+        } else {
+            StudyRecordDetailView(record: record)
+                .padding(.horizontal, 16)
+        }
+    }
+
+    private func loadRecordIfNeeded() async {
+        guard record == nil else {
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            loadedRecord = try await appState.fetchBackendNotificationRecord(recordID: recordID)
+        } catch {
+            await appState.refreshBackendRecords()
         }
     }
 }

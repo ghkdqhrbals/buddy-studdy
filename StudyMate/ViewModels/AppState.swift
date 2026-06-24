@@ -693,7 +693,10 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRouteFromNotification(_ route: AppRoute) -> Bool {
-        openRoute(route)
+        selectedTab = .home
+        homeStudyRoute = nil
+        appRouteRequest = AppRouteRequest(route: route, presentation: .notificationInbox)
+        return true
     }
 
     @discardableResult
@@ -6699,6 +6702,10 @@ final class AppState: ObservableObject {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined()
+    }
+
+    func categoryIDForStudyTopic(_ topic: String) -> String? {
+        categoryID(forTopic: topic)
     }
 
     private func categoryID(forTopic topic: String) -> String? {
