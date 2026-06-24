@@ -4,6 +4,15 @@ server:
 spring:
   application:
     name: buddystuddy-backend
+  ai:
+    model:
+      audio:
+        speech: none
+        transcription: none
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
   profiles:
     default: dev
   datasource:

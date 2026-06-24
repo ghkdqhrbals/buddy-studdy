@@ -47,6 +47,7 @@ java {
 dependencyManagement {
     imports {
         mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:4.0.2")
+        mavenBom("org.springframework.ai:spring-ai-bom:2.0.0")
     }
 }
 
