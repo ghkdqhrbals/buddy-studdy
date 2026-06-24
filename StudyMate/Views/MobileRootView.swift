@@ -193,7 +193,6 @@ private struct MobileHomeView: View {
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
     @State private var isPullRefreshing = false
-    @State private var pullRefreshIndicatorTask: Task<Void, Never>?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -250,7 +249,6 @@ private struct MobileHomeView: View {
             List {
                 homeTitleRow
                 homeScopePickerRow
-                homeRefreshRow
                 homeContentSection
             }
             .listStyle(.plain)
@@ -258,7 +256,7 @@ private struct MobileHomeView: View {
             .refreshable {
                 await refreshHomeData()
             }
-            .searchSafeRefreshControlOffset(offset: 36, isRefreshing: isPullRefreshing, hidesSystemIndicator: true)
+            .searchSafeRefreshControlOffset(offset: 36, isRefreshing: isPullRefreshing)
         }
         .background(Color(.systemBackground))
         .environment(\.editMode, $editMode)
@@ -476,23 +474,6 @@ private struct MobileHomeView: View {
         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
-    }
-
-    @ViewBuilder
-    private var homeRefreshRow: some View {
-        if isPullRefreshing {
-            HStack {
-                Spacer()
-                ProgressView()
-                    .controlSize(.small)
-                Spacer()
-            }
-            .padding(.vertical, 10)
-            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            .accessibilityLabel(strings.refresh)
-        }
     }
 
     @ViewBuilder
@@ -853,18 +834,8 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func refreshHomeData() async {
-        pullRefreshIndicatorTask?.cancel()
-        isPullRefreshing = false
-        pullRefreshIndicatorTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(260))
-            guard !Task.isCancelled else {
-                return
-            }
-            isPullRefreshing = true
-        }
+        isPullRefreshing = true
         defer {
-            pullRefreshIndicatorTask?.cancel()
-            pullRefreshIndicatorTask = nil
             isPullRefreshing = false
         }
 
