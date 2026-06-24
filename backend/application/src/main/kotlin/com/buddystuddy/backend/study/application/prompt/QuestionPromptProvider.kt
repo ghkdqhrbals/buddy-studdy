@@ -1,6 +1,5 @@
 package com.buddystuddy.backend.study.application.prompt
 
-import com.buddystuddy.backend.config.BuddyStuddyProperties
 import org.springframework.stereotype.Component
 
 data class QuestionGenerationPrompt(
@@ -10,9 +9,7 @@ data class QuestionGenerationPrompt(
 )
 
 @Component
-class QuestionPromptProvider(
-    private val properties: BuddyStuddyProperties,
-) {
+class QuestionPromptProvider {
     fun buildQuestionGenerationPrompt(
         topic: String,
         level: Int,
@@ -21,11 +18,6 @@ class QuestionPromptProvider(
         recentQuestions: List<String>,
     ): QuestionGenerationPrompt {
         val resolvedTopic = topic.ifBlank { "general study" }
-        val systemPrompt = properties.prompt.questionSystemPrompt
-            .takeIf { it.isNotBlank() }
-            ?: properties.prompt.questionSecurityContext
-            .takeIf { it.isNotBlank() }
-            ?: DEFAULT_QUESTION_SYSTEM_PROMPT
         val languageName = if (language == "en") "English" else "Korean"
         val recentQuestionText = recentQuestions
             .filter { it.isNotBlank() }
@@ -36,7 +28,7 @@ class QuestionPromptProvider(
 
         return QuestionGenerationPrompt(
             fallbackTopic = resolvedTopic,
-            systemPrompt = systemPrompt,
+            systemPrompt = DEFAULT_QUESTION_SYSTEM_PROMPT,
             userPrompt = """
                 Create one short study question.
                 Topic: $resolvedTopic

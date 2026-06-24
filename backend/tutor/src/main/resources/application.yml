@@ -93,8 +93,6 @@ buddystuddy:
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
-  prompt:
-    question-system-prompt: ${QUESTION_SYSTEM_PROMPT:${QUESTION_PROMPT_SECURITY_CONTEXT:}}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

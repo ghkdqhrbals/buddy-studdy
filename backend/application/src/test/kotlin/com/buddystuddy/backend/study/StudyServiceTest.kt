@@ -53,7 +53,7 @@ class StudyServiceTest {
         users = users,
         cipher = cipher,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
-        questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
+        questionPrompts = QuestionPromptProvider(),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
             questionStats = questionStats,

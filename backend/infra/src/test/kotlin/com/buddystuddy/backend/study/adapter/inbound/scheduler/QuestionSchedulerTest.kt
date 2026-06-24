@@ -53,7 +53,7 @@ class QuestionSchedulerTest {
         notifications = notifications,
         openAI = openAI,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, users),
-        questionPrompts = QuestionPromptProvider(BuddyStuddyProperties()),
+        questionPrompts = QuestionPromptProvider(),
     )
 
     @Test
