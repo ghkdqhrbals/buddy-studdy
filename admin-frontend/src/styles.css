@@ -745,6 +745,18 @@ h2 {
   font-size: 12px;
 }
 
+.pagination-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pagination-summary b {
+  color: var(--text);
+  font-weight: 750;
+}
+
 .pagination-controls {
   display: flex;
   align-items: center;
@@ -797,6 +809,7 @@ table {
   min-width: 860px;
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 th,
@@ -815,10 +828,11 @@ th {
 
 td {
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .result-cell {
-  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -830,6 +844,8 @@ td {
 td strong,
 td small {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 td small {
@@ -838,6 +854,31 @@ td small {
   color: var(--danger);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.job-col {
+  width: 190px;
+}
+
+.time-col {
+  width: 128px;
+}
+
+.status-col {
+  width: 96px;
+}
+
+.result-col {
+  width: 250px;
+}
+
+.duration-col,
+.retry-col {
+  width: 86px;
+}
+
+.action-col {
+  width: 74px;
 }
 
 .status {

@@ -645,13 +645,13 @@ function Operations({
         <table>
           <thead>
             <tr>
-              <th>Job</th>
-              <th>Last run</th>
-              <th>Status</th>
-              <th>Result</th>
-              <th>Duration</th>
-              <th>Retry</th>
-              <th></th>
+              <th className="job-col">Job</th>
+              <th className="time-col">Last run</th>
+              <th className="status-col">Status</th>
+              <th className="result-col">Result</th>
+              <th className="duration-col">Duration</th>
+              <th className="retry-col">Retry</th>
+              <th className="action-col"></th>
             </tr>
           </thead>
           <tbody>
@@ -674,7 +674,15 @@ function Operations({
       </div>
       {onPageChange ? (
         <div className="pagination-bar">
-          <span>{start}-{end} / {page.totalCount} · {pageCountLabel(totalPages)}</span>
+          <span className="pagination-summary">
+            <b>{start}-{end}</b>
+            {" "}
+            <span>of {page.totalCount}</span>
+            {" "}
+            <span aria-hidden="true">·</span>
+            {" "}
+            <span>{pageCountLabel(totalPages)}</span>
+          </span>
           <div className="pagination-controls">
             <a
               className={hasPrevious ? "page-button icon-page" : "page-button icon-page disabled"}
