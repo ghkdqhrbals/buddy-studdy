@@ -1198,7 +1198,7 @@ td small {
     grid-column: 1 / -1;
     grid-row: 2;
     display: flex;
-    gap: 3px;
+    gap: 2px;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
@@ -1211,8 +1211,9 @@ td small {
   .nav-item {
     flex: 0 0 auto;
     width: auto;
-    min-height: 30px;
-    padding: 0 8px;
+    min-height: 28px;
+    padding: 0 4px;
+    font-size: 11px;
     white-space: nowrap;
   }
 
