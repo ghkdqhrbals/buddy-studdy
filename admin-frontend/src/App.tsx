@@ -67,33 +67,47 @@ const emptyJobPage: ScheduledJobRunsResponse = {
   offset: 0,
 };
 
-function routeState(): { section: SectionKey; jobOffset: number } {
+function isIsoDate(value: string | null): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function routeState(): { section: SectionKey; jobOffset: number; startDate: string; endDate: string } {
   const path = window.location.pathname;
+  const params = new URLSearchParams(window.location.search);
   const section: SectionKey = path.startsWith("/operations")
     ? "operations"
     : path === "/overview"
       ? "overview"
       : sections.find((item) => path === sectionPaths[item.key])?.key ?? "overview";
-  const page = Number(new URLSearchParams(window.location.search).get("page") ?? "1");
+  const page = Number(params.get("page") ?? "1");
   return {
     section,
     jobOffset: section === "operations" ? (Math.max(1, Number.isFinite(page) ? page : 1) - 1) * JOB_PAGE_SIZE : 0,
+    startDate: isIsoDate(params.get("startDate")) ? params.get("startDate")! : defaultStart,
+    endDate: isIsoDate(params.get("endDate")) ? params.get("endDate")! : defaultEnd,
   };
 }
 
-function sectionHref(section: SectionKey, offset = 0): string {
+function sectionHref(section: SectionKey, offset = 0, range?: { startDate: string; endDate: string }): string {
+  const params = new URLSearchParams();
   if (section !== "operations") {
-    return sectionPaths[section];
+    if (range) {
+      params.set("startDate", range.startDate);
+      params.set("endDate", range.endDate);
+    }
+    const query = params.toString();
+    return `${sectionPaths[section]}${query ? `?${query}` : ""}`;
   }
-  return `${sectionPaths.operations}?page=${Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1}`;
+  params.set("page", String(Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1));
+  return `${sectionPaths.operations}?${params}`;
 }
 
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("buddystuddy.adminTheme") as Theme) || "light");
   const [activeSection, setActiveSection] = useState<SectionKey>(() => routeState().section);
-  const [startDate, setStartDate] = useState(defaultStart);
-  const [endDate, setEndDate] = useState(defaultEnd);
+  const [startDate, setStartDate] = useState(() => routeState().startDate);
+  const [endDate, setEndDate] = useState(() => routeState().endDate);
   const [series, setSeries] = useState<AdminMetricSeries[]>([]);
   const [jobPage, setJobPage] = useState<ScheduledJobRunsResponse>(emptyJobPage);
   const [jobOffset, setJobOffset] = useState(() => routeState().jobOffset);
@@ -110,7 +124,7 @@ export function App() {
 
   useEffect(() => {
     if (window.location.pathname === "/") {
-      window.history.replaceState(null, "", sectionHref(activeSection, jobOffset));
+      window.history.replaceState(null, "", sectionHref(activeSection, jobOffset, { startDate, endDate }));
     }
   }, []);
 
@@ -124,6 +138,8 @@ export function App() {
       const next = routeState();
       setActiveSection(next.section);
       setJobOffset(next.jobOffset);
+      setStartDate(next.startDate);
+      setEndDate(next.endDate);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -203,18 +219,24 @@ export function App() {
   }
 
   function navigateToSection(section: SectionKey) {
-    const path = sectionPaths[section];
-    window.history.pushState(null, "", section === "operations" ? `${path}?page=1` : path);
+    window.history.pushState(null, "", sectionHref(section, 0, { startDate, endDate }));
     setActiveSection(section);
     setJobOffset(0);
   }
 
   function navigateToJobPage(offset: number) {
     const safeOffset = Math.max(0, offset);
-    const page = Math.floor(safeOffset / JOB_PAGE_SIZE) + 1;
-    window.history.pushState(null, "", `${sectionPaths.operations}?page=${page}`);
+    window.history.pushState(null, "", sectionHref("operations", safeOffset));
     setActiveSection("operations");
     setJobOffset(safeOffset);
+  }
+
+  function updateDateRange(nextStartDate: string, nextEndDate: string) {
+    setStartDate(nextStartDate);
+    setEndDate(nextEndDate);
+    if (activeSection !== "operations") {
+      window.history.replaceState(null, "", sectionHref(activeSection, 0, { startDate: nextStartDate, endDate: nextEndDate }));
+    }
   }
 
   if (!isAuthenticated) {
@@ -235,7 +257,7 @@ export function App() {
           {sections.map((section) => (
             <a
               key={section.key}
-              href={sectionHref(section.key)}
+              href={sectionHref(section.key, 0, { startDate, endDate })}
               className={section.key === activeSection ? "nav-item active" : "nav-item"}
               onClick={(event) => {
                 event.preventDefault();
@@ -264,7 +286,14 @@ export function App() {
             <h1>{active.label}</h1>
           </div>
           <div className="toolbar">
-            <DateRange startDate={startDate} endDate={endDate} setStartDate={setStartDate} setEndDate={setEndDate} />
+            {activeSection === "operations" ? null : (
+              <DateRange
+                startDate={startDate}
+                endDate={endDate}
+                setStartDate={(value) => updateDateRange(value, endDate)}
+                setEndDate={(value) => updateDateRange(startDate, value)}
+              />
+            )}
             <button className="secondary-button icon-button square-button" aria-label="Refresh" title="Refresh" onClick={handleRefresh} disabled={loading}>
               <Icon name="refresh" />
             </button>
@@ -359,9 +388,21 @@ function DateRange({
 }) {
   return (
     <div className="date-range">
-      <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+      <input
+        aria-label="Start date"
+        type="date"
+        value={startDate}
+        onInput={(event) => setStartDate(event.currentTarget.value)}
+        onChange={(event) => setStartDate(event.target.value)}
+      />
       <span>~</span>
-      <input aria-label="End date" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+      <input
+        aria-label="End date"
+        type="date"
+        value={endDate}
+        onInput={(event) => setEndDate(event.currentTarget.value)}
+        onChange={(event) => setEndDate(event.target.value)}
+      />
     </div>
   );
 }
