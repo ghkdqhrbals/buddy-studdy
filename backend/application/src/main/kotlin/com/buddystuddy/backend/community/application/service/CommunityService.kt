@@ -61,7 +61,11 @@ class CommunityService(
 
     @Transactional(readOnly = true)
     override fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
-        val result = search.searchPublic(query?.trim()?.takeIf { it.isNotEmpty() }, language, limit, offset)
+        val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+        val result = search.searchPublic(normalizedQuery, language, limit, offset)
+        if (result.questionIds.isEmpty() && normalizedQuery != null) {
+            return publicQuestionsFromOrigin(principal, normalizedQuery, language, limit, offset)
+        }
         if (result.questionIds.isEmpty()) {
             return CommunityQuestionsResponse(emptyList(), result.totalCount, limit, offset)
         }
@@ -71,6 +75,21 @@ class CommunityService(
         val context = communityContext(orderedQuestions, principal)
         val rows = orderedQuestions.map { community(it, context, translatedById[it.id]) }
         return CommunityQuestionsResponse(rows, result.totalCount, limit, offset)
+    }
+
+    private fun publicQuestionsFromOrigin(
+        principal: Principal?,
+        query: String,
+        language: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse {
+        val page = questions.findPublicAnsweredByQuery(query, PageRequest.of(offset / limit, limit))
+        val questionIds = page.content.map { it.id }
+        val translatedById = translatedRows(questionIds, language)
+        val context = communityContext(page.content, principal)
+        val rows = page.content.map { community(it, context, translatedById[it.id]) }
+        return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
     @Transactional

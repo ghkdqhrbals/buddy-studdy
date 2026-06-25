@@ -235,6 +235,36 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `create question does not consume monthly tier quota when openai generation fails`() {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = "ACTIVE",
+            appLanguage = "en",
+        )
+        memberships.usedCount = 2
+        openAI.failure = IllegalStateException("OpenAI unavailable")
+        serviceStudies.rows += StudyEntity(
+            id = 81,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis",
+            difficultyLevel = 5,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            service.createQuestion(principal, studyId = 81)
+        }.isInstanceOf(IllegalStateException::class.java)
+
+        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
+        assertThat(memberships.usedCount).isEqualTo(2)
+        assertThat(memberships.consumeCalls).isEqualTo(1)
+        assertThat(memberships.refundCalls).isEqualTo(1)
+    }
+
+    @Test
     fun `publicity reads question stats only for final response`() {
         questions.visibleRows += gradedQuestion(id = 401, topic = "Swift")
         questionStats.rows += QuestionStatsEntity(questionId = 401, likeCount = 2)
@@ -370,6 +400,7 @@ class StudyServiceTest {
         var tier: String? = null
         var usedCount = 0
         var consumeCalls = 0
+        var refundCalls = 0
         override fun activeTierCodeForUser(userId: Long): String? = tier
         override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
@@ -377,17 +408,23 @@ class StudyServiceTest {
             usedCount += 1
             return true
         }
+        override fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+            refundCalls += 1
+            if (usedCount > 0) usedCount -= 1
+        }
     }
 
     private class FakeOpenAI : OpenAIPort {
         var gradeCalls = 0
         var generateCalls = 0
+        var failure: RuntimeException? = null
         var generatedPrompt: QuestionGenerationPrompt? = null
         val generatedApiKeys = mutableListOf<String>()
         override fun validate(apiKey: String) = Unit
         override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateCalls += 1
             generatedApiKeys += apiKey
+            failure?.let { throw it }
             generatedPrompt = prompt
             assertThat(prompt.userPrompt).contains("Language: English")
             return GeneratedQuestion("Question", null)

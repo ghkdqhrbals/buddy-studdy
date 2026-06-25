@@ -14,8 +14,15 @@ import java.time.ZoneOffset
 
 data class OpenAIQuestionKey(
     val apiKey: String,
-    val usesSystemMembershipQuota: Boolean,
+    val quotaReservation: SystemQuestionQuotaReservation? = null,
     val user: UserEntity?,
+) {
+    val usesSystemMembershipQuota: Boolean get() = quotaReservation != null
+}
+
+data class SystemQuestionQuotaReservation(
+    val userId: Long,
+    val yearMonth: YearMonth,
 )
 
 enum class QuestionMembershipTier(val monthlyQuestionLimit: Int) {
@@ -40,7 +47,7 @@ class OpenAIQuestionKeyProvider(
     fun resolveForQuestionGeneration(user: UserEntity?): OpenAIQuestionKey {
         val userApiKey = cipher.decrypt(user?.openaiApiKeyCipher)
         if (!userApiKey.isNullOrBlank()) {
-            return OpenAIQuestionKey(userApiKey, usesSystemMembershipQuota = false, user = user)
+            return OpenAIQuestionKey(userApiKey, user = user)
         }
 
         val systemApiKey = properties.openai.apiKey.takeIf { it.isNotBlank() }
@@ -51,9 +58,10 @@ class OpenAIQuestionKeyProvider(
         }
 
         val tier = QuestionMembershipTier.fromDb(memberships.activeTierCodeForUser(user.id))
+        val yearMonth = YearMonth.now(ZoneOffset.UTC)
         val consumed = memberships.tryConsumeMonthlySystemQuestion(
             userId = user.id,
-            yearMonth = YearMonth.now(ZoneOffset.UTC),
+            yearMonth = yearMonth,
             limit = tier.monthlyQuestionLimit,
             now = Instant.now(),
         )
@@ -61,10 +69,19 @@ class OpenAIQuestionKeyProvider(
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached. Add your OpenAI API key to continue.")
         }
 
-        return OpenAIQuestionKey(systemApiKey, usesSystemMembershipQuota = true, user = user)
+        return OpenAIQuestionKey(
+            apiKey = systemApiKey,
+            quotaReservation = SystemQuestionQuotaReservation(user.id, yearMonth),
+            user = user,
+        )
     }
 
     fun markQuestionCreated(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         if (!key.usesSystemMembershipQuota) return
+    }
+
+    fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
+        val reservation = key.quotaReservation ?: return
+        memberships.refundMonthlySystemQuestion(reservation.userId, reservation.yearMonth, now)
     }
 }

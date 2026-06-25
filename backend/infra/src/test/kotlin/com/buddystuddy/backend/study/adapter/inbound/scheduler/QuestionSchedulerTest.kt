@@ -238,6 +238,9 @@ class QuestionSchedulerTest {
         assertThat(questions.savedRows).isEmpty()
         assertThat(notifications.commands).isEmpty()
         assertThat(study.lastError).isEqualTo("OpenAI unavailable")
+        assertThat(memberships.usedCount).isZero()
+        assertThat(memberships.consumeCalls).isEqualTo(1)
+        assertThat(memberships.refundCalls).isEqualTo(1)
         assertThat(Duration.between(Instant.now(), study.nextDueAt).seconds).isBetween(550, 610)
     }
 
@@ -315,12 +318,17 @@ class QuestionSchedulerTest {
         var tier: String? = null
         var usedCount = 0
         var consumeCalls = 0
+        var refundCalls = 0
         override fun activeTierCodeForUser(userId: Long): String? = tier
         override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false
             usedCount += 1
             return true
+        }
+        override fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+            refundCalls += 1
+            if (usedCount > 0) usedCount -= 1
         }
     }
 

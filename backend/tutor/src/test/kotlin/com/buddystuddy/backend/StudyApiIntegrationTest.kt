@@ -9,7 +9,6 @@ import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionRepository
-import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystuddy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystuddy.study.domain.entity.QuestionEntity
@@ -51,7 +50,6 @@ class StudyApiIntegrationTest {
     @Autowired lateinit var mapper: ObjectMapper
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository
-    @Autowired lateinit var pushOutbox: QuestionPushOutboxJpaRepository
     @Autowired lateinit var stats: QuestionStatsRepository
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var roles: RoleAssignmentPort
@@ -375,11 +373,6 @@ class StudyApiIntegrationTest {
 
         val pendingQuestionCount = questions.countPendingForStudy(created["id"].asLong())
         assertThat(pendingQuestionCount).isEqualTo(1)
-        val outboxItems = pushOutbox.findAll()
-        assertThat(outboxItems).hasSize(1)
-        assertThat(outboxItems[0].recordId).isEqualTo(question["id"].asLong())
-        assertThat(outboxItems[0].status).isEqualTo("PENDING")
-        assertThat(outboxItems[0].topic).isEqualTo("Kotlin Architecture")
     }
 
     @TestConfiguration

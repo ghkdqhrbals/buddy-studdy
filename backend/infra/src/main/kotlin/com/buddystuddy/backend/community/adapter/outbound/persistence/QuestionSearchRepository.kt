@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
+import javax.sql.DataSource
 
 @Repository
 interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, QuestionSearchId> {
@@ -95,13 +96,70 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Ques
         @Param("language") language: String,
     ): Long
 
+    @Query(
+        value = """
+            select qs.question_id
+            from question_search qs
+            join users u on u.id = qs.user_id
+            where qs.public_question = true
+              and qs.score is not null
+              and qs.deleted_at is null
+              and qs.language = :language
+              and u.allow_public_questions = true
+              and (
+                    lower(qs.topic) like concat('%', lower(:query), '%')
+                 or lower(qs.question) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.answer, '')) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.feedback, '')) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.explanation, '')) like concat('%', lower(:query), '%')
+              )
+            order by qs.created_at desc
+            limit :limit offset :offset
+        """,
+        nativeQuery = true,
+    )
+    fun searchPublicByLike(
+        @Param("query") query: String,
+        @Param("language") language: String,
+        @Param("limit") limit: Int,
+        @Param("offset") offset: Int,
+    ): List<Number>
+
+    @Query(
+        value = """
+            select count(distinct qs.question_id)
+            from question_search qs
+            join users u on u.id = qs.user_id
+            where qs.public_question = true
+              and qs.score is not null
+              and qs.deleted_at is null
+              and qs.language = :language
+              and u.allow_public_questions = true
+              and (
+                    lower(qs.topic) like concat('%', lower(:query), '%')
+                 or lower(qs.question) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.answer, '')) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.feedback, '')) like concat('%', lower(:query), '%')
+                 or lower(coalesce(qs.explanation, '')) like concat('%', lower(:query), '%')
+              )
+        """,
+        nativeQuery = true,
+    )
+    fun countSearchPublicByLike(
+        @Param("query") query: String,
+        @Param("language") language: String,
+    ): Long
+
     fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
 }
 
 @Repository
 class QuestionSearchRepository(
     private val jpa: QuestionSearchJpaRepository,
+    private val dataSource: DataSource,
 ) : QuestionSearchPort {
+    private val postgresDatabase: Boolean by lazy { detectPostgres() }
+
     override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = jpa.save(entity)
 
     @Transactional
@@ -111,15 +169,19 @@ class QuestionSearchRepository(
         val safeLimit = limit.coerceIn(1, 100)
         val safeOffset = maxOf(offset, 0)
         val normalizedLanguage = language.normalizedSearchLanguage()
-        val ids = if (query.isNullOrBlank()) {
+        val ids = (if (query.isNullOrBlank()) {
             jpa.listPublic(normalizedLanguage, safeLimit, safeOffset)
-        } else {
+        } else if (postgresDatabase) {
             jpa.searchPublic(query, normalizedLanguage, safeLimit, safeOffset)
-        }.map { it.toLong() }
+        } else {
+            jpa.searchPublicByLike(query, normalizedLanguage, safeLimit, safeOffset)
+        }).map { it.toLong() }
         val total = if (query.isNullOrBlank()) {
             jpa.countPublic(normalizedLanguage)
-        } else {
+        } else if (postgresDatabase) {
             jpa.countSearchPublic(query, normalizedLanguage)
+        } else {
+            jpa.countSearchPublicByLike(query, normalizedLanguage)
         }
         return SearchResult(ids, total)
     }
@@ -134,4 +196,9 @@ class QuestionSearchRepository(
 
     private fun String.normalizedSearchLanguage(): String =
         if (lowercase().startsWith("en")) "en" else "ko"
+
+    private fun detectPostgres(): Boolean =
+        dataSource.connection.use { connection ->
+            connection.metaData.databaseProductName.equals("PostgreSQL", ignoreCase = true)
+        }
 }

@@ -71,37 +71,41 @@ class StudyService(
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
 
-        val generatedQuestionDeferred = async(Dispatchers.IO) {
-            val questionKey = questionKeys.resolveForQuestionGeneration(user)
-            val prompt = questionPrompts.buildQuestionGenerationPrompt(
-                topic = room.topic,
-                level = room.difficultyLevel,
-                language = room.appLanguage,
-                customPrompt = room.customPrompt,
-                recentQuestions = recentQuestionsDeferred.await(),
-            )
-            val generated = openAI.generateQuestion(
-                questionKey.apiKey,
-                study.openaiModel.ifBlank { properties.openai.model },
-                prompt,
-            )
-            questionKey to generated
+        val questionKey = questionKeys.resolveForQuestionGeneration(user)
+        try {
+            val generatedQuestionDeferred = async(Dispatchers.IO) {
+                val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                    topic = room.topic,
+                    level = room.difficultyLevel,
+                    language = room.appLanguage,
+                    customPrompt = room.customPrompt,
+                    recentQuestions = recentQuestionsDeferred.await(),
+                )
+                openAI.generateQuestion(
+                    questionKey.apiKey,
+                    study.openaiModel.ifBlank { properties.openai.model },
+                    prompt,
+                )
+            }
+
+            val generated = generatedQuestionDeferred.await()
+            val now = Instant.now()
+
+            val questionDeferred = async(Dispatchers.IO) {
+                questionWriter.saveQuestionWithNotification(
+                    room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
+                    { saved -> saved.toQuestionNotification(study, appLanguage) },
+                    now,
+                )
+            }
+
+            val question = questionDeferred.await()
+            questionKeys.markQuestionCreated(questionKey, now)
+            question.toStudyRecord().toProjection().toRecordResponse()
+        } catch (error: Exception) {
+            questionKeys.releaseQuestionReservation(questionKey)
+            throw error
         }
-
-        val (questionKey, generated) = generatedQuestionDeferred.await()
-        val now = Instant.now()
-
-        val questionDeferred = async(Dispatchers.IO) {
-            questionWriter.saveQuestionWithNotification(
-                room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
-                { saved -> saved.toQuestionNotification(study, appLanguage) },
-                now,
-            )
-        }
-
-        val question = questionDeferred.await()
-        questionKeys.markQuestionCreated(questionKey, now)
-        question.toStudyRecord().toProjection().toRecordResponse()
     }
 
     @Transactional

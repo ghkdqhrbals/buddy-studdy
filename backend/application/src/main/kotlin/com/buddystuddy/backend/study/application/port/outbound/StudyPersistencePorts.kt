@@ -57,6 +57,7 @@ interface QuestionStatsPort {
 interface QuestionMembershipPort {
     fun activeTierCodeForUser(userId: Long): String?
     fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
+    fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
 }
 
 interface QuestionCreatedPublishPort {

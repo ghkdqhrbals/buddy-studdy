@@ -12,6 +12,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
+import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.study.domain.entity.QuestionEntity
@@ -110,6 +111,8 @@ class ScheduledQuestionCreator(
         usersById: MutableMap<Long, UserEntity?>,
         recentQuestionsByUserId: MutableMap<Long, List<String>>,
     ) {
+        var questionKey: OpenAIQuestionKey? = null
+        var questionCreated = false
         try {
             val userId = study.userId
             val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
@@ -119,7 +122,7 @@ class ScheduledQuestionCreator(
                 log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} topic={} pending={}", study.deviceId, userId, study.id, study.topic, pending)
                 return
             }
-            val questionKey = questionKeys.resolveForQuestionGeneration(user)
+            questionKey = questionKeys.resolveForQuestionGeneration(user)
             val recent = recentQuestionsByUserId.getOrPut(userId) {
                 questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
             }
@@ -134,6 +137,7 @@ class ScheduledQuestionCreator(
             val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
             questionKeys.markQuestionCreated(questionKey, now)
+            questionCreated = true
             study.markCompleted(now)
             afterCommit {
                 questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
@@ -141,6 +145,9 @@ class ScheduledQuestionCreator(
             }
             log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} notification=true", study.deviceId, userId, study.id, study.topic, saved.id)
         } catch (error: Exception) {
+            if (!questionCreated) {
+                questionKey?.let { questionKeys.releaseQuestionReservation(it, now) }
+            }
             val retryAt = if (error is ApiException && error.code == ApiErrorCode.OPENAI_API_KEY_MISSING) {
                 backoffPolicy.missingApiKeyNextDueAt(now)
             } else {
