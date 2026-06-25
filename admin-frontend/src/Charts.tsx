@@ -46,16 +46,13 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   const values = points.map((point) => point.value);
   const rawMax = Math.max(1, ...values);
   const rawMin = Math.min(0, ...values);
-  const rangePadding = Math.max((rawMax - rawMin) * 0.12, rawMax === rawMin ? rawMax * 0.12 : 0);
-  const min = Math.max(0, rawMin - rangePadding);
-  const max = rawMax + rangePadding;
+  const scale = chartScale(definition, rawMin, rawMax);
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const activeIndex = hovered ?? Math.max(0, points.length - 1);
   const x = (index: number) => padding.left + (points.length <= 1 ? 0 : (index / (points.length - 1)) * plotWidth);
-  const y = (value: number) => padding.top + (1 - ((value - min) / Math.max(1, max - min))) * plotHeight;
+  const y = (value: number) => padding.top + (1 - ((value - scale.min) / Math.max(1, scale.max - scale.min))) * plotHeight;
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`).join(" ");
-  const ticks = yTicks(min, max);
   const active = points[activeIndex];
 
   const moveHover = (clientX: number, bounds: DOMRect) => {
@@ -74,7 +71,7 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
       </div>
       <div className="trend-canvas">
         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${definition.label} trend chart`}>
-          {ticks.map((tick) => {
+          {scale.ticks.map((tick) => {
             const yy = y(tick);
             return (
               <g key={tick}>
@@ -121,9 +118,33 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   );
 }
 
-function yTicks(min: number, max: number): number[] {
-  if (max <= min) return [0, max];
-  return [max, min + (max - min) / 2, min];
+function chartScale(definition: MetricDefinition, rawMin: number, rawMax: number): { min: number; max: number; ticks: number[] } {
+  if (definition.kind === "rate") {
+    const max = Math.max(100, niceCeil(rawMax));
+    return { min: 0, max, ticks: [max, max / 2, 0] };
+  }
+  if (definition.kind === "count" || definition.kind === "days") {
+    const max = Math.max(1, niceCeil(rawMax));
+    const middle = Math.round(max / 2);
+    const ticks = max <= 2 ? [max, 0] : [max, middle, 0];
+    return { min: 0, max, ticks: uniqueTicks(ticks) };
+  }
+  const max = Math.max(1, niceCeil(rawMax));
+  const min = Math.max(0, rawMin);
+  return { min, max, ticks: uniqueTicks([max, (max + min) / 2, min]) };
+}
+
+function uniqueTicks(values: number[]): number[] {
+  return values.filter((value, index, self) => self.findIndex((item) => roundOne(item) === roundOne(value)) === index);
+}
+
+function niceCeil(value: number): number {
+  if (value <= 1) return 1;
+  const exponent = Math.floor(Math.log10(value));
+  const magnitude = 10 ** exponent;
+  const normalized = value / magnitude;
+  const nice = normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return nice * magnitude;
 }
 
 function formatAxisTick(definition: MetricDefinition, value: number): string {
