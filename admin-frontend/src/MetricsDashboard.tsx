@@ -105,7 +105,7 @@ function QuotaPanel({ series }: { series?: AdminMetricSeries }) {
     <section className="side-panel quota-panel">
       <h2>Quota</h2>
       <div className="quota-meter" aria-label={`Quota used ${ratio}%`}>
-        <span style={{ width: `${ratio}%` }} />
+        {ratio > 0 ? <span style={{ width: `${ratio}%` }} /> : null}
       </div>
       <div className="quota-value">
         <strong>{ratio}%</strong>
