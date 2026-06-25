@@ -30,6 +30,9 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
                 MemberCategory.INVOKE_DECLARED_METHODS,
             )
         }
+        hibernateEventListenerArrays.forEach { listenerArray ->
+            hints.reflection().registerType(TypeReference.of(listenerArray))
+        }
         hints.resources().registerPattern("org/hibernate/**/*.i18n.properties")
     }
 
@@ -87,5 +90,43 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "org.hibernate.sql.results.LoadingLogger_\$logger",
         "org.hibernate.sql.results.ResultsLogger_\$logger",
         "org.hibernate.sql.results.graph.embeddable.EmbeddableLoadingLogger_\$logger",
+    )
+
+    private val hibernateEventListenerArrays = listOf(
+        "org.hibernate.event.spi.AutoFlushEventListener[]",
+        "org.hibernate.event.spi.ClearEventListener[]",
+        "org.hibernate.event.spi.DeleteEventListener[]",
+        "org.hibernate.event.spi.DirtyCheckEventListener[]",
+        "org.hibernate.event.spi.EvictEventListener[]",
+        "org.hibernate.event.spi.FlushEntityEventListener[]",
+        "org.hibernate.event.spi.FlushEventListener[]",
+        "org.hibernate.event.spi.InitializeCollectionEventListener[]",
+        "org.hibernate.event.spi.LoadEventListener[]",
+        "org.hibernate.event.spi.LockEventListener[]",
+        "org.hibernate.event.spi.MergeEventListener[]",
+        "org.hibernate.event.spi.PersistEventListener[]",
+        "org.hibernate.event.spi.PostActionEventListener[]",
+        "org.hibernate.event.spi.PostCollectionRecreateEventListener[]",
+        "org.hibernate.event.spi.PostCollectionRemoveEventListener[]",
+        "org.hibernate.event.spi.PostCollectionUpdateEventListener[]",
+        "org.hibernate.event.spi.PostCommitDeleteEventListener[]",
+        "org.hibernate.event.spi.PostCommitInsertEventListener[]",
+        "org.hibernate.event.spi.PostCommitUpdateEventListener[]",
+        "org.hibernate.event.spi.PostDeleteEventListener[]",
+        "org.hibernate.event.spi.PostInsertEventListener[]",
+        "org.hibernate.event.spi.PostLoadEventListener[]",
+        "org.hibernate.event.spi.PostUpdateEventListener[]",
+        "org.hibernate.event.spi.PostUpsertEventListener[]",
+        "org.hibernate.event.spi.PreCollectionRecreateEventListener[]",
+        "org.hibernate.event.spi.PreCollectionRemoveEventListener[]",
+        "org.hibernate.event.spi.PreCollectionUpdateEventListener[]",
+        "org.hibernate.event.spi.PreDeleteEventListener[]",
+        "org.hibernate.event.spi.PreFlushEventListener[]",
+        "org.hibernate.event.spi.PreInsertEventListener[]",
+        "org.hibernate.event.spi.PreLoadEventListener[]",
+        "org.hibernate.event.spi.PreUpdateEventListener[]",
+        "org.hibernate.event.spi.PreUpsertEventListener[]",
+        "org.hibernate.event.spi.RefreshEventListener[]",
+        "org.hibernate.event.spi.ReplicateEventListener[]",
     )
 }
