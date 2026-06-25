@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+type PageItem = number | { type: "ellipsis"; page: number };
+
 type PaginationProps = {
   start: number;
   end: number;
@@ -51,8 +53,16 @@ export function Pagination({
           <Chevron direction="left" />
         </PageAnchor>
         {pageItems.map((item, index) => (
-          item === "ellipsis" ? (
-            <span className="page-ellipsis" key={`ellipsis-${index}`}>...</span>
+          typeof item === "object" ? (
+            <PageAnchor
+              key={`ellipsis-${index}-${item.page}`}
+              href={hrefForPage(item.page)}
+              label={`Jump to page ${item.page}`}
+              variant="ellipsis"
+              onClick={() => onPageChange(item.page)}
+            >
+              ...
+            </PageAnchor>
           ) : (
             <PageAnchor
               key={item}
@@ -105,6 +115,7 @@ function PageAnchor({
   disabled = false,
   href,
   label,
+  variant,
   onClick,
   children,
 }: {
@@ -112,6 +123,7 @@ function PageAnchor({
   disabled?: boolean;
   href: string;
   label?: string;
+  variant?: "ellipsis";
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -120,6 +132,7 @@ function PageAnchor({
       className={[
         "page-button",
         label ? "icon-page" : "",
+        variant === "ellipsis" ? "page-ellipsis" : "",
         active ? "active" : "",
         disabled ? "disabled" : "",
       ].filter(Boolean).join(" ")}
@@ -145,7 +158,7 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
   );
 }
 
-function paginationItems(current: number, total: number): Array<number | "ellipsis"> {
+export function paginationItems(current: number, total: number): PageItem[] {
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
   const pages = new Set<number>([1, 2, total - 1, total, current - 1, current, current + 1]);
   if (current <= 4) {
@@ -161,7 +174,9 @@ function paginationItems(current: number, total: number): Array<number | "ellips
   const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
   return sorted.flatMap((page, index) => {
     const previous = sorted[index - 1];
-    if (previous && page - previous > 1) return ["ellipsis" as const, page];
+    if (previous && page - previous > 1) {
+      return [{ type: "ellipsis" as const, page: Math.floor((previous + page) / 2) }, page];
+    }
     return [page];
   });
 }

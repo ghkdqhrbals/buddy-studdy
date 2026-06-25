@@ -841,12 +841,16 @@ h2 {
 }
 
 .page-ellipsis {
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 26px;
+  min-width: 24px;
+  width: auto;
+  padding: 0 5px;
   color: var(--muted);
-  font-size: 12px;
+  background: transparent;
+}
+
+.page-ellipsis:hover {
+  color: var(--text);
+  background: var(--surface-2);
 }
 
 .page-jump {
