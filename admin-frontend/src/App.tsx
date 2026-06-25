@@ -12,19 +12,19 @@ type MetricDefinition = {
   shortLabel: string;
   kind: MetricKind;
   color: string;
-  compareLabel: string;
+  description: string;
 };
 
 const metricCatalog: Record<string, MetricDefinition> = {
-  daily_active_users: { key: "daily_active_users", label: "Daily Active Users", shortLabel: "DAU", kind: "count", color: "#2563eb", compareLabel: "vs previous day" },
-  weekly_active_learners: { key: "weekly_active_learners", label: "Weekly Active Learners", shortLabel: "WAU", kind: "count", color: "#7c3aed", compareLabel: "vs last 7 days" },
-  question_created_count: { key: "question_created_count", label: "Questions Created", shortLabel: "Questions", kind: "count", color: "#2563eb", compareLabel: "vs previous day" },
-  answer_submitted_count: { key: "answer_submitted_count", label: "Answers Submitted", shortLabel: "Answers", kind: "count", color: "#16a34a", compareLabel: "vs previous day" },
-  answer_rate: { key: "answer_rate", label: "Answer Rate", shortLabel: "Answer Rate", kind: "rate", color: "#9333ea", compareLabel: "pp vs previous day" },
-  push_open_rate: { key: "push_open_rate", label: "Push Open Rate", shortLabel: "Push Open", kind: "rate", color: "#f97316", compareLabel: "pp vs previous day" },
-  question_to_answer_latency: { key: "question_to_answer_latency", label: "Question to Answer", shortLabel: "Latency", kind: "duration", color: "#0ea5e9", compareLabel: "vs previous day" },
-  study_streak: { key: "study_streak", label: "Study Streak", shortLabel: "Streak", kind: "days", color: "#22c55e", compareLabel: "vs previous day" },
-  quota_used_count: { key: "quota_used_count", label: "Quota Used", shortLabel: "Quota", kind: "count", color: "#64748b", compareLabel: "this month" },
+  daily_active_users: { key: "daily_active_users", label: "Daily Active Users", shortLabel: "DAU", kind: "count", color: "#2563eb", description: "Unique active users for the selected day." },
+  weekly_active_learners: { key: "weekly_active_learners", label: "Weekly Active Learners", shortLabel: "WAU", kind: "count", color: "#7c3aed", description: "Users who studied at least once in the trailing week." },
+  question_created_count: { key: "question_created_count", label: "Questions Created", shortLabel: "Questions", kind: "count", color: "#2563eb", description: "Questions generated during the selected period." },
+  answer_submitted_count: { key: "answer_submitted_count", label: "Answers Submitted", shortLabel: "Answers", kind: "count", color: "#16a34a", description: "Answers submitted by learners." },
+  answer_rate: { key: "answer_rate", label: "Answer Rate", shortLabel: "Answer Rate", kind: "rate", color: "#9333ea", description: "Answered questions divided by created questions." },
+  push_open_rate: { key: "push_open_rate", label: "Push Open Rate", shortLabel: "Push Open", kind: "rate", color: "#f97316", description: "Push notifications opened by users." },
+  question_to_answer_latency: { key: "question_to_answer_latency", label: "Question to Answer", shortLabel: "Latency", kind: "duration", color: "#0ea5e9", description: "Average time from question creation to answer submission." },
+  study_streak: { key: "study_streak", label: "Study Streak", shortLabel: "Streak", kind: "days", color: "#22c55e", description: "Average consecutive study days." },
+  quota_used_count: { key: "quota_used_count", label: "Quota Used", shortLabel: "Quota", kind: "count", color: "#64748b", description: "Monthly system quota consumed." },
 };
 
 const overviewMetrics = [
@@ -169,20 +169,25 @@ export function App() {
               className={section.key === activeSection ? "nav-item active" : "nav-item"}
               onClick={() => setActiveSection(section.key)}
             >
-              <span className="nav-icon" aria-hidden="true" />
+              <span className={`nav-icon ${section.key}`} aria-hidden="true" />
               {section.label}
             </button>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <span className="online-dot" />
-          <span>admin</span>
+          <div className="admin-chip">
+            <span className="admin-avatar">A</span>
+            <span>admin</span>
+          </div>
+          <button className="logout-button" onClick={handleLogout}>Logout</button>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <button className="menu-button" aria-label="Menu">☰</button>
+          <div className="topbar-title">
+            <h1>{active.label}</h1>
+          </div>
           <div className="toolbar">
             <DateRange startDate={startDate} endDate={endDate} setStartDate={setStartDate} setEndDate={setEndDate} />
             <button className="secondary-button icon-button" onClick={handleRefresh} disabled={loading}>
@@ -191,7 +196,6 @@ export function App() {
             <button className="secondary-button icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
               {theme === "light" ? "☾" : "☀"}
             </button>
-            <button className="ghost-button" onClick={handleLogout}>admin</button>
           </div>
         </header>
 
@@ -333,11 +337,14 @@ function MetricCard({ item }: { item: AdminMetricSeries }) {
     <article className="metric-card">
       <div className="metric-title">
         <span>{definition.label}</span>
-        <b title={definition.label}>i</b>
+        <button className="info-button" aria-label={`${definition.label} details`}>
+          i
+          <span role="tooltip">{definition.description}</span>
+        </button>
       </div>
       <strong>{formatMetric(definition, last?.value ?? 0)}</strong>
       <small className={delta >= 0 ? "positive" : "negative"}>
-        {formatDelta(definition, delta)} <em>{definition.compareLabel}</em>
+        {formatDelta(definition, delta)}
       </small>
       <Sparkline item={item} definition={definition} />
     </article>
@@ -418,14 +425,14 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             return <path key={item.metricKey} d={linePath(item)} className="line-path" stroke={definition.color} />;
           })}
-          {series.map((item) => {
+          {hovered !== null ? series.map((item) => {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             const active = item.points[activeIndex];
             if (!active) return null;
             const y = metricKind(item.metricKey) === "rate" ? yRate(active.value) : yCount(active.value);
             return <circle key={item.metricKey} cx={x(activeIndex)} cy={y} r={5} className="chart-dot" stroke={definition.color} />;
-          })}
-          <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" />
+          }) : null}
+          {hovered !== null ? <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" /> : null}
           {allDates[0] ? <text x={padding.left} y={height - 10} className="axis-label">{formatShortDate(allDates[0])}</text> : null}
           {allDates.at(-1) ? <text x={width - padding.right} y={height - 10} textAnchor="end" className="axis-label">{formatShortDate(allDates.at(-1)!)}</text> : null}
           <rect
@@ -438,7 +445,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             onMouseLeave={() => setHovered(null)}
           />
         </svg>
-        <ChartTooltip index={activeIndex} dates={allDates} series={series} left={(x(activeIndex) / width) * 100} />
+        {hovered !== null ? <ChartTooltip index={activeIndex} dates={allDates} series={series} left={clamp((x(activeIndex) / width) * 100, 14, 86)} /> : null}
       </div>
       <div className="chart-legend">
         {series.map((item) => {
@@ -587,7 +594,7 @@ function metricKind(metricKey: string): MetricKind {
 }
 
 function fallbackDefinition(metricKey: string): MetricDefinition {
-  return { key: metricKey, label: metricKey, shortLabel: metricKey, kind: "count", color: "#64748b", compareLabel: "vs previous day" };
+  return { key: metricKey, label: metricKey, shortLabel: metricKey, kind: "count", color: "#64748b", description: metricKey };
 }
 
 function formatMetric(definition: MetricDefinition, value: number): string {
@@ -598,9 +605,14 @@ function formatMetric(definition: MetricDefinition, value: number): string {
 }
 
 function formatDelta(definition: MetricDefinition, value: number): string {
+  if (value === 0) return "0";
   const sign = value > 0 ? "+" : "";
   if (definition.kind === "rate") return `${sign}${roundOne(value)}pp`;
   return `${sign}${formatMetric(definition, value)}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function roundOne(value: number): number {
