@@ -26,12 +26,112 @@ export function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   if (series.length === 0 || series.every((item) => item.points.length === 0)) {
     return <EmptyState title="No chart data" message="Try a wider date range." compact />;
   }
+  const definitions = series.map((item) => metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey));
+  const sameKind = definitions.every((definition) => definition.kind === definitions[0]?.kind);
+  if (series.length > 1 && sameKind) {
+    return <CombinedTrendChart series={series} definitions={definitions} />;
+  }
 
   return (
     <div className="trend-grid">
       {series.map((item) => (
         <MetricTrendChart key={item.metricKey} item={item} />
       ))}
+    </div>
+  );
+}
+
+function CombinedTrendChart({
+  series,
+  definitions,
+}: {
+  series: AdminMetricSeries[];
+  definitions: MetricDefinition[];
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const width = 760;
+  const height = 188;
+  const padding = { top: 14, right: 20, bottom: 26, left: 44 };
+  const dates = longestDates(series);
+  const values = series.flatMap((item) => item.points.map((point) => point.value));
+  const scale = chartScale(definitions[0], Math.min(0, ...values), Math.max(1, ...values));
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const activeIndex = hovered ?? Math.max(0, dates.length - 1);
+  const x = (index: number) => padding.left + (dates.length <= 1 ? 0 : (index / (dates.length - 1)) * plotWidth);
+  const y = (value: number) => padding.top + (1 - ((value - scale.min) / Math.max(1, scale.max - scale.min))) * plotHeight;
+  const activeDate = dates[activeIndex];
+
+  const moveHover = (clientX: number, bounds: DOMRect) => {
+    const ratio = clamp((clientX - bounds.left - padding.left * (bounds.width / width)) / (plotWidth * (bounds.width / width)), 0, 1);
+    setHovered(Math.round(ratio * Math.max(0, dates.length - 1)));
+  };
+
+  return (
+    <div className="combined-chart">
+      <div className="combined-legend">
+        {series.map((item, index) => (
+          <span key={item.metricKey}>
+            <i style={{ background: definitions[index].color }} />
+            {definitions[index].shortLabel}
+            <b>{formatMetric(definitions[index], item.points.at(-1)?.value ?? 0)}</b>
+          </span>
+        ))}
+      </div>
+      <div className="trend-canvas combined-canvas">
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Metric trend chart">
+          {scale.ticks.map((tick) => {
+            const yy = y(tick);
+            return (
+              <g key={tick}>
+                <line x1={padding.left} x2={width - padding.right} y1={yy} y2={yy} className="grid-line" />
+                <text x={padding.left - 10} y={yy + 4} textAnchor="end" className="axis-label">{formatAxisTick(definitions[0], tick)}</text>
+              </g>
+            );
+          })}
+          <line x1={padding.left} x2={width - padding.right} y1={height - padding.bottom} y2={height - padding.bottom} className="axis-line" />
+          {series.map((item, seriesIndex) => {
+            const path = item.points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`).join(" ");
+            const active = item.points[activeIndex];
+            return (
+              <g key={item.metricKey}>
+                <path d={path} className="line-path" stroke={definitions[seriesIndex].color} />
+                {active ? <circle cx={x(activeIndex)} cy={y(active.value)} r={3.2} className="chart-dot" stroke={definitions[seriesIndex].color} /> : null}
+              </g>
+            );
+          })}
+          {activeDate ? <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" /> : null}
+          {xTicks(dates).map((tick) => (
+            <text key={`${tick.index}-${tick.date}`} x={x(tick.index)} y={height - 10} textAnchor={tick.anchor} className="axis-label">
+              {formatShortDate(tick.date)}
+            </text>
+          ))}
+          <rect
+            x={padding.left}
+            y={padding.top}
+            width={plotWidth}
+            height={plotHeight}
+            fill="transparent"
+            onMouseMove={(event) => moveHover(event.clientX, event.currentTarget.getBoundingClientRect())}
+            onMouseLeave={() => setHovered(null)}
+          />
+        </svg>
+        {hovered !== null && activeDate ? (
+          <div className="chart-tooltip combined-tooltip" style={{ left: `${clamp((x(activeIndex) / width) * 100, 18, 82)}%` }}>
+            <strong>{formatShortDate(activeDate)}</strong>
+            {series.map((item, index) => {
+              const point = item.points[activeIndex];
+              return (
+                <span key={item.metricKey}>
+                  <i style={{ background: definitions[index].color }} />
+                  <small>{definitions[index].shortLabel}</small>
+                  <b>{formatMetric(definitions[index], point?.value ?? 0)}</b>
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -116,6 +216,10 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
       </div>
     </article>
   );
+}
+
+function longestDates(series: AdminMetricSeries[]): string[] {
+  return series.reduce<string[]>((longest, item) => item.points.length > longest.length ? item.points.map((point) => point.date) : longest, []);
 }
 
 function chartScale(definition: MetricDefinition, rawMin: number, rawMax: number): { min: number; max: number; ticks: number[] } {
