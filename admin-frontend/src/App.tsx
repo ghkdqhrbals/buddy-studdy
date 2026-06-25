@@ -389,6 +389,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
           <div className="chart-panel">
             <div className="panel-header">
               <h2>Trend</h2>
+              <span>Relative 0-100</span>
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
