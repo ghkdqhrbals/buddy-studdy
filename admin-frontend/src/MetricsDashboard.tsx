@@ -37,7 +37,7 @@ export function MetricsDashboard({ series, metricKeys, jobs, operationsHrefForPa
           <div className="chart-panel">
             <div className="panel-header">
               <h2>Trend</h2>
-              <span>Normalized per metric</span>
+              <span>Relative scale, hover for values</span>
             </div>
             <MultiLineChart series={chartSeries} />
           </div>

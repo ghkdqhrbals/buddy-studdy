@@ -552,6 +552,11 @@ h2 {
   stroke-dasharray: 3 4;
 }
 
+.axis-line {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
 .axis-label,
 .axis-title {
   fill: var(--muted);
@@ -640,10 +645,10 @@ h2 {
   position: static;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex-wrap: wrap;
   margin-top: 2px;
-  padding-left: 42px;
+  padding-left: 50px;
   color: var(--text);
   font-size: 11px;
 }
@@ -651,7 +656,21 @@ h2 {
 .chart-legend span {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.chart-legend span span {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-legend b {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .side-panel h2 {

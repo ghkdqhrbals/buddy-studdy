@@ -26,7 +26,7 @@ export function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 720;
   const height = 260;
-  const padding = { top: 12, right: 18, bottom: 34, left: 42 };
+  const padding = { top: 14, right: 22, bottom: 38, left: 50 };
   const allDates = series[0]?.points.map((point) => point.date) ?? [];
   const seriesMax = useMemo(
     () => new Map(series.map((item) => [item.metricKey, Math.max(1, ...item.points.map((point) => point.value))])),
@@ -66,10 +66,11 @@ export function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             return (
               <g key={tick}>
                 <line x1={padding.left} x2={width - padding.right} y1={yy} y2={yy} className="grid-line" />
-                <text x={padding.left - 10} y={yy + 4} textAnchor="end" className="axis-label">{value}%</text>
+                <text x={padding.left - 12} y={yy + 4} textAnchor="end" className="axis-label">{value}</text>
               </g>
             );
           })}
+          <line x1={padding.left} x2={padding.left} y1={padding.top} y2={height - padding.bottom} className="axis-line" />
           {series.map((item) => {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             return <path key={item.metricKey} d={linePath(item)} className="line-path" stroke={definition.color} />;
@@ -104,7 +105,8 @@ export function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
           return (
             <span key={item.metricKey}>
               <i style={{ background: definition.color }} />
-              {definition.shortLabel}
+              <span>{definition.shortLabel}</span>
+              <b>{formatMetric(definition, item.points.at(-1)?.value ?? 0)}</b>
             </span>
           );
         })}
