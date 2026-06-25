@@ -20,6 +20,7 @@ RUN microdnf install -y curl shadow-utils && \
     groupadd --system app && \
     useradd --system --gid app --home-dir /app --shell /sbin/nologin app
 COPY --from=build /workspace/tutor/build/native/nativeCompile/buddystuddy-backend /app/buddystuddy-backend
+COPY --from=build /workspace/tutor/src/main/resources/db/migration /app/db/migration
 RUN chown -R app:app /app
 
 USER app
