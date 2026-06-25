@@ -65,6 +65,26 @@ class ScheduledJobRunPersistenceAdapterTest {
     }
 
     @Test
+    fun `finds runs without job name filter`() {
+        val first = adapter.finish(
+            adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "rows=9",
+            null,
+            17,
+        )
+        val second = adapter.finish(
+            adapter.start("user-stats-refresh", JobTriggerType.MANUAL, null, "admin").id,
+            JobRunStatus.FAILED,
+            null,
+            "boom",
+            32,
+        )
+
+        assertThat(adapter.findRuns(null, 10)).containsExactly(second, first)
+    }
+
+    @Test
     fun `reads enabled flag from scheduled jobs`() {
         jdbc.update(
             """

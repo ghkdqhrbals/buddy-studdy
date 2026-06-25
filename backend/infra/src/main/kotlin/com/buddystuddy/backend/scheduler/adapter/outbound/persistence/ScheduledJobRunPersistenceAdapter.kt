@@ -72,17 +72,28 @@ class ScheduledJobRunPersistenceAdapter(
         return findById(runId)
     }
 
-    override fun findRuns(jobName: String?, limit: Int): List<ScheduledJobRun> =
-        jdbc.query(
-            """
-            select *
-            from scheduled_job_runs
-            where (:jobName is null or job_name = :jobName)
-            order by started_at desc, id desc
-            limit :limit
-            """.trimIndent(),
-            mapOf("jobName" to jobName, "limit" to limit),
-        ) { rs, _ -> rs.toRun() }
+    override fun findRuns(jobName: String?, limit: Int): List<ScheduledJobRun> {
+        val sql = buildString {
+            append(
+                """
+                select *
+                from scheduled_job_runs
+                """.trimIndent(),
+            )
+            if (jobName != null) {
+                append("\nwhere job_name = :jobName")
+            }
+            append("\norder by started_at desc, id desc\nlimit :limit")
+        }
+        val params = MapSqlParameterSource()
+            .addValue("limit", limit)
+            .apply {
+                if (jobName != null) {
+                    addValue("jobName", jobName)
+                }
+            }
+        return jdbc.query(sql, params) { rs, _ -> rs.toRun() }
+    }
 
     private fun findById(id: Long): ScheduledJobRun =
         jdbc.query(
