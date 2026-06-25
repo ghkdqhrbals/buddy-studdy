@@ -49,3 +49,13 @@ export function formatShortDate(value: string): string {
 export function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("en", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
+
+export function formatDurationMs(value?: number | null): string {
+  if (value == null) return "-";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${roundOne(seconds)}s`;
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${roundOne(minutes)}m`;
+  return `${roundOne(minutes / 60)}h`;
+}

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
 import { JOB_PAGE_SIZE, metricCatalog, overviewTrendMetrics, sectionPaths, sections, type MetricDefinition } from "./adminConfig";
-import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatMetric, formatShortDate, statusLabel } from "./format";
+import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatDurationMs, formatMetric, formatShortDate, statusLabel } from "./format";
 import { Pagination } from "./Pagination";
 import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
 
@@ -665,7 +665,7 @@ function Operations({
               <th className="status-col">Status</th>
               <th className="result-col">Result</th>
               <th className="duration-col">Duration</th>
-              <th className="retry-col">Retry</th>
+              <th className="retry-col">Retry of</th>
               <th className="action-col"></th>
             </tr>
           </thead>
@@ -679,7 +679,7 @@ function Operations({
                 <td>{formatDateTime(job.startedAt)}</td>
                 <td><span className={`status ${job.status.toLowerCase()}`}>{statusLabel(job.status)}</span></td>
                 <td className="result-cell" title={job.summary ?? job.status}>{job.summary ?? job.status}</td>
-                <td>{job.durationMs == null ? "-" : `${job.durationMs}ms`}</td>
+                <td>{formatDurationMs(job.durationMs)}</td>
                 <td>{job.retryOfRunId ? `#${job.retryOfRunId}` : "-"}</td>
                 <td className="action-cell">
                   {job.status === "FAILED" ? (
