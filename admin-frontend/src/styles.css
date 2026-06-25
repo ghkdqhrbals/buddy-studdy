@@ -942,7 +942,7 @@ table {
 
 th,
 td {
-  padding: 8px 8px;
+  padding: 7px 8px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
@@ -1012,28 +1012,31 @@ td small {
 .status {
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
+  gap: 5px;
+  min-height: 18px;
   color: var(--muted);
-  background: var(--surface-2);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
+}
+
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .status.success {
   color: #15803d;
-  background: #dcfce7;
 }
 
 .status.failed {
   color: #b91c1c;
-  background: #fee2e2;
 }
 
 .status.running {
   color: #1d4ed8;
-  background: #dbeafe;
 }
 
 .empty-state {
@@ -1287,7 +1290,7 @@ td small {
 
   th,
   td {
-    padding: 8px 6px;
+    padding: 7px 6px;
   }
 
   .result-col,
