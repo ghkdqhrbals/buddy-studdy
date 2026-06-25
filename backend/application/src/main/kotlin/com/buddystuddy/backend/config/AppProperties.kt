@@ -15,6 +15,7 @@ data class BuddyStuddyProperties(
     var translation: Translation = Translation(),
     var openapi: OpenApi = OpenApi(),
     var admin: Admin = Admin(),
+    var analytics: Analytics = Analytics(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -53,6 +54,13 @@ data class BuddyStuddyProperties(
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
     data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)
+    data class Analytics(var datasource: AnalyticsDataSource = AnalyticsDataSource())
+    data class AnalyticsDataSource(
+        var url: String = "",
+        var username: String = "",
+        var password: String = "",
+        var driverClassName: String = "",
+    )
 }
 
 @Configuration

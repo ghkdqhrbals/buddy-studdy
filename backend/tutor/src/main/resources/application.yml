@@ -99,6 +99,12 @@ buddystuddy:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:admin}
     token-hours: ${ADMIN_TOKEN_HOURS:12}
+  analytics:
+    datasource:
+      url: ${ADMIN_ANALYTICS_DATABASE_URL:}
+      username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}
+      password: ${ADMIN_ANALYTICS_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
+      driver-class-name: ${ADMIN_ANALYTICS_DATABASE_DRIVER:}
 
 redis-stream-coordinator:
   coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}

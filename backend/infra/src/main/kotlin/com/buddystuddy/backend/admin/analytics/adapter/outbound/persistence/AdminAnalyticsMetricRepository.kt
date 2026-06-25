@@ -1,56 +1,90 @@
 package com.buddystuddy.backend.admin.analytics.adapter.outbound.persistence
 
-import com.buddystuddy.admin.domain.entity.AdminDailyMetricEntity
 import com.buddystuddy.backend.admin.analytics.application.model.AdminDailyMetricPoint
 import com.buddystuddy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
-import jakarta.persistence.EntityManager
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.dao.DuplicateKeyException
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
-import org.springframework.transaction.annotation.Transactional
 import java.sql.Date
+import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
 import java.time.LocalDate
 
-interface AdminDailyMetricJpaRepository : JpaRepository<AdminDailyMetricEntity, Long> {
-    fun findByMetricDateBetweenOrderByMetricKeyAscDimensionAscMetricDateAsc(
-        startDate: LocalDate,
-        endDate: LocalDate,
-    ): List<AdminDailyMetricEntity>
-
-    @Query(
-        """
-        select m from AdminDailyMetricEntity m
-        where m.metricDate between :startDate and :endDate
-          and m.metricKey in :metricKeys
-        order by m.metricKey asc, m.dimension asc, m.metricDate asc
-        """
-    )
-    fun findSeries(
-        @Param("startDate") startDate: LocalDate,
-        @Param("endDate") endDate: LocalDate,
-        @Param("metricKeys") metricKeys: Set<String>,
-    ): List<AdminDailyMetricEntity>
-}
-
 @Repository
 class AdminAnalyticsMetricPersistenceAdapter(
-    private val jpa: AdminDailyMetricJpaRepository,
-    private val entityManager: EntityManager,
+    @param:Qualifier("adminAnalyticsJdbcTemplate")
+    private val jdbc: NamedParameterJdbcTemplate,
 ) : AdminAnalyticsMetricPort {
-    @Transactional
+    init {
+        ensureSchema()
+    }
+
+    fun ensureSchema() {
+        jdbc.jdbcTemplate.execute(
+            """
+            create table if not exists admin_daily_metrics (
+                id bigserial primary key,
+                metric_date date not null,
+                metric_key varchar(80) not null,
+                dimension varchar(160) not null default '',
+                "value" double precision not null,
+                sample_count bigint not null default 0,
+                created_at timestamp not null,
+                updated_at timestamp not null,
+                constraint uq_admin_daily_metrics_day_key_dimension unique (metric_date, metric_key, dimension)
+            )
+            """.trimIndent()
+        )
+        jdbc.jdbcTemplate.execute("create index if not exists idx_admin_daily_metrics_key_date on admin_daily_metrics (metric_key, metric_date)")
+        jdbc.jdbcTemplate.execute("create index if not exists idx_admin_daily_metrics_date on admin_daily_metrics (metric_date)")
+    }
+
     override fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
-        val now = Instant.now()
+        val now = Timestamp.from(Instant.now())
         points.forEach { point ->
-            entityManager.createNativeQuery(
+            val params = MapSqlParameterSource()
+                .addValue("metricDate", Date.valueOf(point.date))
+                .addValue("metricKey", point.metricKey)
+                .addValue("dimension", point.dimension.orEmpty())
+                .addValue("value", point.value)
+                .addValue("sampleCount", point.sampleCount)
+                .addValue("now", now)
+            val updated = updateMetric(params)
+            if (updated == 0) {
+                try {
+                    insertMetric(params)
+                } catch (_: DuplicateKeyException) {
+                    updateMetric(params)
+                }
+            }
+        }
+    }
+
+    private fun updateMetric(params: MapSqlParameterSource): Int =
+        jdbc.update(
+            """
+            update admin_daily_metrics
+            set "value" = :value,
+                sample_count = :sampleCount,
+                updated_at = :now
+            where metric_date = :metricDate
+              and metric_key = :metricKey
+              and dimension = :dimension
+            """.trimIndent(),
+            params,
+        )
+
+    private fun insertMetric(params: MapSqlParameterSource) {
+        jdbc.update(
                 """
                 insert into admin_daily_metrics (
                     metric_date,
                     metric_key,
                     dimension,
-                    value,
+                    "value",
                     sample_count,
                     created_at,
                     updated_at
@@ -63,36 +97,39 @@ class AdminAnalyticsMetricPersistenceAdapter(
                     :now,
                     :now
                 )
-                on conflict (metric_date, metric_key, dimension)
-                do update set
-                    value = excluded.value,
-                    sample_count = excluded.sample_count,
-                    updated_at = excluded.updated_at
-                """.trimIndent()
-            )
-                .setParameter("metricDate", Date.valueOf(point.date))
-                .setParameter("metricKey", point.metricKey)
-                .setParameter("dimension", point.dimension.orEmpty())
-                .setParameter("value", point.value)
-                .setParameter("sampleCount", point.sampleCount)
-                .setParameter("now", Timestamp.from(now))
-                .executeUpdate()
-        }
+                """.trimIndent(),
+            params,
+        )
     }
 
-    @Transactional(readOnly = true)
-    override fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> =
-        (if (metricKeys.isEmpty()) {
-            jpa.findByMetricDateBetweenOrderByMetricKeyAscDimensionAscMetricDateAsc(startDate, endDate)
+    override fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> {
+        val params = MapSqlParameterSource()
+            .addValue("startDate", Date.valueOf(startDate))
+            .addValue("endDate", Date.valueOf(endDate))
+        val metricFilter = if (metricKeys.isEmpty()) {
+            ""
         } else {
-            jpa.findSeries(startDate, endDate, metricKeys)
-        }).map {
-            AdminDailyMetricPoint(
-                date = it.metricDate,
-                metricKey = it.metricKey,
-                dimension = it.dimension.ifBlank { null },
-                value = it.value,
-                sampleCount = it.sampleCount,
-            )
+            params.addValue("metricKeys", metricKeys)
+            "and metric_key in (:metricKeys)"
         }
+        return jdbc.query(
+            """
+            select metric_date, metric_key, dimension, "value", sample_count
+            from admin_daily_metrics
+            where metric_date between :startDate and :endDate
+              $metricFilter
+            order by metric_key asc, dimension asc, metric_date asc
+            """.trimIndent(),
+            params,
+        ) { resultSet, _ -> resultSet.toPoint() }
+    }
+
+    private fun ResultSet.toPoint(): AdminDailyMetricPoint =
+        AdminDailyMetricPoint(
+            date = getDate("metric_date").toLocalDate(),
+            metricKey = getString("metric_key"),
+            dimension = getString("dimension").ifBlank { null },
+            value = getDouble("value"),
+            sampleCount = getLong("sample_count"),
+        )
 }
