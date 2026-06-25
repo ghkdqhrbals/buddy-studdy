@@ -34,6 +34,11 @@ class AdminPageRouteTest {
 
         assertThat(context.getBean(SpringTemplateEngine::class.java).process("admin/index", Context()))
             .contains("BuddyStuddy Admin")
+            .contains("Admin analytics")
+            .contains("Users")
+            .contains("Learning")
+            .contains("Notifications")
+            .contains("Quota")
             .contains("Average answer latency")
             .contains("Average answer rate")
             .contains("Weekly active learners")
