@@ -100,6 +100,9 @@ buddystuddy:
     password: ${ADMIN_PASSWORD:admin}
     token-hours: ${ADMIN_TOKEN_HOURS:12}
   analytics:
+    enabled: ${ADMIN_ANALYTICS_ENABLED:true}
+    recent-days: ${ADMIN_ANALYTICS_RECENT_DAYS:2}
+    correction-days: ${ADMIN_ANALYTICS_CORRECTION_DAYS:30}
     datasource:
       url: ${ADMIN_ANALYTICS_DATABASE_URL:}
       username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}

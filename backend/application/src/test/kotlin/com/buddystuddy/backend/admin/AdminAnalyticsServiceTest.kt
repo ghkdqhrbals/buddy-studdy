@@ -67,6 +67,36 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
+    fun `scheduled recent refresh recomputes configured recent date range`() {
+        properties.analytics.recentDays = 2
+        val yesterday = LocalDate.parse("2026-06-24")
+        val today = LocalDate.parse("2026-06-25")
+        source.rows[yesterday] = listOf(AdminDailyMetricPoint(yesterday, "daily_active_users", null, 3.0))
+        source.rows[today] = listOf(AdminDailyMetricPoint(today, "daily_active_users", null, 5.0))
+
+        val rows = service.refreshRecent(today)
+
+        assertThat(rows).isEqualTo(2)
+        assertThat(metrics.upserted.map { it.date }).containsExactly(yesterday, today)
+    }
+
+    @Test
+    fun `scheduled correction refresh recomputes configured correction date range`() {
+        properties.analytics.correctionDays = 3
+        val first = LocalDate.parse("2026-06-23")
+        val second = LocalDate.parse("2026-06-24")
+        val third = LocalDate.parse("2026-06-25")
+        source.rows[first] = listOf(AdminDailyMetricPoint(first, "question_created_count", null, 1.0))
+        source.rows[second] = listOf(AdminDailyMetricPoint(second, "question_created_count", null, 2.0))
+        source.rows[third] = listOf(AdminDailyMetricPoint(third, "question_created_count", null, 3.0))
+
+        val rows = service.refreshCorrection(third)
+
+        assertThat(rows).isEqualTo(3)
+        assertThat(metrics.upserted.map { it.date }).containsExactly(first, second, third)
+    }
+
+    @Test
     fun `unknown admin metrics are not exposed even when persisted`() {
         val day = LocalDate.parse("2026-06-01")
         metrics.upsertDailyMetrics(

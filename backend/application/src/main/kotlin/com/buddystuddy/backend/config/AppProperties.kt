@@ -54,7 +54,12 @@ data class BuddyStuddyProperties(
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
     data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)
-    data class Analytics(var datasource: AnalyticsDataSource = AnalyticsDataSource())
+    data class Analytics(
+        var enabled: Boolean = true,
+        var recentDays: Long = 2,
+        var correctionDays: Long = 30,
+        var datasource: AnalyticsDataSource = AnalyticsDataSource(),
+    )
     data class AnalyticsDataSource(
         var url: String = "",
         var username: String = "",

@@ -4,6 +4,7 @@ import com.buddystuddy.backend.admin.analytics.application.model.AdminDailyMetri
 import com.buddystuddy.backend.admin.analytics.application.model.AdminLoginResponse
 import com.buddystuddy.backend.admin.analytics.application.model.AdminMetricSeries
 import com.buddystuddy.backend.admin.analytics.application.model.AdminMetricsResponse
+import com.buddystuddy.backend.admin.analytics.application.port.inbound.AdminAnalyticsAggregationUseCase
 import com.buddystuddy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
 import com.buddystuddy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
 import com.buddystuddy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
@@ -26,7 +27,7 @@ class AdminAnalyticsService(
     private val properties: BuddyStuddyProperties,
     private val metrics: AdminAnalyticsMetricPort,
     private val source: AdminAnalyticsSourcePort,
-) : AdminAnalyticsUseCase {
+) : AdminAnalyticsUseCase, AdminAnalyticsAggregationUseCase {
     private val exposedMetricKeys = setOf(
         "daily_active_users",
         "weekly_active_learners",
@@ -67,10 +68,21 @@ class AdminAnalyticsService(
     override fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse {
         validateAdminToken(adminToken)
         val range = normalizedRange(startDate, endDate)
-        val rows = range.flatMap { source.collectDailyMetrics(it) }
-        metrics.upsertDailyMetrics(rows)
+        refreshDates(range)
         return response(range.first(), range.last(), metrics.findDailyMetrics(range.first(), range.last(), emptySet()))
     }
+
+    @Transactional
+    override fun refreshRecent(referenceDate: LocalDate): Int =
+        refreshRange(referenceDate.minusDays((properties.analytics.recentDays - 1).coerceAtLeast(0)), referenceDate)
+
+    @Transactional
+    override fun refreshCorrection(referenceDate: LocalDate): Int =
+        refreshRange(referenceDate.minusDays((properties.analytics.correctionDays - 1).coerceAtLeast(0)), referenceDate)
+
+    @Transactional
+    override fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int =
+        refreshDates(normalizedRange(startDate, endDate))
 
     @Transactional(readOnly = true)
     override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse {
@@ -97,6 +109,15 @@ class AdminAnalyticsService(
             .takeWhile { !it.isAfter(end) }
             .take(370)
             .toList()
+    }
+
+    private fun refreshDates(range: List<LocalDate>): Int {
+        if (range.isEmpty()) {
+            return 0
+        }
+        val rows = range.flatMap { source.collectDailyMetrics(it) }
+        metrics.upsertDailyMetrics(rows)
+        return rows.size
     }
 
     private fun response(startDate: LocalDate, endDate: LocalDate, rows: List<AdminDailyMetricPoint>): AdminMetricsResponse {

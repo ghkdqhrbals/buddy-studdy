@@ -9,3 +9,9 @@ interface AdminAnalyticsUseCase {
     fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
     fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
 }
+
+interface AdminAnalyticsAggregationUseCase {
+    fun refreshRecent(referenceDate: LocalDate): Int
+    fun refreshCorrection(referenceDate: LocalDate): Int
+    fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int
+}
