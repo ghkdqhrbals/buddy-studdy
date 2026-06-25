@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BuddyStuddy Admin</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
+    body { margin: 0; background: #050505; color: #f5f5f7; }
+    main { max-width: 1180px; margin: 0 auto; padding: 44px 24px 80px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+    h1 { font-size: 42px; margin: 0; letter-spacing: 0; }
+    .panel { background: #18181a; border: 1px solid #2b2b2f; border-radius: 22px; padding: 20px; }
+    .login { max-width: 420px; display: grid; gap: 12px; margin-top: 32px; }
+    input, button { border: 0; border-radius: 14px; font: inherit; }
+    input { background: #242428; color: #fff; padding: 15px 16px; outline: none; }
+    button { background: #f5f5f7; color: #080808; padding: 14px 18px; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #29292d; color: #f5f5f7; border: 1px solid #3a3a40; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 20px; }
+    .toolbar input { width: 150px; padding: 12px 14px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { background: #18181a; border: 1px solid #2b2b2f; border-radius: 18px; padding: 16px; min-height: 94px; }
+    .label { color: #a1a1aa; font-size: 13px; }
+    .value { font-size: 30px; font-weight: 800; margin-top: 12px; }
+    .charts { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .chart-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .chart-title strong { font-size: 18px; }
+    svg { width: 100%; height: 190px; display: block; background: #101012; border-radius: 14px; }
+    .axis { stroke: #2d2d33; stroke-width: 1; }
+    .line { fill: none; stroke: #62d26f; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .dot { fill: #62d26f; }
+    .muted { color: #8e8e98; }
+    .error { color: #ff6b6b; min-height: 22px; }
+    .hidden { display: none; }
+    @media (max-width: 820px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } h1 { font-size: 34px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>BuddyStuddy Admin</h1>
+      <div class="muted">운영 지표와 학습 사용량을 간단히 확인합니다.</div>
+    </div>
+    <button id="logoutButton" class="secondary hidden">Logout</button>
+  </header>
+
+  <section id="loginPanel" class="panel login">
+    <input id="username" autocomplete="username" placeholder="Admin username" />
+    <input id="password" autocomplete="current-password" type="password" placeholder="Password" />
+    <button id="loginButton">Login</button>
+    <div id="loginError" class="error"></div>
+  </section>
+
+  <section id="dashboard" class="hidden">
+    <div class="toolbar">
+      <input id="startDate" type="date" />
+      <input id="endDate" type="date" />
+      <button id="refreshButton">Refresh Aggregates</button>
+      <button id="reloadButton" class="secondary">Reload</button>
+      <span id="status" class="muted"></span>
+    </div>
+    <div id="cards" class="grid"></div>
+    <div id="charts" class="charts"></div>
+  </section>
+</main>
+
+<script>
+const metricLabels = {
+  daily_active_users: "Daily active users",
+  weekly_active_learners: "Weekly active learners",
+  question_created_count: "Questions created",
+  answer_submitted_count: "Answers submitted",
+  answer_rate: "Answer rate",
+  push_open_rate: "Push open rate",
+  question_to_answer_latency: "Answer latency",
+  study_streak: "Study streak",
+  topic_score_trend: "Topic score trend",
+  quota_used_count: "Quota used"
+};
+const primaryMetrics = [
+  "daily_active_users",
+  "weekly_active_learners",
+  "question_created_count",
+  "answer_submitted_count",
+  "answer_rate",
+  "push_open_rate",
+  "question_to_answer_latency",
+  "quota_used_count"
+];
+let token = localStorage.getItem("buddystuddy.adminToken") || "";
+
+function isoDate(date) { return date.toISOString().slice(0, 10); }
+function defaultDates() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 29);
+  startDate.value = isoDate(start);
+  endDate.value = isoDate(end);
+}
+function authHeaders() { return { "Authorization": `Bearer ${token}` }; }
+function formatValue(metric, value) {
+  if (metric.endsWith("_rate")) return `${Math.round(value * 100)}%`;
+  if (metric === "question_to_answer_latency") return `${Math.round(value / 60)}m`;
+  return new Intl.NumberFormat().format(Math.round(value * 10) / 10);
+}
+async function login() {
+  loginError.textContent = "";
+  const res = await fetch("/api/v1/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: username.value, password: password.value })
+  });
+  if (!res.ok) {
+    loginError.textContent = "Login failed.";
+    return;
+  }
+  const body = await res.json();
+  token = body.adminToken;
+  localStorage.setItem("buddystuddy.adminToken", token);
+  showDashboard();
+  await reload();
+}
+function logout() {
+  token = "";
+  localStorage.removeItem("buddystuddy.adminToken");
+  dashboard.classList.add("hidden");
+  logoutButton.classList.add("hidden");
+  loginPanel.classList.remove("hidden");
+}
+function showDashboard() {
+  loginPanel.classList.add("hidden");
+  dashboard.classList.remove("hidden");
+  logoutButton.classList.remove("hidden");
+}
+async function refreshAggregates() {
+  status.textContent = "Refreshing...";
+  const url = `/api/v1/admin/analytics/refresh?startDate=${startDate.value}&endDate=${endDate.value}`;
+  const res = await fetch(url, { method: "POST", headers: authHeaders() });
+  if (!res.ok) throw new Error("refresh failed");
+  status.textContent = "Aggregates refreshed";
+  await render(await res.json());
+}
+async function reload() {
+  status.textContent = "Loading...";
+  const query = primaryMetrics.map(key => `metricKey=${encodeURIComponent(key)}`).join("&");
+  const url = `/api/v1/admin/analytics/metrics?startDate=${startDate.value}&endDate=${endDate.value}&${query}`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error("load failed");
+  status.textContent = "";
+  await render(await res.json());
+}
+async function render(data) {
+  const byKey = new Map(data.series.filter(s => !s.dimension).map(s => [s.metricKey, s]));
+  cards.innerHTML = primaryMetrics.map(key => {
+    const point = byKey.get(key)?.points?.at(-1);
+    return `<div class="card"><div class="label">${metricLabels[key] || key}</div><div class="value">${formatValue(key, point?.value || 0)}</div></div>`;
+  }).join("");
+  charts.innerHTML = data.series.map(series => chart(series)).join("");
+}
+function chart(series) {
+  const points = series.points || [];
+  const values = points.map(p => p.value);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const span = Math.max(max - min, 1);
+  const width = 1000;
+  const height = 190;
+  const pad = 22;
+  const coords = points.map((p, i) => {
+    const x = pad + (points.length <= 1 ? 0 : i * (width - pad * 2) / (points.length - 1));
+    const y = height - pad - ((p.value - min) / span) * (height - pad * 2);
+    return `${x},${y}`;
+  }).join(" ");
+  const latest = points.at(-1);
+  const title = `${metricLabels[series.metricKey] || series.metricKey}${series.dimension ? ` · ${series.dimension}` : ""}`;
+  return `<section class="panel">
+    <div class="chart-title"><strong>${title}</strong><span class="muted">${latest ? formatValue(series.metricKey, latest.value) : "0"}</span></div>
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      <line class="axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"></line>
+      <polyline class="line" points="${coords}"></polyline>
+    </svg>
+  </section>`;
+}
+loginButton.onclick = login;
+logoutButton.onclick = logout;
+refreshButton.onclick = () => refreshAggregates().catch(error => status.textContent = error.message);
+reloadButton.onclick = () => reload().catch(error => status.textContent = error.message);
+defaultDates();
+if (token) { showDashboard(); reload().catch(() => logout()); }
+</script>
+</body>
+</html>
