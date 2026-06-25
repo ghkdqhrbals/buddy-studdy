@@ -9,6 +9,7 @@ const today = new Date();
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
+const LOGIN_PATH = "/login";
 const emptyJobPage: ScheduledJobRunsResponse = {
   runs: [],
   totalCount: 0,
@@ -83,6 +84,11 @@ export function App() {
   }, [isAuthenticated, activeSection, startDate, endDate, jobOffset]);
 
   useEffect(() => {
+    if (isAuthenticated || window.location.pathname === LOGIN_PATH) return;
+    window.history.replaceState(null, "", LOGIN_PATH);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     const handlePopState = () => {
       const next = routeState();
       setActiveSection(next.section);
@@ -97,6 +103,7 @@ export function App() {
   const handleUnauthorized = () => {
     setToken(null);
     setError("Session expired");
+    window.history.replaceState(null, "", LOGIN_PATH);
   };
 
   async function loadSection() {
@@ -165,6 +172,7 @@ export function App() {
     setJobPage(emptyJobPage);
     setJobOffset(0);
     setError(null);
+    window.history.pushState(null, "", LOGIN_PATH);
   }
 
   function navigateToSection(section: SectionKey) {
@@ -189,7 +197,19 @@ export function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen onLoggedIn={(newToken) => setToken(newToken)} theme={theme} setTheme={setTheme} error={error} />;
+    return (
+      <LoginScreen
+        onLoggedIn={(newToken) => {
+          setToken(newToken);
+          window.history.replaceState(null, "", sectionHref("overview", 0, { startDate, endDate }));
+          setActiveSection("overview");
+          setJobOffset(0);
+        }}
+        theme={theme}
+        setTheme={setTheme}
+        error={error}
+      />
+    );
   }
 
   return (
