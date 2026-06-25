@@ -40,6 +40,13 @@ export type ScheduledJobRun = {
   createdBy: string;
 };
 
+export type ScheduledJobRunsResponse = {
+  runs: ScheduledJobRun[];
+  totalCount: number;
+  limit: number;
+  offset: number;
+};
+
 export type AdminApiError = {
   error?: {
     code?: string;

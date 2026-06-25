@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.scheduler.application.model
 
+import com.buddystuddy.backend.common.application.model.PageResponse
 import java.time.Instant
 
 enum class JobTriggerType {
@@ -28,3 +29,10 @@ data class ScheduledJobRun(
     val retryOfRunId: Long? = null,
     val createdBy: String = "system",
 )
+
+data class ScheduledJobRunPageResponse(
+    val runs: List<ScheduledJobRun>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse

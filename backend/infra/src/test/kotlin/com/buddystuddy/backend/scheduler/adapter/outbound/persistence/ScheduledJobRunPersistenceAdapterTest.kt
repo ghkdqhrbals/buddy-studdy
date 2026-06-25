@@ -61,7 +61,9 @@ class ScheduledJobRunPersistenceAdapterTest {
 
         assertThat(finished.status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(finished.summary).isEqualTo("rows=9")
-        assertThat(adapter.findRuns("admin-analytics-recent", 10)).containsExactly(finished)
+        val page = adapter.findRuns("admin-analytics-recent", 10, 0)
+        assertThat(page.runs).containsExactly(finished)
+        assertThat(page.totalCount).isEqualTo(1)
     }
 
     @Test
@@ -81,7 +83,34 @@ class ScheduledJobRunPersistenceAdapterTest {
             32,
         )
 
-        assertThat(adapter.findRuns(null, 10)).containsExactly(second, first)
+        val page = adapter.findRuns(null, 10, 0)
+        assertThat(page.runs).containsExactly(second, first)
+        assertThat(page.totalCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `finds runs with offset pagination`() {
+        val first = adapter.finish(
+            adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "rows=9",
+            null,
+            17,
+        )
+        val second = adapter.finish(
+            adapter.start("user-stats-refresh", JobTriggerType.MANUAL, null, "admin").id,
+            JobRunStatus.FAILED,
+            null,
+            "boom",
+            32,
+        )
+
+        val page = adapter.findRuns(null, 1, 1)
+
+        assertThat(page.runs).containsExactly(first)
+        assertThat(page.totalCount).isEqualTo(2)
+        assertThat(page.limit).isEqualTo(1)
+        assertThat(page.offset).isEqualTo(1)
     }
 
     @Test

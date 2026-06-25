@@ -3,6 +3,7 @@ package com.buddystuddy.backend.scheduler.adapter.outbound.persistence
 import com.buddystuddy.backend.scheduler.application.model.JobRunStatus
 import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
 import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystuddy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystuddy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.springframework.beans.factory.annotation.Qualifier
@@ -72,7 +73,21 @@ class ScheduledJobRunPersistenceAdapter(
         return findById(runId)
     }
 
-    override fun findRuns(jobName: String?, limit: Int): List<ScheduledJobRun> {
+    override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+        val whereSql = if (jobName != null) "\nwhere job_name = :jobName" else ""
+        val params = MapSqlParameterSource()
+            .addValue("limit", limit)
+            .addValue("offset", offset)
+            .apply {
+                if (jobName != null) {
+                    addValue("jobName", jobName)
+                }
+            }
+        val total = jdbc.queryForObject(
+            "select count(*) from scheduled_job_runs$whereSql",
+            params,
+            Long::class.java,
+        ) ?: 0L
         val sql = buildString {
             append(
                 """
@@ -80,19 +95,11 @@ class ScheduledJobRunPersistenceAdapter(
                 from scheduled_job_runs
                 """.trimIndent(),
             )
-            if (jobName != null) {
-                append("\nwhere job_name = :jobName")
-            }
-            append("\norder by started_at desc, id desc\nlimit :limit")
+            append(whereSql)
+            append("\norder by started_at desc, id desc\nlimit :limit offset :offset")
         }
-        val params = MapSqlParameterSource()
-            .addValue("limit", limit)
-            .apply {
-                if (jobName != null) {
-                    addValue("jobName", jobName)
-                }
-            }
-        return jdbc.query(sql, params) { rs, _ -> rs.toRun() }
+        val rows = jdbc.query(sql, params) { rs, _ -> rs.toRun() }
+        return ScheduledJobRunPageResponse(rows, total, limit, offset)
     }
 
     private fun findById(id: Long): ScheduledJobRun =

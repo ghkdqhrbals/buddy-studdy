@@ -739,6 +739,21 @@ h2 {
   overflow: auto;
 }
 
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pagination-bar > div {
+  display: flex;
+  gap: 8px;
+}
+
 table {
   min-width: 980px;
   width: 100%;

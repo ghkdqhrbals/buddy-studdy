@@ -3,6 +3,7 @@ package com.buddystuddy.backend.scheduler
 import com.buddystuddy.backend.scheduler.application.model.JobRunStatus
 import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
 import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystuddy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystuddy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
@@ -107,7 +108,9 @@ class ManagedJobExecutionServiceTest {
             return updated
         }
 
-        override fun findRuns(jobName: String?, limit: Int): List<ScheduledJobRun> =
-            rows.filter { jobName == null || it.jobName == jobName }.take(limit)
+        override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+            val filtered = rows.filter { jobName == null || it.jobName == jobName }
+            return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
+        }
     }
 }

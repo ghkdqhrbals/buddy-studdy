@@ -1,4 +1,4 @@
-import type { AdminApiError, AdminLoginResponse, AdminMetricsResponse, ScheduledJobRun } from "./types";
+import type { AdminApiError, AdminLoginResponse, AdminMetricsResponse, ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
 const TOKEN_KEY = "buddystuddy.adminToken";
@@ -80,8 +80,22 @@ export function refreshMetrics(
   return request(`/api/v1/admin/analytics/refresh?${params}`, { method: "POST" }, onUnauthorized);
 }
 
-export function fetchJobRuns(onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobRun[]> {
-  return request("/api/v1/admin/jobs/runs?limit=50", { method: "GET" }, onUnauthorized);
+export async function fetchJobRuns(onUnauthorized: UnauthorizedHandler, limit = 20, offset = 0): Promise<ScheduledJobRunsResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const response = await request<ScheduledJobRunsResponse | ScheduledJobRun[]>(
+    `/api/v1/admin/jobs/runs?${params}`,
+    { method: "GET" },
+    onUnauthorized,
+  );
+  if (Array.isArray(response)) {
+    return {
+      runs: response,
+      totalCount: response.length,
+      limit,
+      offset,
+    };
+  }
+  return response;
 }
 
 export function retryJob(jobName: string, runId: number | null, onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobRun> {

@@ -2,6 +2,7 @@ package com.buddystuddy.backend.scheduler.application.port.inbound
 
 import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
 import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 
 interface ManagedJob {
     val name: String
@@ -16,5 +17,5 @@ interface ManagedJobExecutionUseCase {
         createdBy: String = "system",
     ): ScheduledJobRun
 
-    fun findRuns(jobName: String? = null, limit: Int = 50): List<ScheduledJobRun>
+    fun findRuns(jobName: String? = null, limit: Int = 50, offset: Int = 0): ScheduledJobRunPageResponse
 }

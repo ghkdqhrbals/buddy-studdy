@@ -3,6 +3,7 @@ package com.buddystuddy.backend.scheduler.application.service
 import com.buddystuddy.backend.scheduler.application.model.JobRunStatus
 import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
 import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystuddy.backend.scheduler.application.port.outbound.JobLockPort
@@ -41,8 +42,8 @@ class ManagedJobExecutionService(
         }
     }
 
-    override fun findRuns(jobName: String?, limit: Int): List<ScheduledJobRun> =
-        runs.findRuns(jobName, limit.coerceIn(1, 200))
+    override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+        runs.findRuns(jobName, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
 
     private fun elapsedMs(started: Long): Long =
         ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0)

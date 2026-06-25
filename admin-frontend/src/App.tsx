@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
-import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun } from "./types";
+import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
 
 type SectionKey = "overview" | "users" | "learning" | "notifications" | "quota" | "operations";
 type Theme = "light" | "dark";
@@ -51,6 +51,13 @@ const today = new Date();
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
+const JOB_PAGE_SIZE = 20;
+const emptyJobPage: ScheduledJobRunsResponse = {
+  runs: [],
+  totalCount: 0,
+  limit: JOB_PAGE_SIZE,
+  offset: 0,
+};
 
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
@@ -59,7 +66,8 @@ export function App() {
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
   const [series, setSeries] = useState<AdminMetricSeries[]>([]);
-  const [jobs, setJobs] = useState<ScheduledJobRun[]>([]);
+  const [jobPage, setJobPage] = useState<ScheduledJobRunsResponse>(emptyJobPage);
+  const [jobOffset, setJobOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,7 +82,11 @@ export function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
     void loadSection();
-  }, [isAuthenticated, activeSection, startDate, endDate]);
+  }, [isAuthenticated, activeSection, startDate, endDate, jobOffset]);
+
+  useEffect(() => {
+    setJobOffset(0);
+  }, [activeSection]);
 
   const handleUnauthorized = () => {
     setToken(null);
@@ -86,15 +98,15 @@ export function App() {
     setError(null);
     try {
       if (activeSection === "operations") {
-        setJobs(await fetchJobRuns(handleUnauthorized));
+        setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
         setSeries([]);
       } else {
         const [metrics, runs] = await Promise.all([
           fetchMetrics(startDate, endDate, active.metrics, handleUnauthorized),
-          fetchJobRuns(handleUnauthorized).catch(() => [] as ScheduledJobRun[]),
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, 0).catch(() => emptyJobPage),
         ]);
         setSeries(metrics.series);
-        setJobs(runs);
+        setJobPage(runs);
       }
     } catch (err) {
       if (getStoredToken()) {
@@ -110,14 +122,14 @@ export function App() {
     setError(null);
     try {
       if (activeSection === "operations") {
-        setJobs(await fetchJobRuns(handleUnauthorized));
+        setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
       } else {
         const [metrics, runs] = await Promise.all([
           refreshMetrics(startDate, endDate, handleUnauthorized),
-          fetchJobRuns(handleUnauthorized).catch(() => jobs),
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, 0).catch(() => jobPage),
         ]);
         setSeries(metrics.series.filter((item) => active.metrics.includes(item.metricKey)));
-        setJobs(runs);
+        setJobPage(runs);
       }
     } catch (err) {
       if (getStoredToken()) {
@@ -132,7 +144,7 @@ export function App() {
     setError(null);
     try {
       await retryJob(job.jobName, job.id, handleUnauthorized);
-      setJobs(await fetchJobRuns(handleUnauthorized));
+      setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
     } catch (err) {
       if (getStoredToken()) {
         setError(err instanceof Error ? err.message : "Retry failed");
@@ -144,7 +156,8 @@ export function App() {
     clearToken();
     setToken(null);
     setSeries([]);
-    setJobs([]);
+    setJobPage(emptyJobPage);
+    setJobOffset(0);
     setError(null);
   }
 
@@ -203,9 +216,9 @@ export function App() {
         {loading ? <div className="loading-bar" /> : null}
 
         {activeSection === "operations" ? (
-          <Operations jobs={jobs} onRetry={handleRetry} />
+          <Operations page={jobPage} onRetry={handleRetry} onPageChange={setJobOffset} />
         ) : (
-          <MetricsDashboard series={series} metricKeys={active.metrics} jobs={jobs} />
+          <MetricsDashboard series={series} metricKeys={active.metrics} jobs={jobPage.runs} />
         )}
       </main>
     </div>
@@ -315,7 +328,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
-          <Operations jobs={jobs.slice(0, 8)} onRetry={() => {}} compact />
+          <Operations page={{ runs: jobs.slice(0, 8), totalCount: jobs.length, limit: 8, offset: 0 }} onRetry={() => {}} compact />
         </div>
 
         <aside className="insight-column">
@@ -536,15 +549,32 @@ function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
   );
 }
 
-function Operations({ jobs, onRetry, compact = false }: { jobs: ScheduledJobRun[]; onRetry: (job: ScheduledJobRun) => void; compact?: boolean }) {
+function Operations({
+  page,
+  onRetry,
+  onPageChange,
+  compact = false,
+}: {
+  page: ScheduledJobRunsResponse;
+  onRetry: (job: ScheduledJobRun) => void;
+  onPageChange?: (offset: number) => void;
+  compact?: boolean;
+}) {
+  const jobs = page.runs;
   if (jobs.length === 0) {
     return <EmptyState title="No job runs" compact={compact} />;
   }
+  const start = page.offset + 1;
+  const end = Math.min(page.offset + jobs.length, page.totalCount);
+  const previousOffset = Math.max(0, page.offset - page.limit);
+  const nextOffset = page.offset + page.limit;
+  const hasPrevious = page.offset > 0;
+  const hasNext = nextOffset < page.totalCount;
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
         <h2>Scheduler runs</h2>
-        <span>{jobs.length} latest</span>
+        <span>{start}-{end} of {page.totalCount}</span>
       </div>
       <div className="table-wrap horizontal-scroll">
         <table>
@@ -577,6 +607,15 @@ function Operations({ jobs, onRetry, compact = false }: { jobs: ScheduledJobRun[
           </tbody>
         </table>
       </div>
+      {onPageChange ? (
+        <div className="pagination-bar">
+          <span>Page {Math.floor(page.offset / page.limit) + 1} of {Math.max(1, Math.ceil(page.totalCount / page.limit))}</span>
+          <div>
+            <button className="secondary-button compact" onClick={() => onPageChange(previousOffset)} disabled={!hasPrevious}>Previous</button>
+            <button className="secondary-button compact" onClick={() => onPageChange(nextOffset)} disabled={!hasNext}>Next</button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

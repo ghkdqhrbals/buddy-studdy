@@ -7,6 +7,7 @@ import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
 import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystuddy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import jakarta.validation.Valid
@@ -55,8 +56,9 @@ class AdminAnalyticsController(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam(required = false) jobName: String?,
         @RequestParam(defaultValue = "50") limit: Int,
-    ): List<ScheduledJobRun> =
-        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, limit)
+        @RequestParam(defaultValue = "0") offset: Int,
+    ): ScheduledJobRunPageResponse =
+        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, limit, offset)
 
     @PostMapping("/jobs/{jobName}/retry")
     fun retryJob(
@@ -76,7 +78,7 @@ interface AdminAnalyticsWebPort {
     fun login(request: AdminLoginRequest): AdminLoginResponse
     fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
     fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
-    fun jobRuns(adminToken: String, jobName: String?, limit: Int): List<ScheduledJobRun>
+    fun jobRuns(adminToken: String, jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse
     fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
 }
 
@@ -97,9 +99,9 @@ class AdminAnalyticsWebAdapter(
     override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse =
         admin.metrics(adminToken, startDate, endDate, metricKeys)
 
-    override fun jobRuns(adminToken: String, jobName: String?, limit: Int): List<ScheduledJobRun> {
+    override fun jobRuns(adminToken: String, jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
         admin.validate(adminToken)
-        return jobExecutions.findRuns(jobName, limit)
+        return jobExecutions.findRuns(jobName, limit, offset)
     }
 
     override fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun {

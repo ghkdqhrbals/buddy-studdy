@@ -380,9 +380,10 @@ async function reloadJobs() {
   if (!res.ok) throw new Error("job load failed");
   status.textContent = "";
   cards.innerHTML = "";
-  const rows = await res.json();
+  const page = await res.json();
+  const rows = Array.isArray(page) ? page : page.runs;
   charts.innerHTML = `<section class="panel">
-    <div class="chart-title"><strong>Scheduled jobs</strong><span class="muted">${rows.length} recent runs</span></div>
+    <div class="chart-title"><strong>Scheduled jobs</strong><span class="muted">${rows.length} of ${page.totalCount ?? rows.length}</span></div>
     <table class="table">
       <thead><tr><th>Job</th><th>Status</th><th>Trigger</th><th>Started</th><th>Duration</th><th>Summary</th><th></th></tr></thead>
       <tbody>
