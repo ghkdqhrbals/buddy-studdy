@@ -16,6 +16,7 @@
   --danger: #c2410c;
   --warning: #d97706;
   --shadow: none;
+  --radius: 5px;
 }
 
 :root[data-theme="dark"] {
@@ -33,6 +34,7 @@
   --danger: #f87171;
   --warning: #fb923c;
   --shadow: 0 16px 42px rgba(0, 0, 0, 0.24);
+  --radius: 5px;
 }
 
 * {
@@ -63,7 +65,7 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 156px minmax(0, 1fr);
+  grid-template-columns: 164px minmax(0, 1fr);
   min-height: 100vh;
   min-width: 0;
 }
@@ -72,8 +74,8 @@ button {
   position: sticky;
   top: 0;
   height: 100vh;
-  padding: 14px 8px;
-  background: var(--surface);
+  padding: 12px 8px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg));
   border-right: 1px solid var(--border);
 }
 
@@ -81,10 +83,27 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px 16px;
+  min-height: 36px;
+  padding: 0 6px 14px;
+  border-radius: var(--radius);
 }
 
-.brand-mark,
+.brand:hover {
+  color: var(--accent);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: white;
+  background: #111827;
+  font-weight: 900;
+  font-size: 13px;
+}
+
 .login-mark {
   display: grid;
   place-items: center;
@@ -102,7 +121,7 @@ button {
 }
 
 .brand strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .brand span {
@@ -120,34 +139,34 @@ button {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   padding: 0 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--text);
   background: transparent;
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   transition: background 120ms ease, color 120ms ease;
 }
 
 .nav-item:hover,
 .nav-item.active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .sidebar-footer {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 16px;
+  left: 8px;
+  right: 8px;
+  bottom: 12px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: var(--muted);
   border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 .admin-chip {
@@ -162,8 +181,8 @@ button {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   color: white;
   background: var(--accent);
@@ -194,12 +213,12 @@ button {
 
 .logout-button {
   width: 100%;
-  min-height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text);
-  background: var(--surface);
-  padding: 0 8px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: transparent;
+  padding: 0 7px;
   font-size: 11px;
   font-weight: 650;
   text-align: left;
@@ -207,7 +226,6 @@ button {
 
 .logout-button:hover {
   color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
   background: color-mix(in srgb, var(--danger) 7%, transparent);
 }
 
@@ -232,16 +250,16 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 54px;
-  padding: 9px 14px 9px 18px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  height: 50px;
+  padding: 8px 14px 8px 18px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
 }
 
 .topbar-title h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 750;
   letter-spacing: 0;
 }
@@ -268,12 +286,12 @@ h2 {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 8px;
   color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12px;
 }
 
@@ -288,9 +306,9 @@ h2 {
 .primary-button,
 .secondary-button,
 .ghost-button {
-  min-height: 32px;
+  min-height: 30px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 0 10px;
   font-size: 12px;
   font-weight: 650;
@@ -298,7 +316,7 @@ h2 {
 }
 
 .square-button {
-  width: 32px;
+  width: 30px;
   padding: 0;
 }
 
@@ -378,13 +396,13 @@ h2 {
 
 .dashboard {
   display: grid;
-  gap: 10px;
-  padding: 12px 14px 24px;
+  gap: 12px;
+  padding: 14px 16px 24px;
 }
 
 .metric-rail {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
   gap: 8px;
 }
 
@@ -395,13 +413,13 @@ h2 {
 .empty-state {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
 
 .metric-card {
   min-width: 0;
-  padding: 10px 11px;
+  padding: 9px 10px;
 }
 
 .metric-title {
@@ -426,8 +444,8 @@ h2 {
 
 .metric-card strong {
   display: block;
-  margin: 9px 0 5px;
-  font-size: 22px;
+  margin: 8px 0 5px;
+  font-size: 20px;
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -460,7 +478,7 @@ h2 {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(238px, 21vw, 300px);
+  grid-template-columns: minmax(0, 1fr) clamp(230px, 20vw, 288px);
   gap: 12px;
 }
 
@@ -481,7 +499,7 @@ h2 {
 .operations-panel,
 .side-panel {
   min-width: 0;
-  padding: 12px;
+  padding: 11px;
 }
 
 .panel-header {
@@ -520,12 +538,12 @@ h2 {
 
 .chart-canvas {
   position: relative;
-  min-width: 560px;
+  min-width: 600px;
 }
 
 .chart-wrap svg {
   width: 100%;
-  height: 260px;
+  height: 238px;
   display: block;
 }
 
@@ -537,7 +555,7 @@ h2 {
 .axis-label,
 .axis-title {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .axis-title {
@@ -547,7 +565,7 @@ h2 {
 
 .line-path {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -566,10 +584,10 @@ h2 {
   position: absolute;
   top: 42%;
   z-index: 2;
-  min-width: 180px;
+  min-width: 176px;
   max-width: 240px;
-  padding: 11px 12px;
-  border-radius: 8px;
+  padding: 10px 11px;
+  border-radius: 7px;
   color: #f8fafc;
   background: #111827;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.24);
@@ -622,10 +640,10 @@ h2 {
   position: static;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   flex-wrap: wrap;
-  margin-top: 4px;
-  padding-left: 46px;
+  margin-top: 2px;
+  padding-left: 42px;
   color: var(--text);
   font-size: 11px;
 }
@@ -674,8 +692,8 @@ h2 {
 .donut {
   display: grid;
   place-items: center;
-  width: 96px;
-  height: 96px;
+  width: 88px;
+  height: 88px;
   margin: 6px auto 2px;
   border-radius: 999px;
 }
@@ -683,8 +701,8 @@ h2 {
 .donut > div {
   display: grid;
   place-items: center;
-  width: 66px;
-  height: 66px;
+  width: 60px;
+  height: 60px;
   border-radius: 999px;
   background: var(--surface);
 }
@@ -745,8 +763,8 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding-top: 10px;
+  gap: 10px;
+  padding-top: 9px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -766,7 +784,7 @@ h2 {
 .pagination-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -774,10 +792,10 @@ h2 {
 .page-button {
   display: inline-grid;
   place-items: center;
-  min-width: 28px;
-  height: 28px;
+  min-width: 26px;
+  height: 26px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   color: var(--text);
   background: var(--surface);
   font-size: 12px;
@@ -807,7 +825,7 @@ h2 {
   display: inline-grid;
   place-items: center;
   width: 18px;
-  height: 28px;
+  height: 26px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -815,7 +833,7 @@ h2 {
 .page-jump {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   margin-left: 4px;
   color: var(--muted);
   font-size: 11px;
@@ -826,23 +844,23 @@ h2 {
 }
 
 .page-jump input {
-  width: 46px;
-  height: 28px;
+  width: 44px;
+  height: 26px;
   padding: 0 7px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   font-size: 12px;
 }
 
 .page-jump-button {
-  height: 28px;
+  height: 26px;
   padding: 0 8px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   font-size: 11px;
   font-weight: 650;
 }
@@ -860,7 +878,7 @@ table {
 
 th,
 td {
-  padding: 9px 8px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
@@ -930,8 +948,8 @@ td small {
 .status {
   display: inline-flex;
   align-items: center;
-  min-height: 21px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 6px;
   border-radius: 999px;
   color: var(--muted);
   background: var(--surface-2);

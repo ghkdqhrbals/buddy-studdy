@@ -40,7 +40,7 @@ export function AdminShell({
       <aside className="sidebar">
         <a
           className="brand"
-          href={hrefForSection("overview")}
+          href="/home"
           onClick={(event) => {
             event.preventDefault();
             onNavigate("overview");
