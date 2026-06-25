@@ -538,6 +538,16 @@ h2 {
   font-size: 12px;
 }
 
+.panel-link {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.panel-link:hover {
+  text-decoration: underline;
+}
+
 .horizontal-scroll {
   overflow-x: auto;
   scrollbar-width: thin;
@@ -738,6 +748,20 @@ h2 {
 
 .compact-panel table {
   min-width: 0;
+}
+
+.compact-panel {
+  padding: 10px;
+}
+
+.compact-panel .panel-header {
+  margin-bottom: 6px;
+}
+
+.compact-panel th,
+.compact-panel td {
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 .compact-panel th:nth-child(n + 4),

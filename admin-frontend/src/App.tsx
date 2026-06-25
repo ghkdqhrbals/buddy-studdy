@@ -409,7 +409,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
-          <Operations page={{ runs: jobs.slice(0, 8), totalCount: jobs.length, limit: 8, offset: 0 }} onRetry={() => {}} compact />
+          <Operations page={{ runs: jobs.slice(0, 5), totalCount: jobs.length, limit: 5, offset: 0 }} onRetry={() => {}} compact />
         </div>
 
         <aside className="insight-column">
@@ -651,7 +651,11 @@ function Operations({
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
         <h2>Scheduler runs</h2>
-        <span>{start}-{end} of {page.totalCount}</span>
+        {compact ? (
+          <a className="panel-link" href={sectionHref("operations", 0)}>View all</a>
+        ) : (
+          <span>{start}-{end} of {page.totalCount}</span>
+        )}
       </div>
       <div className="table-wrap horizontal-scroll">
         <table>
