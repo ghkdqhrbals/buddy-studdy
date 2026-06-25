@@ -681,7 +681,11 @@ function Operations({
                 <td className="result-cell" title={job.summary ?? job.status}>{job.summary ?? job.status}</td>
                 <td>{job.durationMs == null ? "-" : `${job.durationMs}ms`}</td>
                 <td>{job.retryOfRunId ? `#${job.retryOfRunId}` : "-"}</td>
-                <td className="action-cell"><button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button></td>
+                <td className="action-cell">
+                  {job.status === "FAILED" ? (
+                    <button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
