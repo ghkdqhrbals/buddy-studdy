@@ -41,8 +41,8 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
   const points = item.points;
   const width = 420;
-  const height = 148;
-  const padding = { top: 14, right: 18, bottom: 24, left: 42 };
+  const height = 132;
+  const padding = { top: 12, right: 18, bottom: 22, left: 42 };
   const values = points.map((point) => point.value);
   const rawMax = Math.max(1, ...values);
   const rawMin = Math.min(0, ...values);
