@@ -36,8 +36,7 @@ export function MetricsDashboard({ series, metricKeys, jobs, operationsHrefForPa
         <div className="primary-column">
           <div className="chart-panel">
             <div className="panel-header">
-              <h2>Trend</h2>
-              <span>Actual values by metric</span>
+              <h2>Trends</h2>
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
@@ -81,7 +80,7 @@ function MetricCard({ item }: { item: AdminMetricSeries }) {
 function TodaySummary({ series }: { series: AdminMetricSeries[] }) {
   return (
     <section className="side-panel">
-      <h2>Today</h2>
+      <h2>Latest</h2>
       <div className="summary-list">
         {series.slice(0, 6).map((item) => {
           const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
@@ -105,11 +104,12 @@ function QuotaPanel({ series }: { series?: AdminMetricSeries }) {
   return (
     <section className="side-panel quota-panel">
       <h2>Quota</h2>
-      <div className="donut" style={{ background: `conic-gradient(var(--accent) ${ratio}%, var(--surface-2) 0)` }}>
-        <div>
-          <strong>{ratio}%</strong>
-          <span>{formatCompact(latest)} / {formatCompact(limit)}</span>
-        </div>
+      <div className="quota-meter" aria-label={`Quota used ${ratio}%`}>
+        <span style={{ width: `${ratio}%` }} />
+      </div>
+      <div className="quota-value">
+        <strong>{ratio}%</strong>
+        <span>{formatCompact(latest)} / {formatCompact(limit)}</span>
       </div>
     </section>
   );
@@ -118,7 +118,7 @@ function QuotaPanel({ series }: { series?: AdminMetricSeries }) {
 function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
   return (
     <section className="side-panel">
-      <h2>Recent failures</h2>
+      <h2>Failures</h2>
       {jobs.length === 0 ? <p className="muted-line">None</p> : null}
       {jobs.map((job) => (
         <div className="failed-job" key={job.id}>
