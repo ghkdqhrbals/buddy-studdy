@@ -89,6 +89,7 @@ class AdminAnalyticsService(
 
     private fun response(startDate: LocalDate, endDate: LocalDate, rows: List<AdminDailyMetricPoint>): AdminMetricsResponse {
         val series = rows
+            .filterNot { it.metricKey == "topic_score_trend" }
             .sortedWith(compareBy<AdminDailyMetricPoint> { it.metricKey }.thenBy { it.dimension ?: "" }.thenBy { it.date })
             .groupBy { it.metricKey to it.dimension }
             .map { (key, points) ->

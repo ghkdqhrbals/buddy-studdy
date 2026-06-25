@@ -52,7 +52,6 @@ class AdminAnalyticsSourceAdapter(
             point(date, "study_streak", streakUsers(previousStart, start, end)),
             point(date, "quota_used_count", quotaUsed(date)),
         )
-        rows += topicScoreTrend(date, start, end)
         return rows
     }
 
@@ -117,30 +116,4 @@ class AdminAnalyticsSourceAdapter(
             .setParameter("yearMonth", date.toString().take(7))
             .singleResult as Number).toLong()
 
-    @Suppress("UNCHECKED_CAST")
-    private fun topicScoreTrend(date: LocalDate, start: Instant, end: Instant): List<AdminDailyMetricPoint> =
-        (entityManager.createNativeQuery(
-            """
-            select topic, avg(score), count(*)
-            from questions
-            where answered_at >= :start
-              and answered_at < :end
-              and score is not null
-              and deleted_at is null
-            group by topic
-            order by count(*) desc
-            limit 20
-            """.trimIndent()
-        )
-            .setParameter("start", Timestamp.from(start))
-            .setParameter("end", Timestamp.from(end))
-            .resultList as List<Array<Any?>>).map { row ->
-            AdminDailyMetricPoint(
-                date = date,
-                metricKey = "topic_score_trend",
-                dimension = row[0]?.toString(),
-                value = (row[1] as Number).toDouble(),
-                sampleCount = (row[2] as Number).toLong(),
-            )
-        }
 }

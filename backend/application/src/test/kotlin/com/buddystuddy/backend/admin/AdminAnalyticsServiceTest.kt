@@ -53,7 +53,7 @@ class AdminAnalyticsServiceTest {
         val day = LocalDate.parse("2026-06-01")
         source.rows[day] = listOf(
             AdminDailyMetricPoint(day, "daily_active_users", null, 7.0),
-            AdminDailyMetricPoint(day, "topic_score_trend", "Redis", 82.5),
+            AdminDailyMetricPoint(day, "answer_rate", null, 0.75, sampleCount = 4),
         )
         val token = service.login("admin", "secret").adminToken
 
@@ -61,9 +61,25 @@ class AdminAnalyticsServiceTest {
         val response = service.metrics(token, day, day, emptySet())
 
         assertThat(metrics.upserted).hasSize(2)
-        assertThat(response.series.map { it.metricKey }).containsExactlyInAnyOrder("daily_active_users", "topic_score_trend")
+        assertThat(response.series.map { it.metricKey }).containsExactlyInAnyOrder("daily_active_users", "answer_rate")
         assertThat(response.series.single { it.metricKey == "daily_active_users" }.points.single().value).isEqualTo(7.0)
-        assertThat(response.series.single { it.metricKey == "topic_score_trend" }.points.single().dimension).isEqualTo("Redis")
+        assertThat(response.series.single { it.metricKey == "answer_rate" }.points.single().sampleCount).isEqualTo(4)
+    }
+
+    @Test
+    fun `topic score trend is not exposed even when persisted`() {
+        val day = LocalDate.parse("2026-06-01")
+        metrics.upsertDailyMetrics(
+            listOf(
+                AdminDailyMetricPoint(day, "daily_active_users", null, 7.0),
+                AdminDailyMetricPoint(day, "topic_score_trend", "Redis", 82.5),
+            )
+        )
+        val token = service.login("admin", "secret").adminToken
+
+        val response = service.metrics(token, day, day, emptySet())
+
+        assertThat(response.series.map { it.metricKey }).containsExactly("daily_active_users")
     }
 
     private class FakeMetricPort : AdminAnalyticsMetricPort {
