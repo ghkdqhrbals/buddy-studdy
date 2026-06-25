@@ -52,7 +52,7 @@ data class BuddyStuddyProperties(
         var supportedLanguages: List<String> = listOf("ko", "en"),
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
-    data class Admin(var username: String = "admin", var password: String = "", var tokenHours: Long = 12)
+    data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)
 }
 
 @Configuration

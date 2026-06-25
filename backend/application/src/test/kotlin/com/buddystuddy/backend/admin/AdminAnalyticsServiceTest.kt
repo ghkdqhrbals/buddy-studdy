@@ -23,6 +23,19 @@ class AdminAnalyticsServiceTest {
     private val service = AdminAnalyticsService(properties, metrics, source)
 
     @Test
+    fun `default admin credentials are admin admin`() {
+        val defaultService = AdminAnalyticsService(
+            BuddyStuddyProperties().apply { crypto.masterKey = "test-master-key" },
+            FakeMetricPort(),
+            FakeSourcePort(),
+        )
+
+        val token = defaultService.login("admin", "admin").adminToken
+
+        assertThat(token).isNotBlank()
+    }
+
+    @Test
     fun `admin login returns token and metrics require valid admin token`() {
         assertThatThrownBy { service.metrics("bad-token", LocalDate.parse("2026-06-01"), LocalDate.parse("2026-06-01"), emptySet()) }
             .isInstanceOf(ApiException::class.java)
