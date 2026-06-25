@@ -12,7 +12,7 @@ export type MetricDefinition = {
 export const metricCatalog: Record<string, MetricDefinition> = {
   daily_active_users: { key: "daily_active_users", label: "Daily Active Users", shortLabel: "DAU", kind: "count", color: "#2563eb", description: "Unique active users for the selected day." },
   weekly_active_learners: { key: "weekly_active_learners", label: "Weekly Active Learners", shortLabel: "WAU", kind: "count", color: "#7c3aed", description: "Users who studied at least once in the trailing week." },
-  question_created_count: { key: "question_created_count", label: "Questions Created", shortLabel: "Questions", kind: "count", color: "#2563eb", description: "Questions generated during the selected period." },
+  question_created_count: { key: "question_created_count", label: "Questions Created", shortLabel: "Questions", kind: "count", color: "#0891b2", description: "Questions generated during the selected period." },
   answer_submitted_count: { key: "answer_submitted_count", label: "Answers Submitted", shortLabel: "Answers", kind: "count", color: "#16a34a", description: "Answers submitted by learners." },
   answer_rate: { key: "answer_rate", label: "Answer Rate", shortLabel: "Answer Rate", kind: "rate", color: "#9333ea", description: "Answered questions divided by created questions." },
   push_open_rate: { key: "push_open_rate", label: "Push Open Rate", shortLabel: "Push Open", kind: "rate", color: "#f97316", description: "Push notifications opened by users." },
