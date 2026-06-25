@@ -1,9 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
+import { useEffect, useMemo, useState } from "react";
+import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
+import { AdminShell } from "./AdminShell";
 import { JOB_PAGE_SIZE, metricCatalog, overviewTrendMetrics, sectionPaths, sections } from "./adminConfig";
 import { MultiLineChart, Sparkline } from "./Charts";
 import { EmptyState } from "./EmptyState";
 import { fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatMetric } from "./format";
+import { LoginScreen } from "./LoginScreen";
 import { OperationsPanel } from "./OperationsPanel";
 import type { AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
 
@@ -220,171 +222,32 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">B</div>
-          <div>
-            <strong>BuddyStuddy</strong>
-            <span>Admin</span>
-          </div>
-        </div>
-        <nav className="nav-list">
-          {sections.map((section) => (
-            <a
-              key={section.key}
-              href={sectionHref(section.key, 0, { startDate, endDate })}
-              className={section.key === activeSection ? "nav-item active" : "nav-item"}
-              onClick={(event) => {
-                event.preventDefault();
-                navigateToSection(section.key);
-              }}
-            >
-              {section.label}
-            </a>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <div className="admin-chip">
-            <span className="admin-avatar">A</span>
-            <span>
-              <strong>admin</strong>
-              <small>Administrator</small>
-            </span>
-          </div>
-          <button className="logout-button" onClick={handleLogout}>Sign out</button>
-        </div>
-      </aside>
-
-      <main className="main">
-        <header className="topbar">
-          <div className="topbar-title">
-            <h1>{active.label}</h1>
-          </div>
-          <div className="toolbar">
-            {activeSection === "operations" ? null : (
-              <DateRange
-                startDate={startDate}
-                endDate={endDate}
-                setStartDate={(value) => updateDateRange(value, endDate)}
-                setEndDate={(value) => updateDateRange(startDate, value)}
-              />
-            )}
-            <button className="secondary-button icon-button square-button" aria-label="Refresh" title="Refresh" onClick={handleRefresh} disabled={loading}>
-              <Icon name="refresh" />
-            </button>
-            <button className="secondary-button icon-button square-button" aria-label="Toggle theme" title="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-              <Icon name={theme === "light" ? "moon" : "sun"} />
-            </button>
-          </div>
-        </header>
-
-        {error ? <div className="error-banner">{error}</div> : null}
-        {loading ? <div className="loading-bar" /> : null}
-
-        {activeSection === "operations" ? (
-          <OperationsPanel
-            page={jobPage}
-            onRetry={handleRetry}
-            hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit)}
-            onPageChange={(nextPage) => navigateToJobPage((nextPage - 1) * jobPage.limit)}
-          />
-        ) : (
-          <MetricsDashboard series={series} metricKeys={active.metrics} jobs={jobPage.runs} />
-        )}
-      </main>
-    </div>
-  );
-}
-
-function LoginScreen({
-  onLoggedIn,
-  theme,
-  setTheme,
-  error,
-}: {
-  onLoggedIn: (token: string) => void;
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-  error: string | null;
-}) {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
-  const [busy, setBusy] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(error);
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setLoginError(null);
-    try {
-      const response = await login(username, password);
-      storeToken(response);
-      onLoggedIn(response.adminToken);
-    } catch (err) {
-      setLoginError(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="login-shell">
-      <form className="login-card" onSubmit={handleSubmit}>
-        <div className="login-head">
-          <div className="login-mark">B</div>
-          <button type="button" className="secondary-button square-button" aria-label="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-            <Icon name={theme === "light" ? "moon" : "sun"} />
-          </button>
-        </div>
-        <h1>Admin console</h1>
-        <p>BuddyStuddy operations</p>
-        <label>
-          ID
-          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-        </label>
-        <label>
-          Password
-          <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
-        </label>
-        {loginError ? <div className="form-error">{loginError}</div> : null}
-        <button className="primary-button full" disabled={busy}>
-          {busy ? "Signing in" : "Sign in"}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function DateRange({
-  startDate,
-  endDate,
-  setStartDate,
-  setEndDate,
-}: {
-  startDate: string;
-  endDate: string;
-  setStartDate: (value: string) => void;
-  setEndDate: (value: string) => void;
-}) {
-  return (
-    <div className="date-range">
-      <input
-        aria-label="Start date"
-        type="date"
-        value={startDate}
-        onInput={(event) => setStartDate(event.currentTarget.value)}
-        onChange={(event) => setStartDate(event.target.value)}
-      />
-      <span>~</span>
-      <input
-        aria-label="End date"
-        type="date"
-        value={endDate}
-        onInput={(event) => setEndDate(event.currentTarget.value)}
-        onChange={(event) => setEndDate(event.target.value)}
-      />
-    </div>
+    <AdminShell
+      activeSection={activeSection}
+      activeLabel={active.label}
+      startDate={startDate}
+      endDate={endDate}
+      theme={theme}
+      loading={loading}
+      error={error}
+      hrefForSection={(section) => sectionHref(section, 0, { startDate, endDate })}
+      onDateRangeChange={updateDateRange}
+      onLogout={handleLogout}
+      onNavigate={navigateToSection}
+      onRefresh={handleRefresh}
+      onThemeChange={setTheme}
+    >
+      {activeSection === "operations" ? (
+        <OperationsPanel
+          page={jobPage}
+          onRetry={handleRetry}
+          hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit)}
+          onPageChange={(nextPage) => navigateToJobPage((nextPage - 1) * jobPage.limit)}
+        />
+      ) : (
+        <MetricsDashboard series={series} metricKeys={active.metrics} jobs={jobPage.runs} />
+      )}
+    </AdminShell>
   );
 }
 
@@ -504,30 +367,4 @@ function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
       ))}
     </section>
   );
-}
-
-function Icon({ name }: { name: "refresh" | "moon" | "sun" }) {
-  if (name === "refresh") {
-    return (
-      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M15.4 6.2A6 6 0 1 0 16 10" />
-        <path d="M15.5 3.8v3h-3" />
-      </svg>
-    );
-  }
-  if (name === "moon") {
-    return (
-      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M14.7 13.7A6.7 6.7 0 0 1 6.3 5.3 6.9 6.9 0 1 0 14.7 13.7Z" />
-      </svg>
-    );
-  }
-  if (name === "sun") {
-    return (
-      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
-        <circle cx="10" cy="10" r="3.3" />
-        <path d="M10 1.8v2M10 16.2v2M1.8 10h2M16.2 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 4.2l-1.4 1.4M5.6 14.4l-1.4 1.4" />
-      </svg>
-    );
-  }
 }
