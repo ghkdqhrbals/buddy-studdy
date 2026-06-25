@@ -12,6 +12,13 @@ const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
 const LOGIN_PATH = "/login";
+const legacySectionPaths: Partial<Record<SectionKey, string[]>> = {
+  overview: ["/overview"],
+  users: ["/users"],
+  learning: ["/learning"],
+  notifications: ["/notifications"],
+  quota: ["/quota"],
+};
 const emptyJobPage: ScheduledJobRunsResponse = {
   runs: [],
   totalCount: 0,
@@ -26,12 +33,11 @@ function isIsoDate(value: string | null): value is string {
 function routeState(): { section: SectionKey; jobOffset: number; startDate: string; endDate: string } {
   const path = window.location.pathname;
   const params = new URLSearchParams(window.location.search);
-  const section: SectionKey = path.startsWith("/operations")
+  const section: SectionKey = path.startsWith(sectionPaths.operations)
     ? "operations"
-    : path === "/overview"
-      ? "overview"
-      : sections.find((item) => path === sectionPaths[item.key])?.key ?? "overview";
-  const page = Number(params.get("page") ?? "1");
+    : sections.find((item) => path === sectionPaths[item.key] || legacySectionPaths[item.key]?.includes(path))?.key ?? "overview";
+  const pathPage = path.match(/^\/operations\/scheduler-runs\/page\/(\d+)$/)?.[1];
+  const page = Number(pathPage ?? params.get("page") ?? "1");
   return {
     section,
     jobOffset: section === "operations" ? (Math.max(1, Number.isFinite(page) ? page : 1) - 1) * JOB_PAGE_SIZE : 0,
@@ -50,8 +56,8 @@ function sectionHref(section: SectionKey, offset = 0, range?: { startDate: strin
     const query = params.toString();
     return `${sectionPaths[section]}${query ? `?${query}` : ""}`;
   }
-  params.set("page", String(Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1));
-  return `${sectionPaths.operations}?${params}`;
+  const page = Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1;
+  return page <= 1 ? sectionPaths.operations : `${sectionPaths.operations}/page/${page}`;
 }
 
 export function App() {

@@ -9,6 +9,7 @@ type PaginationProps = {
   totalCount: number;
   currentPage: number;
   totalPages: number;
+  pageSize: number;
   hrefForPage: (page: number) => string;
   onPageChange: (page: number) => void;
 };
@@ -19,6 +20,7 @@ export function Pagination({
   totalCount,
   currentPage,
   totalPages,
+  pageSize,
   hrefForPage,
   onPageChange,
 }: PaginationProps) {
@@ -35,13 +37,15 @@ export function Pagination({
   return (
     <div className="pagination-bar">
       <span className="pagination-summary">
-        <b>{start}-{end}</b>
-        {" "}
-        <span>of {totalCount}</span>
+        <b>Page {currentPage} of {totalPages}</b>
         {" "}
         <span aria-hidden="true">·</span>
         {" "}
-        <span>{pageCountLabel(totalPages)}</span>
+        <span>{start}-{end} of {totalCount}</span>
+        {" "}
+        <span aria-hidden="true">·</span>
+        {" "}
+        <span>{pageSize} rows/page</span>
       </span>
       <div className="pagination-controls">
         <PageAnchor
@@ -179,8 +183,4 @@ export function paginationItems(current: number, total: number): PageItem[] {
     }
     return [page];
   });
-}
-
-function pageCountLabel(totalPages: number): string {
-  return `${totalPages} ${totalPages === 1 ? "page" : "pages"}`;
 }

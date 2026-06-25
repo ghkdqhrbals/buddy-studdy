@@ -52,9 +52,9 @@ export const JOB_PAGE_SIZE = 10;
 
 export const sectionPaths: Record<SectionKey, string> = {
   overview: "/home",
-  users: "/users",
-  learning: "/learning",
-  notifications: "/notifications",
-  quota: "/quota",
+  users: "/analytics/users",
+  learning: "/analytics/learning",
+  notifications: "/analytics/notifications",
+  quota: "/analytics/quota",
   operations: "/operations/scheduler-runs",
 };

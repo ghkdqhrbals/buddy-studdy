@@ -82,6 +82,7 @@ export function OperationsPanel({
           totalCount={page.totalCount}
           currentPage={currentPage}
           totalPages={totalPages}
+          pageSize={page.limit}
           hrefForPage={hrefForPage}
           onPageChange={onPageChange}
         />
