@@ -21,13 +21,23 @@ class FlywayMigrationConfig {
             .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration").split(",").map { it.trim() }.toTypedArray())
             .baselineOnMigrate(environment.getProperty("spring.flyway.baseline-on-migrate", Boolean::class.java, true))
             .baselineVersion(environment.getProperty("spring.flyway.baseline-version", "0"))
-            .validateOnMigrate(environment.getProperty("spring.flyway.validate-on-migrate", Boolean::class.java, true))
+            .validateOnMigrate(
+                environment.getBooleanProperty(
+                    "spring.flyway.validate-on-migrate",
+                    "SPRING_FLYWAY_VALIDATE_ON_MIGRATE",
+                    "FLYWAY_VALIDATE_ON_MIGRATE",
+                    defaultValue = true,
+                ),
+            )
             .load()
 
     @Bean
     fun flywayMigration(flyway: Flyway): MigrateResult = flyway.migrate()
 
     companion object {
+        private fun Environment.getBooleanProperty(vararg names: String, defaultValue: Boolean): Boolean =
+            names.firstNotNullOfOrNull { getProperty(it, Boolean::class.java) } ?: defaultValue
+
         @Bean
         @JvmStatic
         fun entityManagerFactoryDependsOnFlyway(): BeanFactoryPostProcessor =
