@@ -1,3 +1,7 @@
+export type SectionKey = "overview" | "users" | "learning" | "notifications" | "quota" | "operations";
+export type Theme = "light" | "dark";
+export type MetricKind = "count" | "rate" | "duration" | "days";
+
 export type AdminLoginResponse = {
   adminToken: string;
   expiresAt: string;

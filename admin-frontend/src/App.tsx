@@ -1,72 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
-import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
-
-type SectionKey = "overview" | "users" | "learning" | "notifications" | "quota" | "operations";
-type Theme = "light" | "dark";
-type MetricKind = "count" | "rate" | "duration" | "days";
-
-type MetricDefinition = {
-  key: string;
-  label: string;
-  shortLabel: string;
-  kind: MetricKind;
-  color: string;
-  description: string;
-};
-
-const metricCatalog: Record<string, MetricDefinition> = {
-  daily_active_users: { key: "daily_active_users", label: "Daily Active Users", shortLabel: "DAU", kind: "count", color: "#2563eb", description: "Unique active users for the selected day." },
-  weekly_active_learners: { key: "weekly_active_learners", label: "Weekly Active Learners", shortLabel: "WAU", kind: "count", color: "#7c3aed", description: "Users who studied at least once in the trailing week." },
-  question_created_count: { key: "question_created_count", label: "Questions Created", shortLabel: "Questions", kind: "count", color: "#2563eb", description: "Questions generated during the selected period." },
-  answer_submitted_count: { key: "answer_submitted_count", label: "Answers Submitted", shortLabel: "Answers", kind: "count", color: "#16a34a", description: "Answers submitted by learners." },
-  answer_rate: { key: "answer_rate", label: "Answer Rate", shortLabel: "Answer Rate", kind: "rate", color: "#9333ea", description: "Answered questions divided by created questions." },
-  push_open_rate: { key: "push_open_rate", label: "Push Open Rate", shortLabel: "Push Open", kind: "rate", color: "#f97316", description: "Push notifications opened by users." },
-  question_to_answer_latency: { key: "question_to_answer_latency", label: "Question to Answer", shortLabel: "Latency", kind: "duration", color: "#0ea5e9", description: "Average time from question creation to answer submission." },
-  study_streak: { key: "study_streak", label: "Study Streak", shortLabel: "Streak", kind: "days", color: "#22c55e", description: "Average consecutive study days." },
-  quota_used_count: { key: "quota_used_count", label: "Quota Used", shortLabel: "Quota", kind: "count", color: "#64748b", description: "Monthly system quota consumed." },
-};
-
-const overviewMetrics = [
-  "daily_active_users",
-  "weekly_active_learners",
-  "question_created_count",
-  "answer_submitted_count",
-  "answer_rate",
-  "push_open_rate",
-  "question_to_answer_latency",
-  "study_streak",
-];
-
-const overviewTrendMetrics = [
-  "daily_active_users",
-  "weekly_active_learners",
-  "question_created_count",
-  "answer_submitted_count",
-];
-
-const sections: Array<{ key: SectionKey; label: string; metrics: string[] }> = [
-  { key: "overview", label: "Home", metrics: overviewMetrics },
-  { key: "users", label: "Users", metrics: ["daily_active_users", "weekly_active_learners", "study_streak"] },
-  { key: "learning", label: "Learning", metrics: ["question_created_count", "answer_submitted_count", "answer_rate", "question_to_answer_latency"] },
-  { key: "notifications", label: "Notifications", metrics: ["push_open_rate"] },
-  { key: "quota", label: "Quota", metrics: ["quota_used_count"] },
-  { key: "operations", label: "Operations", metrics: [] },
-];
+import { JOB_PAGE_SIZE, metricCatalog, overviewTrendMetrics, sectionPaths, sections, type MetricDefinition } from "./adminConfig";
+import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatMetric, formatShortDate, statusLabel } from "./format";
+import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
 
 const today = new Date();
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
-const JOB_PAGE_SIZE = 10;
-const sectionPaths: Record<SectionKey, string> = {
-  overview: "/home",
-  users: "/users",
-  learning: "/learning",
-  notifications: "/notifications",
-  quota: "/quota",
-  operations: "/operations/scheduler-runs",
-};
 const emptyJobPage: ScheduledJobRunsResponse = {
   runs: [],
   totalCount: 0,
@@ -848,55 +789,6 @@ function Icon({ name }: { name: "refresh" | "moon" | "sun" | "chevron-left" | "c
       <path d={name === "chevron-left" ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"} />
     </svg>
   );
-}
-
-function metricKind(metricKey: string): MetricKind {
-  return metricCatalog[metricKey]?.kind ?? "count";
-}
-
-function fallbackDefinition(metricKey: string): MetricDefinition {
-  return { key: metricKey, label: metricKey, shortLabel: metricKey, kind: "count", color: "#64748b", description: metricKey };
-}
-
-function formatMetric(definition: MetricDefinition, value: number): string {
-  if (definition.kind === "rate") return `${roundOne(value)}%`;
-  if (definition.kind === "duration") return `${roundOne(value)}h`;
-  if (definition.kind === "days") return `${roundOne(value)}d`;
-  return formatCompact(value);
-}
-
-function formatDelta(definition: MetricDefinition, value: number): string {
-  if (value === 0) return "0";
-  const sign = value > 0 ? "+" : "";
-  if (definition.kind === "rate") return `${sign}${roundOne(value)}pp`;
-  return `${sign}${formatMetric(definition, value)}`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function roundOne(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function formatCompact(value: number): string {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: value < 1000 ? 0 : 1 }).format(value);
-}
-
-function statusLabel(status: string): string {
-  if (status === "SUCCESS") return "Success";
-  if (status === "FAILED") return "Failed";
-  if (status === "RUNNING") return "Running";
-  return status;
-}
-
-function formatShortDate(value: string): string {
-  return new Intl.DateTimeFormat("en", { month: "2-digit", day: "2-digit" }).format(new Date(value));
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat("en", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function xTicks(dates: string[]) {
