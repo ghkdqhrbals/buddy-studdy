@@ -14,6 +14,10 @@ version = "0.2.0"
 subprojects {
     group = rootProject.group
     version = rootProject.version
+
+    tasks.withType<JavaCompile>().configureEach {
+        options.release.set(24)
+    }
 }
 
 tasks.register("bootJar") {
