@@ -431,10 +431,6 @@ function MetricCard({ item }: { item: AdminMetricSeries }) {
     <article className="metric-card">
       <div className="metric-title">
         <span title={definition.label}>{definition.shortLabel}</span>
-        <button className="info-button" aria-label={`${definition.label} details`}>
-          i
-          <span role="tooltip">{definition.description}</span>
-        </button>
       </div>
       <strong>{formatMetric(definition, last?.value ?? 0)}</strong>
       <small className={delta >= 0 ? "positive" : "negative"}>

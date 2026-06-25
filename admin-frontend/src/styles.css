@@ -407,8 +407,7 @@ h2 {
 .metric-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  min-width: 0;
 }
 
 .metric-title span,
@@ -423,47 +422,6 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.info-button {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid currentColor;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 0;
-}
-
-.info-button span {
-  position: absolute;
-  z-index: 20;
-  top: 22px;
-  right: 0;
-  width: 210px;
-  padding: 8px 9px;
-  border-radius: 8px;
-  color: #f8fafc;
-  background: #111827;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
-  font-size: 12px;
-  line-height: 1.35;
-  text-align: left;
-  opacity: 0;
-  transform: translateY(-2px);
-  pointer-events: none;
-  transition: opacity 80ms ease, transform 80ms ease;
-}
-
-.info-button:hover span,
-.info-button:focus-visible span {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .metric-card strong {
