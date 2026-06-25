@@ -50,7 +50,9 @@ export function Pagination({
         <PageAnchor
           disabled={currentPage <= 1}
           href={hrefForPage(Math.max(1, currentPage - 1))}
+          iconOnly
           label="Previous page"
+          title="Previous page"
           onClick={() => onPageChange(Math.max(1, currentPage - 1))}
         >
           <Chevron direction="left" />
@@ -72,6 +74,8 @@ export function Pagination({
               key={item}
               active={item === currentPage}
               href={hrefForPage(item)}
+              label={`Page ${item}`}
+              title={`Page ${item}`}
               onClick={() => onPageChange(item)}
             >
               {item}
@@ -81,7 +85,9 @@ export function Pagination({
         <PageAnchor
           disabled={currentPage >= totalPages}
           href={hrefForPage(Math.min(totalPages, currentPage + 1))}
+          iconOnly
           label="Next page"
+          title="Next page"
           onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
         >
           <Chevron direction="right" />
@@ -117,6 +123,7 @@ export function Pagination({
 function PageAnchor({
   active = false,
   disabled = false,
+  iconOnly = false,
   href,
   label,
   title,
@@ -126,6 +133,7 @@ function PageAnchor({
 }: {
   active?: boolean;
   disabled?: boolean;
+  iconOnly?: boolean;
   href: string;
   label?: string;
   title?: string;
@@ -137,7 +145,7 @@ function PageAnchor({
     <a
       className={[
         "page-button",
-        label ? "icon-page" : "",
+        iconOnly ? "icon-page" : "",
         variant === "ellipsis" ? "page-ellipsis" : "",
         active ? "active" : "",
         disabled ? "disabled" : "",

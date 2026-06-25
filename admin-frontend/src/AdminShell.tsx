@@ -41,6 +41,7 @@ export function AdminShell({
         <a
           className="brand"
           href="/home"
+          title="Home"
           onClick={(event) => {
             if (!shouldHandleClientNavigation(event)) return;
             event.preventDefault();
@@ -53,12 +54,14 @@ export function AdminShell({
             <span>Admin</span>
           </div>
         </a>
-        <nav className="nav-list">
+        <nav className="nav-list" aria-label="Primary navigation">
           {sections.map((section) => (
             <a
               key={section.key}
               href={hrefForSection(section.key)}
               className={section.key === activeSection ? "nav-item active" : "nav-item"}
+              title={section.label}
+              aria-current={section.key === activeSection ? "page" : undefined}
               onClick={(event) => {
                 if (!shouldHandleClientNavigation(event)) return;
                 event.preventDefault();
@@ -78,12 +81,12 @@ export function AdminShell({
                 <small>Administrator</small>
               </span>
             </div>
-            <button className="logout-button" onClick={onLogout}>Sign out</button>
+            <button className="logout-button" title="Sign out" onClick={onLogout}>Sign out</button>
           </div>
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" aria-busy={loading}>
         <header className="topbar">
           <div className="topbar-title">
             <h1>{activeLabel}</h1>
@@ -106,7 +109,7 @@ export function AdminShell({
           </div>
         </header>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? <div className="error-banner" role="alert">{error}</div> : null}
         {loading ? <div className="loading-bar" /> : null}
         {children}
       </main>
@@ -126,14 +129,14 @@ function DateRange({
   setEndDate: (value: string) => void;
 }) {
   return (
-    <div className="date-range">
+    <div className="date-range" role="group" aria-label="Metric date range">
       <input
         aria-label="Start date"
         type="date"
         value={startDate}
         onChange={(event) => setStartDate(event.target.value)}
       />
-      <span>~</span>
+      <span aria-hidden="true">~</span>
       <input
         aria-label="End date"
         type="date"

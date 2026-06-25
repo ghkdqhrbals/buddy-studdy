@@ -33,7 +33,7 @@ export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenP
 
   return (
     <div className="login-shell">
-      <form className="login-card" onSubmit={handleSubmit}>
+      <form className="login-card" aria-label="Admin sign in" onSubmit={handleSubmit}>
         <div className="login-head">
           <div className="login-brand">
             <div className="login-mark">B</div>
@@ -42,7 +42,7 @@ export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenP
               <span>Admin</span>
             </div>
           </div>
-          <button type="button" className="secondary-button square-button" aria-label="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
+          <button type="button" className="secondary-button square-button" aria-label="Toggle theme" title="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
             <Icon name={theme === "light" ? "moon" : "sun"} />
           </button>
         </div>
@@ -58,7 +58,7 @@ export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenP
           <span>Password</span>
           <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required />
         </label>
-        {loginError ? <div className="form-error">{loginError}</div> : null}
+        {loginError ? <div className="form-error" role="alert">{loginError}</div> : null}
         <button className="primary-button full" disabled={busy}>
           {busy ? "Signing in" : "Sign in"}
         </button>
