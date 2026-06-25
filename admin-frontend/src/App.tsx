@@ -623,6 +623,7 @@ function Operations({
   onPageChange?: (offset: number) => void;
   compact?: boolean;
 }) {
+  const [jumpPage, setJumpPage] = useState("");
   const jobs = page.runs;
   if (jobs.length === 0) {
     return <EmptyState title="No job runs" compact={compact} />;
@@ -636,6 +637,14 @@ function Operations({
   const currentPage = Math.floor(page.offset / page.limit) + 1;
   const totalPages = Math.max(1, Math.ceil(page.totalCount / page.limit));
   const pageItems = paginationItems(currentPage, totalPages);
+  const submitJump = () => {
+    if (!onPageChange) return;
+    const parsed = Number(jumpPage);
+    if (!Number.isFinite(parsed)) return;
+    const nextPage = Math.max(1, Math.min(totalPages, Math.trunc(parsed)));
+    setJumpPage("");
+    onPageChange((nextPage - 1) * page.limit);
+  };
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
@@ -727,6 +736,25 @@ function Operations({
             >
               <Icon name="chevron-right" />
             </a>
+            {totalPages > 7 ? (
+              <label className="page-jump">
+                <span>Page</span>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={1}
+                  max={totalPages}
+                  value={jumpPage}
+                  placeholder={String(currentPage)}
+                  aria-label="Jump to page"
+                  onChange={(event) => setJumpPage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") submitJump();
+                  }}
+                />
+                <button type="button" className="page-jump-button" onClick={submitJump}>Go</button>
+              </label>
+            ) : null}
           </div>
         </div>
       ) : null}
