@@ -389,7 +389,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
   const failedJobs = jobs.filter((job) => job.status === "FAILED").slice(0, 3);
 
   if (featured.length === 0) {
-    return <EmptyState title="No metrics" />;
+    return <EmptyState title="No metrics" message="No data returned for the selected range." />;
   }
 
   return (
@@ -490,7 +490,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   };
 
   if (series.length === 0 || allDates.length === 0) {
-    return <EmptyState title="No chart data" compact />;
+    return <EmptyState title="No chart data" message="Try a wider date range." compact />;
   }
 
   return (
@@ -640,7 +640,7 @@ function Operations({
 }) {
   const jobs = page.runs;
   if (jobs.length === 0) {
-    return <EmptyState title="No job runs" compact={compact} />;
+    return <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />;
   }
   const start = page.offset + 1;
   const end = Math.min(page.offset + jobs.length, page.totalCount);
@@ -709,10 +709,11 @@ function Operations({
   );
 }
 
-function EmptyState({ title, compact = false }: { title: string; compact?: boolean }) {
+function EmptyState({ title, message, compact = false }: { title: string; message?: string; compact?: boolean }) {
   return (
     <div className={compact ? "empty-state compact-empty" : "empty-state"}>
       <h2>{title}</h2>
+      {message ? <p>{message}</p> : null}
     </div>
   );
 }

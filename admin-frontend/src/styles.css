@@ -956,16 +956,26 @@ td small {
 
 .empty-state {
   display: grid;
+  align-content: center;
+  gap: 6px;
   place-items: center;
-  min-height: 360px;
+  min-height: 220px;
+  padding: 24px;
+  text-align: center;
 }
 
 .compact-empty {
-  min-height: 210px;
+  min-height: 136px;
 }
 
 .empty-state h2 {
   color: var(--muted);
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .login-shell {
