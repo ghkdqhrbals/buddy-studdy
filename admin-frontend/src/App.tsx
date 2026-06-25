@@ -262,10 +262,10 @@ export function App() {
           </div>
           <div className="toolbar">
             <DateRange startDate={startDate} endDate={endDate} setStartDate={setStartDate} setEndDate={setEndDate} />
-            <button className="secondary-button icon-button" onClick={handleRefresh} disabled={loading}>
-              ↻ <span>Refresh</span>
+            <button className="secondary-button icon-button square-button" aria-label="Refresh" title="Refresh" onClick={handleRefresh} disabled={loading}>
+              ↻
             </button>
-            <button className="secondary-button icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
+            <button className="secondary-button icon-button square-button" aria-label="Toggle theme" title="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
               {theme === "light" ? "☾" : "☀"}
             </button>
           </div>
@@ -382,8 +382,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
         <div className="primary-column">
           <div className="chart-panel">
             <div className="panel-header">
-              <h2>Metric trend</h2>
-              <span>Daily</span>
+              <h2>Trend</h2>
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
@@ -444,19 +443,25 @@ function Sparkline({ item, definition }: { item: AdminMetricSeries; definition: 
 function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 960;
-  const height = 340;
-  const padding = { top: 18, right: 24, bottom: 48, left: 58 };
+  const height = 320;
+  const padding = { top: 16, right: 22, bottom: 42, left: 46 };
   const allDates = series[0]?.points.map((point) => point.date) ?? [];
-  const yMax = Math.max(1, ...series.flatMap((item) => item.points.map((point) => point.value)));
+  const seriesMax = useMemo(
+    () => new Map(series.map((item) => [item.metricKey, Math.max(1, ...item.points.map((point) => point.value))])),
+    [series],
+  );
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const activeIndex = hovered ?? Math.max(0, allDates.length - 1);
   const x = (index: number) => padding.left + (allDates.length <= 1 ? 0 : (index / (allDates.length - 1)) * plotWidth);
-  const y = (value: number) => padding.top + (1 - value / yMax) * plotHeight;
+  const y = (metricKey: string, value: number) => {
+    const max = seriesMax.get(metricKey) ?? 1;
+    return padding.top + (1 - value / max) * plotHeight;
+  };
 
   const linePath = (item: AdminMetricSeries) => {
     return item.points.map((point, index) => {
-      return `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`;
+      return `${index === 0 ? "M" : "L"} ${x(index)} ${y(item.metricKey, point.value)}`;
     }).join(" ");
   };
 
@@ -475,11 +480,11 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Metric trend chart">
           {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
             const yy = padding.top + tick * plotHeight;
-            const value = yMax * (1 - tick);
+            const value = Math.round((1 - tick) * 100);
             return (
               <g key={tick}>
                 <line x1={padding.left} x2={width - padding.right} y1={yy} y2={yy} className="grid-line" />
-                <text x={padding.left - 12} y={yy + 4} textAnchor="end" className="axis-label">{formatCompact(value)}</text>
+                <text x={padding.left - 10} y={yy + 4} textAnchor="end" className="axis-label">{value}</text>
               </g>
             );
           })}
@@ -491,7 +496,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             const active = item.points[activeIndex];
             if (!active) return null;
-            return <circle key={item.metricKey} cx={x(activeIndex)} cy={y(active.value)} r={4} className="chart-dot" stroke={definition.color} />;
+            return <circle key={item.metricKey} cx={x(activeIndex)} cy={y(item.metricKey, active.value)} r={4} className="chart-dot" stroke={definition.color} />;
           }) : null}
           {hovered !== null ? <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" /> : null}
           {xTicks(allDates).map((tick) => (
