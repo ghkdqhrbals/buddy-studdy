@@ -72,6 +72,7 @@ export function AdminShell({
         <div className="sidebar-footer">
           <div className="account-panel">
             <div className="admin-chip">
+              <span className="account-dot" aria-hidden="true" />
               <span>
                 <strong>admin</strong>
                 <small>Administrator</small>
