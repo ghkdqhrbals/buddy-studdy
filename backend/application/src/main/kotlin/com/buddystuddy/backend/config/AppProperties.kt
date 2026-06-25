@@ -60,6 +60,7 @@ data class BuddyStuddyProperties(
         var username: String = "",
         var password: String = "",
         var driverClassName: String = "",
+        var databaseName: String = "buddystuddy_aggregation",
     )
 }
 

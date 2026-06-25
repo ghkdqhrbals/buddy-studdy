@@ -105,6 +105,7 @@ buddystuddy:
       username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}
       password: ${ADMIN_ANALYTICS_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
       driver-class-name: ${ADMIN_ANALYTICS_DATABASE_DRIVER:}
+      database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:buddystuddy_aggregation}
 
 redis-stream-coordinator:
   coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}

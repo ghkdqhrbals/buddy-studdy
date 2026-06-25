@@ -23,6 +23,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
         "spring.flyway.locations=classpath:db/migration",
         "buddystuddy.scheduler.enabled=false",
         "buddystuddy.streams.enabled=false",
+        "buddystuddy.analytics.datasource.database-name=",
         "buddystuddy.crypto.master-key=test-master-key",
         "buddystuddy.auth.jwt-secret=test-jwt-secret",
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
