@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
 import { JOB_PAGE_SIZE, metricCatalog, overviewTrendMetrics, sectionPaths, sections, type MetricDefinition } from "./adminConfig";
-import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatDurationMs, formatMetric, formatShortDate, statusLabel } from "./format";
-import { Pagination } from "./Pagination";
+import { EmptyState } from "./EmptyState";
+import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatMetric, formatShortDate } from "./format";
+import { OperationsPanel } from "./OperationsPanel";
 import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
 
 const today = new Date();
@@ -281,7 +282,12 @@ export function App() {
         {loading ? <div className="loading-bar" /> : null}
 
         {activeSection === "operations" ? (
-          <Operations page={jobPage} onRetry={handleRetry} onPageChange={navigateToJobPage} />
+          <OperationsPanel
+            page={jobPage}
+            onRetry={handleRetry}
+            hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit)}
+            onPageChange={(nextPage) => navigateToJobPage((nextPage - 1) * jobPage.limit)}
+          />
         ) : (
           <MetricsDashboard series={series} metricKeys={active.metrics} jobs={jobPage.runs} />
         )}
@@ -409,7 +415,12 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
-          <Operations page={{ runs: jobs.slice(0, 5), totalCount: jobs.length, limit: 5, offset: 0 }} onRetry={() => {}} compact />
+          <OperationsPanel
+            page={{ runs: jobs.slice(0, 5), totalCount: jobs.length, limit: 5, offset: 0 }}
+            onRetry={() => {}}
+            hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * JOB_PAGE_SIZE)}
+            compact
+          />
         </div>
 
         <aside className="insight-column">
@@ -624,97 +635,6 @@ function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
         </div>
       ))}
     </section>
-  );
-}
-
-function Operations({
-  page,
-  onRetry,
-  onPageChange,
-  compact = false,
-}: {
-  page: ScheduledJobRunsResponse;
-  onRetry: (job: ScheduledJobRun) => void;
-  onPageChange?: (offset: number) => void;
-  compact?: boolean;
-}) {
-  const jobs = page.runs;
-  if (jobs.length === 0) {
-    return <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />;
-  }
-  const start = page.offset + 1;
-  const end = Math.min(page.offset + jobs.length, page.totalCount);
-  const currentPage = Math.floor(page.offset / page.limit) + 1;
-  const totalPages = Math.max(1, Math.ceil(page.totalCount / page.limit));
-  const showActions = !compact && jobs.some((job) => job.status === "FAILED");
-  return (
-    <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
-      <div className="panel-header">
-        <h2>Scheduler runs</h2>
-        {compact ? (
-          <a className="panel-link" href={sectionHref("operations", 0)}>View all</a>
-        ) : (
-          <span>{start}-{end} of {page.totalCount}</span>
-        )}
-      </div>
-      <div className="table-wrap horizontal-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th className="job-col">Job</th>
-              <th className="time-col">Last run</th>
-              <th className="status-col">Status</th>
-              <th className="result-col">Result</th>
-              <th className="duration-col">Duration</th>
-              <th className="retry-col">Retry of</th>
-              {showActions ? <th className="action-col">Action</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id}>
-                <td>
-                  <strong>{job.jobName}</strong>
-                  {job.errorMessage ? <small>{job.errorMessage}</small> : null}
-                </td>
-                <td>{formatDateTime(job.startedAt)}</td>
-                <td><span className={`status ${job.status.toLowerCase()}`}>{statusLabel(job.status)}</span></td>
-                <td className="result-cell" title={job.summary ?? job.status}>{job.summary ?? job.status}</td>
-                <td>{formatDurationMs(job.durationMs)}</td>
-                <td>{job.retryOfRunId ? `#${job.retryOfRunId}` : "-"}</td>
-                {showActions ? (
-                  <td className="action-cell">
-                    {job.status === "FAILED" ? (
-                      <button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button>
-                    ) : null}
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {onPageChange ? (
-        <Pagination
-          start={start}
-          end={end}
-          totalCount={page.totalCount}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * page.limit)}
-          onPageChange={(nextPage) => onPageChange((nextPage - 1) * page.limit)}
-        />
-      ) : null}
-    </section>
-  );
-}
-
-function EmptyState({ title, message, compact = false }: { title: string; message?: string; compact?: boolean }) {
-  return (
-    <div className={compact ? "empty-state compact-empty" : "empty-state"}>
-      <h2>{title}</h2>
-      {message ? <p>{message}</p> : null}
-    </div>
   );
 }
 
