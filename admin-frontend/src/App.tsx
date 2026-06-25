@@ -405,7 +405,7 @@ function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSer
           <div className="chart-panel">
             <div className="panel-header">
               <h2>Trend</h2>
-              <span>Relative 0-100</span>
+              <span>Normalized per metric</span>
             </div>
             <MultiLineChart series={chartSeries} />
           </div>
@@ -507,7 +507,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             return (
               <g key={tick}>
                 <line x1={padding.left} x2={width - padding.right} y1={yy} y2={yy} className="grid-line" />
-                <text x={padding.left - 10} y={yy + 4} textAnchor="end" className="axis-label">{value}</text>
+                <text x={padding.left - 10} y={yy + 4} textAnchor="end" className="axis-label">{value}%</text>
               </g>
             );
           })}
@@ -563,11 +563,14 @@ function ChartTooltip({ index, dates, series, left }: { index: number; dates: st
       {series.map((item) => {
         const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
         const value = item.points[index]?.value ?? 0;
+        const max = Math.max(1, ...item.points.map((point) => point.value));
+        const normalized = Math.round((value / max) * 100);
         return (
           <span key={item.metricKey}>
             <i style={{ background: definition.color }} />
-            {definition.shortLabel}
+            <small>{definition.shortLabel}</small>
             <b>{formatMetric(definition, value)}</b>
+            <em>{normalized}%</em>
           </span>
         );
       })}

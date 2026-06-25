@@ -628,7 +628,7 @@ h2 {
 
 .chart-tooltip span {
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   font-size: 12px;
@@ -644,6 +644,20 @@ h2 {
 
 .chart-tooltip b {
   font-weight: 800;
+}
+
+.chart-tooltip small {
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-tooltip em {
+  color: #94a3b8;
+  font-size: 11px;
+  font-style: normal;
 }
 
 .chart-legend {
