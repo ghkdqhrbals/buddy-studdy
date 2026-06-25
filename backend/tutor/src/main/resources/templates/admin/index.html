@@ -376,7 +376,7 @@ async function render(data) {
   charts.innerHTML = data.series.map(series => chart(series)).join("");
 }
 async function reloadJobs() {
-  const res = await fetch("/api/v1/admin/jobs/runs?limit=50", { headers: authHeaders() });
+  const res = await fetch("/api/v1/admin/jobs/runs?limit=10", { headers: authHeaders() });
   if (!res.ok) throw new Error("job load failed");
   status.textContent = "";
   cards.innerHTML = "";

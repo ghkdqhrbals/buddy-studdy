@@ -52,6 +52,11 @@ input {
   font: inherit;
 }
 
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
 button {
   cursor: pointer;
 }
@@ -247,6 +252,15 @@ button {
 .logout-button:hover {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.page-link {
+  text-decoration: none;
+}
+
+.page-link.disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .main {

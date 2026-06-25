@@ -90,7 +90,7 @@ export async function fetchJobRuns(onUnauthorized: UnauthorizedHandler, limit = 
   if (Array.isArray(response)) {
     return {
       runs: response,
-      totalCount: response.length,
+      totalCount: offset + response.length,
       limit,
       offset,
     };

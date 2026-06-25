@@ -55,7 +55,7 @@ class AdminAnalyticsController(
     fun jobRuns(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam(required = false) jobName: String?,
-        @RequestParam(defaultValue = "50") limit: Int,
+        @RequestParam(defaultValue = "10") limit: Int,
         @RequestParam(defaultValue = "0") offset: Int,
     ): ScheduledJobRunPageResponse =
         admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, limit, offset)
