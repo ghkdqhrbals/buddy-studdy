@@ -39,7 +39,7 @@ const overviewMetrics = [
 ];
 
 const sections: Array<{ key: SectionKey; label: string; metrics: string[] }> = [
-  { key: "overview", label: "Overview", metrics: overviewMetrics },
+  { key: "overview", label: "Home", metrics: overviewMetrics },
   { key: "users", label: "Users", metrics: ["daily_active_users", "weekly_active_learners", "study_streak"] },
   { key: "learning", label: "Learning", metrics: ["question_created_count", "answer_submitted_count", "answer_rate", "question_to_answer_latency"] },
   { key: "notifications", label: "Notifications", metrics: ["push_open_rate"] },
@@ -53,7 +53,7 @@ const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
 const JOB_PAGE_SIZE = 10;
 const sectionPaths: Record<SectionKey, string> = {
-  overview: "/overview",
+  overview: "/home",
   users: "/users",
   learning: "/learning",
   notifications: "/notifications",
@@ -71,7 +71,9 @@ function routeState(): { section: SectionKey; jobOffset: number } {
   const path = window.location.pathname;
   const section: SectionKey = path.startsWith("/operations")
     ? "operations"
-    : sections.find((item) => path === sectionPaths[item.key])?.key ?? "overview";
+    : path === "/overview"
+      ? "overview"
+      : sections.find((item) => path === sectionPaths[item.key])?.key ?? "overview";
   const page = Number(new URLSearchParams(window.location.search).get("page") ?? "1");
   return {
     section,
@@ -240,7 +242,6 @@ export function App() {
                 navigateToSection(section.key);
               }}
             >
-              <span className={`nav-icon ${section.key}`} aria-hidden="true" />
               {section.label}
             </a>
           ))}
@@ -443,25 +444,19 @@ function Sparkline({ item, definition }: { item: AdminMetricSeries; definition: 
 function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 960;
-  const height = 380;
-  const padding = { top: 18, right: 58, bottom: 40, left: 62 };
+  const height = 340;
+  const padding = { top: 18, right: 24, bottom: 48, left: 58 };
   const allDates = series[0]?.points.map((point) => point.date) ?? [];
-  const countSeries = series.filter((item) => metricKind(item.metricKey) !== "rate");
-  const rateSeries = series.filter((item) => metricKind(item.metricKey) === "rate");
-  const countMax = Math.max(1, ...countSeries.flatMap((item) => item.points.map((point) => point.value)));
-  const rateMax = Math.max(100, ...rateSeries.flatMap((item) => item.points.map((point) => point.value)));
+  const yMax = Math.max(1, ...series.flatMap((item) => item.points.map((point) => point.value)));
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const activeIndex = hovered ?? Math.max(0, allDates.length - 1);
   const x = (index: number) => padding.left + (allDates.length <= 1 ? 0 : (index / (allDates.length - 1)) * plotWidth);
-  const yCount = (value: number) => padding.top + (1 - value / countMax) * plotHeight;
-  const yRate = (value: number) => padding.top + (1 - value / rateMax) * plotHeight;
+  const y = (value: number) => padding.top + (1 - value / yMax) * plotHeight;
 
   const linePath = (item: AdminMetricSeries) => {
-    const isRate = metricKind(item.metricKey) === "rate";
     return item.points.map((point, index) => {
-      const y = isRate ? yRate(point.value) : yCount(point.value);
-      return `${index === 0 ? "M" : "L"} ${x(index)} ${y}`;
+      return `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`;
     }).join(" ");
   };
 
@@ -480,18 +475,14 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Metric trend chart">
           {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
             const yy = padding.top + tick * plotHeight;
-            const leftValue = countMax * (1 - tick);
-            const rightValue = rateMax * (1 - tick);
+            const value = yMax * (1 - tick);
             return (
               <g key={tick}>
                 <line x1={padding.left} x2={width - padding.right} y1={yy} y2={yy} className="grid-line" />
-                <text x={padding.left - 12} y={yy + 4} textAnchor="end" className="axis-label">{formatCompact(leftValue)}</text>
-                <text x={width - padding.right + 12} y={yy + 4} className="axis-label">{Math.round(rightValue)}%</text>
+                <text x={padding.left - 12} y={yy + 4} textAnchor="end" className="axis-label">{formatCompact(value)}</text>
               </g>
             );
           })}
-          <text x={padding.left - 8} y={padding.top - 4} textAnchor="end" className="axis-title">Count</text>
-          <text x={width - padding.right + 8} y={padding.top - 4} className="axis-title">Rate</text>
           {series.map((item) => {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             return <path key={item.metricKey} d={linePath(item)} className="line-path" stroke={definition.color} />;
@@ -500,12 +491,14 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
             const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
             const active = item.points[activeIndex];
             if (!active) return null;
-            const y = metricKind(item.metricKey) === "rate" ? yRate(active.value) : yCount(active.value);
-            return <circle key={item.metricKey} cx={x(activeIndex)} cy={y} r={5} className="chart-dot" stroke={definition.color} />;
+            return <circle key={item.metricKey} cx={x(activeIndex)} cy={y(active.value)} r={4} className="chart-dot" stroke={definition.color} />;
           }) : null}
           {hovered !== null ? <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" /> : null}
-          {allDates[0] ? <text x={padding.left} y={height - 10} className="axis-label">{formatShortDate(allDates[0])}</text> : null}
-          {allDates.at(-1) ? <text x={width - padding.right} y={height - 10} textAnchor="end" className="axis-label">{formatShortDate(allDates.at(-1)!)}</text> : null}
+          {xTicks(allDates).map((tick) => (
+            <text key={`${tick.index}-${tick.date}`} x={x(tick.index)} y={height - 18} textAnchor={tick.anchor} className="axis-label">
+              {formatShortDate(tick.date)}
+            </text>
+          ))}
           <rect
             x={padding.left}
             y={padding.top}
@@ -630,6 +623,7 @@ function Operations({
   const hasNext = nextOffset < page.totalCount;
   const currentPage = Math.floor(page.offset / page.limit) + 1;
   const totalPages = Math.max(1, Math.ceil(page.totalCount / page.limit));
+  const pageItems = paginationItems(currentPage, totalPages);
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
@@ -669,29 +663,49 @@ function Operations({
       </div>
       {onPageChange ? (
         <div className="pagination-bar">
-          <span>Page {currentPage} of {totalPages} · Total pages {totalPages}</span>
-          <div>
+          <span>{start}-{end} / {page.totalCount} · {totalPages} pages</span>
+          <div className="pagination-controls">
             <a
-              className={hasPrevious ? "secondary-button compact page-link" : "secondary-button compact page-link disabled"}
+              className={hasPrevious ? "page-button icon-page" : "page-button icon-page disabled"}
               href={sectionHref("operations", previousOffset)}
+              aria-label="Previous page"
               aria-disabled={!hasPrevious}
               onClick={(event) => {
                 event.preventDefault();
                 if (hasPrevious) onPageChange(previousOffset);
               }}
             >
-              Previous
+              ‹
             </a>
+            {pageItems.map((item, index) => (
+              item === "ellipsis" ? (
+                <span className="page-ellipsis" key={`ellipsis-${index}`}>…</span>
+              ) : (
+                <a
+                  key={item}
+                  className={item === currentPage ? "page-button active" : "page-button"}
+                  href={sectionHref("operations", (item - 1) * page.limit)}
+                  aria-current={item === currentPage ? "page" : undefined}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onPageChange((item - 1) * page.limit);
+                  }}
+                >
+                  {item}
+                </a>
+              )
+            ))}
             <a
-              className={hasNext ? "secondary-button compact page-link" : "secondary-button compact page-link disabled"}
+              className={hasNext ? "page-button icon-page" : "page-button icon-page disabled"}
               href={sectionHref("operations", nextOffset)}
+              aria-label="Next page"
               aria-disabled={!hasNext}
               onClick={(event) => {
                 event.preventDefault();
                 if (hasNext) onPageChange(nextOffset);
               }}
             >
-              Next
+              ›
             </a>
           </div>
         </div>
@@ -755,4 +769,34 @@ function formatShortDate(value: string): string {
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("en", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function xTicks(dates: string[]) {
+  if (dates.length === 0) return [];
+  if (dates.length === 1) return [{ index: 0, date: dates[0], anchor: "middle" as const }];
+  const middle = Math.floor((dates.length - 1) / 2);
+  return [
+    { index: 0, date: dates[0], anchor: "start" as const },
+    { index: middle, date: dates[middle], anchor: "middle" as const },
+    { index: dates.length - 1, date: dates[dates.length - 1], anchor: "end" as const },
+  ];
+}
+
+function paginationItems(current: number, total: number): Array<number | "ellipsis"> {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+  if (current <= 3) {
+    pages.add(2);
+    pages.add(3);
+  }
+  if (current >= total - 2) {
+    pages.add(total - 1);
+    pages.add(total - 2);
+  }
+  const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+  return sorted.flatMap((page, index) => {
+    const previous = sorted[index - 1];
+    if (previous && page - previous > 1) return ["ellipsis" as const, page];
+    return [page];
+  });
 }
