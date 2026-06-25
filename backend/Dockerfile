@@ -1,4 +1,4 @@
-FROM ghcr.io/graalvm/native-image-community:24 AS build
+FROM ghcr.io/graalvm/native-image-community:25 AS build
 
 WORKDIR /workspace
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts ./
