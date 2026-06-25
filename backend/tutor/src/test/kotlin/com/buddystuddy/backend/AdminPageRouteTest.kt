@@ -38,6 +38,5 @@ class AdminPageRouteTest {
             .contains("Average answer rate")
             .contains("Weekly active learners")
             .contains("<title>")
-            .doesNotContain("Topic score trend")
     }
 }

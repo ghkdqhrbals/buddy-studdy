@@ -67,12 +67,12 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `topic score trend is not exposed even when persisted`() {
+    fun `unknown admin metrics are not exposed even when persisted`() {
         val day = LocalDate.parse("2026-06-01")
         metrics.upsertDailyMetrics(
             listOf(
                 AdminDailyMetricPoint(day, "daily_active_users", null, 7.0),
-                AdminDailyMetricPoint(day, "topic_score_trend", "Redis", 82.5),
+                AdminDailyMetricPoint(day, "unknown_metric", "Redis", 82.5),
             )
         )
         val token = service.login("admin", "secret").adminToken

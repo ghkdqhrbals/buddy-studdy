@@ -27,6 +27,18 @@ class AdminAnalyticsService(
     private val metrics: AdminAnalyticsMetricPort,
     private val source: AdminAnalyticsSourcePort,
 ) : AdminAnalyticsUseCase {
+    private val exposedMetricKeys = setOf(
+        "daily_active_users",
+        "weekly_active_learners",
+        "question_created_count",
+        "answer_submitted_count",
+        "answer_rate",
+        "push_open_rate",
+        "question_to_answer_latency",
+        "study_streak",
+        "quota_used_count",
+    )
+
     private val key by lazy {
         val seed = properties.auth.jwtSecret.ifBlank { properties.crypto.masterKey.ifBlank { "dev-buddystuddy-admin-secret" } }
         Keys.hmacShaKeyFor(MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8)))
@@ -89,7 +101,7 @@ class AdminAnalyticsService(
 
     private fun response(startDate: LocalDate, endDate: LocalDate, rows: List<AdminDailyMetricPoint>): AdminMetricsResponse {
         val series = rows
-            .filterNot { it.metricKey == "topic_score_trend" }
+            .filter { it.metricKey in exposedMetricKeys }
             .sortedWith(compareBy<AdminDailyMetricPoint> { it.metricKey }.thenBy { it.dimension ?: "" }.thenBy { it.date })
             .groupBy { it.metricKey to it.dimension }
             .map { (key, points) ->
