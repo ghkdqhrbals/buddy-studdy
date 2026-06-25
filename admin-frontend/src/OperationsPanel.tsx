@@ -34,9 +34,7 @@ export function OperationsPanel({
         <h2>Scheduler runs</h2>
         {compact ? (
           <a className="panel-link" href={hrefForPage(1)}>View all</a>
-        ) : (
-          <span>{start}-{end} of {page.totalCount}</span>
-        )}
+        ) : null}
       </div>
       <div className="table-wrap horizontal-scroll">
         <table>

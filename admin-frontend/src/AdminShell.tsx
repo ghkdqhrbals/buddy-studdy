@@ -72,7 +72,6 @@ export function AdminShell({
         <div className="sidebar-footer">
           <div className="account-panel">
             <div className="admin-chip">
-              <span className="admin-avatar">A</span>
               <span>
                 <strong>admin</strong>
                 <small>Administrator</small>
