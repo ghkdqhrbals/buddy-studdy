@@ -21,6 +21,7 @@ class FlywayMigrationConfig {
             .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration").split(",").map { it.trim() }.toTypedArray())
             .baselineOnMigrate(environment.getProperty("spring.flyway.baseline-on-migrate", Boolean::class.java, true))
             .baselineVersion(environment.getProperty("spring.flyway.baseline-version", "0"))
+            .validateOnMigrate(environment.getProperty("spring.flyway.validate-on-migrate", Boolean::class.java, true))
             .load()
 
     @Bean
