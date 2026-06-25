@@ -25,6 +25,7 @@ export function Pagination({
 }: PaginationProps) {
   const [jumpPage, setJumpPage] = useState("");
   const pageItems = paginationItems(currentPage, totalPages);
+  const shouldShowControls = totalPages > 1;
   const submitJump = () => {
     const parsed = Number(jumpPage);
     if (!Number.isFinite(parsed)) return;
@@ -46,76 +47,78 @@ export function Pagination({
         {" "}
         <span>{pageSize} rows/page</span>
       </span>
-      <div className="pagination-controls">
-        <PageAnchor
-          disabled={currentPage <= 1}
-          href={hrefForPage(Math.max(1, currentPage - 1))}
-          iconOnly
-          label="Previous page"
-          title="Previous page"
-          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-        >
-          <Chevron direction="left" />
-        </PageAnchor>
-        {pageItems.map((item, index) => (
-          typeof item === "object" ? (
-            <PageAnchor
-              key={`ellipsis-${index}-${item.page}`}
-              href={hrefForPage(item.page)}
-              label={`Jump to page ${item.page}`}
-              title={`Jump to page ${item.page}`}
-              variant="ellipsis"
-              onClick={() => onPageChange(item.page)}
-            >
-              ...
-            </PageAnchor>
-          ) : (
-            <PageAnchor
-              key={item}
-              active={item === currentPage}
-              href={hrefForPage(item)}
-              label={`Page ${item}`}
-              title={`Page ${item}`}
-              onClick={() => onPageChange(item)}
-            >
-              {item}
-            </PageAnchor>
-          )
-        ))}
-        <PageAnchor
-          disabled={currentPage >= totalPages}
-          href={hrefForPage(Math.min(totalPages, currentPage + 1))}
-          iconOnly
-          label="Next page"
-          title="Next page"
-          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-        >
-          <Chevron direction="right" />
-        </PageAnchor>
-        {totalPages > 7 ? (
-          <form
-            className="page-jump"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitJump();
-            }}
+      {shouldShowControls ? (
+        <div className="pagination-controls">
+          <PageAnchor
+            disabled={currentPage <= 1}
+            href={hrefForPage(Math.max(1, currentPage - 1))}
+            iconOnly
+            label="Previous page"
+            title="Previous page"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
           >
-            <label htmlFor="admin-page-jump">Page</label>
-            <input
-              id="admin-page-jump"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              min={1}
-              max={totalPages}
-              value={jumpPage}
-              placeholder={String(currentPage)}
-              aria-label="Jump to page"
-              onChange={(event) => setJumpPage(event.target.value)}
-            />
-            <button type="submit" className="page-jump-button">Go</button>
-          </form>
-        ) : null}
-      </div>
+            <Chevron direction="left" />
+          </PageAnchor>
+          {pageItems.map((item, index) => (
+            typeof item === "object" ? (
+              <PageAnchor
+                key={`ellipsis-${index}-${item.page}`}
+                href={hrefForPage(item.page)}
+                label={`Jump to page ${item.page}`}
+                title={`Jump to page ${item.page}`}
+                variant="ellipsis"
+                onClick={() => onPageChange(item.page)}
+              >
+                ...
+              </PageAnchor>
+            ) : (
+              <PageAnchor
+                key={item}
+                active={item === currentPage}
+                href={hrefForPage(item)}
+                label={`Page ${item}`}
+                title={`Page ${item}`}
+                onClick={() => onPageChange(item)}
+              >
+                {item}
+              </PageAnchor>
+            )
+          ))}
+          <PageAnchor
+            disabled={currentPage >= totalPages}
+            href={hrefForPage(Math.min(totalPages, currentPage + 1))}
+            iconOnly
+            label="Next page"
+            title="Next page"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+          >
+            <Chevron direction="right" />
+          </PageAnchor>
+          {totalPages > 7 ? (
+            <form
+              className="page-jump"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitJump();
+              }}
+            >
+              <label htmlFor="admin-page-jump">Page</label>
+              <input
+                id="admin-page-jump"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                min={1}
+                max={totalPages}
+                value={jumpPage}
+                placeholder={String(currentPage)}
+                aria-label="Jump to page"
+                onChange={(event) => setJumpPage(event.target.value)}
+              />
+              <button type="submit" className="page-jump-button">Go</button>
+            </form>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
