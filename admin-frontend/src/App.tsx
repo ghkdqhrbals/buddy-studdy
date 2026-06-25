@@ -266,10 +266,10 @@ export function App() {
           <div className="toolbar">
             <DateRange startDate={startDate} endDate={endDate} setStartDate={setStartDate} setEndDate={setEndDate} />
             <button className="secondary-button icon-button square-button" aria-label="Refresh" title="Refresh" onClick={handleRefresh} disabled={loading}>
-              ↻
+              <Icon name="refresh" />
             </button>
             <button className="secondary-button icon-button square-button" aria-label="Toggle theme" title="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-              {theme === "light" ? "☾" : "☀"}
+              <Icon name={theme === "light" ? "moon" : "sun"} />
             </button>
           </div>
         </header>
@@ -324,7 +324,7 @@ function LoginScreen({
         <div className="login-head">
           <div className="login-mark">B</div>
           <button type="button" className="secondary-button square-button" aria-label="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-            {theme === "light" ? "☾" : "☀"}
+            <Icon name={theme === "light" ? "moon" : "sun"} />
           </button>
         </div>
         <h1>Admin console</h1>
@@ -694,7 +694,7 @@ function Operations({
                 if (hasPrevious) onPageChange(previousOffset);
               }}
             >
-              ‹
+              <Icon name="chevron-left" />
             </a>
             {pageItems.map((item, index) => (
               item === "ellipsis" ? (
@@ -724,7 +724,7 @@ function Operations({
                 if (hasNext) onPageChange(nextOffset);
               }}
             >
-              ›
+              <Icon name="chevron-right" />
             </a>
           </div>
         </div>
@@ -738,6 +738,37 @@ function EmptyState({ title, compact = false }: { title: string; compact?: boole
     <div className={compact ? "empty-state compact-empty" : "empty-state"}>
       <h2>{title}</h2>
     </div>
+  );
+}
+
+function Icon({ name }: { name: "refresh" | "moon" | "sun" | "chevron-left" | "chevron-right" }) {
+  if (name === "refresh") {
+    return (
+      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M15.4 6.2A6 6 0 1 0 16 10" />
+        <path d="M15.5 3.8v3h-3" />
+      </svg>
+    );
+  }
+  if (name === "moon") {
+    return (
+      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M14.7 13.7A6.7 6.7 0 0 1 6.3 5.3 6.9 6.9 0 1 0 14.7 13.7Z" />
+      </svg>
+    );
+  }
+  if (name === "sun") {
+    return (
+      <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="3.3" />
+        <path d="M10 1.8v2M10 16.2v2M1.8 10h2M16.2 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M15.8 4.2l-1.4 1.4M5.6 14.4l-1.4 1.4" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path d={name === "chevron-left" ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"} />
+    </svg>
   );
 }
 

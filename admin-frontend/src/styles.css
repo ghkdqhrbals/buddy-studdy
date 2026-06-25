@@ -335,6 +335,16 @@ h2 {
   gap: 8px;
 }
 
+.ui-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .compact {
   min-height: 26px;
   padding: 0 8px;
@@ -792,8 +802,7 @@ h2 {
 }
 
 .icon-page {
-  font-size: 18px;
-  line-height: 1;
+  color: var(--text);
 }
 
 .page-ellipsis {
