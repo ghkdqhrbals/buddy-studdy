@@ -455,7 +455,7 @@ function MetricCard({ item }: { item: AdminMetricSeries }) {
   return (
     <article className="metric-card">
       <div className="metric-title">
-        <span>{definition.label}</span>
+        <span title={definition.label}>{definition.shortLabel}</span>
         <button className="info-button" aria-label={`${definition.label} details`}>
           i
           <span role="tooltip">{definition.description}</span>
@@ -490,9 +490,9 @@ function Sparkline({ item, definition }: { item: AdminMetricSeries; definition: 
 
 function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const width = 960;
-  const height = 320;
-  const padding = { top: 16, right: 22, bottom: 42, left: 46 };
+  const width = 720;
+  const height = 260;
+  const padding = { top: 12, right: 18, bottom: 34, left: 42 };
   const allDates = series[0]?.points.map((point) => point.date) ?? [];
   const seriesMax = useMemo(
     () => new Map(series.map((item) => [item.metricKey, Math.max(1, ...item.points.map((point) => point.value))])),
@@ -525,7 +525,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
   return (
     <div className="chart-wrap horizontal-scroll">
       <div className="chart-canvas">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Metric trend chart">
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Metric trend chart">
           {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
             const yy = padding.top + tick * plotHeight;
             const value = Math.round((1 - tick) * 100);
@@ -548,7 +548,7 @@ function MultiLineChart({ series }: { series: AdminMetricSeries[] }) {
           }) : null}
           {hovered !== null ? <line x1={x(activeIndex)} x2={x(activeIndex)} y1={padding.top} y2={height - padding.bottom} className="hover-line" /> : null}
           {xTicks(allDates).map((tick) => (
-            <text key={`${tick.index}-${tick.date}`} x={x(tick.index)} y={height - 18} textAnchor={tick.anchor} className="axis-label">
+            <text key={`${tick.index}-${tick.date}`} x={x(tick.index)} y={height - 12} textAnchor={tick.anchor} className="axis-label">
               {formatShortDate(tick.date)}
             </text>
           ))}
