@@ -35,20 +35,28 @@ export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenP
     <div className="login-shell">
       <form className="login-card" onSubmit={handleSubmit}>
         <div className="login-head">
-          <div className="login-mark">B</div>
+          <div className="login-brand">
+            <div className="login-mark">B</div>
+            <div>
+              <strong>BuddyStuddy</strong>
+              <span>Admin</span>
+            </div>
+          </div>
           <button type="button" className="secondary-button square-button" aria-label="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
             <Icon name={theme === "light" ? "moon" : "sun"} />
           </button>
         </div>
-        <h1>Admin console</h1>
-        <p>BuddyStuddy operations</p>
+        <div className="login-copy">
+          <h1>Sign in</h1>
+          <p>Monitor metrics, jobs, and operational health.</p>
+        </div>
         <label>
-          ID
-          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+          <span>ID</span>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
         </label>
         <label>
-          Password
-          <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
+          <span>Password</span>
+          <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required />
         </label>
         {loginError ? <div className="form-error">{loginError}</div> : null}
         <button className="primary-button full" disabled={busy}>

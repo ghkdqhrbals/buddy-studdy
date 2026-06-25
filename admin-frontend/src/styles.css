@@ -1126,13 +1126,13 @@ td small {
   display: grid;
   place-items: center;
   min-height: 100vh;
-  padding: 28px;
+  padding: 24px;
   background: var(--bg);
 }
 
 .login-card {
-  width: min(360px, 100%);
-  padding: 20px;
+  width: min(340px, 100%);
+  padding: 18px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1144,38 +1144,66 @@ td small {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
 }
 
 .login-card h1 {
-  margin: 18px 0 4px;
+  margin: 0;
   color: var(--text);
-  font-size: 20px;
+  font-size: 19px;
   line-height: 1.15;
 }
 
 .login-card p {
-  margin: 0 0 18px;
+  margin: 5px 0 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.login-brand strong,
+.login-brand span {
+  display: block;
+}
+
+.login-brand strong {
+  font-size: 13px;
+}
+
+.login-brand span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.login-copy {
+  margin: 18px 0 16px;
 }
 
 .login-card label {
   display: grid;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 5px;
+  margin-bottom: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .login-card input {
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 9px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   outline: none;
+  font-size: 12px;
 }
 
 .login-card input:focus {
@@ -1183,7 +1211,7 @@ td small {
 }
 
 .login-card .primary-button {
-  min-height: 34px;
+  min-height: 32px;
   margin-top: 0;
 }
 
