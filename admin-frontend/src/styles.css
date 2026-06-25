@@ -821,6 +821,10 @@ h2 {
   font-size: 11px;
 }
 
+.page-jump label {
+  line-height: 1;
+}
+
 .page-jump input {
   width: 46px;
   height: 28px;
@@ -841,6 +845,10 @@ h2 {
   border-radius: 5px;
   font-size: 11px;
   font-weight: 650;
+}
+
+.page-jump-button:hover {
+  background: var(--surface-2);
 }
 
 table {

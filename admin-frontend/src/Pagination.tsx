@@ -73,9 +73,16 @@ export function Pagination({
           <Chevron direction="right" />
         </PageAnchor>
         {totalPages > 7 ? (
-          <label className="page-jump">
-            <span>Page</span>
+          <form
+            className="page-jump"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitJump();
+            }}
+          >
+            <label htmlFor="admin-page-jump">Page</label>
             <input
+              id="admin-page-jump"
               inputMode="numeric"
               pattern="[0-9]*"
               min={1}
@@ -84,12 +91,9 @@ export function Pagination({
               placeholder={String(currentPage)}
               aria-label="Jump to page"
               onChange={(event) => setJumpPage(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submitJump();
-              }}
             />
-            <button type="button" className="page-jump-button" onClick={submitJump}>Go</button>
-          </label>
+            <button type="submit" className="page-jump-button">Go</button>
+          </form>
         ) : null}
       </div>
     </div>
