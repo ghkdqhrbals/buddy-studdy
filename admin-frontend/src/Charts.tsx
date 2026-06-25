@@ -50,8 +50,8 @@ function CombinedTrendChart({
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 760;
-  const height = 188;
-  const padding = { top: 14, right: 20, bottom: 26, left: 44 };
+  const height = 178;
+  const padding = { top: 12, right: 18, bottom: 24, left: 42 };
   const dates = allDates(series);
   const pointMaps = series.map((item) => new Map(item.points.map((point) => [point.date, point.value])));
   const values = series.flatMap((item) => item.points.map((point) => point.value));
@@ -80,7 +80,7 @@ function CombinedTrendChart({
         ))}
       </div>
       <div className="trend-canvas combined-canvas">
-        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Metric trend chart">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Metric trend chart">
           {scale.ticks.map((tick) => {
             const yy = y(tick);
             return (
@@ -146,8 +146,8 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
   const points = item.points;
   const width = 420;
-  const height = 132;
-  const padding = { top: 12, right: 18, bottom: 22, left: 42 };
+  const height = 124;
+  const padding = { top: 10, right: 16, bottom: 22, left: 40 };
   const values = points.map((point) => point.value);
   const rawMax = Math.max(1, ...values);
   const rawMin = Math.min(0, ...values);
@@ -175,7 +175,7 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
         <strong>{formatMetric(definition, points.at(-1)?.value ?? 0)}</strong>
       </div>
       <div className="trend-canvas">
-        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${definition.label} trend chart`}>
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${definition.label} trend chart`}>
           {scale.ticks.map((tick) => {
             const yy = y(tick);
             return (

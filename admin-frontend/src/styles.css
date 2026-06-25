@@ -65,7 +65,7 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 164px minmax(0, 1fr);
+  grid-template-columns: 152px minmax(0, 1fr);
   min-height: 100vh;
   min-width: 0;
 }
@@ -82,9 +82,9 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 6px 14px;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 5px 12px;
   border-radius: var(--radius);
 }
 
@@ -95,13 +95,13 @@ button {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius);
   color: white;
   background: #111827;
   font-weight: 900;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .login-mark {
@@ -121,13 +121,13 @@ button {
 }
 
 .brand strong {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .brand span {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .nav-list {
@@ -139,14 +139,14 @@ button {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 28px;
+  padding: 0 7px;
   border: 0;
   border-radius: var(--radius);
   color: var(--text);
   background: transparent;
   text-align: left;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -253,8 +253,8 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 50px;
-  padding: 8px 14px 8px 18px;
+  height: 46px;
+  padding: 7px 12px 7px 14px;
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
@@ -262,7 +262,7 @@ button {
 
 .topbar-title h1 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 750;
   letter-spacing: 0;
 }
@@ -289,8 +289,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 28px;
+  padding: 0 7px;
   color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -309,7 +309,7 @@ h2 {
 .primary-button,
 .secondary-button,
 .ghost-button {
-  min-height: 30px;
+  min-height: 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0 10px;
@@ -319,7 +319,7 @@ h2 {
 }
 
 .square-button {
-  width: 30px;
+  width: 28px;
   padding: 0;
 }
 
@@ -357,8 +357,8 @@ h2 {
 }
 
 .ui-icon {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -681,10 +681,10 @@ h2 {
   position: absolute;
   top: 48%;
   z-index: 2;
-  min-width: 142px;
-  max-width: 200px;
-  padding: 8px 9px;
-  border-radius: 7px;
+  min-width: 132px;
+  max-width: 192px;
+  padding: 7px 8px;
+  border-radius: var(--radius);
   color: #f8fafc;
   background: #111827;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.24);
@@ -699,17 +699,17 @@ h2 {
 
 .chart-tooltip strong {
   display: block;
-  margin-bottom: 6px;
-  font-size: 12px;
+  margin-bottom: 5px;
+  font-size: 11px;
 }
 
 .chart-tooltip span {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.6;
+  gap: 5px;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .chart-tooltip i,
@@ -726,14 +726,14 @@ h2 {
 .chart-tooltip small {
   overflow: hidden;
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chart-tooltip em {
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -744,7 +744,7 @@ h2 {
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 2px;
-  padding-left: 50px;
+  padding-left: 44px;
   color: var(--text);
   font-size: 11px;
 }
@@ -1105,14 +1105,14 @@ td small {
   align-content: center;
   gap: 6px;
   place-items: center;
-  min-height: 148px;
-  padding: 18px;
+  min-height: 128px;
+  padding: 14px;
   text-align: center;
 }
 
 .compact-empty {
-  min-height: 86px;
-  padding: 12px;
+  min-height: 72px;
+  padding: 10px;
 }
 
 .empty-state h2 {
@@ -1243,7 +1243,7 @@ td small {
   }
 
   .app-shell {
-    grid-template-columns: 156px minmax(0, 1fr);
+    grid-template-columns: 148px minmax(0, 1fr);
   }
 
   .dashboard-grid {
@@ -1262,7 +1262,7 @@ td small {
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
     align-content: start;
   }
 
@@ -1270,14 +1270,13 @@ td small {
     z-index: 8;
     align-self: start;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto;
     align-items: center;
-    row-gap: 7px;
-    column-gap: 8px;
+    gap: 6px;
     height: auto;
     min-width: 0;
-    padding: 8px;
+    padding: 6px 8px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
@@ -1288,16 +1287,17 @@ td small {
     padding: 0;
   }
 
+  .brand strong,
   .brand span,
   .admin-chip small {
     display: none;
   }
 
   .nav-list {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    grid-column: 2;
+    grid-row: 1;
     display: flex;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
@@ -1310,14 +1310,14 @@ td small {
   .nav-item {
     flex: 0 0 auto;
     width: auto;
-    min-height: 28px;
-    padding: 0 7px;
+    min-height: 26px;
+    padding: 0 6px;
     font-size: 11px;
     white-space: nowrap;
   }
 
   .sidebar-footer {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
     position: static;
     display: flex;
@@ -1339,17 +1339,18 @@ td small {
 
   .logout-button {
     width: auto;
-    min-height: 28px;
-    padding: 0 7px;
+    min-height: 24px;
+    padding: 0 4px;
     background: transparent;
+    font-size: 9px;
   }
 
   .topbar {
     top: 0;
     height: auto;
-    min-height: 50px;
+    min-height: 44px;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 7px 8px;
   }
 
   .toolbar {
