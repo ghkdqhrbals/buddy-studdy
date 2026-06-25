@@ -38,6 +38,13 @@ const overviewMetrics = [
   "study_streak",
 ];
 
+const overviewTrendMetrics = [
+  "daily_active_users",
+  "weekly_active_learners",
+  "question_created_count",
+  "answer_submitted_count",
+];
+
 const sections: Array<{ key: SectionKey; label: string; metrics: string[] }> = [
   { key: "overview", label: "Home", metrics: overviewMetrics },
   { key: "users", label: "Users", metrics: ["daily_active_users", "weekly_active_learners", "study_streak"] },
@@ -410,7 +417,8 @@ function DateRange({
 function MetricsDashboard({ series, metricKeys, jobs }: { series: AdminMetricSeries[]; metricKeys: string[]; jobs: ScheduledJobRun[] }) {
   const seriesByKey = useMemo(() => new Map(series.map((item) => [item.metricKey, item])), [series]);
   const featured = metricKeys.map((key) => seriesByKey.get(key)).filter(Boolean) as AdminMetricSeries[];
-  const chartSeries = featured.filter((item) => item.points.length > 0);
+  const trendKeys = metricKeys.length > 4 ? overviewTrendMetrics : metricKeys;
+  const chartSeries = trendKeys.map((key) => seriesByKey.get(key)).filter((item): item is AdminMetricSeries => Boolean(item && item.points.length > 0));
   const failedJobs = jobs.filter((job) => job.status === "FAILED").slice(0, 3);
 
   if (featured.length === 0) {
