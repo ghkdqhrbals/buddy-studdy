@@ -816,6 +816,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 8px;
   color: var(--muted);
@@ -825,6 +826,7 @@ h2 {
 .pagination-summary {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 220px;
   gap: 6px;
   min-width: 0;
 }
@@ -837,9 +839,11 @@ h2 {
 .pagination-controls {
   display: flex;
   align-items: center;
+  flex: 0 1 auto;
   gap: 2px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .page-button {
@@ -1318,5 +1322,27 @@ td small {
     width: 62px;
     overflow: visible;
     text-overflow: clip;
+  }
+
+  .pagination-bar {
+    align-items: flex-start;
+  }
+
+  .pagination-summary {
+    flex-basis: 100%;
+  }
+
+  .pagination-controls {
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .page-button,
+  .page-jump {
+    flex: 0 0 auto;
   }
 }
