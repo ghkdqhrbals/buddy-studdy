@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-
-type PageItem = number | { type: "ellipsis"; page: number };
+import { paginationItems } from "./paginationModel";
 
 type PaginationProps = {
   start: number;
@@ -62,6 +61,7 @@ export function Pagination({
               key={`ellipsis-${index}-${item.page}`}
               href={hrefForPage(item.page)}
               label={`Jump to page ${item.page}`}
+              title={`Jump to page ${item.page}`}
               variant="ellipsis"
               onClick={() => onPageChange(item.page)}
             >
@@ -119,6 +119,7 @@ function PageAnchor({
   disabled = false,
   href,
   label,
+  title,
   variant,
   onClick,
   children,
@@ -127,6 +128,7 @@ function PageAnchor({
   disabled?: boolean;
   href: string;
   label?: string;
+  title?: string;
   variant?: "ellipsis";
   onClick: () => void;
   children: ReactNode;
@@ -142,6 +144,7 @@ function PageAnchor({
       ].filter(Boolean).join(" ")}
       href={href}
       aria-label={label}
+      title={title}
       aria-current={active ? "page" : undefined}
       aria-disabled={disabled || undefined}
       onClick={(event) => {
@@ -169,28 +172,4 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 
 function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
-}
-
-export function paginationItems(current: number, total: number): PageItem[] {
-  if (total <= 11) return Array.from({ length: total }, (_, index) => index + 1);
-  const safeCurrent = Math.max(1, Math.min(total, current));
-  const pages = new Set<number>([
-    1,
-    2,
-    3,
-    safeCurrent - 1,
-    safeCurrent,
-    safeCurrent + 1,
-    total - 2,
-    total - 1,
-    total,
-  ]);
-  const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
-  return sorted.flatMap((page, index) => {
-    const previous = sorted[index - 1];
-    if (previous && page - previous > 1) {
-      return [{ type: "ellipsis" as const, page: Math.floor((previous + page) / 2) }, page];
-    }
-    return [page];
-  });
 }
