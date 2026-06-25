@@ -73,16 +73,18 @@ export function AdminShell({
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="account-panel">
-            <div className="admin-chip">
+          <details className="account-menu">
+            <summary className="admin-chip" title="Admin account">
               <span className="account-dot" aria-hidden="true" />
               <span>
                 <strong>admin</strong>
                 <small>Administrator</small>
               </span>
+            </summary>
+            <div className="account-popover">
+              <button className="logout-button" title="Sign out" onClick={onLogout}>Sign out</button>
             </div>
-            <button className="logout-button" title="Sign out" onClick={onLogout}>Sign out</button>
-          </div>
+          </details>
         </div>
       </aside>
 

@@ -167,20 +167,67 @@ button {
   padding-top: 8px;
 }
 
-.account-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.account-menu {
+  position: relative;
   min-width: 0;
+}
+
+.account-menu[open] .admin-chip {
+  background: var(--surface-2);
 }
 
 .admin-chip {
   display: flex;
   align-items: center;
   gap: 7px;
+  min-height: 26px;
+  padding: 0 5px;
+  border-radius: var(--radius);
   color: var(--text);
+  cursor: pointer;
+  list-style: none;
+  outline: none;
   min-width: 0;
+}
+
+.admin-chip::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  opacity: 0.55;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.account-menu[open] .admin-chip::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.admin-chip::-webkit-details-marker {
+  display: none;
+}
+
+.admin-chip:hover {
+  background: var(--surface-2);
+}
+
+.admin-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.account-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
 }
 
 .account-dot {
@@ -213,23 +260,22 @@ button {
 }
 
 .logout-button {
-  flex: 0 0 auto;
-  width: auto;
-  min-height: 22px;
-  border: 1px solid transparent;
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  border: 0;
   border-radius: var(--radius);
-  color: var(--muted);
+  color: var(--text);
   background: transparent;
-  padding: 0 2px;
-  font-size: 10px;
+  padding: 0 6px;
+  font-size: 11px;
   font-weight: 650;
-  text-align: center;
+  text-align: left;
 }
 
 .logout-button:hover {
   color: var(--danger);
-  border-color: transparent;
-  background: transparent;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .page-link {
@@ -1326,22 +1372,24 @@ td small {
     border-top: 0;
   }
 
-  .account-panel {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
   .admin-chip {
     gap: 6px;
+    min-height: 26px;
+    padding: 0 4px;
+  }
+
+  .account-popover {
+    left: auto;
+    right: 0;
+    bottom: auto;
+    top: calc(100% + 6px);
+    width: 86px;
   }
 
   .logout-button {
-    width: auto;
-    min-height: 24px;
-    padding: 0 4px;
-    background: transparent;
-    font-size: 9px;
+    min-height: 26px;
+    padding: 0 6px;
+    font-size: 10px;
   }
 
   .topbar {
