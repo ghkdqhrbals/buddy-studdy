@@ -646,6 +646,7 @@ function Operations({
   const end = Math.min(page.offset + jobs.length, page.totalCount);
   const currentPage = Math.floor(page.offset / page.limit) + 1;
   const totalPages = Math.max(1, Math.ceil(page.totalCount / page.limit));
+  const showActions = !compact && jobs.some((job) => job.status === "FAILED");
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
@@ -666,7 +667,7 @@ function Operations({
               <th className="result-col">Result</th>
               <th className="duration-col">Duration</th>
               <th className="retry-col">Retry of</th>
-              <th className="action-col"></th>
+              {showActions ? <th className="action-col">Action</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -681,11 +682,13 @@ function Operations({
                 <td className="result-cell" title={job.summary ?? job.status}>{job.summary ?? job.status}</td>
                 <td>{formatDurationMs(job.durationMs)}</td>
                 <td>{job.retryOfRunId ? `#${job.retryOfRunId}` : "-"}</td>
-                <td className="action-cell">
-                  {job.status === "FAILED" ? (
-                    <button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button>
-                  ) : null}
-                </td>
+                {showActions ? (
+                  <td className="action-cell">
+                    {job.status === "FAILED" ? (
+                      <button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
