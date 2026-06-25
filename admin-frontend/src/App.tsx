@@ -11,7 +11,8 @@ const today = new Date();
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
-const LOGIN_PATH = "/login";
+const basePath = normalizeBasePath(import.meta.env.BASE_URL);
+const LOGIN_PATH = withBasePath("/login");
 const legacySectionPaths: Partial<Record<SectionKey, string[]>> = {
   overview: ["/overview"],
   users: ["/users"],
@@ -31,7 +32,7 @@ function isIsoDate(value: string | null): value is string {
 }
 
 function routeState(): { section: SectionKey; jobOffset: number; startDate: string; endDate: string } {
-  const path = window.location.pathname;
+  const path = stripBasePath(window.location.pathname);
   const params = new URLSearchParams(window.location.search);
   const section: SectionKey = path.startsWith(sectionPaths.operations)
     ? "operations"
@@ -46,6 +47,21 @@ function routeState(): { section: SectionKey; jobOffset: number; startDate: stri
   };
 }
 
+function normalizeBasePath(value: string): string {
+  const trimmed = value.replace(/\/+$/, "");
+  return trimmed === "" ? "" : trimmed;
+}
+
+function stripBasePath(path: string): string {
+  if (!basePath || path === basePath) return path === basePath ? "/" : path;
+  return path.startsWith(`${basePath}/`) ? path.slice(basePath.length) : path;
+}
+
+function withBasePath(path: string): string {
+  if (!basePath) return path;
+  return path === "/" ? `${basePath}/` : `${basePath}${path}`;
+}
+
 function sectionHref(section: SectionKey, offset = 0, range?: { startDate: string; endDate: string }): string {
   const params = new URLSearchParams();
   if (section !== "operations") {
@@ -54,10 +70,10 @@ function sectionHref(section: SectionKey, offset = 0, range?: { startDate: strin
       params.set("endDate", range.endDate);
     }
     const query = params.toString();
-    return `${sectionPaths[section]}${query ? `?${query}` : ""}`;
+    return `${withBasePath(sectionPaths[section])}${query ? `?${query}` : ""}`;
   }
   const page = Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1;
-  return page <= 1 ? sectionPaths.operations : `${sectionPaths.operations}/page/${page}`;
+  return page <= 1 ? withBasePath(sectionPaths.operations) : withBasePath(`${sectionPaths.operations}/page/${page}`);
 }
 
 export function App() {

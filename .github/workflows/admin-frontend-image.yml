@@ -1,0 +1,261 @@
+name: Build Admin Frontend Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag. Leave empty to use the commit SHA."
+        required: false
+        type: string
+      dispatch_deploy:
+        description: "Notify the deploy repository after pushing the image."
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/buddy-studdy-admin-frontend
+  DEPLOY_REPO: ghkdqhrbals/personal-deploy
+
+jobs:
+  build:
+    name: Build and Publish
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    outputs:
+      image_ref: ${{ steps.resolve.outputs.image_ref }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "${TAG}" ]; then
+            TAG="${GITHUB_SHA}"
+          fi
+          echo "IMAGE_TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "IMAGE_REF=${IMAGE_NAME}:${TAG}" >> "${GITHUB_ENV}"
+          echo "image_tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "image_ref=${IMAGE_NAME}:${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push admin frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./admin-frontend
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            VITE_BASE_PATH=/admin/
+          tags: |
+            ${{ env.IMAGE_REF }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  notify:
+    name: Notify Deploy Repo
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ inputs.dispatch_deploy == true }}
+    outputs:
+      correlation_id: ${{ steps.dispatch.outputs.correlation_id }}
+      dispatched_at: ${{ steps.dispatch.outputs.dispatched_at }}
+
+    steps:
+      - name: Dispatch personal-deploy
+        id: dispatch
+        env:
+          DEPLOY_REPO_DISPATCH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          IMAGE_REF: ${{ needs.build.outputs.image_ref }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          EVENT_TYPE: admin-frontend-image-published
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_REPO_DISPATCH_TOKEN}" ]; then
+            echo "Missing DEPLOY_REPO_DISPATCH_TOKEN secret." >&2
+            exit 1
+          fi
+
+          correlation_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${IMAGE_TAG}"
+          dispatched_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          payload="$(jq -n \
+            --arg image "${IMAGE_REF}" \
+            --arg sha "${GITHUB_SHA}" \
+            --arg image_tag "${IMAGE_TAG}" \
+            --arg source_repo "${GITHUB_REPOSITORY}" \
+            --arg source_run_id "${GITHUB_RUN_ID}" \
+            --arg source_run_attempt "${GITHUB_RUN_ATTEMPT}" \
+            --arg correlation_id "${correlation_id}" \
+            --argjson deploy_enabled true \
+            '{
+              event_type: "admin-frontend-image-published",
+              client_payload: {
+                image: $image,
+                sha: $sha,
+                image_tag: $image_tag,
+                source_repo: $source_repo,
+                source_run_id: $source_run_id,
+                source_run_attempt: $source_run_attempt,
+                correlation_id: $correlation_id,
+                deploy_enabled: $deploy_enabled
+              }
+            }')"
+
+          echo "Dispatch target: ${DEPLOY_REPO}"
+          echo "Dispatch event: ${EVENT_TYPE}"
+          echo "Dispatch image: ${IMAGE_REF}"
+          echo "Dispatch correlation id: ${correlation_id}"
+          echo "Dispatch timestamp: ${dispatched_at}"
+          echo "Dispatch payload:"
+          echo "${payload}" | jq .
+
+          response_file="$(mktemp)"
+          status="$(
+            curl -sS \
+              -o "${response_file}" \
+              -w "%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${DEPLOY_REPO_DISPATCH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${DEPLOY_REPO}/dispatches" \
+              -d "${payload}"
+          )"
+
+          echo "Dispatch HTTP status: ${status}"
+          if [ -s "${response_file}" ]; then
+            echo "Dispatch response body:"
+            cat "${response_file}"
+          else
+            echo "Dispatch response body: <empty>"
+          fi
+
+          if [ "${status}" -lt 200 ] || [ "${status}" -ge 300 ]; then
+            exit 1
+          fi
+
+          echo "correlation_id=${correlation_id}" >> "${GITHUB_OUTPUT}"
+          echo "dispatched_at=${dispatched_at}" >> "${GITHUB_OUTPUT}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Deploy Repo Notification"
+            echo ""
+            echo "- Target: \`${DEPLOY_REPO}\`"
+            echo "- Event: \`admin-frontend-image-published\`"
+            echo "- Image: \`${{ needs.build.outputs.image_ref }}\`"
+            echo "- Source SHA: \`${GITHUB_SHA}\`"
+            echo "- Correlation ID: \`${{ steps.dispatch.outputs.correlation_id }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  watch:
+    name: Watch Deploy Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - build
+      - notify
+    if: ${{ inputs.dispatch_deploy == true }}
+
+    steps:
+      - name: Wait for deploy workflow run
+        id: deploy_run
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          IMAGE_REF: ${{ needs.build.outputs.image_ref }}
+          DISPATCHED_AT: ${{ needs.notify.outputs.dispatched_at }}
+          CORRELATION_ID: ${{ needs.notify.outputs.correlation_id }}
+          DEPLOY_WORKFLOW_NAME: Deploy BuddyStuddy Admin Frontend
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for deploy repo workflow..."
+          echo "Target repo: ${DEPLOY_REPO}"
+          echo "Workflow: ${DEPLOY_WORKFLOW_NAME}"
+          echo "Image: ${IMAGE_REF}"
+          echo "Correlation ID: ${CORRELATION_ID}"
+          echo "Dispatched at: ${DISPATCHED_AT}"
+
+          run_id=""
+          run_url=""
+          for attempt in $(seq 1 60); do
+            runs="$(
+              gh run list \
+                -R "${DEPLOY_REPO}" \
+                --workflow "${DEPLOY_WORKFLOW_NAME}" \
+                --event repository_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt,displayTitle,status,conclusion,url
+            )"
+            match="$(
+              echo "${runs}" | jq -r \
+                --arg dispatched_at "${DISPATCHED_AT}" \
+                '[
+                  .[]
+                  | select(.createdAt >= $dispatched_at)
+                ]
+                | sort_by(.createdAt)
+                | reverse
+                | first // empty'
+            )"
+
+            if [ -n "${match}" ] && [ "${match}" != "null" ]; then
+              run_id="$(echo "${match}" | jq -r '.databaseId')"
+              run_url="$(echo "${match}" | jq -r '.url')"
+              echo "Found deploy run: ${run_id}"
+              echo "Deploy run URL: ${run_url}"
+              break
+            fi
+
+            echo "Deploy run not visible yet. attempt=${attempt}/60"
+            sleep 5
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "Could not find deploy repo workflow run after dispatch." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_url=${run_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Watch deploy workflow
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          DEPLOY_RUN_ID: ${{ steps.deploy_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run watch -R "${DEPLOY_REPO}" "${DEPLOY_RUN_ID}" --exit-status
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy Result"
+            echo ""
+            echo "- Target: \`${DEPLOY_REPO}\`"
+            echo "- Deploy run: ${{ steps.deploy_run.outputs.run_url || '<not found>' }}"
+            echo "- Image: \`${{ needs.build.outputs.image_ref }}\`"
+            echo "- Correlation ID: \`${{ needs.notify.outputs.correlation_id }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
