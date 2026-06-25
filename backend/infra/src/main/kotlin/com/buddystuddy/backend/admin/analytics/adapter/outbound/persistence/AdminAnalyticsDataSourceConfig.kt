@@ -15,6 +15,8 @@ class AdminAnalyticsDataSourceConfig {
     fun adminAnalyticsJdbcTemplate(
         properties: BuddyStuddyProperties,
         @Value("\${spring.datasource.url:}") primaryDataSourceUrl: String,
+        @Value("\${spring.datasource.username:}") primaryDataSourceUsername: String,
+        @Value("\${spring.datasource.password:}") primaryDataSourcePassword: String,
         @Qualifier("dataSource") primaryDataSource: DataSource,
     ): NamedParameterJdbcTemplate {
         val datasource = properties.analytics.datasource
@@ -26,8 +28,8 @@ class AdminAnalyticsDataSourceConfig {
         }
         val builder = DataSourceBuilder.create()
             .url(analyticsUrl)
-            .username(datasource.username)
-            .password(datasource.password)
+            .username(datasource.username.ifBlank { primaryDataSourceUsername })
+            .password(datasource.password.ifBlank { primaryDataSourcePassword })
         if (datasource.driverClassName.isNotBlank()) {
             builder.driverClassName(datasource.driverClassName)
         }

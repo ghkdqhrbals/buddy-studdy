@@ -6,6 +6,7 @@ import java.time.LocalDate
 
 interface AdminAnalyticsUseCase {
     fun login(username: String, password: String): AdminLoginResponse
+    fun validate(adminToken: String)
     fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
     fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
 }

@@ -94,6 +94,15 @@
     .x-label { fill: #8c8f99; font-size: 12px; }
     .line { fill: none; stroke: #168a3a; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
     .dot { fill: #168a3a; }
+    .table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .table th, .table td { padding: 12px 10px; border-bottom: 1px solid #eceef2; text-align: left; vertical-align: top; }
+    .table th { color: #71717a; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 850; }
+    .badge.SUCCESS { color: #116329; background: #dafbe1; }
+    .badge.FAILED { color: #a40e26; background: #ffebe9; }
+    .badge.RUNNING { color: #0969da; background: #ddf4ff; }
+    .badge.SKIPPED { color: #6e7781; background: #f1f2f4; }
+    .small-button { background: #ffffff; color: #27272a; border: 1px solid #d8dbe2; border-radius: 10px; padding: 8px 10px; font-size: 13px; font-weight: 800; }
     .muted { color: #71717a; }
     .error { color: #d1242f; min-height: 22px; }
     .hidden { display: none !important; }
@@ -190,6 +199,13 @@ const categories = [
     title: "Quota",
     description: "시스템 API 사용량과 무료 질문 사용량을 봅니다.",
     metrics: ["quota_used_count"]
+  },
+  {
+    id: "operations",
+    title: "Operations",
+    description: "스케줄러 실행 성공, 실패, 재실행 상태를 봅니다.",
+    metrics: [],
+    jobs: true
   }
 ];
 let token = localStorage.getItem("buddystuddy.adminToken") || "";
@@ -319,6 +335,11 @@ async function reload() {
   pageTitle.textContent = activeMetricKey ? metricLabels[activeMetricKey] : category.title;
   pageSubtitle.textContent = activeMetricKey ? category.description : category.description;
   status.textContent = "Loading...";
+  if (category.jobs) {
+    activeMetricKey = null;
+    await reloadJobs();
+    return;
+  }
   const query = activeMetricKeys().map(key => `metricKey=${encodeURIComponent(key)}`).join("&");
   const url = `/api/v1/admin/analytics/metrics?startDate=${startDate.value}&endDate=${endDate.value}&${query}`;
   const res = await fetch(url, { headers: authHeaders() });
@@ -334,6 +355,51 @@ async function render(data) {
     return `<div class="card"><div class="label">${metricLabels[key] || key}</div><div class="value">${formatValue(key, point?.value || 0)}</div><div class="hint">${pointRange(key, point)}</div></div>`;
   }).join("");
   charts.innerHTML = data.series.map(series => chart(series)).join("");
+}
+async function reloadJobs() {
+  const res = await fetch("/api/v1/admin/jobs/runs?limit=50", { headers: authHeaders() });
+  if (!res.ok) throw new Error("job load failed");
+  status.textContent = "";
+  cards.innerHTML = "";
+  const rows = await res.json();
+  charts.innerHTML = `<section class="panel">
+    <div class="chart-title"><strong>Scheduled jobs</strong><span class="muted">${rows.length} recent runs</span></div>
+    <table class="table">
+      <thead><tr><th>Job</th><th>Status</th><th>Trigger</th><th>Started</th><th>Duration</th><th>Summary</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(row => `<tr>
+          <td><strong>${escapeHtml(row.jobName)}</strong></td>
+          <td><span class="badge ${row.status}">${row.status}</span></td>
+          <td>${row.triggerType}${row.retryOfRunId ? `<div class="muted">retry of #${row.retryOfRunId}</div>` : ""}</td>
+          <td>${formatDateTime(row.startedAt)}</td>
+          <td>${row.durationMs ?? 0} ms</td>
+          <td>${escapeHtml(row.summary || row.errorMessage || "")}</td>
+          <td><button class="small-button" type="button" data-retry="${escapeHtml(row.jobName)}" data-run-id="${row.id}">Retry</button></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  </section>`;
+  charts.querySelectorAll("[data-retry]").forEach(button => {
+    button.onclick = async () => retryJob(button.dataset.retry, button.dataset.runId);
+  });
+}
+async function retryJob(jobName, runId) {
+  status.textContent = "Retrying...";
+  const url = `/api/v1/admin/jobs/${encodeURIComponent(jobName)}/retry?runId=${encodeURIComponent(runId)}`;
+  const res = await fetch(url, { method: "POST", headers: authHeaders() });
+  if (!res.ok) throw new Error("retry failed");
+  await reloadJobs();
+}
+function formatDateTime(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleString();
+}
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 function chart(series) {
   const points = series.points || [];

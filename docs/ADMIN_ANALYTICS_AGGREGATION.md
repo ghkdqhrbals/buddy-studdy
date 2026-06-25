@@ -35,6 +35,36 @@ flowchart LR
 All writes are idempotent upserts keyed by `(metric_date, metric_key, dimension)`.
 If the server stops mid-run, the next scheduled run recalculates the same date range from the source database.
 
+## Managed Scheduler Runs
+
+Scheduler execution is tracked in the primary database.
+
+- `scheduled_jobs`: one row per managed job, with an `enabled` flag.
+- `scheduled_job_runs`: one row per execution attempt.
+
+Tracked jobs:
+
+- `admin-analytics-recent`
+- `admin-analytics-correction`
+- `user-stats-refresh`
+
+Each run stores:
+
+- job name
+- trigger type: `SCHEDULED`, `MANUAL`, or `RETRY`
+- status: `RUNNING`, `SUCCESS`, `FAILED`, or `SKIPPED`
+- start/end time, duration, summary, error message
+- retry source run id when applicable
+
+The runtime uses PostgreSQL advisory locks per job name so the same job does not run concurrently on multiple scheduler threads or application instances.
+
+Admin APIs:
+
+- `GET /api/v1/admin/jobs/runs?jobName=&limit=50`
+- `POST /api/v1/admin/jobs/{jobName}/retry?runId=`
+
+The `/admin` dashboard has an `Operations` section for recent runs and manual retries.
+
 ## Metric Storage
 
 `admin_daily_metrics` stores:

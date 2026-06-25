@@ -66,7 +66,7 @@ class AdminAnalyticsService(
 
     @Transactional
     override fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse {
-        validateAdminToken(adminToken)
+        validate(adminToken)
         val range = normalizedRange(startDate, endDate)
         refreshDates(range)
         return response(range.first(), range.last(), metrics.findDailyMetrics(range.first(), range.last(), emptySet()))
@@ -86,12 +86,12 @@ class AdminAnalyticsService(
 
     @Transactional(readOnly = true)
     override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse {
-        validateAdminToken(adminToken)
+        validate(adminToken)
         val range = normalizedRange(startDate, endDate)
         return response(range.first(), range.last(), metrics.findDailyMetrics(range.first(), range.last(), metricKeys))
     }
 
-    private fun validateAdminToken(adminToken: String) {
+    override fun validate(adminToken: String) {
         try {
             val claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(adminToken).payload
             if (claims.subject != "admin" || claims["admin"] != true) {

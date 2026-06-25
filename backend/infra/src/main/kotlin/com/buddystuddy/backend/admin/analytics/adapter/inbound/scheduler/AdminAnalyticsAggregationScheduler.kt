@@ -1,7 +1,9 @@
 package com.buddystuddy.backend.admin.analytics.adapter.inbound.scheduler
 
 import com.buddystuddy.backend.admin.analytics.application.port.inbound.AdminAnalyticsAggregationUseCase
-import org.slf4j.LoggerFactory
+import com.buddystuddy.backend.scheduler.application.model.JobTriggerType
+import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJob
+import com.buddystuddy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -11,42 +13,41 @@ import java.time.ZoneOffset
 @Component
 @ConditionalOnProperty(prefix = "buddystuddy.analytics", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class AdminAnalyticsAggregationScheduler(
-    private val analytics: AdminAnalyticsAggregationUseCase,
+    private val jobs: ManagedJobExecutionUseCase,
+    private val recentJob: AdminAnalyticsRecentJob,
+    private val correctionJob: AdminAnalyticsCorrectionJob,
 ) {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
     @Scheduled(cron = "\${buddystuddy.analytics.recent-cron:0 */5 * * * *}")
     fun refreshRecent() {
-        refresh("recent") { today -> analytics.refreshRecent(today) }
+        jobs.execute(recentJob, JobTriggerType.SCHEDULED)
     }
 
     @Scheduled(cron = "\${buddystuddy.analytics.correction-cron:0 20 3 * * *}")
     fun refreshCorrection() {
-        refresh("correction") { today -> analytics.refreshCorrection(today) }
+        jobs.execute(correctionJob, JobTriggerType.SCHEDULED)
     }
+}
 
-    private fun refresh(type: String, block: (LocalDate) -> Int) {
-        val started = System.nanoTime()
+@Component
+class AdminAnalyticsRecentJob(
+    private val analytics: AdminAnalyticsAggregationUseCase,
+) : ManagedJob {
+    override val name: String = "admin-analytics-recent"
+
+    override fun run(): String {
         val today = LocalDate.now(ZoneOffset.UTC)
-        runCatching {
-            block(today)
-        }.onSuccess { rows ->
-            val durationMs = (System.nanoTime() - started) / 1_000_000.0
-            logger.info(
-                "admin_analytics_aggregation_completed type={} referenceDate={} rows={} durationMs={}",
-                type,
-                today,
-                rows,
-                "%.2f".format(durationMs),
-            )
-        }.onFailure { error ->
-            logger.warn(
-                "admin_analytics_aggregation_failed type={} referenceDate={} error={}",
-                type,
-                today,
-                error.message,
-                error,
-            )
-        }
+        return "rows=${analytics.refreshRecent(today)} referenceDate=$today"
+    }
+}
+
+@Component
+class AdminAnalyticsCorrectionJob(
+    private val analytics: AdminAnalyticsAggregationUseCase,
+) : ManagedJob {
+    override val name: String = "admin-analytics-correction"
+
+    override fun run(): String {
+        val today = LocalDate.now(ZoneOffset.UTC)
+        return "rows=${analytics.refreshCorrection(today)} referenceDate=$today"
     }
 }
