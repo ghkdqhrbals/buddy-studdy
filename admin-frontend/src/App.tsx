@@ -89,6 +89,11 @@ export function App() {
   }, [isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated || window.location.pathname !== LOGIN_PATH) return;
+    window.history.replaceState(null, "", sectionHref(activeSection, jobOffset, { startDate, endDate }));
+  }, [isAuthenticated, activeSection, jobOffset, startDate, endDate]);
+
+  useEffect(() => {
     const handlePopState = () => {
       const next = routeState();
       setActiveSection(next.section);
