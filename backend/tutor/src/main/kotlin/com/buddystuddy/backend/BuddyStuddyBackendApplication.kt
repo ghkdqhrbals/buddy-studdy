@@ -34,6 +34,7 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
             hints.reflection().registerType(TypeReference.of(listenerArray))
         }
         hints.resources().registerPattern("org/hibernate/**/*.i18n.properties")
+        hints.resources().registerPattern("db/migration/*.sql")
     }
 
     private val hibernateGeneratedLoggers = listOf(
