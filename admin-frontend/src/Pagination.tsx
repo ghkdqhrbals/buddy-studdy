@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 type PageItem = number | { type: "ellipsis"; page: number };
 
@@ -145,8 +145,13 @@ function PageAnchor({
       aria-current={active ? "page" : undefined}
       aria-disabled={disabled || undefined}
       onClick={(event) => {
+        if (disabled) {
+          event.preventDefault();
+          return;
+        }
+        if (!shouldHandleClientNavigation(event)) return;
         event.preventDefault();
-        if (!disabled) onClick();
+        onClick();
       }}
     >
       {children}
@@ -160,6 +165,10 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
       <path d={direction === "left" ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"} />
     </svg>
   );
+}
+
+function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
 export function paginationItems(current: number, total: number): PageItem[] {
