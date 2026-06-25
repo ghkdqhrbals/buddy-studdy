@@ -52,7 +52,8 @@ function CombinedTrendChart({
   const width = 760;
   const height = 188;
   const padding = { top: 14, right: 20, bottom: 26, left: 44 };
-  const dates = longestDates(series);
+  const dates = allDates(series);
+  const pointMaps = series.map((item) => new Map(item.points.map((point) => [point.date, point.value])));
   const values = series.flatMap((item) => item.points.map((point) => point.value));
   const scale = chartScale(definitions[0], Math.min(0, ...values), Math.max(1, ...values));
   const plotWidth = width - padding.left - padding.right;
@@ -91,12 +92,16 @@ function CombinedTrendChart({
           })}
           <line x1={padding.left} x2={width - padding.right} y1={height - padding.bottom} y2={height - padding.bottom} className="axis-line" />
           {series.map((item, seriesIndex) => {
-            const path = item.points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`).join(" ");
-            const active = item.points[activeIndex];
+            const path = dates.map((date, index) => {
+              const value = pointMaps[seriesIndex].get(date);
+              if (value === undefined) return "";
+              return `${index === 0 || !pointMaps[seriesIndex].has(dates[index - 1]) ? "M" : "L"} ${x(index)} ${y(value)}`;
+            }).filter(Boolean).join(" ");
+            const activeValue = pointMaps[seriesIndex].get(activeDate);
             return (
               <g key={item.metricKey}>
                 <path d={path} className="line-path" stroke={definitions[seriesIndex].color} />
-                {active ? <circle cx={x(activeIndex)} cy={y(active.value)} r={3.2} className="chart-dot" stroke={definitions[seriesIndex].color} /> : null}
+                {activeValue !== undefined ? <circle cx={x(activeIndex)} cy={y(activeValue)} r={3.2} className="chart-dot" stroke={definitions[seriesIndex].color} /> : null}
               </g>
             );
           })}
@@ -120,12 +125,12 @@ function CombinedTrendChart({
           <div className="chart-tooltip combined-tooltip" style={{ left: `${clamp((x(activeIndex) / width) * 100, 18, 82)}%` }}>
             <strong>{formatShortDate(activeDate)}</strong>
             {series.map((item, index) => {
-              const point = item.points[activeIndex];
+              const value = pointMaps[index].get(activeDate);
               return (
                 <span key={item.metricKey}>
                   <i style={{ background: definitions[index].color }} />
                   <small>{definitions[index].shortLabel}</small>
-                  <b>{formatMetric(definitions[index], point?.value ?? 0)}</b>
+                  <b>{value === undefined ? "-" : formatMetric(definitions[index], value)}</b>
                 </span>
               );
             })}
@@ -218,8 +223,8 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   );
 }
 
-function longestDates(series: AdminMetricSeries[]): string[] {
-  return series.reduce<string[]>((longest, item) => item.points.length > longest.length ? item.points.map((point) => point.date) : longest, []);
+function allDates(series: AdminMetricSeries[]): string[] {
+  return Array.from(new Set(series.flatMap((item) => item.points.map((point) => point.date)))).sort();
 }
 
 function chartScale(definition: MetricDefinition, rawMin: number, rawMax: number): { min: number; max: number; ticks: number[] } {
