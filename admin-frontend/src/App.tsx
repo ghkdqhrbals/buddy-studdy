@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, login, refreshMetrics, retryJob, storeToken } from "./api";
 import { JOB_PAGE_SIZE, metricCatalog, overviewTrendMetrics, sectionPaths, sections, type MetricDefinition } from "./adminConfig";
 import { clamp, fallbackDefinition, formatCompact, formatDateTime, formatDelta, formatMetric, formatShortDate, statusLabel } from "./format";
+import { Pagination } from "./Pagination";
 import type { AdminDailyMetricPoint, AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
 
 const today = new Date();
@@ -613,28 +614,14 @@ function Operations({
   onPageChange?: (offset: number) => void;
   compact?: boolean;
 }) {
-  const [jumpPage, setJumpPage] = useState("");
   const jobs = page.runs;
   if (jobs.length === 0) {
     return <EmptyState title="No job runs" compact={compact} />;
   }
   const start = page.offset + 1;
   const end = Math.min(page.offset + jobs.length, page.totalCount);
-  const previousOffset = Math.max(0, page.offset - page.limit);
-  const nextOffset = page.offset + page.limit;
-  const hasPrevious = page.offset > 0;
-  const hasNext = nextOffset < page.totalCount;
   const currentPage = Math.floor(page.offset / page.limit) + 1;
   const totalPages = Math.max(1, Math.ceil(page.totalCount / page.limit));
-  const pageItems = paginationItems(currentPage, totalPages);
-  const submitJump = () => {
-    if (!onPageChange) return;
-    const parsed = Number(jumpPage);
-    if (!Number.isFinite(parsed)) return;
-    const nextPage = Math.max(1, Math.min(totalPages, Math.trunc(parsed)));
-    setJumpPage("");
-    onPageChange((nextPage - 1) * page.limit);
-  };
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <div className="panel-header">
@@ -673,80 +660,15 @@ function Operations({
         </table>
       </div>
       {onPageChange ? (
-        <div className="pagination-bar">
-          <span className="pagination-summary">
-            <b>{start}-{end}</b>
-            {" "}
-            <span>of {page.totalCount}</span>
-            {" "}
-            <span aria-hidden="true">·</span>
-            {" "}
-            <span>{pageCountLabel(totalPages)}</span>
-          </span>
-          <div className="pagination-controls">
-            <a
-              className={hasPrevious ? "page-button icon-page" : "page-button icon-page disabled"}
-              href={sectionHref("operations", previousOffset)}
-              aria-label="Previous page"
-              aria-disabled={!hasPrevious}
-              onClick={(event) => {
-                event.preventDefault();
-                if (hasPrevious) onPageChange(previousOffset);
-              }}
-            >
-              <Icon name="chevron-left" />
-            </a>
-            {pageItems.map((item, index) => (
-              item === "ellipsis" ? (
-                <span className="page-ellipsis" key={`ellipsis-${index}`}>…</span>
-              ) : (
-                <a
-                  key={item}
-                  className={item === currentPage ? "page-button active" : "page-button"}
-                  href={sectionHref("operations", (item - 1) * page.limit)}
-                  aria-current={item === currentPage ? "page" : undefined}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onPageChange((item - 1) * page.limit);
-                  }}
-                >
-                  {item}
-                </a>
-              )
-            ))}
-            <a
-              className={hasNext ? "page-button icon-page" : "page-button icon-page disabled"}
-              href={sectionHref("operations", nextOffset)}
-              aria-label="Next page"
-              aria-disabled={!hasNext}
-              onClick={(event) => {
-                event.preventDefault();
-                if (hasNext) onPageChange(nextOffset);
-              }}
-            >
-              <Icon name="chevron-right" />
-            </a>
-            {totalPages > 7 ? (
-              <label className="page-jump">
-                <span>Page</span>
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  min={1}
-                  max={totalPages}
-                  value={jumpPage}
-                  placeholder={String(currentPage)}
-                  aria-label="Jump to page"
-                  onChange={(event) => setJumpPage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") submitJump();
-                  }}
-                />
-                <button type="button" className="page-jump-button" onClick={submitJump}>Go</button>
-              </label>
-            ) : null}
-          </div>
-        </div>
+        <Pagination
+          start={start}
+          end={end}
+          totalCount={page.totalCount}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * page.limit)}
+          onPageChange={(nextPage) => onPageChange((nextPage - 1) * page.limit)}
+        />
       ) : null}
     </section>
   );
@@ -760,7 +682,7 @@ function EmptyState({ title, compact = false }: { title: string; compact?: boole
   );
 }
 
-function Icon({ name }: { name: "refresh" | "moon" | "sun" | "chevron-left" | "chevron-right" }) {
+function Icon({ name }: { name: "refresh" | "moon" | "sun" }) {
   if (name === "refresh") {
     return (
       <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
@@ -784,11 +706,6 @@ function Icon({ name }: { name: "refresh" | "moon" | "sun" | "chevron-left" | "c
       </svg>
     );
   }
-  return (
-    <svg className="ui-icon" viewBox="0 0 20 20" aria-hidden="true">
-      <path d={name === "chevron-left" ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"} />
-    </svg>
-  );
 }
 
 function xTicks(dates: string[]) {
@@ -800,29 +717,4 @@ function xTicks(dates: string[]) {
     { index: middle, date: dates[middle], anchor: "middle" as const },
     { index: dates.length - 1, date: dates[dates.length - 1], anchor: "end" as const },
   ];
-}
-
-function paginationItems(current: number, total: number): Array<number | "ellipsis"> {
-  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
-  const pages = new Set<number>([1, 2, total - 1, total, current - 1, current, current + 1]);
-  if (current <= 4) {
-    pages.add(2);
-    pages.add(3);
-    pages.add(4);
-  }
-  if (current >= total - 3) {
-    pages.add(total - 1);
-    pages.add(total - 2);
-    pages.add(total - 3);
-  }
-  const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
-  return sorted.flatMap((page, index) => {
-    const previous = sorted[index - 1];
-    if (previous && page - previous > 1) return ["ellipsis" as const, page];
-    return [page];
-  });
-}
-
-function pageCountLabel(totalPages: number): string {
-  return `${totalPages} ${totalPages === 1 ? "page" : "pages"}`;
 }
