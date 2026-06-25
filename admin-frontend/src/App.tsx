@@ -249,9 +249,12 @@ export function App() {
         <div className="sidebar-footer">
           <div className="admin-chip">
             <span className="admin-avatar">A</span>
-            <span>admin</span>
+            <span>
+              <strong>admin</strong>
+              <small>Administrator</small>
+            </span>
           </div>
-          <button className="logout-button" onClick={handleLogout}>Logout</button>
+          <button className="logout-button" onClick={handleLogout}>Sign out</button>
         </div>
       </aside>
 
@@ -317,12 +320,15 @@ function LoginScreen({
 
   return (
     <div className="login-shell">
-      <button className="theme-floating" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-        {theme === "light" ? "Dark" : "Light"}
-      </button>
       <form className="login-card" onSubmit={handleSubmit}>
-        <div className="login-mark">B</div>
-        <h1>BuddyStuddy Admin</h1>
+        <div className="login-head">
+          <div className="login-mark">B</div>
+          <button type="button" className="secondary-button square-button" aria-label="Toggle theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
+            {theme === "light" ? "☾" : "☀"}
+          </button>
+        </div>
+        <h1>Admin console</h1>
+        <p>BuddyStuddy operations</p>
         <label>
           ID
           <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
@@ -657,10 +663,10 @@ function Operations({
                 </td>
                 <td>{formatDateTime(job.startedAt)}</td>
                 <td><span className={`status ${job.status.toLowerCase()}`}>{statusLabel(job.status)}</span></td>
-                <td>{job.summary ?? job.status}</td>
+                <td className="result-cell" title={job.summary ?? job.status}>{job.summary ?? job.status}</td>
                 <td>{job.durationMs == null ? "-" : `${job.durationMs}ms`}</td>
                 <td>{job.retryOfRunId ? `#${job.retryOfRunId}` : "-"}</td>
-                <td><button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button></td>
+                <td className="action-cell"><button className="secondary-button compact" onClick={() => onRetry(job)}>Retry</button></td>
               </tr>
             ))}
           </tbody>
@@ -668,7 +674,7 @@ function Operations({
       </div>
       {onPageChange ? (
         <div className="pagination-bar">
-          <span>{start}-{end} / {page.totalCount} · {totalPages} pages</span>
+          <span>{start}-{end} / {page.totalCount} · {pageCountLabel(totalPages)}</span>
           <div className="pagination-controls">
             <a
               className={hasPrevious ? "page-button icon-page" : "page-button icon-page disabled"}
@@ -789,14 +795,16 @@ function xTicks(dates: string[]) {
 
 function paginationItems(current: number, total: number): Array<number | "ellipsis"> {
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
-  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
-  if (current <= 3) {
+  const pages = new Set<number>([1, 2, total - 1, total, current - 1, current, current + 1]);
+  if (current <= 4) {
     pages.add(2);
     pages.add(3);
+    pages.add(4);
   }
-  if (current >= total - 2) {
+  if (current >= total - 3) {
     pages.add(total - 1);
     pages.add(total - 2);
+    pages.add(total - 3);
   }
   const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
   return sorted.flatMap((page, index) => {
@@ -804,4 +812,8 @@ function paginationItems(current: number, total: number): Array<number | "ellips
     if (previous && page - previous > 1) return ["ellipsis" as const, page];
     return [page];
   });
+}
+
+function pageCountLabel(totalPages: number): string {
+  return `${totalPages} ${totalPages === 1 ? "page" : "pages"}`;
 }
