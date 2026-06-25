@@ -163,17 +163,14 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 }
 
 export function paginationItems(current: number, total: number): PageItem[] {
-  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
-  const pages = new Set<number>([1, 2, total - 1, total, current - 1, current, current + 1]);
-  if (current <= 4) {
-    pages.add(2);
-    pages.add(3);
-    pages.add(4);
+  if (total <= 9) return Array.from({ length: total }, (_, index) => index + 1);
+  const safeCurrent = Math.max(1, Math.min(total, current));
+  const pages = new Set<number>([1, total, safeCurrent - 1, safeCurrent, safeCurrent + 1]);
+  if (safeCurrent <= 4) {
+    [2, 3, 4, 5].forEach((page) => pages.add(page));
   }
-  if (current >= total - 3) {
-    pages.add(total - 1);
-    pages.add(total - 2);
-    pages.add(total - 3);
+  if (safeCurrent >= total - 3) {
+    [total - 4, total - 3, total - 2, total - 1].forEach((page) => pages.add(page));
   }
   const sorted = Array.from(pages).filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
   return sorted.flatMap((page, index) => {

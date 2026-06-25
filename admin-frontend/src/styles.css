@@ -885,16 +885,19 @@ h2 {
 }
 
 .page-ellipsis {
-  min-width: 24px;
+  min-width: 22px;
   width: auto;
-  padding: 0 5px;
+  padding: 0 4px;
+  border-color: transparent;
   color: var(--muted);
   background: transparent;
+  letter-spacing: 0.02em;
 }
 
 .page-ellipsis:hover {
   color: var(--text);
-  background: var(--surface-2);
+  border-color: var(--border);
+  background: var(--surface);
 }
 
 .page-jump {
