@@ -33,6 +33,15 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         hibernateEventListenerArrays.forEach { listenerArray ->
             hints.reflection().registerType(TypeReference.of(listenerArray))
         }
+        redisStreamJacksonTypes.forEach { type ->
+            hints.reflection().registerType(
+                TypeReference.of(type),
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.INVOKE_DECLARED_METHODS,
+            )
+        }
         hints.resources().registerPattern("org/hibernate/**/*.i18n.properties")
         hints.resources().registerPattern("db/migration/*.sql")
     }
@@ -129,5 +138,10 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "org.hibernate.event.spi.PreUpsertEventListener[]",
         "org.hibernate.event.spi.RefreshEventListener[]",
         "org.hibernate.event.spi.ReplicateEventListener[]",
+    )
+
+    private val redisStreamJacksonTypes = listOf(
+        "com.redisstream.consumer.ProducerRoutingResponse",
+        "com.redisstream.consumer.ProducerRoutingShard",
     )
 }
