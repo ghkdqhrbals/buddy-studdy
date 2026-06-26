@@ -49,6 +49,17 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
+    fun `admin token validation rejects tampered token`() {
+        val token = service.login("admin", "secret").adminToken
+        val tampered = token.substringBeforeLast(".") + ".tampered"
+
+        assertThatThrownBy { service.validate(tampered) }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN)
+    }
+
+    @Test
     fun `refresh stores daily source metrics and returns time series`() {
         val day = LocalDate.parse("2026-06-01")
         source.rows[day] = listOf(

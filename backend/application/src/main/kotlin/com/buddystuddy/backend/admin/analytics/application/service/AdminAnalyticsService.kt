@@ -11,8 +11,8 @@ import com.buddystuddy.backend.admin.analytics.application.port.outbound.AdminAn
 import com.buddystuddy.backend.common.application.error.ApiErrorCode
 import com.buddystuddy.backend.common.application.error.ApiException
 import com.buddystuddy.backend.config.BuddyStuddyProperties
-import io.jsonwebtoken.Jwts
-import io.jsonwebtoken.security.Keys
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -20,7 +20,9 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
-import java.util.Date
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 @Service
 class AdminAnalyticsService(
@@ -40,9 +42,10 @@ class AdminAnalyticsService(
         "quota_used_count",
     )
 
-    private val key by lazy {
+    private val jwtJson = jacksonObjectMapper()
+    private val keyBytes by lazy {
         val seed = properties.auth.jwtSecret.ifBlank { properties.crypto.masterKey.ifBlank { "dev-buddystuddy-admin-secret" } }
-        Keys.hmacShaKeyFor(MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8)))
+        MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8))
     }
 
     override fun login(username: String, password: String): AdminLoginResponse {
@@ -54,13 +57,7 @@ class AdminAnalyticsService(
         }
         val now = Instant.now()
         val expiresAt = now.plusSeconds(properties.admin.tokenHours.coerceAtLeast(1) * 3_600)
-        val token = Jwts.builder()
-            .subject("admin")
-            .claim("admin", true)
-            .issuedAt(Date.from(now))
-            .expiration(Date.from(expiresAt))
-            .signWith(key)
-            .compact()
+        val token = createAdminToken(now, expiresAt)
         return AdminLoginResponse(token, expiresAt)
     }
 
@@ -93,14 +90,46 @@ class AdminAnalyticsService(
 
     override fun validate(adminToken: String) {
         try {
-            val claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(adminToken).payload
-            if (claims.subject != "admin" || claims["admin"] != true) {
-                throw IllegalArgumentException("not an admin token")
-            }
+            validateAdminToken(adminToken)
         } catch (error: Exception) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid admin token.")
         }
     }
+
+    private fun createAdminToken(now: Instant, expiresAt: Instant): String {
+        val header = mapOf("alg" to "HS256", "typ" to "JWT")
+        val payload = mapOf(
+            "sub" to "admin",
+            "admin" to true,
+            "iat" to now.epochSecond,
+            "exp" to expiresAt.epochSecond,
+        )
+        val signingInput = "${base64Url(jwtJson.writeValueAsBytes(header))}.${base64Url(jwtJson.writeValueAsBytes(payload))}"
+        return "$signingInput.${base64Url(hmacSha256(signingInput))}"
+    }
+
+    private fun validateAdminToken(adminToken: String) {
+        val parts = adminToken.split(".")
+        require(parts.size == 3) { "invalid token parts" }
+        val signingInput = "${parts[0]}.${parts[1]}"
+        val expected = base64Url(hmacSha256(signingInput))
+        require(MessageDigest.isEqual(expected.toByteArray(StandardCharsets.UTF_8), parts[2].toByteArray(StandardCharsets.UTF_8))) {
+            "invalid signature"
+        }
+        val claims = jwtJson.readValue<Map<String, Any?>>(Base64.getUrlDecoder().decode(parts[1]))
+        require(claims["sub"] == "admin" && claims["admin"] == true) { "not an admin token" }
+        val exp = (claims["exp"] as? Number)?.toLong() ?: error("missing exp")
+        require(Instant.now().epochSecond < exp) { "expired admin token" }
+    }
+
+    private fun hmacSha256(value: String): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+        return mac.doFinal(value.toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private fun base64Url(bytes: ByteArray): String =
+        Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
     private fun normalizedRange(startDate: LocalDate, endDate: LocalDate): List<LocalDate> {
         val start = minOf(startDate, endDate)
