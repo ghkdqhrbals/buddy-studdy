@@ -5,6 +5,7 @@ spring:
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystuddy/dev}
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
+    validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:false}
   cloud:
     aws:
       region:
