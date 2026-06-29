@@ -60,6 +60,55 @@ class OpenAIClient(
             .embed(text)
             .toList()
 
+    override fun generateQuestionCoverageBlueprint(
+        apiKey: String,
+        model: String,
+        topic: String,
+        level: Int,
+        customPrompt: String,
+    ): List<OpenAIPort.QuestionCoverageConcept> {
+        val prompt = """
+            Split this study topic into 8 to 12 practical learning concepts.
+            For each concept, provide 3 to 5 question angles.
+            Topic: ${topic.ifBlank { "general study" }}
+            Level: ${level.coerceIn(1, 10)}/10
+            Extra tutor prompt: ${customPrompt.ifBlank { "None" }}
+
+            Return JSON only:
+            {
+              "concepts": [
+                {
+                  "key": "stable_snake_case",
+                  "name": "Human readable concept",
+                  "angles": [
+                    {"key": "stable_snake_case", "name": "Human readable angle"}
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+        val response = chatModel(apiKey, model, json = true).call(
+            Prompt(UserMessage(prompt), options(apiKey, model, json = true))
+        )
+        val text = response.result?.output?.text ?: "{}"
+        val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
+        val concepts = parsed["concepts"] as? List<*> ?: return emptyList()
+        return concepts.mapNotNull { raw ->
+            val concept = raw as? Map<*, *> ?: return@mapNotNull null
+            val key = concept["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val name = concept["name"]?.toString()?.takeIf { it.isNotBlank() } ?: key
+            val angles = (concept["angles"] as? List<*>)
+                ?.mapNotNull { rawAngle ->
+                    val angle = rawAngle as? Map<*, *> ?: return@mapNotNull null
+                    val angleKey = angle["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val angleName = angle["name"]?.toString()?.takeIf { it.isNotBlank() } ?: angleKey
+                    OpenAIPort.QuestionCoverageAngle(angleKey, angleName)
+                }
+                .orEmpty()
+            OpenAIPort.QuestionCoverageConcept(key, name, angles)
+        }
+    }
+
     override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
         val prompt = """
             Grade this answer consistently from 0 to 100.

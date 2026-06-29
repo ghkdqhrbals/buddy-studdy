@@ -30,6 +30,12 @@ class QuestionEntity(
     var userId: Long? = null,
     @Column(name = "study_id")
     var studyId: Long? = null,
+    @Column(name = "concept_id")
+    var conceptId: Long? = null,
+    @Column(name = "concept_key", length = 255)
+    var conceptKey: String? = null,
+    @Column(name = "angle_key", length = 255)
+    var angleKey: String? = null,
     @Column(nullable = false, columnDefinition = "text")
     var question: String = "",
     @Column(columnDefinition = "text")

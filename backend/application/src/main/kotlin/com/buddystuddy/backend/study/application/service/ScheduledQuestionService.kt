@@ -8,6 +8,8 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -16,6 +18,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystuddy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.study.domain.entity.QuestionEntity
@@ -39,6 +42,7 @@ class ScheduledQuestionService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
+    private val questionCoverage: QuestionCoveragePort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val openAI: OpenAIPort,
@@ -54,6 +58,7 @@ class ScheduledQuestionService(
         questions = questions,
         questionStats = questionStats,
         questionEmbeddings = questionEmbeddings,
+        questionCoverage = questionCoverage,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
@@ -107,6 +112,7 @@ class ScheduledQuestionCreator(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
+    private val questionCoverage: QuestionCoveragePort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val openAI: OpenAIPort,
@@ -142,6 +148,7 @@ class ScheduledQuestionCreator(
             val recentEmbeddings = recentEmbeddingsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
                 questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
             }
+            val coverageSelection = selectCoverage(questionKey.apiKey, study)
             val generated = generateDistinctQuestion(
                 apiKey = questionKey.apiKey,
                 model = study.openaiModel,
@@ -153,9 +160,14 @@ class ScheduledQuestionCreator(
                 userId = userId,
                 recentQuestions = recent,
                 recentEmbeddings = recentEmbeddings,
+                coverageSelection = coverageSelection,
             )
-            val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
+            val saved = questions.save(
+                study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now)
+                    .applyCoverage(coverageSelection)
+            )
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
+            coverageSelection?.let { questionCoverage.markAsked(it, now) }
             questionEmbeddings.save(
                 questionId = saved.id,
                 userId = userId,
@@ -207,6 +219,7 @@ class ScheduledQuestionCreator(
         userId: Long,
         recentQuestions: List<String>,
         recentEmbeddings: List<QuestionEmbeddingCandidate>,
+        coverageSelection: QuestionCoverageSelection?,
     ): GeneratedQuestionWithEmbedding {
         val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
         val rejectedQuestions = mutableListOf<String>()
@@ -220,6 +233,7 @@ class ScheduledQuestionCreator(
                 customPrompt = customPrompt,
                 recentQuestions = history,
                 diversity = questionDiversity.choose(topic, studyId, userId, history),
+                coverage = coverageSelection?.let { QuestionCoverageGuide(it.conceptName, it.angleName) },
             )
             val generated = openAI.generateQuestion(apiKey, model, prompt)
             val embedding = openAI.embedText(apiKey, generated.question)
@@ -241,6 +255,25 @@ class ScheduledQuestionCreator(
             }
         }
         error("unreachable")
+    }
+
+    private fun selectCoverage(apiKey: String, study: StudyEntity): QuestionCoverageSelection? {
+        questionCoverage.selectNext(study.id)?.let { return it }
+        val blueprint = openAI.generateQuestionCoverageBlueprint(
+            apiKey = apiKey,
+            model = study.openaiModel.ifBlank { properties.openai.model },
+            topic = study.topic,
+            level = study.difficultyLevel,
+            customPrompt = study.customPrompt,
+        ).map { concept ->
+            QuestionCoveragePort.CoverageConceptBlueprint(
+                key = concept.key,
+                name = concept.name,
+                angles = concept.angles.map { QuestionCoveragePort.CoverageAngleBlueprint(it.key, it.name) },
+            )
+        }
+        questionCoverage.ensureCoverage(study.id, study.topic, blueprint.ifEmpty { defaultCoverageBlueprint(study.topic) })
+        return questionCoverage.selectNext(study.id)
     }
 
     private fun afterCommit(action: () -> Unit) {

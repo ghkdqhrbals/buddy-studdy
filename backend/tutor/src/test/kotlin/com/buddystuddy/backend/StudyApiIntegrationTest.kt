@@ -390,6 +390,21 @@ class StudyApiIntegrationTest {
 
             override fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
 
+            override fun generateQuestionCoverageBlueprint(
+                apiKey: String,
+                model: String,
+                topic: String,
+                level: Int,
+                customPrompt: String,
+            ): List<OpenAIPort.QuestionCoverageConcept> =
+                listOf(
+                    OpenAIPort.QuestionCoverageConcept(
+                        key = "general",
+                        name = "General",
+                        angles = listOf(OpenAIPort.QuestionCoverageAngle("definition", "Definition")),
+                    )
+                )
+
             override fun grade(
                 apiKey: String,
                 model: String,

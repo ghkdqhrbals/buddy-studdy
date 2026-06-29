@@ -75,6 +75,33 @@ interface QuestionEmbeddingPort {
     fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate>
 }
 
+data class QuestionCoverageSelection(
+    val conceptId: Long,
+    val coverageId: Long,
+    val conceptKey: String,
+    val conceptName: String,
+    val angleKey: String,
+    val angleName: String,
+)
+
+interface QuestionCoveragePort {
+    data class CoverageConceptBlueprint(
+        val key: String,
+        val name: String,
+        val angles: List<CoverageAngleBlueprint>,
+    )
+
+    data class CoverageAngleBlueprint(
+        val key: String,
+        val name: String,
+    )
+
+    fun ensureCoverage(studyId: Long, topic: String, concepts: List<CoverageConceptBlueprint>)
+    fun selectNext(studyId: Long): QuestionCoverageSelection?
+    fun markAsked(selection: QuestionCoverageSelection, now: Instant)
+    fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant)
+}
+
 interface QuestionMembershipPort {
     fun activeTierCodeForUser(userId: Long): String?
     fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean

@@ -10,6 +10,8 @@ import com.buddystuddy.backend.study.application.port.inbound.RunQuestionSchedul
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -41,6 +43,7 @@ class QuestionSchedulerTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
     private val questionEmbeddings = FakeQuestionEmbeddingPort()
+    private val questionCoverage = FakeQuestionCoveragePort()
     private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
@@ -57,6 +60,7 @@ class QuestionSchedulerTest {
         questions = questions,
         questionStats = questionStats,
         questionEmbeddings = questionEmbeddings,
+        questionCoverage = questionCoverage,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
@@ -443,6 +447,14 @@ class QuestionSchedulerTest {
             return GeneratedQuestion("Question for ${prompt.fallbackTopic}", "Hint")
         }
         override fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
+        override fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> =
+            listOf(
+                OpenAIPort.QuestionCoverageConcept(
+                    key = "general",
+                    name = "General",
+                    angles = listOf(OpenAIPort.QuestionCoverageAngle("definition", "Definition")),
+                )
+            )
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
             GradedAnswer(100, true, "Good", "Because")
     }
@@ -456,6 +468,13 @@ class QuestionSchedulerTest {
         }
 
         override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> = emptyList()
+    }
+
+    private class FakeQuestionCoveragePort : QuestionCoveragePort {
+        override fun ensureCoverage(studyId: Long, topic: String, concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>) = Unit
+        override fun selectNext(studyId: Long): QuestionCoverageSelection? = null
+        override fun markAsked(selection: QuestionCoverageSelection, now: Instant) = Unit
+        override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) = Unit
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

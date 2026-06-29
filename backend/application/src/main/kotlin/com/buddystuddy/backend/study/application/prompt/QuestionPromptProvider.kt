@@ -15,6 +15,11 @@ data class QuestionDiversityGuide(
     val noveltySeed: String,
 )
 
+data class QuestionCoverageGuide(
+    val conceptName: String,
+    val angleName: String,
+)
+
 @Component
 class QuestionDiversityPolicy {
     fun choose(topic: String, studyId: Long, userId: Long, recentQuestions: List<String>): QuestionDiversityGuide {
@@ -75,6 +80,7 @@ class QuestionPromptProvider {
         customPrompt: String,
         recentQuestions: List<String>,
         diversity: QuestionDiversityGuide,
+        coverage: QuestionCoverageGuide? = null,
     ): QuestionGenerationPrompt {
         val resolvedTopic = topic.ifBlank { "general study" }
         val languageName = if (language == "en") "English" else "Korean"
@@ -84,6 +90,12 @@ class QuestionPromptProvider {
             .joinToString(" | ")
             .ifBlank { "None" }
         val tutorPrompt = customPrompt.ifBlank { "None" }
+        val coverageText = coverage?.let {
+            """
+                Focus concept: ${it.conceptName}
+                Question angle: ${it.angleName}
+            """.trimIndent()
+        } ?: "Focus concept: Not specified\nQuestion angle: Not specified"
 
         return QuestionGenerationPrompt(
             fallbackTopic = resolvedTopic,
@@ -97,6 +109,7 @@ class QuestionPromptProvider {
                 Question format: ${diversity.format}
                 Reasoning mode: ${diversity.reasoningMode}
                 Novelty seed: ${diversity.noveltySeed}
+                $coverageText
                 Previously asked questions for this learner and topic: $recentQuestionText
                 Do not create the same or semantically similar question as any previous question above.
                 Use a different angle, concept, trade-off, or scenario from the previous questions.

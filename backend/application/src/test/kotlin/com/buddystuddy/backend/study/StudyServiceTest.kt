@@ -14,6 +14,8 @@ import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershipPort
@@ -47,6 +49,7 @@ class StudyServiceTest {
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
     private val questionEmbeddings = FakeQuestionEmbeddingPort()
+    private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" }
@@ -58,6 +61,7 @@ class StudyServiceTest {
         questionStats = questionStats,
         openAI = openAI,
         questionEmbeddings = questionEmbeddings,
+        questionCoverage = questionCoverage,
         users = users,
         cipher = cipher,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
@@ -229,6 +233,57 @@ class StudyServiceTest {
         val savedEmbedding = questionEmbeddings.savedRows.single()
         assertThat(savedEmbedding.questionId).isEqualTo(response.id.toLong())
         assertThat(savedEmbedding.embedding).containsExactly(0f, 1f, 0f)
+    }
+
+    @Test
+    fun `create question lazily creates coverage and stores selected concept angle`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 84,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis",
+            difficultyLevel = 7,
+            intervalMinutes = 15,
+            customPrompt = "Ask production questions.",
+            openaiModel = "gpt-5.4",
+        )
+        openAI.coverageBlueprint = listOf(
+            OpenAIPort.QuestionCoverageConcept(
+                key = "replication",
+                name = "Replication",
+                angles = listOf(OpenAIPort.QuestionCoverageAngle("failure_mode", "Failure Mode")),
+            )
+        )
+
+        val response = service.createQuestion(principal, studyId = 84)
+
+        assertThat(response.question.question).isEqualTo("Question")
+        assertThat(openAI.coverageBlueprintCalls).isEqualTo(1)
+        assertThat(questionCoverage.createdBlueprintStudyIds).containsExactly(84)
+        assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.conceptId).isEqualTo(1)
+        assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.angleKey).isEqualTo("failure_mode")
+        assertThat(questionCoverage.markAskedCalls).containsExactly(
+            QuestionCoverageSelection(1, 1, "replication", "Replication", "failure_mode", "Failure Mode")
+        )
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept: Replication")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Question angle: Failure Mode")
+    }
+
+    @Test
+    fun `graded answer updates coverage score when question has concept angle`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
+            conceptId = 11
+            conceptKey = "replication"
+            angleKey = "failure_mode"
+        }
+
+        service.answer(principal, recordId = 502, answer = "My answer", grade = true)
+
+        assertThat(questionCoverage.markAnsweredCalls).containsExactly(
+            FakeQuestionCoveragePort.AnsweredCall(conceptId = 11, angleKey = "failure_mode", score = 100, correct = true),
+        )
     }
 
     @Test
@@ -529,6 +584,12 @@ class StudyServiceTest {
         val embeddings = mutableMapOf<String, List<Float>>()
         override fun embedText(apiKey: String, text: String): List<Float> =
             embeddings[text] ?: listOf(0f, 0f, 1f)
+        var coverageBlueprintCalls = 0
+        var coverageBlueprint = emptyList<OpenAIPort.QuestionCoverageConcept>()
+        override fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> {
+            coverageBlueprintCalls += 1
+            return coverageBlueprint
+        }
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
             gradeCalls += 1
             assertThat(language).isEqualTo("en")
@@ -548,6 +609,40 @@ class StudyServiceTest {
 
         override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> =
             rows.take(limit)
+    }
+
+    private class FakeQuestionCoveragePort : QuestionCoveragePort {
+        val createdBlueprintStudyIds = mutableListOf<Long>()
+        val markAskedCalls = mutableListOf<QuestionCoverageSelection>()
+        val markAnsweredCalls = mutableListOf<AnsweredCall>()
+        private var selection: QuestionCoverageSelection? = null
+        override fun ensureCoverage(
+            studyId: Long,
+            topic: String,
+            concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>,
+        ) {
+            createdBlueprintStudyIds += studyId
+            selection = QuestionCoverageSelection(
+                conceptId = 1,
+                coverageId = 1,
+                conceptKey = concepts.first().key,
+                conceptName = concepts.first().name,
+                angleKey = concepts.first().angles.first().key,
+                angleName = concepts.first().angles.first().name,
+            )
+        }
+
+        override fun selectNext(studyId: Long): QuestionCoverageSelection? = selection
+
+        override fun markAsked(selection: QuestionCoverageSelection, now: Instant) {
+            markAskedCalls += selection
+        }
+
+        override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
+            markAnsweredCalls += AnsweredCall(conceptId, angleKey, score, correct)
+        }
+
+        data class AnsweredCall(val conceptId: Long, val angleKey: String, val score: Int, val correct: Boolean)
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

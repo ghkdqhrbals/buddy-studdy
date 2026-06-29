@@ -19,6 +19,8 @@ import com.buddystuddy.study.domain.entity.StudyEntity
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
@@ -26,6 +28,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
+import com.buddystuddy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +49,7 @@ class StudyService(
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
+    private val questionCoverage: QuestionCoveragePort,
     private val users: UserPort,
     private val cipher: KeyCipher,
     private val questionKeys: OpenAIQuestionKeyProvider,
@@ -82,7 +86,11 @@ class StudyService(
             val recentEmbeddingsDeferred = async(Dispatchers.IO) {
                 questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
             }
+            val coverageSelectionDeferred = async(Dispatchers.IO) {
+                selectCoverage(questionKey.apiKey, study, room.difficultyLevel)
+            }
             val generatedQuestionDeferred = async(Dispatchers.IO) {
+                val coverageSelection = coverageSelectionDeferred.await()
                 generateDistinctQuestion(
                     apiKey = questionKey.apiKey,
                     model = study.openaiModel.ifBlank { properties.openai.model },
@@ -94,18 +102,24 @@ class StudyService(
                     userId = principal.userId,
                     recentQuestions = recentQuestionsDeferred.await(),
                     recentEmbeddings = recentEmbeddingsDeferred.await(),
+                    coverageSelection = coverageSelection,
                 )
             }
 
             val generated = generatedQuestionDeferred.await()
+            val coverageSelection = coverageSelectionDeferred.await()
             val now = Instant.now()
 
             val questionDeferred = async(Dispatchers.IO) {
+                val question = room.createQuestion(generated.question, generated.hint, source = "manual", now = now)
+                    .toQuestionEntity()
+                    .applyCoverage(coverageSelection)
                 val saved = questionWriter.saveQuestionWithNotification(
-                    room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
+                    question,
                     { saved -> saved.toQuestionNotification(study, appLanguage) },
                     now,
                 )
+                coverageSelection?.let { questionCoverage.markAsked(it, now) }
                 questionEmbeddings.save(
                     questionId = saved.id,
                     userId = principal.userId,
@@ -147,6 +161,9 @@ class StudyService(
                 user?.appLanguage ?: "ko",
             )
             q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
+            if (q.conceptId != null && q.angleKey != null) {
+                questionCoverage.markAnswered(q.conceptId!!, q.angleKey!!, graded.score, graded.isCorrect, Instant.now())
+            }
         }
         questionSearch.refreshIndexedQuestion(q, user)
         return q.toStudyRecord(questionStats.findById(q.id).orElse(null)).toProjection().toRecordResponse()
@@ -239,6 +256,7 @@ class StudyService(
         userId: Long,
         recentQuestions: List<String>,
         recentEmbeddings: List<QuestionEmbeddingCandidate>,
+        coverageSelection: QuestionCoverageSelection?,
     ): GeneratedQuestionWithEmbedding {
         val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
         val rejectedQuestions = mutableListOf<String>()
@@ -251,6 +269,7 @@ class StudyService(
                 customPrompt = customPrompt,
                 recentQuestions = history,
                 diversity = questionDiversity.choose(topic, studyId, userId, history),
+                coverage = coverageSelection?.let { QuestionCoverageGuide(it.conceptName, it.angleName) },
             )
             val generated = openAI.generateQuestion(apiKey, model, prompt)
             val embedding = openAI.embedText(apiKey, generated.question)
@@ -274,6 +293,25 @@ class StudyService(
         error("unreachable")
     }
 
+    private fun selectCoverage(apiKey: String, study: StudyEntity, level: Int): QuestionCoverageSelection? {
+        questionCoverage.selectNext(study.id)?.let { return it }
+        val blueprint = openAI.generateQuestionCoverageBlueprint(
+            apiKey = apiKey,
+            model = study.openaiModel.ifBlank { properties.openai.model },
+            topic = study.topic,
+            level = level,
+            customPrompt = study.customPrompt,
+        ).map { concept ->
+            QuestionCoveragePort.CoverageConceptBlueprint(
+                key = concept.key,
+                name = concept.name,
+                angles = concept.angles.map { QuestionCoveragePort.CoverageAngleBlueprint(it.key, it.name) },
+            )
+        }
+        questionCoverage.ensureCoverage(study.id, study.topic, blueprint.ifEmpty { defaultCoverageBlueprint(study.topic) })
+        return questionCoverage.selectNext(study.id)
+    }
+
     private fun List<QuestionEntity>.toRecordResponses(language: String = "ko"): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
@@ -288,6 +326,28 @@ class StudyService(
         }
     }
 }
+
+internal fun QuestionEntity.applyCoverage(selection: QuestionCoverageSelection?): QuestionEntity {
+    if (selection == null) return this
+    conceptId = selection.conceptId
+    conceptKey = selection.conceptKey
+    angleKey = selection.angleKey
+    return this
+}
+
+internal fun defaultCoverageBlueprint(topic: String): List<QuestionCoveragePort.CoverageConceptBlueprint> =
+    listOf(
+        QuestionCoveragePort.CoverageConceptBlueprint(
+            key = topic.ifBlank { "general" },
+            name = topic.ifBlank { "General" },
+            angles = listOf(
+                QuestionCoveragePort.CoverageAngleBlueprint("definition", "Definition"),
+                QuestionCoveragePort.CoverageAngleBlueprint("trade_off", "Trade-off"),
+                QuestionCoveragePort.CoverageAngleBlueprint("failure_mode", "Failure Mode"),
+                QuestionCoveragePort.CoverageAngleBlueprint("debugging", "Debugging"),
+            ),
+        )
+    )
 
 private const val RECENT_EMBEDDING_LIMIT = 200
 
