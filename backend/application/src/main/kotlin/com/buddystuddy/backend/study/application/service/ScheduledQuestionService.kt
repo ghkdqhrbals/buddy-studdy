@@ -26,6 +26,7 @@ import com.buddystuddy.study.domain.entity.QuestionStatsEntity
 import com.buddystuddy.study.domain.entity.StudyEntity
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -45,6 +46,7 @@ class ScheduledQuestionService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
+    @param:Qualifier("openAIClient")
     private val openAI: OpenAIPort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,

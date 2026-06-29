@@ -23,7 +23,6 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.test.context.TestPropertySource
 import java.net.URI
 import java.net.http.HttpClient
@@ -43,6 +42,7 @@ import java.time.Instant
         "buddystuddy.crypto.master-key=test-master-key",
         "buddystuddy.auth.jwt-secret=test-jwt-secret",
         "buddystuddy.openai.api-key=test-openai-key",
+        "spring.main.allow-bean-definition-overriding=true",
         "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
@@ -377,9 +377,8 @@ class StudyApiIntegrationTest {
 
     @TestConfiguration
     class OpenAITestConfig {
-        @Bean
-        @Primary
-        fun openAIPort(): OpenAIPort = object : OpenAIPort {
+        @Bean("openAIClient")
+        fun openAIClient(): OpenAIPort = object : OpenAIPort {
             override fun validate(apiKey: String) = Unit
 
             override fun generateQuestion(

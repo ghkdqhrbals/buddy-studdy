@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -47,6 +48,7 @@ class StudyService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    @param:Qualifier("openAIClient")
     private val openAI: OpenAIPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
