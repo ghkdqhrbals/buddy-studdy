@@ -8,6 +8,8 @@ import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystuddy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
@@ -22,6 +24,7 @@ import com.buddystuddy.study.domain.entity.StudyEntity
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionSynchronization
@@ -35,6 +38,7 @@ class ScheduledQuestionService(
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val openAI: OpenAIPort,
@@ -49,6 +53,7 @@ class ScheduledQuestionService(
         users = users,
         questions = questions,
         questionStats = questionStats,
+        questionEmbeddings = questionEmbeddings,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
@@ -65,6 +70,7 @@ class ScheduledQuestionService(
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
         val recentQuestionsByStudyTopic = mutableMapOf<StudyTopicKey, List<String>>()
+        val recentEmbeddingsByStudyTopic = mutableMapOf<StudyTopicKey, List<QuestionEmbeddingCandidate>>()
         val batchSize = properties.scheduler.batchSize.coerceAtLeast(1)
         var processed = 0
         while (true) {
@@ -78,6 +84,7 @@ class ScheduledQuestionService(
                     pending = pendingCounts[study.id] ?: 0L,
                     usersById = usersById,
                     recentQuestionsByStudyTopic = recentQuestionsByStudyTopic,
+                    recentEmbeddingsByStudyTopic = recentEmbeddingsByStudyTopic,
                 )
                 studies.save(study)
             }
@@ -99,6 +106,7 @@ class ScheduledQuestionCreator(
     private val users: UserPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCreatedPublisher: QuestionCreatedPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val openAI: OpenAIPort,
@@ -114,6 +122,7 @@ class ScheduledQuestionCreator(
         pending: Long,
         usersById: MutableMap<Long, UserEntity?>,
         recentQuestionsByStudyTopic: MutableMap<StudyTopicKey, List<String>>,
+        recentEmbeddingsByStudyTopic: MutableMap<StudyTopicKey, List<QuestionEmbeddingCandidate>>,
     ) {
         var questionKey: OpenAIQuestionKey? = null
         var questionCreated = false
@@ -130,17 +139,31 @@ class ScheduledQuestionCreator(
             val recent = recentQuestionsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
                 recentQuestions(userId, study)
             }
-            val prompt = questionPrompts.buildQuestionGenerationPrompt(
+            val recentEmbeddings = recentEmbeddingsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
+                questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
+            }
+            val generated = generateDistinctQuestion(
+                apiKey = questionKey.apiKey,
+                model = study.openaiModel,
                 topic = study.topic,
                 level = study.difficultyLevel,
                 language = appLanguage,
                 customPrompt = study.customPrompt,
+                studyId = study.id,
+                userId = userId,
                 recentQuestions = recent,
-                diversity = questionDiversity.choose(study.topic, study.id, userId, recent),
+                recentEmbeddings = recentEmbeddings,
             )
-            val generated = openAI.generateQuestion(questionKey.apiKey, study.openaiModel, prompt)
             val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
             questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
+            questionEmbeddings.save(
+                questionId = saved.id,
+                userId = userId,
+                studyId = study.id,
+                topic = study.topic,
+                question = saved.question,
+                embedding = generated.embedding,
+            )
             questionKeys.markQuestionCreated(questionKey, now)
             questionCreated = true
             study.markCompleted(now)
@@ -171,6 +194,53 @@ class ScheduledQuestionCreator(
             .filter { it.isNotBlank() }
             .distinctBy { it.normalizedQuestionKey() }
             .take(40)
+    }
+
+    private fun generateDistinctQuestion(
+        apiKey: String,
+        model: String,
+        topic: String,
+        level: Int,
+        language: String,
+        customPrompt: String,
+        studyId: Long,
+        userId: Long,
+        recentQuestions: List<String>,
+        recentEmbeddings: List<QuestionEmbeddingCandidate>,
+    ): GeneratedQuestionWithEmbedding {
+        val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
+        val rejectedQuestions = mutableListOf<String>()
+        val similarityPolicy = QuestionSimilarityPolicy()
+        repeat(maxAttempts) { attempt ->
+            val history = recentQuestions + rejectedQuestions
+            val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                topic = topic,
+                level = level,
+                language = language,
+                customPrompt = customPrompt,
+                recentQuestions = history,
+                diversity = questionDiversity.choose(topic, studyId, userId, history),
+            )
+            val generated = openAI.generateQuestion(apiKey, model, prompt)
+            val embedding = openAI.embedText(apiKey, generated.question)
+            val similar = similarityPolicy.findSimilar(
+                embedding = embedding,
+                candidates = recentEmbeddings,
+                threshold = properties.openai.questionSimilarityThreshold,
+            )
+            if (similar == null) {
+                return GeneratedQuestionWithEmbedding(generated, embedding)
+            }
+            rejectedQuestions += generated.question
+            if (attempt == maxAttempts - 1) {
+                throw ApiException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCode.VALIDATION_ERROR,
+                    "Generated question is too similar to a previous question.",
+                )
+            }
+        }
+        error("unreachable")
     }
 
     private fun afterCommit(action: () -> Unit) {
@@ -251,3 +321,5 @@ private fun String.normalizedQuestionKey(): String =
     lowercase()
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()
+
+private const val RECENT_EMBEDDING_LIMIT = 200

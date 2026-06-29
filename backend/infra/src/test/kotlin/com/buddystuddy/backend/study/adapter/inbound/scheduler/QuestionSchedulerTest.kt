@@ -10,6 +10,8 @@ import com.buddystuddy.backend.study.application.port.inbound.RunQuestionSchedul
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershipPort
@@ -38,6 +40,7 @@ class QuestionSchedulerTest {
     private val users = FakeUserPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
+    private val questionEmbeddings = FakeQuestionEmbeddingPort()
     private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
@@ -53,6 +56,7 @@ class QuestionSchedulerTest {
         users = users,
         questions = questions,
         questionStats = questionStats,
+        questionEmbeddings = questionEmbeddings,
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
@@ -438,8 +442,20 @@ class QuestionSchedulerTest {
             recentArguments += recentText
             return GeneratedQuestion("Question for ${prompt.fallbackTopic}", "Hint")
         }
+        override fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
             GradedAnswer(100, true, "Good", "Because")
+    }
+
+    private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
+        val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
+        override fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
+            val row = QuestionEmbeddingCandidate(questionId, question, embedding)
+            savedRows += row
+            return row
+        }
+
+        override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> = emptyList()
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

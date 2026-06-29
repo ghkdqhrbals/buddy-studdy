@@ -1,5 +1,6 @@
 package com.buddystuddy.backend.study.adapter.outbound.openai
 
+import com.buddystuddy.backend.config.BuddyStuddyProperties
 import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
@@ -11,10 +12,14 @@ import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.openai.OpenAiChatModel
 import org.springframework.ai.openai.OpenAiChatOptions
+import org.springframework.ai.openai.OpenAiEmbeddingModel
+import org.springframework.ai.openai.OpenAiEmbeddingOptions
 import org.springframework.stereotype.Component
 
 @Component
-class OpenAIClient : OpenAIPort {
+class OpenAIClient(
+    private val properties: BuddyStuddyProperties,
+) : OpenAIPort {
     private val mapper = jacksonObjectMapper()
     private val jsonResponseFormat = OpenAiChatModel.ResponseFormat.builder()
         .type(OpenAiChatModel.ResponseFormat.Type.JSON_OBJECT)
@@ -42,6 +47,18 @@ class OpenAIClient : OpenAIPort {
             hint = parsed["expectedAnswerHint"]?.toString(),
         )
     }
+
+    override fun embedText(apiKey: String, text: String): List<Float> =
+        OpenAiEmbeddingModel.builder()
+            .options(
+                OpenAiEmbeddingOptions.builder()
+                    .apiKey(apiKey)
+                    .model(properties.openai.embeddingModel)
+                    .build()
+            )
+            .build()
+            .embed(text)
+            .toList()
 
     override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
         val prompt = """

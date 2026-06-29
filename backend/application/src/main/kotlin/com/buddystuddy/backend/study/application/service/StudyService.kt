@@ -19,6 +19,8 @@ import com.buddystuddy.study.domain.entity.StudyEntity
 import com.buddystuddy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystuddy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
@@ -43,6 +45,7 @@ class StudyService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val openAI: OpenAIPort,
+    private val questionEmbeddings: QuestionEmbeddingPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
     private val questionKeys: OpenAIQuestionKeyProvider,
@@ -50,6 +53,7 @@ class StudyService(
     private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
+    private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
         createQuestionAsync(principal, studyId)
@@ -75,20 +79,21 @@ class StudyService(
 
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {
+            val recentEmbeddingsDeferred = async(Dispatchers.IO) {
+                questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
+            }
             val generatedQuestionDeferred = async(Dispatchers.IO) {
-                val recentQuestions = recentQuestionsDeferred.await()
-                val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                generateDistinctQuestion(
+                    apiKey = questionKey.apiKey,
+                    model = study.openaiModel.ifBlank { properties.openai.model },
                     topic = room.topic,
                     level = room.difficultyLevel,
                     language = room.appLanguage,
                     customPrompt = room.customPrompt,
-                    recentQuestions = recentQuestions,
-                    diversity = questionDiversity.choose(room.topic, study.id, principal.userId, recentQuestions),
-                )
-                openAI.generateQuestion(
-                    questionKey.apiKey,
-                    study.openaiModel.ifBlank { properties.openai.model },
-                    prompt,
+                    studyId = study.id,
+                    userId = principal.userId,
+                    recentQuestions = recentQuestionsDeferred.await(),
+                    recentEmbeddings = recentEmbeddingsDeferred.await(),
                 )
             }
 
@@ -96,11 +101,20 @@ class StudyService(
             val now = Instant.now()
 
             val questionDeferred = async(Dispatchers.IO) {
-                questionWriter.saveQuestionWithNotification(
+                val saved = questionWriter.saveQuestionWithNotification(
                     room.createQuestion(generated.question, generated.hint, source = "manual", now = now).toQuestionEntity(),
                     { saved -> saved.toQuestionNotification(study, appLanguage) },
                     now,
                 )
+                questionEmbeddings.save(
+                    questionId = saved.id,
+                    userId = principal.userId,
+                    studyId = study.id,
+                    topic = study.topic,
+                    question = saved.question,
+                    embedding = generated.embedding,
+                )
+                saved
             }
 
             val question = questionDeferred.await()
@@ -214,6 +228,52 @@ class StudyService(
             .take(40)
     }
 
+    private fun generateDistinctQuestion(
+        apiKey: String,
+        model: String,
+        topic: String,
+        level: Int,
+        language: String,
+        customPrompt: String,
+        studyId: Long,
+        userId: Long,
+        recentQuestions: List<String>,
+        recentEmbeddings: List<QuestionEmbeddingCandidate>,
+    ): GeneratedQuestionWithEmbedding {
+        val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
+        val rejectedQuestions = mutableListOf<String>()
+        repeat(maxAttempts) { attempt ->
+            val history = recentQuestions + rejectedQuestions
+            val prompt = questionPrompts.buildQuestionGenerationPrompt(
+                topic = topic,
+                level = level,
+                language = language,
+                customPrompt = customPrompt,
+                recentQuestions = history,
+                diversity = questionDiversity.choose(topic, studyId, userId, history),
+            )
+            val generated = openAI.generateQuestion(apiKey, model, prompt)
+            val embedding = openAI.embedText(apiKey, generated.question)
+            val similar = questionSimilarity.findSimilar(
+                embedding = embedding,
+                candidates = recentEmbeddings,
+                threshold = properties.openai.questionSimilarityThreshold,
+            )
+            if (similar == null) {
+                return GeneratedQuestionWithEmbedding(generated, embedding)
+            }
+            rejectedQuestions += generated.question
+            if (attempt == maxAttempts - 1) {
+                throw ApiException(
+                    HttpStatus.CONFLICT,
+                    ApiErrorCode.VALIDATION_ERROR,
+                    "Generated question is too similar to a previous question.",
+                )
+            }
+        }
+        error("unreachable")
+    }
+
     private fun List<QuestionEntity>.toRecordResponses(language: String = "ko"): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
@@ -228,6 +288,8 @@ class StudyService(
         }
     }
 }
+
+private const val RECENT_EMBEDDING_LIMIT = 200
 
 private fun String.normalizedQuestionKey(): String =
     lowercase()

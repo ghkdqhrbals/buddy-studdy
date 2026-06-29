@@ -56,6 +56,25 @@ interface QuestionStatsPort {
     fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
 }
 
+data class QuestionEmbeddingCandidate(
+    val questionId: Long,
+    val question: String,
+    val embedding: List<Float>,
+)
+
+interface QuestionEmbeddingPort {
+    fun save(
+        questionId: Long,
+        userId: Long,
+        studyId: Long,
+        topic: String,
+        question: String,
+        embedding: List<Float>,
+    ): QuestionEmbeddingCandidate
+
+    fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate>
+}
+
 interface QuestionMembershipPort {
     fun activeTierCodeForUser(userId: Long): String?
     fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean

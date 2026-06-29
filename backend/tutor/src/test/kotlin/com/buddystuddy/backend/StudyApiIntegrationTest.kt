@@ -388,6 +388,8 @@ class StudyApiIntegrationTest {
                 prompt: QuestionGenerationPrompt,
             ) = GeneratedQuestion("Generated question for ${prompt.fallbackTopic}", "Generated hint")
 
+            override fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
+
             override fun grade(
                 apiKey: String,
                 model: String,

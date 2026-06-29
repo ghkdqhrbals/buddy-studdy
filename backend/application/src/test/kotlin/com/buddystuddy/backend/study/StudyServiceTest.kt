@@ -14,6 +14,8 @@ import com.buddystuddy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystuddy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystuddy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
+import com.buddystuddy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionSearchTranslationPort
@@ -44,6 +46,7 @@ class StudyServiceTest {
     private val questionStats = FakeQuestionStatsPort()
     private val users = FakeUserPort()
     private val openAI = FakeOpenAI()
+    private val questionEmbeddings = FakeQuestionEmbeddingPort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStuddyProperties().apply { openai.apiKey = "test-api-key" }
@@ -54,6 +57,7 @@ class StudyServiceTest {
         questions = questions,
         questionStats = questionStats,
         openAI = openAI,
+        questionEmbeddings = questionEmbeddings,
         users = users,
         cipher = cipher,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
@@ -192,6 +196,39 @@ class StudyServiceTest {
         assertThat(openAI.generatedPrompt?.userPrompt).contains("Reasoning mode:")
         assertThat(questions.findRecentQuestionTextsByStudyIdAndTopicCalls).isEqualTo(1)
         assertThat(questions.findRecentQuestionTextsByUserIdAndTopicCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `create question retries and stores embedding when generated question is too similar`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 83,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis",
+            difficultyLevel = 6,
+            intervalMinutes = 15,
+            customPrompt = "Ask practical scenarios.",
+            openaiModel = "gpt-5.4",
+        )
+        questionEmbeddings.rows += QuestionEmbeddingCandidate(
+            questionId = 700,
+            question = "How does Redis persistence work?",
+            embedding = listOf(1f, 0f, 0f),
+        )
+        openAI.generatedQuestions += GeneratedQuestion("How does Redis persistence work in production?", null)
+        openAI.generatedQuestions += GeneratedQuestion("How would you diagnose Redis memory fragmentation?", null)
+        openAI.embeddings["How does Redis persistence work in production?"] = listOf(0.99f, 0.01f, 0f)
+        openAI.embeddings["How would you diagnose Redis memory fragmentation?"] = listOf(0f, 1f, 0f)
+
+        val response = service.createQuestion(principal, studyId = 83)
+
+        assertThat(response.question.question).isEqualTo("How would you diagnose Redis memory fragmentation?")
+        assertThat(openAI.generateCalls).isEqualTo(2)
+        assertThat(questionEmbeddings.savedRows).hasSize(1)
+        val savedEmbedding = questionEmbeddings.savedRows.single()
+        assertThat(savedEmbedding.questionId).isEqualTo(response.id.toLong())
+        assertThat(savedEmbedding.embedding).containsExactly(0f, 1f, 0f)
     }
 
     @Test
@@ -485,13 +522,32 @@ class StudyServiceTest {
             failure?.let { throw it }
             generatedPrompt = prompt
             assertThat(prompt.userPrompt).contains("Language: English")
+            if (generatedQuestions.isNotEmpty()) return generatedQuestions.removeFirst()
             return GeneratedQuestion("Question", null)
         }
+        val generatedQuestions = ArrayDeque<GeneratedQuestion>()
+        val embeddings = mutableMapOf<String, List<Float>>()
+        override fun embedText(apiKey: String, text: String): List<Float> =
+            embeddings[text] ?: listOf(0f, 0f, 1f)
         override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
             gradeCalls += 1
             assertThat(language).isEqualTo("en")
             return GradedAnswer(100, true, "Good", "Because")
         }
+    }
+
+    private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
+        val rows = mutableListOf<QuestionEmbeddingCandidate>()
+        val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
+        override fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
+            val row = QuestionEmbeddingCandidate(questionId, question, embedding)
+            savedRows += row
+            rows += row
+            return row
+        }
+
+        override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> =
+            rows.take(limit)
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

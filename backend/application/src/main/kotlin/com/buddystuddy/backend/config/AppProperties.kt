@@ -30,6 +30,9 @@ data class BuddyStuddyProperties(
     data class OpenAI(
         var apiKey: String = "",
         var model: String = "gpt-5.4",
+        var embeddingModel: String = "text-embedding-3-small",
+        var questionSimilarityThreshold: Double = 0.86,
+        var questionSimilarityMaxAttempts: Int = 3,
     )
     data class Apns(
         var teamId: String = "",
