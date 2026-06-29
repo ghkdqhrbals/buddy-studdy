@@ -143,6 +143,36 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
         pageable: Pageable,
     ): Page<QuestionEntity>
 
+    @Query(
+        """
+        select q.question from QuestionEntity q
+        where q.studyId = :studyId
+          and q.deletedAt is null
+          and lower(q.topic) = lower(:topic)
+        order by q.createdAt desc, q.id desc
+        """
+    )
+    override fun findRecentQuestionTextsByStudyIdAndTopic(
+        @Param("studyId") studyId: Long,
+        @Param("topic") topic: String,
+        pageable: Pageable,
+    ): List<String>
+
+    @Query(
+        """
+        select q.question from QuestionEntity q
+        where q.userId = :userId
+          and q.deletedAt is null
+          and lower(q.topic) = lower(:topic)
+        order by q.createdAt desc, q.id desc
+        """
+    )
+    override fun findRecentQuestionTextsByUserIdAndTopic(
+        @Param("userId") userId: Long,
+        @Param("topic") topic: String,
+        pageable: Pageable,
+    ): List<String>
+
     @Query("select count(q) from QuestionEntity q where q.studyId = :studyId and q.deletedAt is null and q.skippedAt is null and q.score is null")
     override fun countPendingForStudy(@Param("studyId") studyId: Long): Long
 

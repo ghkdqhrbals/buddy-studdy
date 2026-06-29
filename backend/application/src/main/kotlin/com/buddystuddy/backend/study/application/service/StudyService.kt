@@ -23,6 +23,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionPort
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,7 @@ class StudyService(
     private val cipher: KeyCipher,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
+    private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
 ) : StudyUseCase, BrowseRecordsUseCase {
@@ -56,7 +58,6 @@ class StudyService(
     private suspend fun createQuestionAsync(principal: Principal, studyId: Long): StudyRecordResponse = coroutineScope {
         val studyDeferred = async(Dispatchers.IO) { studies.findByIdAndUserId(studyId, principal.userId) }
         val userDeferred = async(Dispatchers.IO) { users.findById(principal.userId).orElse(null) }
-        val recentQuestionsDeferred = async(Dispatchers.IO) { recentQuestions(principal) }
 
         val study = studyDeferred.await()
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
@@ -64,6 +65,7 @@ class StudyService(
         val appLanguage = user?.appLanguage ?: "ko"
 
         val pendingCountDeferred = async(Dispatchers.IO) { questions.countPendingForStudy(study.id) }
+        val recentQuestionsDeferred = async(Dispatchers.IO) { recentQuestions(principal, study) }
         val room = StudyRoom.of(study.toStudyRoomSchedule(appLanguage), pendingCountDeferred.await())
         try {
             room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
@@ -74,12 +76,14 @@ class StudyService(
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {
             val generatedQuestionDeferred = async(Dispatchers.IO) {
+                val recentQuestions = recentQuestionsDeferred.await()
                 val prompt = questionPrompts.buildQuestionGenerationPrompt(
                     topic = room.topic,
                     level = room.difficultyLevel,
                     language = room.appLanguage,
                     customPrompt = room.customPrompt,
-                    recentQuestions = recentQuestionsDeferred.await(),
+                    recentQuestions = recentQuestions,
+                    diversity = questionDiversity.choose(room.topic, study.id, principal.userId, recentQuestions),
                 )
                 openAI.generateQuestion(
                     questionKey.apiKey,
@@ -200,8 +204,15 @@ class StudyService(
 
     private fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model
 
-    private fun recentQuestions(principal: Principal): List<String> =
-        questions.findVisibleByUser(principal.userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+    private fun recentQuestions(principal: Principal, study: StudyEntity): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(study.id, study.topic, PageRequest.of(0, 30))
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(principal.userId, study.topic, PageRequest.of(0, 30))
+        return (sameStudy + sameTopic)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.normalizedQuestionKey() }
+            .take(40)
+    }
 
     private fun List<QuestionEntity>.toRecordResponses(language: String = "ko"): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
@@ -217,6 +228,11 @@ class StudyService(
         }
     }
 }
+
+private fun String.normalizedQuestionKey(): String =
+    lowercase()
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .trim()
 
 private fun StudyRecordResponse.withTranslatedText(translated: QuestionSearchEntity?): StudyRecordResponse {
     if (translated == null) return this

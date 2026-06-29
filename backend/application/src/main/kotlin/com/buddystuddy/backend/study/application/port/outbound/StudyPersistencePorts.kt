@@ -34,6 +34,8 @@ interface QuestionPort {
     fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
     fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
     fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity>
+    fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String>
+    fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String>
     fun countPendingForStudy(studyId: Long): Long
     fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long>
     fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>

@@ -21,6 +21,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.port.outbound.TranslatedQuestionSearchText
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.QuestionCreationWriteManager
@@ -57,6 +58,7 @@ class StudyServiceTest {
         cipher = cipher,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
         questionPrompts = QuestionPromptProvider(),
+        questionDiversity = QuestionDiversityPolicy(),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
             questionStats = questionStats,
@@ -152,6 +154,44 @@ class StudyServiceTest {
         assertThat(response.question.question).isEqualTo("Question")
         assertThat(openAI.generateCalls).isEqualTo(1)
         assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `create question sends same study and same topic history before openai generation`() {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 82,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis",
+            difficultyLevel = 6,
+            intervalMinutes = 15,
+            customPrompt = "Ask practical scenarios.",
+            openaiModel = "gpt-5.4",
+        )
+        questions.visibleRows += question(id = 901, topic = "Redis").apply {
+            studyId = 82
+            question = "How does Redis persistence work?"
+        }
+        questions.visibleRows += question(id = 902, topic = "Redis").apply {
+            studyId = 99
+            question = "When should Redis use AOF instead of snapshots?"
+        }
+        questions.visibleRows += question(id = 903, topic = "Kafka").apply {
+            studyId = 82
+            question = "What is Kafka consumer lag?"
+        }
+
+        service.createQuestion(principal, studyId = 82)
+
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("How does Redis persistence work?")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("When should Redis use AOF instead of snapshots?")
+        assertThat(openAI.generatedPrompt?.userPrompt).doesNotContain("What is Kafka consumer lag?")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Diversity angle:")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Question format:")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Reasoning mode:")
+        assertThat(questions.findRecentQuestionTextsByStudyIdAndTopicCalls).isEqualTo(1)
+        assertThat(questions.findRecentQuestionTextsByUserIdAndTopicCalls).isEqualTo(1)
     }
 
     @Test
@@ -327,6 +367,24 @@ class StudyServiceTest {
         override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
         override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows.filter { it.topic.contains(query, ignoreCase = true) }, pageable, visibleRows.size.toLong())
+        var findRecentQuestionTextsByStudyIdAndTopicCalls = 0
+        var findRecentQuestionTextsByUserIdAndTopicCalls = 0
+        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
+            findRecentQuestionTextsByStudyIdAndTopicCalls += 1
+            return visibleRows
+                .filter { it.studyId == studyId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
+                .sortedByDescending { it.createdAt }
+                .map { it.question }
+                .take(pageable.pageSize)
+        }
+        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
+            findRecentQuestionTextsByUserIdAndTopicCalls += 1
+            return visibleRows
+                .filter { it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
+                .sortedByDescending { it.createdAt }
+                .map { it.question }
+                .take(pageable.pageSize)
+        }
         override fun countPendingForStudy(studyId: Long): Long = pendingRows.count { it.studyId == studyId }.toLong()
         override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
             pendingRows

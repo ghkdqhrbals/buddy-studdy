@@ -8,6 +8,64 @@ data class QuestionGenerationPrompt(
     val fallbackTopic: String,
 )
 
+data class QuestionDiversityGuide(
+    val angle: String,
+    val format: String,
+    val reasoningMode: String,
+    val noveltySeed: String,
+)
+
+@Component
+class QuestionDiversityPolicy {
+    fun choose(topic: String, studyId: Long, userId: Long, recentQuestions: List<String>): QuestionDiversityGuide {
+        val normalizedHistory = recentQuestions
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+        val base = listOf(topic, studyId.toString(), userId.toString(), normalizedHistory.size.toString(), normalizedHistory.joinToString("|"))
+            .joinToString("#")
+            .fold(0) { acc, char -> (acc * 31 + char.code).absoluteValue() }
+
+        return QuestionDiversityGuide(
+            angle = angles[base % angles.size],
+            format = formats[(base / angles.size) % formats.size],
+            reasoningMode = reasoningModes[(base / (angles.size * formats.size)) % reasoningModes.size],
+            noveltySeed = "route-${base % 10_000}",
+        )
+    }
+
+    private fun Int.absoluteValue(): Int = if (this == Int.MIN_VALUE) 0 else kotlin.math.abs(this)
+
+    companion object {
+        private val angles = listOf(
+            "definition boundary",
+            "real-world failure mode",
+            "trade-off decision",
+            "debugging scenario",
+            "scale-out design",
+            "implementation detail",
+            "operational metric",
+            "comparison with an alternative",
+            "migration or rollout risk",
+            "security or reliability concern",
+        )
+        private val formats = listOf(
+            "single concrete scenario",
+            "why/how explanation",
+            "choose between two options",
+            "spot the problem",
+            "predict the consequence",
+            "design review prompt",
+        )
+        private val reasoningModes = listOf(
+            "cause and effect",
+            "step-by-step diagnosis",
+            "trade-off analysis",
+            "constraint-first thinking",
+            "example-driven explanation",
+        )
+    }
+}
+
 @Component
 class QuestionPromptProvider {
     fun buildQuestionGenerationPrompt(
@@ -16,6 +74,7 @@ class QuestionPromptProvider {
         language: String,
         customPrompt: String,
         recentQuestions: List<String>,
+        diversity: QuestionDiversityGuide,
     ): QuestionGenerationPrompt {
         val resolvedTopic = topic.ifBlank { "general study" }
         val languageName = if (language == "en") "English" else "Korean"
@@ -34,7 +93,13 @@ class QuestionPromptProvider {
                 Topic: $resolvedTopic
                 Level: ${level.coerceIn(1, 10)}/10
                 Language: $languageName
-                Avoid repeating these recent questions: $recentQuestionText
+                Diversity angle: ${diversity.angle}
+                Question format: ${diversity.format}
+                Reasoning mode: ${diversity.reasoningMode}
+                Novelty seed: ${diversity.noveltySeed}
+                Previously asked questions for this learner and topic: $recentQuestionText
+                Do not create the same or semantically similar question as any previous question above.
+                Use a different angle, concept, trade-off, or scenario from the previous questions.
                 Extra tutor prompt: $tutorPrompt
 
                 Return JSON only with keys question and expectedAnswerHint.

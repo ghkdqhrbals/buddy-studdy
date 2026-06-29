@@ -14,6 +14,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.study.domain.entity.QuestionEntity
 import com.buddystuddy.study.domain.entity.QuestionStatsEntity
@@ -39,6 +40,7 @@ class ScheduledQuestionService(
     private val openAI: OpenAIPort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
+    private val questionDiversity: QuestionDiversityPolicy,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -52,6 +54,7 @@ class ScheduledQuestionService(
         openAI = openAI,
         questionKeys = questionKeys,
         questionPrompts = questionPrompts,
+        questionDiversity = questionDiversity,
         backoffPolicy = backoffPolicy,
         log = log,
     )
@@ -61,7 +64,7 @@ class ScheduledQuestionService(
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
-        val recentQuestionsByUserId = mutableMapOf<Long, List<String>>()
+        val recentQuestionsByStudyTopic = mutableMapOf<StudyTopicKey, List<String>>()
         val batchSize = properties.scheduler.batchSize.coerceAtLeast(1)
         var processed = 0
         while (true) {
@@ -74,7 +77,7 @@ class ScheduledQuestionService(
                     now = now,
                     pending = pendingCounts[study.id] ?: 0L,
                     usersById = usersById,
-                    recentQuestionsByUserId = recentQuestionsByUserId,
+                    recentQuestionsByStudyTopic = recentQuestionsByStudyTopic,
                 )
                 studies.save(study)
             }
@@ -101,6 +104,7 @@ class ScheduledQuestionCreator(
     private val openAI: OpenAIPort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
+    private val questionDiversity: QuestionDiversityPolicy,
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
 ) {
@@ -109,7 +113,7 @@ class ScheduledQuestionCreator(
         now: Instant,
         pending: Long,
         usersById: MutableMap<Long, UserEntity?>,
-        recentQuestionsByUserId: MutableMap<Long, List<String>>,
+        recentQuestionsByStudyTopic: MutableMap<StudyTopicKey, List<String>>,
     ) {
         var questionKey: OpenAIQuestionKey? = null
         var questionCreated = false
@@ -123,8 +127,8 @@ class ScheduledQuestionCreator(
                 return
             }
             questionKey = questionKeys.resolveForQuestionGeneration(user)
-            val recent = recentQuestionsByUserId.getOrPut(userId) {
-                questions.findVisibleByUser(userId, includePending = true, PageRequest.of(0, 30)).content.map { it.question }
+            val recent = recentQuestionsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
+                recentQuestions(userId, study)
             }
             val prompt = questionPrompts.buildQuestionGenerationPrompt(
                 topic = study.topic,
@@ -132,6 +136,7 @@ class ScheduledQuestionCreator(
                 language = appLanguage,
                 customPrompt = study.customPrompt,
                 recentQuestions = recent,
+                diversity = questionDiversity.choose(study.topic, study.id, userId, recent),
             )
             val generated = openAI.generateQuestion(questionKey.apiKey, study.openaiModel, prompt)
             val saved = questions.save(study.toScheduledQuestion(generated.question, generated.hint, appLanguage, now))
@@ -156,6 +161,16 @@ class ScheduledQuestionCreator(
             study.markScheduled(error.message ?: error.javaClass.simpleName, retryAt, now)
             log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
         }
+    }
+
+    private fun recentQuestions(userId: Long, study: StudyEntity): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(study.id, study.topic, PageRequest.of(0, 30))
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(userId, study.topic, PageRequest.of(0, 30))
+        return (sameStudy + sameTopic)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.normalizedQuestionKey() }
+            .take(40)
     }
 
     private fun afterCommit(action: () -> Unit) {
@@ -198,6 +213,12 @@ class ScheduledQuestionCreator(
 
 }
 
+data class StudyTopicKey(
+    val studyId: Long,
+    val userId: Long,
+    val topicKey: String,
+)
+
 private fun StudyEntity.markScheduled(error: String, scheduledAt: Instant, now: Instant) {
     nextDueAt = scheduledAt
     lastError = error
@@ -220,3 +241,13 @@ class ScheduleBackoffPolicy(
     fun missingApiKeyNextDueAt(now: Instant): Instant = now.plusSeconds(missingApiKeyRetrySeconds)
     fun failureNextDueAt(now: Instant): Instant = now.plusSeconds(failureRetrySeconds)
 }
+
+private fun String.normalizedTopicKey(): String =
+    lowercase()
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .trim()
+
+private fun String.normalizedQuestionKey(): String =
+    lowercase()
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .trim()

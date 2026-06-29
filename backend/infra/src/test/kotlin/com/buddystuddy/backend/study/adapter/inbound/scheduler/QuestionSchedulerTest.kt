@@ -16,6 +16,7 @@ import com.buddystuddy.backend.study.application.port.outbound.QuestionMembershi
 import com.buddystuddy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystuddy.backend.study.application.port.outbound.StudyPort
 import com.buddystuddy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystuddy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystuddy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystuddy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystuddy.backend.study.application.service.ScheduledQuestionService
@@ -57,6 +58,7 @@ class QuestionSchedulerTest {
         openAI = openAI,
         questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
         questionPrompts = QuestionPromptProvider(),
+        questionDiversity = QuestionDiversityPolicy(),
     )
 
     @Test
@@ -70,7 +72,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run reuses user and recent question lookups for studies of same user`() {
+    fun `scheduled run uses same study and same topic history for each study`() {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
@@ -98,9 +100,13 @@ class QuestionSchedulerTest {
         }
         assertThat(studies.rows.map { it.nextDueAt }).allSatisfy { assertThat(it).isAfter(now) }
         assertThat(users.findByIdCalls).isEqualTo(1)
-        assertThat(questions.findVisibleByUserCalls).isEqualTo(1)
+        assertThat(questions.findVisibleByUserCalls).isZero()
+        assertThat(questions.findRecentQuestionTextsByStudyIdAndTopicCalls).isEqualTo(2)
+        assertThat(questions.findRecentQuestionTextsByUserIdAndTopicCalls).isEqualTo(2)
         assertThat(openAI.recentArguments).allSatisfy { recent ->
-            assertThat(recent).containsExactly("Previous question")
+            if (recent.isNotEmpty()) {
+                assertThat(recent).containsExactly("Previous question")
+            }
         }
     }
 
@@ -337,6 +343,8 @@ class QuestionSchedulerTest {
         val pendingRows = mutableListOf<QuestionEntity>()
         val savedRows = mutableListOf<QuestionEntity>()
         var findVisibleByUserCalls = 0
+        var findRecentQuestionTextsByStudyIdAndTopicCalls = 0
+        var findRecentQuestionTextsByUserIdAndTopicCalls = 0
         var countPendingForStudyCalls = 0
         var countPendingByStudyIdsCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
@@ -367,6 +375,22 @@ class QuestionSchedulerTest {
             return PageImpl(visibleRows.filter { it.userId == userId }, pageable, visibleRows.count { it.userId == userId }.toLong())
         }
         override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
+            findRecentQuestionTextsByStudyIdAndTopicCalls += 1
+            return visibleRows
+                .filter { it.studyId == studyId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
+                .sortedByDescending { it.createdAt }
+                .map { it.question }
+                .take(pageable.pageSize)
+        }
+        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
+            findRecentQuestionTextsByUserIdAndTopicCalls += 1
+            return visibleRows
+                .filter { it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
+                .sortedByDescending { it.createdAt }
+                .map { it.question }
+                .take(pageable.pageSize)
+        }
         override fun countPendingForStudy(studyId: Long): Long {
             countPendingForStudyCalls += 1
             return pendingRows.count { it.studyId == studyId }.toLong()
@@ -406,7 +430,7 @@ class QuestionSchedulerTest {
             generateQuestionCalls += 1
             failure?.let { throw it }
             val recentText = prompt.userPrompt
-                .substringAfter("Avoid repeating these recent questions: ")
+                .substringAfter("Previously asked questions for this learner and topic: ")
                 .substringBefore("\n")
                 .split("|")
                 .map { it.trim() }
