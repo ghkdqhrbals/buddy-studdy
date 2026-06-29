@@ -12,7 +12,7 @@ type LoginScreenProps = {
 
 export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenProps) {
   const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(error);
 
