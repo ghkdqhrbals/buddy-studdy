@@ -279,63 +279,6 @@ spec:
       app.kubernetes.io/name: buddystuddy-postgres
   storageClassName: buddystuddy-local
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: data-buddystuddy-redis-0
-  namespace: buddystuddy
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: buddystuddy-redis
-      app.kubernetes.io/ordinal: "0"
-  storageClassName: buddystuddy-local
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: data-buddystuddy-redis-1
-  namespace: buddystuddy
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: buddystuddy-redis
-      app.kubernetes.io/ordinal: "1"
-  storageClassName: buddystuddy-local
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: data-buddystuddy-redis-2
-  namespace: buddystuddy
-spec:
-  accessModes:
-  - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: buddystuddy-redis
-      app.kubernetes.io/ordinal: "2"
-  storageClassName: buddystuddy-local
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -660,6 +603,9 @@ spec:
       resources:
         requests:
           storage: 5Gi
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: buddystuddy-redis
       storageClassName: buddystuddy-local
 ---
 apiVersion: batch/v1
