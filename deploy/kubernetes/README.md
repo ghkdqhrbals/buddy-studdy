@@ -70,19 +70,32 @@ The Mac Kubernetes target stores state on the host:
 The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
 these host directories.
 
-## External Tunnel Ports
+## External Access
 
-The Mac Kubernetes target exposes fixed NodePorts for Cloudflare Tunnel:
+The Mac Kubernetes target exposes fixed NodePorts:
 
 - Backend API: `localhost:30080`
 - PostgreSQL: `localhost:30432`
 - Redis Cluster proxy entry service: `localhost:30379`
 
-`deploy/cloudflared/lowfidev-config.yaml` maps:
+Cloudflare should be used in two different modes:
+
+- HTTP services use hostname ingress.
+- DB/Redis administration should use a WARP private network route to the
+  MacBook Air node IP.
+
+`deploy/cloudflared/lowfidev-config.yaml` maps public HTTP services and keeps
+compatibility TCP hostnames:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
 - `redis.lowfidev.cloud` -> `tcp://localhost:30379`
+
+For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` and
+connect through WARP to:
+
+- PostgreSQL: `<macbook-air-lan-ip>:30432`
+- Redis Cluster proxy: `<macbook-air-lan-ip>:30379`
 
 The Redis tunnel points at `buddystudy-redis-external`, a single Redis Cluster
 proxy endpoint. Do not point the tunnel directly at Redis Cluster nodes; direct
@@ -90,6 +103,8 @@ node exposure can return internal cluster addresses in redirects.
 
 Cloudflare Tunnel TCP hostnames require clients to connect through
 `cloudflared access tcp` unless Cloudflare Spectrum is configured separately.
+Prefer WARP private routing over Spectrum for this project because DB/Redis
+should not be public Internet services.
 
 If GHCR packages are private, create an image pull secret and add it to the
 backend/admin frontend Deployments:
