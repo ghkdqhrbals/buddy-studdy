@@ -1,10 +1,8 @@
 package com.buddystudy.backend.config
 
 import org.flywaydb.core.Flyway
-import org.flywaydb.core.api.output.MigrateResult
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
@@ -12,7 +10,6 @@ import javax.sql.DataSource
 
 @Configuration
 @ConditionalOnClass(Flyway::class)
-@ConditionalOnProperty(prefix = "spring.flyway", name = ["enabled"], havingValue = "true")
 class FlywayMigrationConfig {
     @Bean
     fun flyway(dataSource: DataSource, environment: Environment): Flyway =
@@ -32,7 +29,19 @@ class FlywayMigrationConfig {
             .load()
 
     @Bean
-    fun flywayMigration(flyway: Flyway): MigrateResult = flyway.migrate()
+    fun flywayMigration(flyway: Flyway, environment: Environment): Any =
+        if (
+            environment.getBooleanProperty(
+                "spring.flyway.enabled",
+                "SPRING_FLYWAY_ENABLED",
+                "FLYWAY_ENABLED",
+                defaultValue = false,
+            )
+        ) {
+            flyway.migrate()
+        } else {
+            "flyway-disabled"
+        }
 
     companion object {
         private fun Environment.getBooleanProperty(vararg names: String, defaultValue: Boolean): Boolean =

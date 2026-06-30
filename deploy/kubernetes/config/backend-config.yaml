@@ -6,6 +6,8 @@ data:
   APP_PORT: "8080"
   SPRING_PROFILES_ACTIVE: "prod"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
+  FLYWAY_ENABLED: "false"
+  SPRING_FLYWAY_ENABLED: "false"
   FLYWAY_LOCATIONS: "filesystem:/app/db/migration"
   DATABASE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy"
   DATABASE_USERNAME: "buddystudy"

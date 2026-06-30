@@ -14,6 +14,7 @@ data:
   DATABASE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
   DATABASE_USERNAME: buddystudy
   ENABLE_OPENAPI_DOCS: "false"
+  FLYWAY_ENABLED: "false"
   FLYWAY_LOCATIONS: filesystem:/app/db/migration
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
@@ -28,6 +29,7 @@ data:
   SCHEDULER_ENABLED: "true"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
   SPRING_DATA_REDIS_CLUSTER_NODES: buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379
+  SPRING_FLYWAY_ENABLED: "false"
   SPRING_PROFILES_ACTIVE: prod
   VIEW_STREAM_PREFIX: view-v1
 kind: ConfigMap
