@@ -1,6 +1,6 @@
-# BuddyStuddy Deploy
+# BuddyStudy Deploy
 
-Deployment repository for the BuddyStuddy Spring Boot Kotlin push backend.
+Deployment repository for the BuddyStudy Spring Boot Kotlin push backend.
 
 This repo is triggered by `repository_dispatch` from the app repository after a backend Docker image is published to GHCR.
 
@@ -38,16 +38,16 @@ Monitoring deploy:
 - `buddystuddy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `backups/`: local host directory (`/opt/buddystuddy-backend/backups`) where `pg_dump` files are written before each deploy.
 - `buddystuddy-postgres-data` retains live DB data across restarts and redeploys.
-- Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStuddy Spring Boot app.
+- Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
 - If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
-- If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStuddy backend logs.
+- If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStudy backend logs.
 - Other paths return 404 at Nginx.
 
 ## Monitoring Deploy
 
 Monitoring is deployed separately from backend image rollout. Copy
 `deploy-monitoring.yml` into the deploy repository's `.github/workflows/`
-directory and run **Deploy BuddyStuddy Monitoring** manually.
+directory and run **Deploy BuddyStudy Monitoring** manually.
 
 Monitoring is PLG only: Promtail, Loki, and Grafana. Prometheus and Redis
 exporter containers are explicitly removed by the workflow so they do not
@@ -62,8 +62,8 @@ The workflow creates or replaces:
 Grafana dashboard provisioning is file-based, so dashboards are restored on
 container recreation:
 
-- `BuddyStuddy Log Search`
-- `BuddyStuddy API Performance`
+- `BuddyStudy Log Search`
+- `BuddyStudy API Performance`
 
 The workflow downloads dashboard JSON from this repository's
 `docs/observability/` directory and mounts them into Grafana provisioning. This

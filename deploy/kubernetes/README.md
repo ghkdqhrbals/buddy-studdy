@@ -1,6 +1,6 @@
-# BuddyStuddy Kubernetes Deployment
+# BuddyStudy Kubernetes Deployment
 
-This directory contains the Kubernetes manifests for running BuddyStuddy on a
+This directory contains the Kubernetes manifests for running BuddyStudy on a
 small ARM64 Kubernetes node, such as a Mac mini/MacBook Kubernetes target.
 
 ## Layout
@@ -11,7 +11,7 @@ small ARM64 Kubernetes node, such as a Mac mini/MacBook Kubernetes target.
 - `postgres/`: PostgreSQL StatefulSet, service, hostPath PV/PVC, and init script.
 - `redis/`: Redis Cluster StatefulSet, services, hostPath PV/PVCs, and cluster init Job.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
-- `backend/`: BuddyStuddy backend Deployment and service.
+- `backend/`: BuddyStudy backend Deployment and service.
 - `admin-frontend/`: admin web frontend Deployment and service.
 - `backup/`: daily PostgreSQL dump CronJob.
 
