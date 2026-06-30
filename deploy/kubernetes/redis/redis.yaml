@@ -56,9 +56,24 @@ metadata:
   labels:
     app.kubernetes.io/name: buddystudy-redis
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: buddystudy-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buddystudy-redis-external
+  labels:
+    app.kubernetes.io/name: buddystudy-redis-proxy
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: buddystudy-redis-proxy
   ports:
     - name: redis
       port: 6379
@@ -210,3 +225,76 @@ spec:
                 exit 0
               fi
               yes yes | redis-cli -a "$REDIS_PASSWORD" --cluster create $nodes --cluster-replicas 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buddystudy-redis-proxy
+  labels:
+    app.kubernetes.io/name: buddystudy-redis-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buddystudy-redis-proxy
+    spec:
+      initContainers:
+        - name: wait-for-redis-cluster
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+                sleep 2
+              done
+      containers:
+        - name: redis-cluster-proxy
+          image: redislabs/redis-cluster-proxy:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              exec redis-cluster-proxy \
+                --port 6379 \
+                --bind 0.0.0.0 \
+                --threads 2 \
+                --auth "$REDIS_PASSWORD" \
+                buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

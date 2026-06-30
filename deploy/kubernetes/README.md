@@ -76,13 +76,17 @@ The Mac Kubernetes target exposes fixed NodePorts for Cloudflare Tunnel:
 
 - Backend API: `localhost:30080`
 - PostgreSQL: `localhost:30432`
-- Redis Cluster entry service: `localhost:30379`
+- Redis Cluster proxy entry service: `localhost:30379`
 
 `deploy/cloudflared/lowfidev-config.yaml` maps:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
 - `redis.lowfidev.cloud` -> `tcp://localhost:30379`
+
+The Redis tunnel points at `buddystudy-redis-external`, a single Redis Cluster
+proxy endpoint. Do not point the tunnel directly at Redis Cluster nodes; direct
+node exposure can return internal cluster addresses in redirects.
 
 Cloudflare Tunnel TCP hostnames require clients to connect through
 `cloudflared access tcp` unless Cloudflare Spectrum is configured separately.
