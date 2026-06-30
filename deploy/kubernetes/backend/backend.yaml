@@ -33,6 +33,23 @@ spec:
       labels:
         app.kubernetes.io/name: buddystuddy-backend
     spec:
+      initContainers:
+        - name: wait-for-redis-cluster
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystuddy-backend-secret
+                  key: REDIS_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystuddy-redis-0.buddystuddy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+                sleep 2
+              done
       containers:
         - name: backend
           image: ghcr.io/ghkdqhrbals/buddy-studdy-backend:latest
@@ -66,4 +83,3 @@ spec:
               memory: 256Mi
             limits:
               memory: 768Mi
-

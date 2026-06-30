@@ -10,6 +10,36 @@ data:
     )\gexec
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: buddystuddy-postgres-data
+  labels:
+    app.kubernetes.io/name: buddystuddy-postgres
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: buddystuddy-local
+  hostPath:
+    path: /Users/gyuminhwangbo/data/buddystudy/db/postgres
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: buddystuddy-postgres-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: buddystuddy-local
+  resources:
+    requests:
+      storage: 20Gi
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystuddy-postgres
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: buddystuddy-postgres
@@ -73,15 +103,9 @@ spec:
             - name: init-scripts
               mountPath: /docker-entrypoint-initdb.d
       volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: buddystuddy-postgres-data
         - name: init-scripts
           configMap:
             name: buddystuddy-postgres-init
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 20Gi
-

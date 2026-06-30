@@ -6,7 +6,6 @@ namespace: buddystuddy
 resources:
   - namespace.yaml
   - config/backend-config.yaml
-  - secrets/backend-secret.yaml
   - postgres/postgres.yaml
   - redis/redis.yaml
   - libretranslate/libretranslate.yaml
@@ -16,4 +15,3 @@ resources:
 
 commonLabels:
   app.kubernetes.io/part-of: buddystuddy
-

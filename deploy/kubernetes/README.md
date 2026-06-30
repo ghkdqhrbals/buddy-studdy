@@ -7,9 +7,9 @@ small ARM64 Kubernetes node, such as a Mac mini/MacBook Kubernetes target.
 
 - `namespace.yaml`: shared namespace.
 - `config/`: non-secret environment configuration.
-- `secrets/`: placeholder Kubernetes secrets. Replace values before production use.
-- `postgres/`: PostgreSQL StatefulSet, service, PVC, and init script.
-- `redis/`: Redis Deployment and service.
+- `secrets/`: placeholder Kubernetes secrets. These are not applied by kustomize.
+- `postgres/`: PostgreSQL StatefulSet, service, hostPath PV/PVC, and init script.
+- `redis/`: Redis Cluster StatefulSet, services, hostPath PV/PVCs, and cluster init Job.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
 - `backend/`: BuddyStuddy backend Deployment and service.
 - `admin-frontend/`: admin web frontend Deployment and service.
@@ -44,8 +44,10 @@ deploy/kubernetes/remote-apply.sh gyuminhwangbo@gyumin-macbookair
 
 ## Secrets
 
-`secrets/backend-secret.yaml` contains development placeholders so the
-manifests are self-contained. Before a real deployment, replace at least:
+`secrets/backend-secret.yaml` contains development placeholders only. It is
+intentionally not included in `kustomization.yaml`, because applying placeholder
+secrets would overwrite live cluster credentials. Create or patch
+`buddystuddy-backend-secret` separately before rollout. Required keys include:
 
 - `BACKEND_MASTER_KEY`
 - `AUTH_JWT_SECRET`
@@ -54,6 +56,19 @@ manifests are self-contained. Before a real deployment, replace at least:
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
+
+## Local Persistent Data
+
+The Mac Kubernetes target stores state on the host:
+
+- PostgreSQL: `/Users/gyuminhwangbo/data/buddystudy/db/postgres`
+- Redis Cluster:
+  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-0`
+  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-1`
+  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-2`
+
+The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
+these host directories.
 
 If GHCR packages are private, create an image pull secret and add it to the
 backend/admin frontend Deployments:

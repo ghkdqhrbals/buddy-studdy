@@ -14,6 +14,7 @@ data:
   REDIS_HOST: "buddystuddy-redis"
   REDIS_PORT: "6379"
   REDIS_SSL: "false"
+  SPRING_DATA_REDIS_CLUSTER_NODES: "buddystuddy-redis-0.buddystuddy-redis-headless:6379,buddystuddy-redis-1.buddystuddy-redis-headless:6379,buddystuddy-redis-2.buddystuddy-redis-headless:6379"
   ENABLE_OPENAPI_DOCS: "false"
   SCHEDULER_ENABLED: "true"
   SCHEDULER_BATCH_SIZE: "50"
