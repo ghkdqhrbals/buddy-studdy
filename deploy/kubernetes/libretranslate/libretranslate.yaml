@@ -44,7 +44,7 @@ spec:
               containerPort: 5000
           readinessProbe:
             httpGet:
-              path: /
+              path: /languages
               port: http
             initialDelaySeconds: 20
             periodSeconds: 20
@@ -65,4 +65,3 @@ spec:
   resources:
     requests:
       storage: 5Gi
-

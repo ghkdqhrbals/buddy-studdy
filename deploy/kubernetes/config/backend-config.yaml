@@ -6,6 +6,7 @@ data:
   APP_PORT: "8080"
   SPRING_PROFILES_ACTIVE: "prod"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
+  FLYWAY_LOCATIONS: "filesystem:/app/db/migration"
   DATABASE_URL: "jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy"
   DATABASE_USERNAME: "buddystuddy"
   ADMIN_ANALYTICS_DATABASE_URL: "jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy_aggregation"
@@ -24,4 +25,3 @@ data:
   VIEW_STREAM_PREFIX: "view-v1"
   BUDDYSTUDDY_TRANSLATION_BASE_URL: "http://buddystuddy-libretranslate:5000"
   GOOGLE_IOS_CLIENT_ID: "328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com"
-
