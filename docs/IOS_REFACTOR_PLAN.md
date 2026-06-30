@@ -1,4 +1,4 @@
-# BuddyStuddy iOS Refactor Plan
+# BuddyStudy iOS Refactor Plan
 
 ## Context
 

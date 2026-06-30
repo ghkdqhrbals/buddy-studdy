@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>BuddyStuddy</string>
+	<string>BuddyStudy</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
 			<string>io.github.ghkdqhrbals.StudyMate.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>buddystuddy</string>
+				<string>buddystudy</string>
 			</array>
 		</dict>
 		<dict>

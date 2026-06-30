@@ -2,8 +2,8 @@
 
 ## Context
 
-Admin analytics uses a separate PostgreSQL database named `buddystuddy_aggregation`.
-The primary BuddyStuddy database remains the source of truth. The aggregation database stores derived read models for the admin dashboard only.
+Admin analytics uses a separate PostgreSQL database named `buddystudy_aggregation`.
+The primary BuddyStudy database remains the source of truth. The aggregation database stores derived read models for the admin dashboard only.
 
 ## Goals
 

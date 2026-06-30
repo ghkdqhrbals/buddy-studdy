@@ -1,6 +1,6 @@
-# BuddyStuddy Backend
+# BuddyStudy Backend
 
-Spring Boot Kotlin backend for BuddyStuddy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
+Spring Boot Kotlin backend for BuddyStudy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
 
 This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this PostgreSQL-backed service.
 
@@ -38,7 +38,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: fallback APNs environment. Scheduled delivery uses each registered device's `apnsEnvironment`, so one backend can serve both debug `sandbox` tokens and TestFlight/App Store `production` tokens.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
-- `DATABASE_URL`: required PostgreSQL JDBC connection string, for example `jdbc:postgresql://db:5432/buddystuddy`.
+- `DATABASE_URL`: required PostgreSQL JDBC connection string, for example `jdbc:postgresql://db:5432/buddystudy`.
 - `DATABASE_USERNAME`, `DATABASE_PASSWORD`: PostgreSQL credentials.
 - `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
@@ -47,7 +47,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by the stream starter and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
-- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystuddy/dev` for the `dev` profile and `buddystuddy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_STREAM_COORDINATOR_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
+- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystudy/dev` for the `dev` profile and `buddystudy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_STREAM_COORDINATOR_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.datasource.url`, `spring.datasource.username`, and `spring.datasource.password`. If one of these styles is used for the datasource URL, keep the matching username and password in the same style or provide them as environment variables.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
@@ -71,8 +71,8 @@ For iPhone testing against a backend running on this Mac, see [Local Backend Tun
 ## Docker
 
 ```sh
-docker build -t buddystuddy-backend ./backend
-docker run --rm -p 8080:8080 --env-file .env -v buddystuddy-data:/data buddystuddy-backend
+docker build -t buddystudy-backend ./backend
+docker run --rm -p 8080:8080 --env-file .env -v buddystudy-data:/data buddystudy-backend
 ```
 
 For a local PostgreSQL-backed stack:
@@ -126,15 +126,15 @@ Spring Boot Actuator serves health checks at `/health` and `/api/v1/health`.
 
 ### DB Backups
 
-- Data is persisted with Docker volume `buddystuddy-postgres-data`.
+- Data is persisted with Docker volume `buddystudy-postgres-data`.
 - In deploy workflow, a logical backup is generated on each rollout as:
-  `backups/buddystuddy-YYYYMMDDTHHMMSS.dump`.
-- Locally, `docker compose` also starts a dedicated backup service (`buddystuddy-db-backups`) that writes
+  `backups/buddystudy-YYYYMMDDTHHMMSS.dump`.
+- Locally, `docker compose` also starts a dedicated backup service (`buddystudy-db-backups`) that writes
   daily states to that same 14-day retention policy.
 
 Backup artifacts are written to the mounted backup volume:
 
-- `buddystuddy-db-backups` (local compose)
+- `buddystudy-db-backups` (local compose)
 - `backups/` (deploy host)
 
 Backup files older than 14 days are removed automatically.
@@ -144,10 +144,10 @@ Example restore command on the deploy host:
 ```sh
 docker run --rm \
   -e PGPASSWORD="<postgres-password>" \
-  --network buddystuddy-net \
+  --network buddystudy-net \
   -v "<absolute-path-to-backups>:/backups:ro" \
   postgres:16-alpine \
-  pg_restore -h buddystuddy-db -U buddystuddy -d buddystuddy /backups/buddystuddy-20260101T000000.dump
+  pg_restore -h buddystudy-db -U buddystudy -d buddystudy /backups/buddystudy-20260101T000000.dump
 ```
 
 Client apps should not call OpenAI directly. They should register a backend device, upload settings/API key to this service, and use the question/grading endpoints.

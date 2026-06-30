@@ -1,16 +1,16 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: buddystuddy-redis-data-0
+  name: buddystudy-redis-data-0
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "0"
 spec:
   capacity:
     storage: 5Gi
   accessModes: ["ReadWriteOnce"]
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
   hostPath:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-0
     type: DirectoryOrCreate
@@ -18,16 +18,16 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: buddystuddy-redis-data-1
+  name: buddystudy-redis-data-1
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "1"
 spec:
   capacity:
     storage: 5Gi
   accessModes: ["ReadWriteOnce"]
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
   hostPath:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-1
     type: DirectoryOrCreate
@@ -35,16 +35,16 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: buddystuddy-redis-data-2
+  name: buddystudy-redis-data-2
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "2"
 spec:
   capacity:
     storage: 5Gi
   accessModes: ["ReadWriteOnce"]
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
   hostPath:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-2
     type: DirectoryOrCreate
@@ -52,13 +52,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: buddystuddy-redis
+  name: buddystudy-redis
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
   ports:
     - name: redis
       port: 6379
@@ -68,14 +68,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: buddystuddy-redis-headless
+  name: buddystudy-redis-headless
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
 spec:
   clusterIP: None
   publishNotReadyAddresses: true
   selector:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
   ports:
     - name: redis
       port: 6379
@@ -87,19 +87,19 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: buddystuddy-redis
+  name: buddystudy-redis
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
 spec:
-  serviceName: buddystuddy-redis-headless
+  serviceName: buddystudy-redis-headless
   replicas: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-redis
+      app.kubernetes.io/name: buddystudy-redis
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-redis
+        app.kubernetes.io/name: buddystudy-redis
     spec:
       containers:
         - name: redis
@@ -120,14 +120,14 @@ spec:
                 --cluster-enabled yes \
                 --cluster-config-file nodes.conf \
                 --cluster-node-timeout 5000 \
-                --cluster-announce-hostname "$(hostname).buddystuddy-redis-headless.buddystuddy.svc.cluster.local" \
+                --cluster-announce-hostname "$(hostname).buddystudy-redis-headless.buddystudy.svc.cluster.local" \
                 --cluster-announce-port 6379 \
                 --cluster-announce-bus-port 16379
           env:
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: buddystuddy-backend-secret
+                  name: buddystudy-backend-secret
                   key: REDIS_PASSWORD
           ports:
             - name: redis
@@ -158,26 +158,26 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: buddystuddy-local
+        storageClassName: buddystudy-local
         resources:
           requests:
             storage: 5Gi
         selector:
           matchLabels:
-            app.kubernetes.io/name: buddystuddy-redis
+            app.kubernetes.io/name: buddystudy-redis
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: buddystuddy-redis-cluster-init
+  name: buddystudy-redis-cluster-init
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
 spec:
   backoffLimit: 6
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-redis-cluster-init
+        app.kubernetes.io/name: buddystudy-redis-cluster-init
     spec:
       restartPolicy: OnFailure
       containers:
@@ -188,7 +188,7 @@ spec:
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: buddystuddy-backend-secret
+                  name: buddystudy-backend-secret
                   key: REDIS_PASSWORD
           command:
             - sh
@@ -196,16 +196,16 @@ spec:
             - |
               set -eu
               nodes="
-              buddystuddy-redis-0.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
-              buddystuddy-redis-1.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
-              buddystuddy-redis-2.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
+              buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+              buddystudy-redis-1.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+              buddystudy-redis-2.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
               "
               for node in $nodes; do
                 until redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" ping | grep -q PONG; do
                   sleep 2
                 done
               done
-              if redis-cli -a "$REDIS_PASSWORD" -h buddystuddy-redis-0.buddystuddy-redis-headless.buddystuddy.svc.cluster.local cluster info | grep -q "cluster_state:ok"; then
+              if redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local cluster info | grep -q "cluster_state:ok"; then
                 echo "Redis cluster already initialized"
                 exit 0
               fi

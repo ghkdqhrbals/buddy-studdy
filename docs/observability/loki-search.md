@@ -1,4 +1,4 @@
-# BuddyStuddy Loki Search Dashboard
+# BuddyStudy Loki Search Dashboard
 
 This dashboard contains a Kibana-style log timeline plus one log search panel: **Log Timeline** and **Search Results**.
 
@@ -9,8 +9,8 @@ Import `docs/observability/grafana-loki-search-dashboard.json` in Grafana, then 
 API performance and latency metrics are intentionally kept in a separate dashboard:
 
 - `docs/observability/grafana-api-latency-dashboard.json`
-- Dashboard UID: `buddystuddy-api-latency`
-- Dashboard title: `BuddyStuddy API Performance`
+- Dashboard UID: `buddystudy-api-latency`
+- Dashboard title: `BuddyStudy API Performance`
 
 The performance dashboard combines Datadog/Sentry-style traffic summaries with grouped latency tables:
 
@@ -24,7 +24,7 @@ The p50, p95, and p99 panels remain separate table panels. Each percentile panel
 
 ## Query Controls
 
-- `Label selector`: raw LogQL stream selector, for example `{job="buddystuddy-backend"}` or `{container="buddystuddy-nginx"}`. Loki labels are the indexed fields, so narrow this first.
+- `Label selector`: raw LogQL stream selector, for example `{job="buddystudy-backend"}` or `{container="buddystudy-nginx"}`. Loki labels are the indexed fields, so narrow this first.
 - `Label filters`: optional Grafana ad hoc label filters applied to the Loki data source. New logs include a `level` label so level filtering can be done here instead of inside the log panel.
 - `LogQL Search`: optional raw LogQL pipeline inserted after the label selector. Leave it empty to show every line in the selected label/time range.
 
@@ -57,7 +57,7 @@ The time series uses full-width bars (`barWidthFactor=1`) so each bucket visuall
 
 ## API Performance Dashboard
 
-The `BuddyStuddy API Performance` dashboard calculates traffic, error, and latency metrics from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables are grouped correctly:
+The `BuddyStudy API Performance` dashboard calculates traffic, error, and latency metrics from backend `api_response` logs. It uses the `route` field emitted by the backend response logger, not the raw request `path`, so path variables are grouped correctly:
 
 ```text
 path=/api/v1/me/records/71

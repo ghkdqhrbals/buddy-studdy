@@ -12,7 +12,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "buddystuddy-backend"
+rootProject.name = "buddystudy-backend"
 
 include("domain")
 include("application")

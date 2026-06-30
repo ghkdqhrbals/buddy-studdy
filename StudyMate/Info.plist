@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>BuddyStuddy</string>
+	<string>BuddyStudy</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,7 +34,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://ghkdqhrbals.github.io/buddy-studdy/appcast.xml</string>
+	<string>https://ghkdqhrbals.github.io/buddy-study/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>Jy7jVs42/k1I0GC5dqroL6XjZng3SXqj72xVGlEZohU=</string>
 </dict>

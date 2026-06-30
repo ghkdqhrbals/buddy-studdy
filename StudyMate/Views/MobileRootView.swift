@@ -1422,7 +1422,7 @@ struct PixelAvatarPalette {
 
     private func stableAvatarColor(seed: String) -> Color {
         let normalizedSeed = seed.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = normalizedSeed.isEmpty ? "buddy-studdy-default-profile" : normalizedSeed
+        let source = normalizedSeed.isEmpty ? "buddy-study-default-profile" : normalizedSeed
         let hash = source.unicodeScalars.reduce(UInt32(2_166_136_261)) { value, scalar in
             (value ^ UInt32(scalar.value)) &* 16_777_619
         }
@@ -3784,7 +3784,7 @@ private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showsAPIKey = false
 
-    private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStuddy%20Feedback")!
+    private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
     var body: some View {

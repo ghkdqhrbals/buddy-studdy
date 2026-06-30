@@ -28,16 +28,16 @@
       "tags": [],
       "targetBlank": false,
       "title": "Log Search",
-      "tooltip": "Open BuddyStuddy log search dashboard",
+      "tooltip": "Open BuddyStudy log search dashboard",
       "type": "link",
-      "url": "/d/buddystuddy-logs/buddystuddy-logs"
+      "url": "/d/buddystudy-logs/buddystudy-logs"
     }
   ],
   "panels": [
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -86,7 +86,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "sum(rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
@@ -101,7 +101,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -180,7 +180,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "sum by (method, route) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
@@ -195,7 +195,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -274,7 +274,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "sum by (status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\".+\" [${qpsWindow}]))",
@@ -289,7 +289,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -368,7 +368,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "sum by (method, route, status) (rate(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | status=~\"[45]..\" [${qpsWindow}]))",
@@ -383,7 +383,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -462,7 +462,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "quantile_over_time(0.99, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__interval]) by (method, route)",
@@ -477,7 +477,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -566,7 +566,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "topk(20, max_over_time(${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, path, route, status))",
@@ -582,7 +582,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -663,7 +663,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "quantile_over_time(0.50, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
@@ -679,7 +679,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -768,7 +768,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "quantile_over_time(0.95, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
@@ -784,7 +784,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -873,7 +873,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "quantile_over_time(0.99, ${labelSelector:raw} |= `api_response` ${logqlSearch:raw} | regexp `\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\",\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\",\\\"route\\\":\\\"(?P<route>[^\\\"]+)\\\",\\\"status\\\":(?P<status>[0-9]+),\\\"durationMs\\\":(?P<durationMs>[0-9.]+)` | unwrap durationMs | __error__=\"\" [$__range]) by (method, route)",
@@ -890,7 +890,7 @@
   "refresh": "",
   "schemaVersion": 42,
   "tags": [
-    "buddystuddy",
+    "buddystudy",
     "api",
     "latency",
     "traffic",
@@ -917,7 +917,7 @@
         "baseFilters": [],
         "datasource": {
           "type": "loki",
-          "uid": "buddystuddy-loki"
+          "uid": "buddystudy-loki"
         },
         "filters": [],
         "hide": 0,
@@ -966,7 +966,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "BuddyStuddy API Performance",
-  "uid": "buddystuddy-api-latency",
+  "title": "BuddyStudy API Performance",
+  "uid": "buddystudy-api-latency",
   "version": 6
 }

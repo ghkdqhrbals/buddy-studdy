@@ -19,7 +19,7 @@ RUN microdnf install -y curl shadow-utils && \
     microdnf clean all && \
     groupadd --system app && \
     useradd --system --gid app --home-dir /app --shell /sbin/nologin app
-COPY --from=build /workspace/tutor/build/native/nativeCompile/buddystuddy-backend /app/buddystuddy-backend
+COPY --from=build /workspace/tutor/build/native/nativeCompile/buddystudy-backend /app/buddystudy-backend
 COPY --from=build /workspace/tutor/src/main/resources/db/migration /app/db/migration
 RUN chown -R app:app /app
 
@@ -29,4 +29,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
 
-CMD ["/app/buddystuddy-backend"]
+CMD ["/app/buddystudy-backend"]

@@ -1,20 +1,20 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: buddystuddy-backend-config
+  name: buddystudy-backend-config
 data:
   APP_PORT: "8080"
   SPRING_PROFILES_ACTIVE: "prod"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
   FLYWAY_LOCATIONS: "filesystem:/app/db/migration"
-  DATABASE_URL: "jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy"
-  DATABASE_USERNAME: "buddystuddy"
-  ADMIN_ANALYTICS_DATABASE_URL: "jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy_aggregation"
-  ADMIN_ANALYTICS_DATABASE_USERNAME: "buddystuddy"
-  REDIS_HOST: "buddystuddy-redis"
+  DATABASE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy"
+  DATABASE_USERNAME: "buddystudy"
+  ADMIN_ANALYTICS_DATABASE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy_aggregation"
+  ADMIN_ANALYTICS_DATABASE_USERNAME: "buddystudy"
+  REDIS_HOST: "buddystudy-redis"
   REDIS_PORT: "6379"
   REDIS_SSL: "false"
-  SPRING_DATA_REDIS_CLUSTER_NODES: "buddystuddy-redis-0.buddystuddy-redis-headless:6379,buddystuddy-redis-1.buddystuddy-redis-headless:6379,buddystuddy-redis-2.buddystuddy-redis-headless:6379"
+  SPRING_DATA_REDIS_CLUSTER_NODES: "buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379"
   ENABLE_OPENAPI_DOCS: "false"
   SCHEDULER_ENABLED: "true"
   SCHEDULER_BATCH_SIZE: "50"
@@ -24,5 +24,5 @@ data:
   REACTION_STREAM_COORDINATOR_USERNAME: "admin"
   PUSH_STREAM_PREFIX: "push-v1"
   VIEW_STREAM_PREFIX: "view-v1"
-  BUDDYSTUDDY_TRANSLATION_BASE_URL: "http://buddystuddy-libretranslate:5000"
+  BUDDYSTUDY_TRANSLATION_BASE_URL: "http://buddystudy-libretranslate:5000"
   GOOGLE_IOS_CLIENT_ID: "328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com"

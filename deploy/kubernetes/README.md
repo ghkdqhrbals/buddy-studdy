@@ -32,8 +32,8 @@ To deploy from a remote host after copying this repository:
 ```sh
 cd /path/to/study-mate
 kubectl apply -k deploy/kubernetes
-kubectl -n buddystuddy rollout status deploy/buddystuddy-backend
-kubectl -n buddystuddy rollout status deploy/buddystuddy-admin-frontend
+kubectl -n buddystudy rollout status deploy/buddystudy-backend
+kubectl -n buddystudy rollout status deploy/buddystudy-admin-frontend
 ```
 
 To copy and apply through the Tailscale SSH target requested for this project:
@@ -47,7 +47,7 @@ deploy/kubernetes/remote-apply.sh gyuminhwangbo@gyumin-macbookair
 `secrets/backend-secret.yaml` contains development placeholders only. It is
 intentionally not included in `kustomization.yaml`, because applying placeholder
 secrets would overwrite live cluster credentials. Create or patch
-`buddystuddy-backend-secret` separately before rollout. Required keys include:
+`buddystudy-backend-secret` separately before rollout. Required keys include:
 
 - `BACKEND_MASTER_KEY`
 - `AUTH_JWT_SECRET`
@@ -91,7 +91,7 @@ If GHCR packages are private, create an image pull secret and add it to the
 backend/admin frontend Deployments:
 
 ```sh
-kubectl -n buddystuddy create secret docker-registry ghcr-pull-secret \
+kubectl -n buddystudy create secret docker-registry ghcr-pull-secret \
   --docker-server=ghcr.io \
   --docker-username=<github-user> \
   --docker-password=<github-token>

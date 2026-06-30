@@ -1,8 +1,8 @@
-# BuddyStuddy Backend Hexagonal Architecture
+# BuddyStudy Backend Hexagonal Architecture
 
 ## Context
 
-BuddyStuddy backend is a Spring Boot Kotlin service that owns device registration, authentication, study settings, question generation, grading, records, public questions, reports, statistics, APNs push, OpenAI calls, PostgreSQL persistence, and Redis stream coordination.
+BuddyStudy backend is a Spring Boot Kotlin service that owns device registration, authentication, study settings, question generation, grading, records, public questions, reports, statistics, APNs push, OpenAI calls, PostgreSQL persistence, and Redis stream coordination.
 
 The backend is split into Gradle modules: `domain`, `application`, `infra`, and `tutor`. Each module is still grouped by feature packages such as `auth`, `study`, `community`, and `settings`.
 
@@ -27,19 +27,19 @@ Use module-first, package-by-feature hexagonal architecture:
 
 ```text
 backend/domain
-  com.buddystuddy.backend.{auth,study,community}.domain
-  com.buddystuddy.domain
+  com.buddystudy.backend.{auth,study,community}.domain
+  com.buddystudy.domain
 
 backend/application
-  com.buddystuddy.backend.{auth,study,community,settings,profile,admin}.application
-  com.buddystuddy.backend.stats
+  com.buddystudy.backend.{auth,study,community,settings,profile,admin}.application
+  com.buddystudy.backend.stats
 
 backend/infra
-  com.buddystuddy.backend.{auth,study,community,settings,profile,admin}.adapter
-  com.buddystuddy.backend.common.adapter
+  com.buddystudy.backend.{auth,study,community,settings,profile,admin}.adapter
+  com.buddystudy.backend.common.adapter
 
 backend/tutor
-  com.buddystuddy.backend.BuddyStuddyBackendApplication
+  com.buddystudy.backend.BuddyStudyBackendApplication
   runtime configuration and bootstrap resources
 ```
 
@@ -225,7 +225,7 @@ auth
 
 ## Data Model
 
-JPA entities are currently centralized under `backend/domain/src/main/kotlin/com/buddystuddy/domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in `infra` outbound persistence adapters implement those ports.
+JPA entities are currently centralized under `backend/domain/src/main/kotlin/com/buddystudy/domain/Entities.kt` as a bridge. The active dependency boundary is enforced by ports: application services depend on outbound port interfaces, and Spring Data repositories in `infra` outbound persistence adapters implement those ports.
 
 Domain root models are now used as the application-facing consistency boundary before the JPA entity bridge is fully removed:
 

@@ -1,8 +1,8 @@
-# BuddyStuddy Notification System
+# BuddyStudy Notification System
 
 ## Context
 
-BuddyStuddy has two related but separate concepts:
+BuddyStudy has two related but separate concepts:
 
 - **In-app notification**: a durable inbox item stored in the backend database and shown in the iOS app.
 - **Push notification**: an optional delivery channel used to wake or alert a device for selected in-app notifications.

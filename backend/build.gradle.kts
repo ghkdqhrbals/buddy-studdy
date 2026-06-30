@@ -8,7 +8,7 @@ plugins {
     jacoco
 }
 
-group = "com.buddystuddy"
+group = "com.buddystudy"
 version = "0.2.0"
 
 subprojects {

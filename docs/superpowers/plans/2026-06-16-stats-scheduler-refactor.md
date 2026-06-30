@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Improve BuddyStuddy backend statistics and scheduled question generation by separating calculation, refresh, due scheduling, and backoff responsibilities without reintroducing dirty stats tables.
+**Goal:** Improve BuddyStudy backend statistics and scheduled question generation by separating calculation, refresh, due scheduling, and backoff responsibilities without reintroducing dirty stats tables.
 
 **Architecture:** Keep the existing `user_stats` read model and `studies.next_due_at` scheduling model. Split large service/scheduler methods into focused collaborators so the scheduling state transition is explicit and the stats response assembly is isolated from raw query orchestration.
 
@@ -13,8 +13,8 @@
 ### Task 1: Stats Assembly Refactor
 
 **Files:**
-- Modify: `backend/application/src/main/kotlin/com/buddystuddy/backend/stats/StatsService.kt`
-- Modify: `backend/application/src/test/kotlin/com/buddystuddy/backend/stats/UserStatsServiceTest.kt`
+- Modify: `backend/application/src/main/kotlin/com/buddystudy/backend/stats/StatsService.kt`
+- Modify: `backend/application/src/test/kotlin/com/buddystudy/backend/stats/UserStatsServiceTest.kt`
 
 - [x] **Step 1: Preserve current behavior with tests**
   - Keep existing tests covering DB-paged stats lookup, latest record batching, and empty topic behavior.
@@ -36,8 +36,8 @@
 ### Task 2: Scheduling Reservation Refactor
 
 **Files:**
-- Modify: `backend/infra/src/main/kotlin/com/buddystuddy/backend/study/adapter/inbound/scheduler/QuestionScheduler.kt`
-- Modify: `backend/infra/src/test/kotlin/com/buddystuddy/backend/study/adapter/inbound/scheduler/QuestionSchedulerTest.kt`
+- Modify: `backend/infra/src/main/kotlin/com/buddystudy/backend/study/adapter/inbound/scheduler/QuestionScheduler.kt`
+- Modify: `backend/infra/src/test/kotlin/com/buddystudy/backend/study/adapter/inbound/scheduler/QuestionSchedulerTest.kt`
 
 - [x] **Step 1: Preserve scheduling behavior with tests**
   - Keep existing tests for batch pending counts and user/recent lookup reuse.

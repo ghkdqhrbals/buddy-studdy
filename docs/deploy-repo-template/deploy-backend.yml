@@ -46,8 +46,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           BACKEND_MASTER_KEY: ${{ secrets.BACKEND_MASTER_KEY }}
           BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
-          POSTGRES_SECRET_ID: buddystuddy/prod/postgres
-          APP_SECRET_ID: buddystuddy/prod
+          POSTGRES_SECRET_ID: buddystudy/prod/postgres
+          APP_SECRET_ID: buddystudy/prod
           GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
           APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
@@ -58,9 +58,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p /opt/buddystuddy-backend
+          mkdir -p /opt/buddystudy-backend
 
-          cd /opt/buddystuddy-backend
+          cd /opt/buddystudy-backend
 
           mkdir -p nginx/certs letsencrypt
 
@@ -71,23 +71,23 @@ jobs:
             --output text 2>/dev/null || true)"
 
           if [ -n "${POSTGRES_SECRET_JSON}" ]; then
-            POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("dbname") or "buddystuddy")')"
-            POSTGRES_USER="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("username") or "buddystuddy")')"
+            POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("dbname") or "buddystudy")')"
+            POSTGRES_USER="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("username") or "buddystudy")')"
             POSTGRES_PASSWORD="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
             printf '%s' "${POSTGRES_PASSWORD}" > .postgres_password
             printf '%s' "${POSTGRES_SECRET_ID}" > .postgres_secret_name
           elif [ ! -s .postgres_password ]; then
-            POSTGRES_DB=buddystuddy
-            POSTGRES_USER=buddystuddy
+            POSTGRES_DB=buddystudy
+            POSTGRES_USER=buddystudy
             openssl rand -hex 32 > .postgres_password
           else
-            POSTGRES_DB=buddystuddy
-            POSTGRES_USER=buddystuddy
+            POSTGRES_DB=buddystudy
+            POSTGRES_USER=buddystudy
           fi
           chmod 600 .postgres_password
           chmod 600 .postgres_secret_name 2>/dev/null || true
           POSTGRES_PASSWORD="$(cat .postgres_password)"
-          DATABASE_URL="jdbc:postgresql://buddystuddy-db:5432/${POSTGRES_DB}"
+          DATABASE_URL="jdbc:postgresql://buddystudy-db:5432/${POSTGRES_DB}"
 
           cat > .env <<ENV
           SPRING_PROFILES_ACTIVE=prod
@@ -127,9 +127,9 @@ jobs:
           docker pull certbot/certbot:v2.11.0
           docker pull curlimages/curl:8.11.0
 
-          docker network create buddystuddy-net >/dev/null 2>&1 || true
+          docker network create buddystudy-net >/dev/null 2>&1 || true
           docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
-          docker volume create buddystuddy-postgres-data >/dev/null
+          docker volume create buddystudy-postgres-data >/dev/null
 
           docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
 
@@ -145,20 +145,20 @@ jobs:
             -p 18080:8080 \
             "${COORDINATOR_IMAGE_REF}"
 
-          docker network connect buddystuddy-net rsc-coordinator >/dev/null 2>&1 || true
+          docker network connect buddystudy-net rsc-coordinator >/dev/null 2>&1 || true
 
-          docker rm -f buddystuddy-caddy >/dev/null 2>&1 || true
-          if docker inspect buddystuddy-db >/dev/null 2>&1; then
-            docker start buddystuddy-db >/dev/null
-            docker network connect buddystuddy-net buddystuddy-db >/dev/null 2>&1 || true
+          docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
+          if docker inspect buddystudy-db >/dev/null 2>&1; then
+            docker start buddystudy-db >/dev/null
+            docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
           else
             docker run -d \
-              --name buddystuddy-db \
-              --network buddystuddy-net \
+              --name buddystudy-db \
+              --network buddystudy-net \
               --restart unless-stopped \
               --env-file db.env \
               -p 5432:5432 \
-              -v buddystuddy-postgres-data:/var/lib/postgresql/data \
+              -v buddystudy-postgres-data:/var/lib/postgresql/data \
               --health-cmd "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" \
               --health-interval 10s \
               --health-timeout 5s \
@@ -167,20 +167,20 @@ jobs:
           fi
 
           for attempt in $(seq 1 60); do
-            if docker exec buddystuddy-db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
+            if docker exec buddystudy-db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 60 ]; then
               echo "PostgreSQL did not become ready." >&2
-              docker logs buddystuddy-db || true
+              docker logs buddystudy-db || true
               exit 1
             fi
             sleep 2
           done
 
-          BLUE_SLOT="buddystuddy-backend-a"
-          GREEN_SLOT="buddystuddy-backend-b"
-          LEGACY_SLOT="buddystuddy-backend"
+          BLUE_SLOT="buddystudy-backend-a"
+          GREEN_SLOT="buddystudy-backend-b"
+          LEGACY_SLOT="buddystudy-backend"
           ACTIVE_SLOT="$(cat .active_backend_slot 2>/dev/null || true)"
           if [ -n "${ACTIVE_SLOT}" ] && ! docker inspect -f '{{.State.Running}}' "${ACTIVE_SLOT}" 2>/dev/null | grep -qx true; then
             ACTIVE_SLOT=""
@@ -206,7 +206,7 @@ jobs:
           docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
           docker run -d \
             --name "${NEW_SLOT}" \
-            --network buddystuddy-net \
+            --network buddystudy-net \
             --restart unless-stopped \
             --env-file .env \
             "${IMAGE_REF}"
@@ -217,7 +217,7 @@ jobs:
 
           for attempt in $(seq 1 30); do
             if docker run --rm \
-              --network buddystuddy-net \
+              --network buddystudy-net \
               curlimages/curl:8.11.0 \
               -fsS "http://${NEW_SLOT}:8080/health"; then
               break
@@ -465,15 +465,15 @@ jobs:
 
           write_nginx_config "${NEW_SLOT}"
 
-          if docker inspect buddystuddy-nginx >/dev/null 2>&1; then
-            docker start buddystuddy-nginx >/dev/null 2>&1 || true
-            docker network connect buddystuddy-net buddystuddy-nginx >/dev/null 2>&1 || true
-            docker exec buddystuddy-nginx nginx -t
-            docker exec buddystuddy-nginx nginx -s reload
+          if docker inspect buddystudy-nginx >/dev/null 2>&1; then
+            docker start buddystudy-nginx >/dev/null 2>&1 || true
+            docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
+            docker exec buddystudy-nginx nginx -t
+            docker exec buddystudy-nginx nginx -s reload
           else
             docker run -d \
-              --name buddystuddy-nginx \
-              --network buddystuddy-net \
+              --name buddystudy-nginx \
+              --network buddystudy-net \
               --restart unless-stopped \
               -p 443:443 \
               -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
@@ -482,12 +482,12 @@ jobs:
               nginx:1.27-alpine
           fi
           if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then
-            docker network connect redis-stream-coordinator-net buddystuddy-nginx >/dev/null 2>&1 || true
+            docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
           fi
 
           for attempt in $(seq 1 30); do
             if docker run --rm \
-              --network buddystuddy-net \
+              --network buddystudy-net \
               curlimages/curl:8.11.0 \
               -fsS "http://${NEW_SLOT}:8080/health"; then
               break
@@ -507,12 +507,12 @@ jobs:
             if [ "$attempt" -eq 30 ]; then
               echo "Backend health check failed after ${attempt} attempts." >&2
               docker logs "${NEW_SLOT}" || true
-              docker logs buddystuddy-nginx || true
+              docker logs buddystudy-nginx || true
               if [ -n "${OLD_SLOT}" ]; then
                 echo "Rolling Nginx back to ${OLD_SLOT}." >&2
                 write_nginx_config "${OLD_SLOT}"
-                docker exec buddystuddy-nginx nginx -t || true
-                docker exec buddystuddy-nginx nginx -s reload || true
+                docker exec buddystudy-nginx nginx -t || true
+                docker exec buddystudy-nginx nginx -s reload || true
               fi
               exit 1
             fi

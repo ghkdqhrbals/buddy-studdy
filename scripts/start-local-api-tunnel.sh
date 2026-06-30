@@ -30,10 +30,10 @@ fi
 
 if [[ -f "${CLOUDFLARED_CONFIG}" ]]; then
   echo "Opening named Cloudflare tunnel from ${CLOUDFLARED_CONFIG}"
-  echo "Use the hostname configured in that file as BuddyStuddy Settings > Developer > Debug API URL."
+  echo "Use the hostname configured in that file as BuddyStudy Settings > Developer > Debug API URL."
   exec "${CLOUDFLARED_BIN}" tunnel --config "${CLOUDFLARED_CONFIG}" run
 fi
 
 echo "Opening quick Cloudflare tunnel to ${LOCAL_BACKEND_URL}"
-echo "Copy the printed https://*.trycloudflare.com URL into BuddyStuddy Settings > Developer > Debug API URL."
+echo "Copy the printed https://*.trycloudflare.com URL into BuddyStudy Settings > Developer > Debug API URL."
 exec "${CLOUDFLARED_BIN}" tunnel --url "${LOCAL_BACKEND_URL}"

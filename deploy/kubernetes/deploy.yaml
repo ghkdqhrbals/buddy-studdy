@@ -2,17 +2,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy
 ---
 apiVersion: v1
 data:
-  ADMIN_ANALYTICS_DATABASE_URL: jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy_aggregation
-  ADMIN_ANALYTICS_DATABASE_USERNAME: buddystuddy
+  ADMIN_ANALYTICS_DATABASE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy_aggregation
+  ADMIN_ANALYTICS_DATABASE_USERNAME: buddystudy
   APP_PORT: "8080"
-  BUDDYSTUDDY_TRANSLATION_BASE_URL: http://buddystuddy-libretranslate:5000
-  DATABASE_URL: jdbc:postgresql://buddystuddy-postgres:5432/buddystuddy
-  DATABASE_USERNAME: buddystuddy
+  BUDDYSTUDY_TRANSLATION_BASE_URL: http://buddystudy-libretranslate:5000
+  DATABASE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
+  DATABASE_USERNAME: buddystudy
   ENABLE_OPENAPI_DOCS: "false"
   FLYWAY_LOCATIONS: filesystem:/app/db/migration
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
@@ -21,61 +21,61 @@ data:
   REACTION_STREAM_COORDINATOR_BASE_URL: https://coordinator.ghkdqhrbals.org
   REACTION_STREAM_COORDINATOR_USERNAME: admin
   REACTION_STREAM_ENABLED: "true"
-  REDIS_HOST: buddystuddy-redis
+  REDIS_HOST: buddystudy-redis
   REDIS_PORT: "6379"
   REDIS_SSL: "false"
   SCHEDULER_BATCH_SIZE: "50"
   SCHEDULER_ENABLED: "true"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
-  SPRING_DATA_REDIS_CLUSTER_NODES: buddystuddy-redis-0.buddystuddy-redis-headless:6379,buddystuddy-redis-1.buddystuddy-redis-headless:6379,buddystuddy-redis-2.buddystuddy-redis-headless:6379
+  SPRING_DATA_REDIS_CLUSTER_NODES: buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379
   SPRING_PROFILES_ACTIVE: prod
   VIEW_STREAM_PREFIX: view-v1
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-backend-config
-  namespace: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-backend-config
+  namespace: buddystudy
 ---
 apiVersion: v1
 data:
   01-create-aggregation-db.sql: |
-    SELECT 'CREATE DATABASE buddystuddy_aggregation'
+    SELECT 'CREATE DATABASE buddystudy_aggregation'
     WHERE NOT EXISTS (
-      SELECT FROM pg_database WHERE datname = 'buddystuddy_aggregation'
+      SELECT FROM pg_database WHERE datname = 'buddystudy_aggregation'
     )\gexec
 kind: ConfigMap
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres-init
-  namespace: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres-init
+  namespace: buddystudy
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-admin-frontend
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-admin-frontend
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-admin-frontend
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-admin-frontend
+  namespace: buddystudy
 spec:
   ports:
   - name: http
     port: 80
     targetPort: http
   selector:
-    app.kubernetes.io/name: buddystuddy-admin-frontend
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-admin-frontend
+    app.kubernetes.io/part-of: buddystudy
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-backend
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-backend
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-backend
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-backend
+  namespace: buddystudy
 spec:
   ports:
   - name: http
@@ -83,35 +83,35 @@ spec:
     port: 8080
     targetPort: http
   selector:
-    app.kubernetes.io/name: buddystuddy-backend
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-backend
+    app.kubernetes.io/part-of: buddystudy
   type: NodePort
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-libretranslate
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-libretranslate
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-libretranslate
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-libretranslate
+  namespace: buddystudy
 spec:
   ports:
   - name: http
     port: 5000
     targetPort: http
   selector:
-    app.kubernetes.io/name: buddystuddy-libretranslate
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-libretranslate
+    app.kubernetes.io/part-of: buddystudy
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-postgres
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres
+  namespace: buddystudy
 spec:
   ports:
   - name: postgres
@@ -119,18 +119,18 @@ spec:
     port: 5432
     targetPort: postgres
   selector:
-    app.kubernetes.io/name: buddystuddy-postgres
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/part-of: buddystudy
   type: NodePort
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis
+  namespace: buddystudy
 spec:
   ports:
   - name: redis
@@ -138,18 +138,18 @@ spec:
     port: 6379
     targetPort: redis
   selector:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
   type: NodePort
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis-headless
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-headless
+  namespace: buddystudy
 spec:
   clusterIP: None
   ports:
@@ -161,16 +161,16 @@ spec:
     targetPort: cluster-bus
   publishNotReadyAddresses: true
   selector:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-postgres
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres-data
+    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres-data
 spec:
   accessModes:
   - ReadWriteOnce
@@ -180,16 +180,16 @@ spec:
     path: /Users/gyuminhwangbo/data/buddystudy/db/postgres
     type: DirectoryOrCreate
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "0"
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis-data-0
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-data-0
 spec:
   accessModes:
   - ReadWriteOnce
@@ -199,16 +199,16 @@ spec:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-0
     type: DirectoryOrCreate
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "1"
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis-data-1
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-data-1
 spec:
   accessModes:
   - ReadWriteOnce
@@ -218,16 +218,16 @@ spec:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-1
     type: DirectoryOrCreate
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
+    app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/ordinal: "2"
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis-data-2
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-data-2
 spec:
   accessModes:
   - ReadWriteOnce
@@ -237,15 +237,15 @@ spec:
     path: /Users/gyuminhwangbo/data/buddystudy/redis/redis-2
     type: DirectoryOrCreate
   persistentVolumeReclaimPolicy: Retain
-  storageClassName: buddystuddy-local
+  storageClassName: buddystudy-local
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-libretranslate-data
-  namespace: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-libretranslate-data
+  namespace: buddystudy
 spec:
   accessModes:
   - ReadWriteOnce
@@ -257,9 +257,9 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres-backups
-  namespace: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres-backups
+  namespace: buddystudy
 spec:
   accessModes:
   - ReadWriteOnce
@@ -271,9 +271,9 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   labels:
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres-data
-  namespace: buddystuddy
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres-data
+  namespace: buddystudy
 spec:
   accessModes:
   - ReadWriteOnce
@@ -282,36 +282,36 @@ spec:
       storage: 20Gi
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-postgres
-  storageClassName: buddystuddy-local
+      app.kubernetes.io/name: buddystudy-postgres
+  storageClassName: buddystudy-local
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-admin-frontend
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-admin-frontend
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-admin-frontend
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-admin-frontend
+  namespace: buddystudy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-admin-frontend
-      app.kubernetes.io/part-of: buddystuddy
+      app.kubernetes.io/name: buddystudy-admin-frontend
+      app.kubernetes.io/part-of: buddystudy
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-admin-frontend
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-admin-frontend
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - env:
         - name: BACKEND_UPSTREAM
-          value: http://buddystuddy-backend:8080
+          value: http://buddystudy-backend:8080
         - name: BACKEND_PROXY_HOST
-          value: buddystuddy-backend
-        image: ghcr.io/ghkdqhrbals/buddy-studdy-admin-frontend:latest
+          value: buddystudy-backend
+        image: ghcr.io/ghkdqhrbals/buddy-study-admin-frontend:latest
         imagePullPolicy: Always
         name: admin-frontend
         ports:
@@ -334,16 +334,16 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-backend
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-backend
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-backend
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-backend
+  namespace: buddystudy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-backend
-      app.kubernetes.io/part-of: buddystuddy
+      app.kubernetes.io/name: buddystudy-backend
+      app.kubernetes.io/part-of: buddystudy
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -352,16 +352,16 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-backend
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-backend
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - envFrom:
         - configMapRef:
-            name: buddystuddy-backend-config
+            name: buddystudy-backend-config
         - secretRef:
-            name: buddystuddy-backend-secret
-        image: ghcr.io/ghkdqhrbals/buddy-studdy-backend:latest
+            name: buddystudy-backend-secret
+        image: ghcr.io/ghkdqhrbals/buddy-study-backend:latest
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
@@ -393,7 +393,7 @@ spec:
         - sh
         - -c
         - |
-          until redis-cli -a "$REDIS_PASSWORD" -h buddystuddy-redis-0.buddystuddy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
             sleep 2
           done
         env:
@@ -401,7 +401,7 @@ spec:
           valueFrom:
             secretKeyRef:
               key: REDIS_PASSWORD
-              name: buddystuddy-backend-secret
+              name: buddystudy-backend-secret
         image: redis:7-alpine
         imagePullPolicy: IfNotPresent
         name: wait-for-redis-cluster
@@ -410,21 +410,21 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-libretranslate
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-libretranslate
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-libretranslate
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-libretranslate
+  namespace: buddystudy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-libretranslate
-      app.kubernetes.io/part-of: buddystuddy
+      app.kubernetes.io/name: buddystudy-libretranslate
+      app.kubernetes.io/part-of: buddystudy
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-libretranslate
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-libretranslate
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - env:
@@ -452,40 +452,40 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: buddystuddy-libretranslate-data
+          claimName: buddystudy-libretranslate-data
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-postgres
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres
+  namespace: buddystudy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-postgres
-      app.kubernetes.io/part-of: buddystuddy
-  serviceName: buddystuddy-postgres
+      app.kubernetes.io/name: buddystudy-postgres
+      app.kubernetes.io/part-of: buddystudy
+  serviceName: buddystudy-postgres
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-postgres
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-postgres
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - env:
         - name: POSTGRES_DB
-          value: buddystuddy
+          value: buddystudy
         - name: POSTGRES_USER
-          value: buddystuddy
+          value: buddystudy
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
               key: DATABASE_PASSWORD
-              name: buddystuddy-backend-secret
+              name: buddystudy-backend-secret
         image: postgres:16-alpine
         imagePullPolicy: IfNotPresent
         livenessProbe:
@@ -493,9 +493,9 @@ spec:
             command:
             - pg_isready
             - -U
-            - buddystuddy
+            - buddystudy
             - -d
-            - buddystuddy
+            - buddystudy
           initialDelaySeconds: 30
           periodSeconds: 20
         name: postgres
@@ -507,9 +507,9 @@ spec:
             command:
             - pg_isready
             - -U
-            - buddystuddy
+            - buddystudy
             - -d
-            - buddystuddy
+            - buddystudy
           initialDelaySeconds: 5
           periodSeconds: 10
         volumeMounts:
@@ -520,31 +520,31 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: buddystuddy-postgres-data
+          claimName: buddystudy-postgres-data
       - configMap:
-          name: buddystuddy-postgres-init
+          name: buddystudy-postgres-init
         name: init-scripts
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis
+  namespace: buddystudy
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystuddy-redis
-      app.kubernetes.io/part-of: buddystuddy
-  serviceName: buddystuddy-redis-headless
+      app.kubernetes.io/name: buddystudy-redis
+      app.kubernetes.io/part-of: buddystudy
+  serviceName: buddystudy-redis-headless
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-redis
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-redis
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - command:
@@ -562,7 +562,7 @@ spec:
             --cluster-enabled yes \
             --cluster-config-file nodes.conf \
             --cluster-node-timeout 5000 \
-            --cluster-announce-hostname "$(hostname).buddystuddy-redis-headless.buddystuddy.svc.cluster.local" \
+            --cluster-announce-hostname "$(hostname).buddystudy-redis-headless.buddystudy.svc.cluster.local" \
             --cluster-announce-port 6379 \
             --cluster-announce-bus-port 16379
         env:
@@ -570,7 +570,7 @@ spec:
           valueFrom:
             secretKeyRef:
               key: REDIS_PASSWORD
-              name: buddystuddy-backend-secret
+              name: buddystudy-backend-secret
         image: redis:7-alpine
         imagePullPolicy: IfNotPresent
         livenessProbe:
@@ -601,7 +601,7 @@ spec:
   volumeClaimTemplates:
   - metadata:
       labels:
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/part-of: buddystudy
       name: data
     spec:
       accessModes:
@@ -611,29 +611,29 @@ spec:
           storage: 5Gi
       selector:
         matchLabels:
-          app.kubernetes.io/name: buddystuddy-redis
-      storageClassName: buddystuddy-local
+          app.kubernetes.io/name: buddystudy-redis
+      storageClassName: buddystudy-local
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-postgres-backup
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-postgres-backup
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-postgres-backup
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-postgres-backup
+  namespace: buddystudy
 spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     metadata:
       labels:
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/part-of: buddystudy
     spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: buddystuddy-postgres-backup
-            app.kubernetes.io/part-of: buddystuddy
+            app.kubernetes.io/name: buddystudy-postgres-backup
+            app.kubernetes.io/part-of: buddystudy
         spec:
           containers:
           - command:
@@ -643,19 +643,19 @@ spec:
               set -euo pipefail
               ts="$(date -u +%Y%m%dT%H%M%SZ)"
               mkdir -p /backups
-              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystuddy > "/backups/buddystuddy-${ts}.dump"
-              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystuddy_aggregation > "/backups/buddystuddy-aggregation-${ts}.dump"
-              find /backups -type f -name "buddystuddy*.dump" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
+              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy > "/backups/buddystudy-${ts}.dump"
+              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy_aggregation > "/backups/buddystudy-aggregation-${ts}.dump"
+              find /backups -type f -name "buddystudy*.dump" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
             env:
             - name: PGHOST
-              value: buddystuddy-postgres
+              value: buddystudy-postgres
             - name: PGUSER
-              value: buddystuddy
+              value: buddystudy
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
                   key: DATABASE_PASSWORD
-                  name: buddystuddy-backend-secret
+                  name: buddystudy-backend-secret
             - name: BACKUP_RETENTION_DAYS
               value: "14"
             image: postgres:16-alpine
@@ -668,7 +668,7 @@ spec:
           volumes:
           - name: backups
             persistentVolumeClaim:
-              claimName: buddystuddy-postgres-backups
+              claimName: buddystudy-postgres-backups
   schedule: 0 18 * * *
   successfulJobsHistoryLimit: 3
 ---
@@ -676,17 +676,17 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   labels:
-    app.kubernetes.io/name: buddystuddy-redis
-    app.kubernetes.io/part-of: buddystuddy
-  name: buddystuddy-redis-cluster-init
-  namespace: buddystuddy
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-cluster-init
+  namespace: buddystudy
 spec:
   backoffLimit: 6
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystuddy-redis-cluster-init
-        app.kubernetes.io/part-of: buddystuddy
+        app.kubernetes.io/name: buddystudy-redis-cluster-init
+        app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - command:
@@ -695,16 +695,16 @@ spec:
         - |
           set -eu
           nodes="
-          buddystuddy-redis-0.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
-          buddystuddy-redis-1.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
-          buddystuddy-redis-2.buddystuddy-redis-headless.buddystuddy.svc.cluster.local:6379
+          buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+          buddystudy-redis-1.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+          buddystudy-redis-2.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
           "
           for node in $nodes; do
             until redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" ping | grep -q PONG; do
               sleep 2
             done
           done
-          if redis-cli -a "$REDIS_PASSWORD" -h buddystuddy-redis-0.buddystuddy-redis-headless.buddystuddy.svc.cluster.local cluster info | grep -q "cluster_state:ok"; then
+          if redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local cluster info | grep -q "cluster_state:ok"; then
             echo "Redis cluster already initialized"
             exit 0
           fi
@@ -714,7 +714,7 @@ spec:
           valueFrom:
             secretKeyRef:
               key: REDIS_PASSWORD
-              name: buddystuddy-backend-secret
+              name: buddystudy-backend-secret
         image: redis:7-alpine
         imagePullPolicy: IfNotPresent
         name: redis-cluster-init

@@ -1,6 +1,6 @@
-# BuddyStuddy
+# BuddyStudy
 
-BuddyStuddy is a free AI tutor for iPhone. It asks short study questions, preserves answer drafts, grades responses with OpenAI, and turns records into topic-level statistics.
+BuddyStudy is a free AI tutor for iPhone. It asks short study questions, preserves answer drafts, grades responses with OpenAI, and turns records into topic-level statistics.
 
 The macOS menu bar target remains in the repository, but public release work is currently paused for macOS. The active release target is the iOS app, distributed through App Store Connect.
 
@@ -8,7 +8,7 @@ The macOS menu bar target remains in the repository, but public release work is 
 
 AI is more useful when you know the subject yourself. Better knowledge leads to sharper questions, better judgment, and better output.
 
-BuddyStuddy was built to help keep that knowledge fresh through small, repeated questions.
+BuddyStudy was built to help keep that knowledge fresh through small, repeated questions.
 
 ## Features
 

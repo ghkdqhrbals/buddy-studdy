@@ -1,4 +1,4 @@
-# BuddyStuddy Backend API
+# BuddyStudy Backend API
 
 The backend is the source of truth for iOS study settings, scheduled question delivery, records, answer drafts, and grading results. It is a Spring Boot Kotlin service backed by PostgreSQL and Spring Data JPA.
 
@@ -119,16 +119,16 @@ Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
 
-Request body is optional. When omitted, the backend sends a default BuddyStuddy test notification to the authenticated device's saved APNs token.
+Request body is optional. When omitted, the backend sends a default BuddyStudy test notification to the authenticated device's saved APNs token.
 
 ```json
 {
-  "title": "BuddyStuddy",
+  "title": "BuddyStudy",
   "body": "Test push",
   "topic": "Test",
   "recordId": "test",
   "sound": "default",
-  "deepLink": "buddystuddy://test-push"
+  "deepLink": "buddystudy://test-push"
 }
 ```
 

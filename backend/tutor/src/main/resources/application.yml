@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: buddystuddy-backend
+    name: buddystudy-backend
   ai:
     model:
       audio:
@@ -16,7 +16,7 @@ spring:
   profiles:
     default: dev
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystuddy}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystudy}
     username: ${DATABASE_USERNAME:}
     password: ${DATABASE_PASSWORD:}
     hikari:
@@ -61,12 +61,12 @@ management:
       exposure:
         include: health,info
 
-buddystuddy:
+buddystudy:
   auth:
-    jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystuddy-secret-must-be-overridden}}
+    jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}
   crypto:
-    master-key: ${BACKEND_MASTER_KEY:dev-buddystuddy-master-key}
+    master-key: ${BACKEND_MASTER_KEY:dev-buddystudy-master-key}
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
     poll-ms: ${SCHEDULER_POLL_MS:30000}
@@ -108,7 +108,7 @@ buddystuddy:
       username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}
       password: ${ADMIN_ANALYTICS_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
       driver-class-name: ${ADMIN_ANALYTICS_DATABASE_DRIVER:}
-      database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:buddystuddy_aggregation}
+      database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:buddystudy_aggregation}
 
 redis-stream-coordinator:
   coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}

@@ -1,0 +1,18 @@
+package com.buddystudy.backend.admin.analytics.application.port.inbound
+
+import com.buddystudy.backend.admin.analytics.application.model.AdminLoginResponse
+import com.buddystudy.backend.admin.analytics.application.model.AdminMetricsResponse
+import java.time.LocalDate
+
+interface AdminAnalyticsUseCase {
+    fun login(username: String, password: String): AdminLoginResponse
+    fun validate(adminToken: String)
+    fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
+    fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
+}
+
+interface AdminAnalyticsAggregationUseCase {
+    fun refreshRecent(referenceDate: LocalDate): Int
+    fun refreshCorrection(referenceDate: LocalDate): Int
+    fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int
+}

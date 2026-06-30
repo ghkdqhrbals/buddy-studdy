@@ -37,7 +37,7 @@ https://example.trycloudflare.com
 
 ## 3. Point the iOS app at the tunnel
 
-In BuddyStuddy on iPhone:
+In BuddyStudy on iPhone:
 
 1. Open Settings.
 2. Enable Debugging Mode.
@@ -51,7 +51,7 @@ After saving, every backend API request made by the app uses the debug URL until
 The persistent local tunnel is registered as a user LaunchAgent:
 
 ```text
-~/Library/LaunchAgents/com.buddystuddy.local-api-tunnel.plist
+~/Library/LaunchAgents/com.buddystudy.local-api-tunnel.plist
 ```
 
 It runs:
@@ -63,15 +63,15 @@ scripts/start-local-api-tunnel.sh
 Logs are written to:
 
 ```text
-~/Library/Logs/BuddyStuddy/local-api-tunnel.log
-~/Library/Logs/BuddyStuddy/local-api-tunnel.err
+~/Library/Logs/BuddyStudy/local-api-tunnel.log
+~/Library/Logs/BuddyStudy/local-api-tunnel.err
 ```
 
 Useful commands:
 
 ```sh
-launchctl print "gui/$(id -u)/com.buddystuddy.local-api-tunnel"
-launchctl kickstart -k "gui/$(id -u)/com.buddystuddy.local-api-tunnel"
+launchctl print "gui/$(id -u)/com.buddystudy.local-api-tunnel"
+launchctl kickstart -k "gui/$(id -u)/com.buddystudy.local-api-tunnel"
 ```
 
 ## Notes

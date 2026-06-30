@@ -2,7 +2,7 @@
 
 ## Context
 
-BuddyStuddy public questions support likes and comments. Public question lists need
+BuddyStudy public questions support likes and comments. Public question lists need
 `likeCount`, `commentCount`, and `isLikedByMe`, but counts from other users may be
 eventually consistent. The product accepts up to about 10 seconds of delay for
 counts caused by other users.

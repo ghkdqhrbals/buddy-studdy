@@ -1,4 +1,4 @@
-# BuddyStuddy Backend APNs Deployment
+# BuddyStudy Backend APNs Deployment
 
 ## Context
 
@@ -57,8 +57,8 @@ Deploy repository:
 
 PostgreSQL credentials are managed in AWS Secrets Manager, not GitHub Actions Secrets.
 
-- AWS Secrets Manager secret: `buddystuddy/prod/postgres`.
-- EC2 instance profile: `BuddyStuddyEC2SecretsProfile`.
+- AWS Secrets Manager secret: `buddystudy/prod/postgres`.
+- EC2 instance profile: `BuddyStudyEC2SecretsProfile`.
 - Required EC2 IAM actions: `secretsmanager:GetSecretValue`, `secretsmanager:DescribeSecret`.
 
 The AWS access key is not required for the SSH-based deployment workflow. If an AWS API based deployment is preferred, use a narrow IAM role and rotate any credentials that were pasted into chat.
@@ -69,14 +69,14 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 2. The workflow builds `backend/Dockerfile`.
 3. The image is pushed to GHCR.
 4. The workflow sends `repository_dispatch` to `ghkdqhrbals/personal-deploy`.
-5. The deploy repository SSHes into EC2, writes `/opt/buddystuddy-backend/.env`, pulls the image, and runs Docker.
+5. The deploy repository SSHes into EC2, writes `/opt/buddystudy-backend/.env`, pulls the image, and runs Docker.
 6. PostgreSQL runs as a separate Docker container with a persistent named volume.
 7. The backend container stays on a private Docker network.
 8. Nginx is the only public backend entrypoint and publishes HTTPS on host port `443`.
 
 ## Public Network Shape
 
-- Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystuddy-backend:8080`
+- Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystudy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
 - PostgreSQL port `5432` is published on the EC2 host for production database access.
 - The workflow requests/renews a Let's Encrypt certificate with the `http-01` challenge, so public port `80` is used temporarily during certificate issuance.
@@ -87,16 +87,16 @@ Use these connection basics for database administration:
 ```text
 host: api.ghkdqhrbals.org
 port: 5432
-database: buddystuddy
-user: buddystuddy
+database: buddystudy
+user: buddystudy
 ```
 
-The password is managed through AWS Secrets Manager at `buddystuddy/prod/postgres` and mirrored on EC2 at `/opt/buddystuddy-backend/.postgres_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
+The password is managed through AWS Secrets Manager at `buddystudy/prod/postgres` and mirrored on EC2 at `/opt/buddystudy-backend/.postgres_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
 
 ## Data Durability
 
-- PostgreSQL data is stored in the `buddystuddy-postgres-data` Docker volume.
-- The previous SQLite volume `buddystuddy-backend-data` is never deleted by the workflow.
+- PostgreSQL data is stored in the `buddystudy-postgres-data` Docker volume.
+- The previous SQLite volume `buddystudy-backend-data` is never deleted by the workflow.
 - The current backend image is Spring Boot Kotlin. The old Python SQLite migration path is no longer executed during rollout.
 - Containers use `--restart unless-stopped` so backend, Nginx, and PostgreSQL restart after daemon or instance reboot.
 

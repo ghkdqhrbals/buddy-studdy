@@ -2,7 +2,7 @@
 
 ## Project
 
-BuddyStuddy is a SwiftUI iOS app. It generates short study questions with OpenAI, stores records, syncs with the backend, and shows topic-level statistics. The product target is iOS only. macOS menu bar, DMG, Sparkle, macOS schemes, macOS tests, and macOS build verification are out of scope unless the user explicitly asks for macOS in that turn. Internal Xcode targets and identifiers still use `StudyMate` for release continuity.
+BuddyStudy is a SwiftUI iOS app. It generates short study questions with OpenAI, stores records, syncs with the backend, and shows topic-level statistics. The product target is iOS only. macOS menu bar, DMG, Sparkle, macOS schemes, macOS tests, and macOS build verification are out of scope unless the user explicitly asks for macOS in that turn. Internal Xcode targets and identifiers still use `StudyMate` for release continuity.
 
 Read these first:
 

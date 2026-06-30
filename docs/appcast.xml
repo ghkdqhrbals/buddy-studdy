@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>BuddyStuddy Updates</title>
-    <link>https://ghkdqhrbals.github.io/buddy-studdy/</link>
-    <description>BuddyStuddy release feed</description>
+    <title>BuddyStudy Updates</title>
+    <link>https://ghkdqhrbals.github.io/buddy-study/</link>
+    <description>BuddyStudy release feed</description>
     <language>en</language>
     <item>
-      <title>BuddyStuddy 1.0.16</title>
+      <title>BuddyStudy 1.0.16</title>
       <sparkle:version>16</sparkle:version>
       <sparkle:shortVersionString>1.0.16</sparkle:shortVersionString>
       <pubDate>Thu, 28 May 2026 10:04:29 GMT</pubDate>
-      <link>https://github.com/ghkdqhrbals/buddy-studdy/releases/tag/v1.0.16</link>
+      <link>https://github.com/ghkdqhrbals/buddy-study/releases/tag/v1.0.16</link>
       <enclosure
-        url="https://github.com/ghkdqhrbals/buddy-studdy/releases/download/v1.0.16/StudyMate-1.0.16.dmg"
+        url="https://github.com/ghkdqhrbals/buddy-study/releases/download/v1.0.16/StudyMate-1.0.16.dmg"
         sparkle:edSignature="6Jgszmf/Ri0Ca/DrWk69ecVzeOsKg2MkFUPakvJ0VpE+OzELHo0r8QxFRdOX3pXLKh2s5nzJpxk32iDo5g0cDg=="
         length="2766160"
         type="application/x-apple-diskimage" />

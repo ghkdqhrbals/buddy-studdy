@@ -8,7 +8,7 @@ plugins {
 }
 
 tasks.register("patchNativeReachabilityMetadata") {
-    val aotMetadata = layout.buildDirectory.file("resources/aot/META-INF/native-image/com.buddystuddy/tutor/reachability-metadata.json")
+    val aotMetadata = layout.buildDirectory.file("resources/aot/META-INF/native-image/com.buddystudy/tutor/reachability-metadata.json")
     dependsOn("processAotResources")
     inputs.file(aotMetadata)
     outputs.file(aotMetadata)
@@ -110,7 +110,7 @@ tasks.jacocoTestReport {
 graalvmNative {
     binaries {
         named("main") {
-            imageName.set("buddystuddy-backend")
+            imageName.set("buddystudy-backend")
             buildArgs.add("--no-fallback")
             buildArgs.add("--parallelism=2")
             buildArgs.add("-Ob")

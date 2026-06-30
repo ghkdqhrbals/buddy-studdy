@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BuddyStuddy Admin</title>
+  <title>BuddyStudy Admin</title>
   <style>
     :root {
       color-scheme: light;
@@ -149,7 +149,7 @@
 <div class="shell">
   <aside id="sidebar" class="sidebar hidden">
     <div class="brand">
-      <h1>BuddyStuddy</h1>
+      <h1>BuddyStudy</h1>
     </div>
     <nav id="metricNav"></nav>
     <button id="logoutButton" class="logout">Logout</button>
@@ -228,7 +228,7 @@ const categories = [
     jobs: true
   }
 ];
-let token = localStorage.getItem("buddystuddy.adminToken") || "";
+let token = localStorage.getItem("buddystudy.adminToken") || "";
 let activeCategoryId = "overview";
 let activeMetricKey = null;
 
@@ -325,13 +325,13 @@ async function login() {
   }
   const body = await res.json();
   token = body.adminToken;
-  localStorage.setItem("buddystuddy.adminToken", token);
+  localStorage.setItem("buddystudy.adminToken", token);
   showDashboard();
   await reload();
 }
 function logout() {
   token = "";
-  localStorage.removeItem("buddystuddy.adminToken");
+  localStorage.removeItem("buddystudy.adminToken");
   sidebar.classList.add("hidden");
   dashboard.classList.add("hidden");
   loginPanel.classList.remove("hidden");

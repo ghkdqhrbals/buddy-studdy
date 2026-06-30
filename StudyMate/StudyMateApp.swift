@@ -63,11 +63,11 @@ private struct MenuBarMenuView: View {
         Button {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.orderFrontStandardAboutPanel(options: [
-                .applicationName: "BuddyStuddy",
+                .applicationName: "BuddyStudy",
                 .applicationVersion: "1.0",
                 .credits: NSAttributedString(string: "AI teacher menu bar app")
             ])
-            AppWindowFocus.bringWindowToFront(named: "About BuddyStuddy")
+            AppWindowFocus.bringWindowToFront(named: "About BuddyStudy")
         } label: {
             Label(strings.aboutStudyMate, systemImage: "info.circle")
         }
@@ -172,7 +172,7 @@ private struct BookStarGlyph: View {
                 .offset(x: 1.5, y: -1)
         }
         .foregroundStyle(.primary.opacity(isRunning ? 1 : 0.62))
-        .accessibilityLabel("BuddyStuddy")
+        .accessibilityLabel("BuddyStudy")
     }
 }
 

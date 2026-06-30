@@ -1,8 +1,8 @@
-# BuddyStuddy PRD
+# BuddyStudy PRD
 
 ## Purpose
 
-BuddyStuddy is a quiet AI tutor for people who use AI heavily but still want to keep their own knowledge sharp. The product asks short questions on a schedule, lets the user answer when convenient, grades the answer with OpenAI, and turns the accumulated record into topic-level learning statistics.
+BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to keep their own knowledge sharp. The product asks short questions on a schedule, lets the user answer when convenient, grades the answer with OpenAI, and turns the accumulated record into topic-level learning statistics.
 
 ## Product Principles
 

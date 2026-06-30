@@ -243,18 +243,18 @@ final class StudyMateTests: XCTestCase {
 
     func testRecordDeepLinksResolveToRecordDetailRoutes() throws {
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records/record-123"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://records/record-123"))),
             .recordDetail(recordID: "record-123")
         )
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records?recordId=record-456"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://records?recordId=record-456"))),
             .recordDetail(recordID: "record-456")
         )
     }
 
     func testNotificationPayloadDeepLinkResolvesToRecordDetailRoute() {
         let deepLinkPayload: [AnyHashable: Any] = [
-            "deepLink": "buddystuddy://records/record-789"
+            "deepLink": "buddystudy://records/record-789"
         ]
 
         XCTAssertEqual(
@@ -1792,26 +1792,26 @@ final class StudyMateTests: XCTestCase {
 
     func testDeepLinksResolveToAppRoutes() throws {
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records/123"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://records/123"))),
             .recordDetail(recordID: "123")
         )
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://records?id=456"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://records?id=456"))),
             .recordDetail(recordID: "456")
         )
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://public/questions?id=789"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://public/questions?id=789"))),
             .publicQuestion(id: "789")
         )
         XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: "buddystuddy://test-push"))),
+            AppRoute(url: try XCTUnwrap(URL(string: "buddystudy://test-push"))),
             .home
         )
     }
 
     func testNotificationPayloadPrefersDeepLinkRoute() {
         let userInfo: [AnyHashable: Any] = [
-            "deepLink": "buddystuddy://records/123"
+            "deepLink": "buddystudy://records/123"
         ]
 
         XCTAssertEqual(

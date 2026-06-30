@@ -114,13 +114,13 @@ private struct StartupPixelFoxSplashView: View {
                     .frame(width: 220, height: 220)
                     .accessibilityHidden(true)
 
-                Text("BuddyStuddy @ghkdqhrbals")
+                Text("BuddyStudy @ghkdqhrbals")
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .monospaced()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .accessibilityLabel("BuddyStuddy by ghkdqhrbals")
+                    .accessibilityLabel("BuddyStudy by ghkdqhrbals")
             }
             .padding(.horizontal, 24)
         }

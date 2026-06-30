@@ -24,7 +24,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -104,7 +104,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "editorMode": "code",
           "expr": "sum(count_over_time(${labelSelector:raw} ${logqlSearch:raw} [$timelineBucket]))",
@@ -120,7 +120,7 @@
     {
       "datasource": {
         "type": "loki",
-        "uid": "buddystuddy-loki"
+        "uid": "buddystudy-loki"
       },
       "fieldConfig": {
         "defaults": {
@@ -170,7 +170,7 @@
         {
           "datasource": {
             "type": "loki",
-            "uid": "buddystuddy-loki"
+            "uid": "buddystudy-loki"
           },
           "direction": "backward",
           "editorMode": "code",
@@ -188,7 +188,7 @@
   "refresh": "",
   "schemaVersion": 42,
   "tags": [
-    "buddystuddy",
+    "buddystudy",
     "logs",
     "loki"
   ],
@@ -212,7 +212,7 @@
         "baseFilters": [],
         "datasource": {
           "type": "loki",
-          "uid": "buddystuddy-loki"
+          "uid": "buddystudy-loki"
         },
         "filters": [],
         "hide": 0,
@@ -267,7 +267,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "BuddyStuddy Logs",
-  "uid": "buddystuddy-logs",
+  "title": "BuddyStudy Logs",
+  "uid": "buddystudy-logs",
   "version": 1
 }

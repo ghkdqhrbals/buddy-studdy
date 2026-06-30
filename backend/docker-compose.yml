@@ -4,13 +4,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: buddystuddy
-      POSTGRES_USER: buddystuddy
+      POSTGRES_DB: buddystudy
+      POSTGRES_USER: buddystudy
       POSTGRES_PASSWORD: local-password
     volumes:
-      - buddystuddy-postgres-data:/var/lib/postgresql/data
+      - buddystudy-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U buddystuddy -d buddystuddy"]
+      test: ["CMD-SHELL", "pg_isready -U buddystudy -d buddystudy"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -18,7 +18,7 @@ services:
 
   backend:
     build: .
-    image: buddystuddy-backend:local
+    image: buddystudy-backend:local
     depends_on:
       db:
         condition: service_healthy
@@ -30,14 +30,14 @@ services:
       - .env
     environment:
       SPRING_PROFILES_ACTIVE: dev
-      DATABASE_URL: jdbc:postgresql://db:5432/buddystuddy
-      DATABASE_USERNAME: buddystuddy
+      DATABASE_URL: jdbc:postgresql://db:5432/buddystudy
+      DATABASE_USERNAME: buddystudy
       DATABASE_PASSWORD: local-password
       ENABLE_OPENAPI_DOCS: "true"
       OPENAPI_ACCESS_TOKEN: "local-openapi"
       GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
       REACTION_STREAM_ENABLED: "false"
-      BUDDYSTUDDY_TRANSLATION_BASE_URL: http://libretranslate:5000
+      BUDDYSTUDY_TRANSLATION_BASE_URL: http://libretranslate:5000
     restart: unless-stopped
 
   libretranslate:
@@ -50,7 +50,7 @@ services:
       LT_DISABLE_WEB_UI: "true"
       LT_WORKERS: "1"
     volumes:
-      - buddystuddy-libretranslate-data:/home/libretranslate/.local/share
+      - buddystudy-libretranslate-data:/home/libretranslate/.local/share
     restart: unless-stopped
 
   backup:
@@ -60,24 +60,24 @@ services:
         condition: service_healthy
     environment:
       PGHOST: db
-      PGUSER: buddystuddy
-      PGDATABASE: buddystuddy
+      PGUSER: buddystudy
+      PGDATABASE: buddystudy
       PGPASSWORD: local-password
       BACKUP_RETENTION_DAYS: 14
     volumes:
-      - buddystuddy-db-backups:/backups
+      - buddystudy-db-backups:/backups
     restart: unless-stopped
     command: >
       sh -c '
       mkdir -p /backups &&
       while true; do
         ts=$$(date -u +%Y%m%dT%H%M%SZ);
-        pg_dump -Fc -h "$${PGHOST}" -U "$${PGUSER}" -d "$${PGDATABASE}" > /backups/buddystuddy-$${ts}.dump;
-        find /backups -type f -name "buddystuddy-*.dump" -mtime +$${BACKUP_RETENTION_DAYS} -delete;
+        pg_dump -Fc -h "$${PGHOST}" -U "$${PGUSER}" -d "$${PGDATABASE}" > /backups/buddystudy-$${ts}.dump;
+        find /backups -type f -name "buddystudy-*.dump" -mtime +$${BACKUP_RETENTION_DAYS} -delete;
         sleep 86400;
       done'
 
 volumes:
-  buddystuddy-postgres-data:
-  buddystuddy-db-backups:
-  buddystuddy-libretranslate-data:
+  buddystudy-postgres-data:
+  buddystudy-db-backups:
+  buddystudy-libretranslate-data:

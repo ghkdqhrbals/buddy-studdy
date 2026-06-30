@@ -29,15 +29,15 @@ Monitoring deploy:
 
 ## Runtime Layout
 
-- `buddystuddy-nginx`: public HTTPS proxy on host port `443`.
-- `buddystuddy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
-- `buddystuddy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
+- `buddystudy-nginx`: public HTTPS proxy on host port `443`.
+- `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
+- `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
 - `rsc-coordinator`: Redis Stream Coordinator on Docker network port `8080`, deployed from a GHCR native-image artifact.
-- `buddystuddy-db`: private PostgreSQL container on Docker network port `5432`.
-- `buddystuddy-postgres-data`: persistent Docker volume for PostgreSQL data.
-- `buddystuddy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
-- `backups/`: local host directory (`/opt/buddystuddy-backend/backups`) where `pg_dump` files are written before each deploy.
-- `buddystuddy-postgres-data` retains live DB data across restarts and redeploys.
+- `buddystudy-db`: private PostgreSQL container on Docker network port `5432`.
+- `buddystudy-postgres-data`: persistent Docker volume for PostgreSQL data.
+- `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
+- `backups/`: local host directory (`/opt/buddystudy-backend/backups`) where `pg_dump` files are written before each deploy.
+- `buddystudy-postgres-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
 - If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
 - If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStudy backend logs.
@@ -75,7 +75,7 @@ Run the `Deploy BuddyStudy Backend` workflow and provide the backend image ref,
 for example:
 
 ```text
-ghcr.io/ghkdqhrbals/buddy-studdy-backend:latest
+ghcr.io/ghkdqhrbals/buddy-study-backend:latest
 ```
 
 Optionally override the Redis Stream Coordinator native image ref:
@@ -95,7 +95,7 @@ coordinator hostnames.
 
 The deploy process uses a blue/green rolling pattern:
 
-1. New image starts on the inactive slot (`buddystuddy-backend-a` or `...-b`).
+1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
 2. New slot health is validated with `/health`.
 3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
 4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
@@ -117,8 +117,8 @@ curl -fsS https://api.ghkdqhrbals.org/health
 ```sh
 docker run --rm \
   -e PGPASSWORD="<postgres-password>" \
-  --network buddystuddy-net \
-  -v "/opt/buddystuddy-backend/backups:/backups:ro" \
+  --network buddystudy-net \
+  -v "/opt/buddystudy-backend/backups:/backups:ro" \
   postgres:16-alpine \
-  pg_restore -h buddystuddy-db -U buddystuddy -d buddystuddy /backups/buddystuddy-<timestamp>.dump
+  pg_restore -h buddystudy-db -U buddystudy -d buddystudy /backups/buddystudy-<timestamp>.dump
 ```

@@ -29,7 +29,7 @@ jobs:
           fi
 
           monitoring_root="/opt/redis-stream-coordinator"
-          render_root="${RUNNER_TEMP:-/tmp}/buddystuddy-monitoring-render"
+          render_root="${RUNNER_TEMP:-/tmp}/buddystudy-monitoring-render"
           rm -rf "${render_root}"
 
           mkdir -p \
@@ -45,7 +45,7 @@ jobs:
 
           datasources:
             - name: BuddyStudy Loki
-              uid: buddystuddy-loki
+              uid: buddystudy-loki
               type: loki
               access: proxy
               url: http://rsc-loki:3100
@@ -144,7 +144,7 @@ jobs:
                 - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
                   target_label: compose_service
                 - source_labels: ['__meta_docker_container_name']
-                  regex: '/(buddystuddy-.*|rsc-.*)'
+                  regex: '/(buddystudy-.*|rsc-.*)'
                   action: keep
           YAML
 
@@ -155,7 +155,7 @@ jobs:
             alpine:3.20 \
             sh -c 'mkdir -p /target/grafana /target/loki /target/promtail && cp -R /source/grafana/provisioning /target/grafana/ && cp -R /source/grafana/dashboards /target/grafana/ && cp /source/loki/loki.yml /target/loki/loki.yml && cp /source/promtail/promtail.yml /target/promtail/promtail.yml'
 
-          docker network create buddystuddy-net >/dev/null 2>&1 || true
+          docker network create buddystudy-net >/dev/null 2>&1 || true
           docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
           docker volume create rsc-loki-data >/dev/null
           docker volume create rsc-grafana-data >/dev/null
@@ -169,8 +169,8 @@ jobs:
             redis-exporter-6379 \
             redis-exporter-6380 \
             redis-exporter-6381 \
-            buddystuddy-loki \
-            buddystuddy-promtail \
+            buddystudy-loki \
+            buddystudy-promtail \
             >/dev/null 2>&1 || true
 
           docker rm -f rsc-loki rsc-promtail rsc-grafana >/dev/null 2>&1 || true
@@ -206,8 +206,8 @@ jobs:
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
             grafana/grafana:11.4.0
 
-          docker network connect buddystuddy-net rsc-grafana >/dev/null 2>&1 || true
-          docker network connect redis-stream-coordinator-net buddystuddy-nginx >/dev/null 2>&1 || true
+          docker network connect buddystudy-net rsc-grafana >/dev/null 2>&1 || true
+          docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
 
           for attempt in $(seq 1 30); do
             if docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health >/dev/null; then

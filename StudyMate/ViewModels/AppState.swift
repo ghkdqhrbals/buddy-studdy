@@ -5201,7 +5201,7 @@ final class AppState: ObservableObject {
         remove_data "io.github.ghkdqhrbals.StudyMate"
         remove_data "com.local.StudyMate"
 
-        /usr/bin/osascript -e 'display dialog "사용해주셔서 감사합니다." with title "BuddyStuddy" buttons {"확인"} default button "확인" giving up after 8' >> "${LOG_PATH}" 2>&1
+        /usr/bin/osascript -e 'display dialog "사용해주셔서 감사합니다." with title "BuddyStudy" buttons {"확인"} default button "확인" giving up after 8' >> "${LOG_PATH}" 2>&1
         echo "StudyMate uninstall finished at $(date)" >> "${LOG_PATH}"
         /bin/rm -f "$0"
         """
