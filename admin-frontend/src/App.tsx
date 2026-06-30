@@ -78,7 +78,7 @@ function sectionHref(section: SectionKey, offset = 0, range?: { startDate: strin
 
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("buddystuddy.adminTheme") as Theme) || "light");
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("buddystudy.adminTheme") as Theme) || "light");
   const [activeSection, setActiveSection] = useState<SectionKey>(() => routeState().section);
   const [startDate, setStartDate] = useState(() => routeState().startDate);
   const [endDate, setEndDate] = useState(() => routeState().endDate);
@@ -93,7 +93,7 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("buddystuddy.adminTheme", theme);
+    localStorage.setItem("buddystudy.adminTheme", theme);
   }, [theme]);
 
   useEffect(() => {

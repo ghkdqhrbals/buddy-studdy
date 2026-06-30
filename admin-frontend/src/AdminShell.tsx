@@ -50,7 +50,7 @@ export function AdminShell({
         >
           <div className="brand-mark">B</div>
           <div>
-            <strong>BuddyStuddy</strong>
+            <strong>BuddyStudy</strong>
             <span>Admin</span>
           </div>
         </a>

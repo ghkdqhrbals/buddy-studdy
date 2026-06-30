@@ -186,7 +186,7 @@ jobs:
           IMAGE_REF: ${{ needs.build.outputs.image_ref }}
           DISPATCHED_AT: ${{ needs.notify.outputs.dispatched_at }}
           CORRELATION_ID: ${{ needs.notify.outputs.correlation_id }}
-          DEPLOY_WORKFLOW_NAME: Deploy BuddyStuddy Admin Frontend
+          DEPLOY_WORKFLOW_NAME: Deploy BuddyStudy Admin Frontend
         run: |
           set -euo pipefail
 

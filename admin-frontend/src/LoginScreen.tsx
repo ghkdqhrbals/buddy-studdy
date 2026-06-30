@@ -38,7 +38,7 @@ export function LoginScreen({ onLoggedIn, theme, setTheme, error }: LoginScreenP
           <div className="login-brand">
             <div className="login-mark">B</div>
             <div>
-              <strong>BuddyStuddy</strong>
+              <strong>BuddyStudy</strong>
               <span>Admin</span>
             </div>
           </div>

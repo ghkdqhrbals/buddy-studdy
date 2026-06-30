@@ -1,8 +1,8 @@
 import type { AdminApiError, AdminLoginResponse, AdminMetricsResponse, ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
-const TOKEN_KEY = "buddystuddy.adminToken";
-const TOKEN_EXP_KEY = "buddystuddy.adminTokenExpiresAt";
+const TOKEN_KEY = "buddystudy.adminToken";
+const TOKEN_EXP_KEY = "buddystudy.adminTokenExpiresAt";
 
 export type UnauthorizedHandler = () => void;
 

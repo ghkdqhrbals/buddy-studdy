@@ -1,4 +1,4 @@
-name: Deploy BuddyStuddy Monitoring
+name: Deploy BuddyStudy Monitoring
 
 on:
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
           apiVersion: 1
 
           datasources:
-            - name: BuddyStuddy Loki
+            - name: BuddyStudy Loki
               uid: buddystuddy-loki
               type: loki
               access: proxy
@@ -57,9 +57,9 @@ jobs:
           apiVersion: 1
 
           providers:
-            - name: BuddyStuddy
+            - name: BuddyStudy
               orgId: 1
-              folder: BuddyStuddy
+              folder: BuddyStudy
               type: file
               disableDeletion: false
               updateIntervalSeconds: 30
