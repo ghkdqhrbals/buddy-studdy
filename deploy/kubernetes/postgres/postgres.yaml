@@ -46,12 +46,14 @@ metadata:
   labels:
     app.kubernetes.io/name: buddystuddy-postgres
 spec:
+  type: NodePort
   selector:
     app.kubernetes.io/name: buddystuddy-postgres
   ports:
     - name: postgres
       port: 5432
       targetPort: postgres
+      nodePort: 30432
 ---
 apiVersion: apps/v1
 kind: StatefulSet

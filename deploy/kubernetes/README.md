@@ -70,6 +70,23 @@ The Mac Kubernetes target stores state on the host:
 The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
 these host directories.
 
+## External Tunnel Ports
+
+The Mac Kubernetes target exposes fixed NodePorts for Cloudflare Tunnel:
+
+- Backend API: `localhost:30080`
+- PostgreSQL: `localhost:30432`
+- Redis Cluster entry service: `localhost:30379`
+
+`deploy/cloudflared/lowfidev-config.yaml` maps:
+
+- `api.lowfidev.cloud` -> `http://localhost:30080`
+- `db.lowfidev.cloud` -> `tcp://localhost:30432`
+- `redis.lowfidev.cloud` -> `tcp://localhost:30379`
+
+Cloudflare Tunnel TCP hostnames require clients to connect through
+`cloudflared access tcp` unless Cloudflare Spectrum is configured separately.
+
 If GHCR packages are private, create an image pull secret and add it to the
 backend/admin frontend Deployments:
 

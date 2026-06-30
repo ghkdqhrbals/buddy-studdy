@@ -1,0 +1,19 @@
+tunnel: 24c83c3f-3c20-402f-a9ca-247ca8d25fbb
+credentials-file: ~/.cloudflared/24c83c3f-3c20-402f-a9ca-247ca8d25fbb.json
+origincert: /Users/gyuminhwangbo/.cloudflared/cert.pem
+ingress:
+  - hostname: api.lowfidev.cloud
+    service: http://localhost:30080
+  - hostname: db.lowfidev.cloud
+    service: tcp://localhost:30432
+  - hostname: redis.lowfidev.cloud
+    service: tcp://localhost:30379
+  - hostname: coordinator.lowfidev.cloud
+    service: http://localhost:8080
+  - hostname: grafana.lowfidev.cloud
+    service: http://localhost:3000
+  - hostname: prometheus.lowfidev.cloud
+    service: http://localhost:9090
+  - hostname: ssh.lowfidev.cloud
+    service: ssh://localhost:22
+  - service: http_status:404
