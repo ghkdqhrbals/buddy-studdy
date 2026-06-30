@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: admin-frontend
-          image: ghcr.io/ghkdqhrbals/buddy-study-admin-frontend:latest
+          image: ghcr.io/ghkdqhrbals/buddystudy-admin-frontend:latest
           imagePullPolicy: Always
           env:
             - name: BACKEND_UPSTREAM
@@ -52,4 +52,3 @@ spec:
               memory: 64Mi
             limits:
               memory: 128Mi
-

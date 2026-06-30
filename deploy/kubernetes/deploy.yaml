@@ -329,7 +329,7 @@ spec:
           value: http://buddystudy-backend:8080
         - name: BACKEND_PROXY_HOST
           value: buddystudy-backend
-        image: ghcr.io/ghkdqhrbals/buddy-study-admin-frontend:latest
+        image: ghcr.io/ghkdqhrbals/buddystudy-admin-frontend:latest
         imagePullPolicy: Always
         name: admin-frontend
         ports:
@@ -379,7 +379,7 @@ spec:
             name: buddystudy-backend-config
         - secretRef:
             name: buddystudy-backend-secret
-        image: ghcr.io/ghkdqhrbals/buddy-study-backend:latest
+        image: ghcr.io/ghkdqhrbals/buddystudy-backend:latest
         imagePullPolicy: Always
         livenessProbe:
           httpGet:

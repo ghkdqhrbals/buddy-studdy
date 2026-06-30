@@ -75,7 +75,7 @@ Run the `Deploy BuddyStudy Backend` workflow and provide the backend image ref,
 for example:
 
 ```text
-ghcr.io/ghkdqhrbals/buddy-study-backend:latest
+ghcr.io/ghkdqhrbals/buddystudy-backend:latest
 ```
 
 Optionally override the Redis Stream Coordinator native image ref:

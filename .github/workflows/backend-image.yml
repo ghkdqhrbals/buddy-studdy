@@ -18,7 +18,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/buddy-studdy-backend
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/buddystudy-backend
   DEPLOY_REPO: ghkdqhrbals/personal-deploy
 
 jobs:

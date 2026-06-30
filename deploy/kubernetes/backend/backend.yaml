@@ -54,7 +54,7 @@ spec:
               done
       containers:
         - name: backend
-          image: ghcr.io/ghkdqhrbals/buddy-study-backend:latest
+          image: ghcr.io/ghkdqhrbals/buddystudy-backend:latest
           imagePullPolicy: Always
           envFrom:
             - configMapRef:
