@@ -14,7 +14,7 @@ spring:
       region:
         static: ${AWS_REGION:ap-northeast-2}
       secretsmanager:
-        enabled: true
+        enabled: ${SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED:false}
         region: ${AWS_REGION:ap-northeast-2}
 
 buddystudy:

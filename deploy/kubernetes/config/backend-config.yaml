@@ -11,6 +11,8 @@ data:
   FLYWAY_LOCATIONS: "filesystem:/app/db/migration"
   DATABASE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy"
   DATABASE_USERNAME: "buddystudy"
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy"
+  SPRING_DATASOURCE_USERNAME: "buddystudy"
   ADMIN_ANALYTICS_DATABASE_URL: "jdbc:postgresql://buddystudy-postgres:5432/buddystudy_aggregation"
   ADMIN_ANALYTICS_DATABASE_USERNAME: "buddystudy"
   REDIS_HOST: "buddystudy-redis"

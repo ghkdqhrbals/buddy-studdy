@@ -29,6 +29,8 @@ data:
   SCHEDULER_ENABLED: "true"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
   SPRING_DATA_REDIS_CLUSTER_NODES: buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379
+  SPRING_DATASOURCE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
+  SPRING_DATASOURCE_USERNAME: buddystudy
   SPRING_FLYWAY_ENABLED: "false"
   SPRING_PROFILES_ACTIVE: prod
   VIEW_STREAM_PREFIX: view-v1
