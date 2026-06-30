@@ -261,7 +261,7 @@ spec:
               done
       containers:
         - name: redis-cluster-proxy
-          image: redislabs/redis-cluster-proxy:latest
+          image: ableuler/redis-cluster-proxy:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: REDIS_PASSWORD

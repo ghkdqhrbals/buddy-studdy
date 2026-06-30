@@ -509,7 +509,7 @@ spec:
             secretKeyRef:
               key: REDIS_PASSWORD
               name: buddystudy-backend-secret
-        image: redislabs/redis-cluster-proxy:latest
+        image: ableuler/redis-cluster-proxy:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
           initialDelaySeconds: 30
