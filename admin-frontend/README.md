@@ -1,6 +1,6 @@
-# BuddyStuddy Admin Frontend
+# BuddyStudy Admin Frontend
 
-Standalone React admin console for BuddyStuddy.
+Standalone React admin console for BuddyStudy.
 
 ## Local
 
@@ -22,10 +22,10 @@ If `VITE_ADMIN_API_BASE_URL` is empty, the app calls the same origin.
 ## Docker
 
 ```sh
-docker build -t buddystuddy-admin ./admin-frontend
+docker build -t buddystudy-admin ./admin-frontend
 docker run --rm -p 3000:80 \
   -e BACKEND_UPSTREAM=http://host.docker.internal:8080 \
-  buddystuddy-admin
+  buddystudy-admin
 ```
 
 Change `BACKEND_UPSTREAM` to point at production without rebuilding the image.

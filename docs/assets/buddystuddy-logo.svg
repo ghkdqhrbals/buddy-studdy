@@ -1,5 +1,5 @@
 <svg width="920" height="160" viewBox="0 0 920 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
-  <title id="title">BuddyStuddy logo</title>
+  <title id="title">BuddyStudy logo</title>
   <rect x="0" y="24" width="112" height="112" rx="30" fill="#17212B"/>
   <text x="56" y="88" text-anchor="middle" dominant-baseline="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="48" font-weight="900" fill="#A2D8FD" stroke="#A2D8FD" stroke-width="2.5" paint-order="stroke fill" letter-spacing="-4">BS</text>
   <path d="M24 105H84L96 111L84 117H24V105Z" fill="#FFD24A"/>
