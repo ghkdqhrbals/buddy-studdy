@@ -79,6 +79,7 @@ spec:
           ports:
             - name: postgres
               containerPort: 5432
+              hostPort: 5432
           env:
             - name: POSTGRES_DB
               value: buddystudy

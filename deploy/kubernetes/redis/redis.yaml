@@ -136,6 +136,7 @@ spec:
                 --cluster-config-file nodes.conf \
                 --cluster-node-timeout 5000 \
                 --cluster-announce-hostname "$(hostname).buddystudy-redis-headless.buddystudy.svc.cluster.local" \
+                --cluster-preferred-endpoint-type hostname \
                 --cluster-announce-port 6379 \
                 --cluster-announce-bus-port 16379
           env:
@@ -282,6 +283,7 @@ spec:
           ports:
             - name: redis
               containerPort: 6379
+              hostPort: 6379
           readinessProbe:
             tcpSocket:
               port: redis

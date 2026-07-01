@@ -33,8 +33,8 @@ Private route registered.
 
 With Cloudflare WARP enabled, connect clients to:
 
-  PostgreSQL: ${LAN_IP}:30432
-  Redis:      ${LAN_IP}:30379
+  PostgreSQL: ${LAN_IP}:5432
+  Redis:      ${LAN_IP}:6379
 
 Keep hostname TCP routes only as compatibility fallbacks:
 

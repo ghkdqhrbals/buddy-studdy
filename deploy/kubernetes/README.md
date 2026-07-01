@@ -72,11 +72,28 @@ these host directories.
 
 ## External Access
 
-The Mac Kubernetes target exposes fixed NodePorts:
+The Mac Kubernetes target exposes fixed local ports. Docker Desktop Kubernetes
+does not reliably bind `hostPort` to the macOS host network, so install the
+launchd port-forward agents after applying the manifests:
+
+```sh
+deploy/kubernetes/install-local-port-forwards.sh
+```
+
+This creates persistent user LaunchAgents bound to `127.0.0.1` and the
+machine's Tailscale IPv4 address when Tailscale is installed. Override with
+`FORWARD_ADDRESS=...` only when you intentionally want a different bind address.
+
+The agents forward:
 
 - Backend API: `localhost:30080`
+- PostgreSQL: `<bind-address>:5432` -> `svc/buddystudy-postgres:5432`
+- Redis Cluster proxy: `<bind-address>:6379` -> `svc/buddystudy-redis-external:6379`
+
+Kubernetes NodePort fallbacks are still available:
+
 - PostgreSQL: `localhost:30432`
-- Redis Cluster proxy entry service: `localhost:30379`
+- Redis Cluster proxy: `localhost:30379`
 
 Cloudflare should be used in two different modes:
 
@@ -88,14 +105,14 @@ Cloudflare should be used in two different modes:
 compatibility TCP hostnames:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
-- `db.lowfidev.cloud` -> `tcp://localhost:30432`
-- `redis.lowfidev.cloud` -> `tcp://localhost:30379`
+- `db.lowfidev.cloud` -> `tcp://localhost:5432`
+- `redis.lowfidev.cloud` -> `tcp://localhost:6379`
 
-For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` and
-connect through WARP to:
+For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` or
+use Tailscale, then connect to:
 
-- PostgreSQL: `<macbook-air-lan-ip>:30432`
-- Redis Cluster proxy: `<macbook-air-lan-ip>:30379`
+- PostgreSQL: `<macbook-air-lan-ip-or-tailscale-ip>:5432`
+- Redis Cluster proxy: `<macbook-air-lan-ip-or-tailscale-ip>:6379`
 
 The Redis tunnel points at `buddystudy-redis-external`, a single Redis Cluster
 proxy endpoint. Do not point the tunnel directly at Redis Cluster nodes; direct

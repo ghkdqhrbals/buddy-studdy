@@ -25,8 +25,8 @@ This keeps API/Grafana URLs simple while avoiding public DB/Redis exposure.
 
 The config also keeps compatibility TCP hostnames:
 
-- `db.lowfidev.cloud` -> `localhost:30432`
-- `redis.lowfidev.cloud` -> `localhost:30379`
+- `db.lowfidev.cloud` -> `localhost:5432`
+- `redis.lowfidev.cloud` -> `localhost:6379`
 
 Those TCP hostnames still require a local client command such as
 `cloudflared access tcp`. For regular administration, prefer the WARP private
@@ -48,12 +48,12 @@ connect directly to the MacBook Air node IP:
 
 ```txt
 PostgreSQL host: <macbook-air-lan-ip>
-PostgreSQL port: 30432
+PostgreSQL port: 5432
 Database: buddystudy
 User: buddystudy
 
 Redis host: <macbook-air-lan-ip>
-Redis port: 30379
+Redis port: 6379
 ```
 
 This is the closest equivalent to the old EC2 public-IP workflow without
