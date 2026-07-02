@@ -214,6 +214,17 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
+test("kubernetes production apply path does not include placeholder backend secret", () => {
+  const kustomization = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/kustomization.yaml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+  const placeholderSecret = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/secrets/backend-secret.yaml"), "utf8");
+
+  assert.match(placeholderSecret, /SLACK_WEBHOOK_URL:\s*""/);
+  assert.doesNotMatch(kustomization, /secrets\/backend-secret\.yaml/);
+  assert.doesNotMatch(combinedManifest, /kind:\s*Secret[\s\S]*name:\s*buddystudy-backend-secret/);
+  assert.match(combinedManifest, /name:\s*buddystudy-backend-secret/);
+});
+
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
