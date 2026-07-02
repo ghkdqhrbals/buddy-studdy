@@ -685,6 +685,52 @@ test("manual check response is not cached", async () => {
   assert.equal(response.headers.get("Cache-Control"), "no-store");
 });
 
+test("root reports healthy stored backend state as ok", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "up",
+        checkedAt: "2026-07-03T00:05:00.000Z",
+        lastUpAt: "2026-07-03T00:05:00.000Z",
+        lastDownAt: null,
+        consecutiveFailures: 0,
+        httpStatus: 200,
+        error: null,
+      },
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(body.ok, true);
+  assert.equal(body.state.status, "up");
+});
+
+test("root reports degraded stored backend state without failing the status page", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "degraded",
+        checkedAt: "2026-07-03T00:05:00.000Z",
+        lastUpAt: "2026-07-02T23:55:00.000Z",
+        lastDownAt: null,
+        consecutiveFailures: 1,
+        httpStatus: 502,
+        error: "HTTP 502",
+      },
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "degraded");
+});
+
 test("root returns service-unavailable when stored backend state is down", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/"),
