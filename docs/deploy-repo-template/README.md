@@ -96,8 +96,9 @@ coordinator hostnames.
 The deploy process uses a blue/green rolling pattern:
 
 1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
-2. GitHub Actions validates that the new container stays running and that
-   Nginx configuration is valid.
+2. GitHub Actions validates only deploy mechanics: the new container process
+   does not immediately exit, and Nginx configuration is valid. It must not
+   call backend health or readiness endpoints.
 3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
 4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
 
