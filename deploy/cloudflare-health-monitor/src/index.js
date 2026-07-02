@@ -219,16 +219,24 @@ function summarizeHealthJson(body) {
     .filter(([, value]) => value && value.ok === false)
     .map(([name, value]) => {
       const message = typeof value.message === "string" && value.message.trim() ? `: ${value.message.trim()}` : "";
-      const details = summarizeCheckDetails(value.details);
+      const details = summarizeCheckDetails(value);
       return `${name}${message}${details ? ` [${details}]` : ""}`;
     });
   if (failed.length === 0) return truncate(JSON.stringify(body), 900);
   return truncate(failed.join("; "), 900);
 }
 
-function summarizeCheckDetails(details) {
-  if (!details || typeof details !== "object") return "";
+function summarizeCheckDetails(check) {
+  const details = check?.details;
+  const durationMs = Number.isFinite(check?.durationMs) ? check.durationMs : null;
+  if (durationMs == null && (!details || typeof details !== "object")) return "";
+  if (!details || typeof details !== "object") {
+    return durationMs == null ? "" : `duration=${durationMs}ms`;
+  }
   const parts = [];
+  if (durationMs != null) {
+    parts.push(`duration=${durationMs}ms`);
+  }
   if (Array.isArray(details.missingJobs) && details.missingJobs.length > 0) {
     parts.push(`missingJobs=${details.missingJobs.join(",")}`);
   }

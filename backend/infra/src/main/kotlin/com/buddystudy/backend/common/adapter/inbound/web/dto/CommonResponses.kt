@@ -16,4 +16,5 @@ data class ReadinessCheckResponse(
     val ok: Boolean,
     val message: String? = null,
     val details: Map<String, Any?> = emptyMap(),
+    val durationMs: Long = 0,
 )

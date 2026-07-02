@@ -30,6 +30,9 @@ class ReadinessCheckerTest {
         assertThat(response.checks["database"]?.ok).isTrue()
         assertThat(response.checks["redis"]?.ok).isTrue()
         assertThat(response.checks["scheduler"]?.ok).isTrue()
+        assertThat(response.checks.values).allSatisfy { check ->
+            assertThat(check.durationMs).isGreaterThanOrEqualTo(0L)
+        }
     }
 
     @Test

@@ -38,19 +38,17 @@ class ReadinessChecker(
     }
 
     private fun checkDatabase(): ReadinessCheckResponse =
-        runCatching {
+        timedCheck {
             dataSource.connection.use { connection ->
                 connection.createStatement().use { statement ->
                     statement.execute("select 1")
                 }
             }
             ReadinessCheckResponse(ok = true)
-        }.getOrElse { error ->
-            ReadinessCheckResponse(ok = false, message = error.safeMessage())
         }
 
     private fun checkRedis(): ReadinessCheckResponse =
-        runCatching {
+        timedCheck {
             val connection = redisConnectionFactory.connection
             try {
                 val pong = connection.ping()
@@ -61,8 +59,6 @@ class ReadinessChecker(
                 connection.close()
             }
             ReadinessCheckResponse(ok = true)
-        }.getOrElse { error ->
-            ReadinessCheckResponse(ok = false, message = error.safeMessage())
         }
 
     private fun checkScheduler(): ReadinessCheckResponse {
@@ -76,7 +72,7 @@ class ReadinessChecker(
         val startupGrace = Duration.ofMinutes(properties.monitoring.schedulerStartupGraceMinutes.coerceAtLeast(0))
         val staleThreshold = Duration.ofMinutes(properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1))
 
-        return runCatching {
+        return timedCheck {
             val params = MapSqlParameterSource()
                 .addValue("jobNames", monitoredJobs)
             val rows = jdbc.query(
@@ -144,10 +140,19 @@ class ReadinessChecker(
                     details = schedulerDetails(),
                 )
             }
-        }.getOrElse { error ->
-            ReadinessCheckResponse(ok = false, message = error.safeMessage())
         }
     }
+
+    private fun timedCheck(block: () -> ReadinessCheckResponse): ReadinessCheckResponse {
+        val started = System.nanoTime()
+        val response = runCatching(block).getOrElse { error ->
+            ReadinessCheckResponse(ok = false, message = error.safeMessage())
+        }
+        return response.copy(durationMs = elapsedMs(started))
+    }
+
+    private fun elapsedMs(started: Long): Long =
+        ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0)
 
     private fun Throwable.safeMessage(): String =
         listOfNotNull(javaClass.simpleName, message?.take(200))

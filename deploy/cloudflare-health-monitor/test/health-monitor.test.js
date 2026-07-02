@@ -159,10 +159,11 @@ test("summarizes failed readiness checks from JSON body", () => {
     ok: false,
     checks: {
       database: { ok: true },
-      redis: { ok: false, message: "Redis ping failed" },
+      redis: { ok: false, message: "Redis ping failed", durationMs: 240 },
       scheduler: {
         ok: false,
         message: "Stale scheduler jobs: question-schedule",
+        durationMs: 31,
         details: {
           thresholdSeconds: 900,
           staleJobs: [
@@ -175,7 +176,7 @@ test("summarizes failed readiness checks from JSON body", () => {
 
   assert.equal(
     summary,
-    "redis: Redis ping failed; scheduler: Stale scheduler jobs: question-schedule [threshold=900s, staleJobs=question-schedule staleFor=1800s]",
+    "redis: Redis ping failed [duration=240ms]; scheduler: Stale scheduler jobs: question-schedule [duration=31ms, threshold=900s, staleJobs=question-schedule staleFor=1800s]",
   );
 });
 
