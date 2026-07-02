@@ -132,7 +132,13 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.ok).isFalse()
         assertThat(response.checks["scheduler"]?.message).contains("Missing monitored scheduler jobs")
         assertThat(response.checks["scheduler"]?.details?.get("missingJobs")).isEqualTo(
-            listOf("question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent"),
+            listOf(
+                "question-schedule",
+                "question-push-outbox-dispatch",
+                "user-stats-refresh",
+                "admin-analytics-recent",
+                "admin-analytics-correction",
+            ),
         )
     }
 
@@ -281,7 +287,13 @@ class ReadinessCheckerTest {
             """.trimIndent(),
         )
         if (seedJobs) {
-            listOf("question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent")
+            listOf(
+                "question-schedule",
+                "question-push-outbox-dispatch",
+                "user-stats-refresh",
+                "admin-analytics-recent",
+                "admin-analytics-correction",
+            )
                 .forEach { jobName ->
                     jdbc.update(
                         "insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value) values (?, true, 'FIXED_DELAY', 'test')",

@@ -71,6 +71,7 @@ data class BuddyStudyProperties(
             "question-push-outbox-dispatch",
             "user-stats-refresh",
             "admin-analytics-recent",
+            "admin-analytics-correction",
         ),
     )
     data class Analytics(
