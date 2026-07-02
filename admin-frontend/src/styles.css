@@ -942,6 +942,13 @@ h2 {
   justify-items: end;
   flex: 0 0 auto;
   max-width: 116px;
+  gap: 4px;
+}
+
+.status-retry-button {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 10px;
 }
 
 .scheduler-status-card.stale,

@@ -24,7 +24,7 @@ export function OperationsPanel({
   if (jobs.length === 0) {
     return (
       <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
-        <SchedulerStatusGrid statuses={statuses} />
+        <SchedulerStatusGrid statuses={statuses} onRetry={onRetry} />
         <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />
       </section>
     );
@@ -37,7 +37,7 @@ export function OperationsPanel({
 
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
-      <SchedulerStatusGrid statuses={statuses} />
+      <SchedulerStatusGrid statuses={statuses} onRetry={onRetry} />
       <div className="panel-header">
         <h2>Scheduler runs</h2>
         {compact ? (
@@ -97,7 +97,13 @@ export function OperationsPanel({
   );
 }
 
-function SchedulerStatusGrid({ statuses }: { statuses: ScheduledJobStatus[] }) {
+function SchedulerStatusGrid({
+  statuses,
+  onRetry,
+}: {
+  statuses: ScheduledJobStatus[];
+  onRetry: (job: ScheduledJobRun) => void;
+}) {
   if (statuses.length === 0) return null;
   return (
     <div className="scheduler-status-grid">
@@ -128,6 +134,11 @@ function SchedulerStatusGrid({ statuses }: { statuses: ScheduledJobStatus[] }) {
             <div className="scheduler-status-meta">
               <span className={`status ${state}`}>{label}</span>
               <small>{latest ? formatDateTime(latest.startedAt) : `No run within ${job.staleThresholdMinutes}m`}</small>
+              {latest?.status === "FAILED" ? (
+                <button className="secondary-button compact status-retry-button" onClick={() => onRetry(latest)}>
+                  Retry
+                </button>
+              ) : null}
             </div>
           </article>
         );
