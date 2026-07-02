@@ -60,6 +60,18 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
+    fun `execute releases lock when run start fails`() {
+        runs.startError = IllegalStateException("database unavailable")
+
+        val error = org.junit.jupiter.api.assertThrows<IllegalStateException> {
+            service.execute(FakeJob("user-stats-refresh") { "done" }, JobTriggerType.SCHEDULED)
+        }
+
+        assertThat(error.message).contains("database unavailable")
+        assertThat(locks.released).containsExactly("user-stats-refresh")
+    }
+
+    @Test
     fun `execute skips disabled job without running work`() {
         runs.enabled["user-stats-refresh"] = false
         var executed = false
@@ -188,11 +200,13 @@ class ManagedJobExecutionServiceTest {
         val enabled = mutableMapOf<String, Boolean>()
         val rows = mutableListOf<ScheduledJobRun>()
         val snapshots = mutableListOf<ScheduledJobSnapshot>()
+        var startError: RuntimeException? = null
         private var nextId = 1L
 
         override fun isEnabled(jobName: String): Boolean = enabled[jobName] ?: true
 
         override fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun {
+            startError?.let { throw it }
             val row = ScheduledJobRun(
                 id = nextId++,
                 jobName = jobName,

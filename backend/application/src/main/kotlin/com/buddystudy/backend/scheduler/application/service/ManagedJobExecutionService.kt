@@ -43,12 +43,14 @@ class ManagedJobExecutionService(
         }
 
         val started = System.nanoTime()
-        val run = runs.start(job.name, triggerType, retryOfRunId, createdBy)
+        var run: ScheduledJobRun? = null
         return try {
+            run = runs.start(job.name, triggerType, retryOfRunId, createdBy)
             val summary = job.run()
             runs.finish(run.id, JobRunStatus.SUCCESS, summary, null, elapsedMs(started))
         } catch (error: Exception) {
-            val failed = runs.finish(run.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
+            val startedRun = run ?: throw error
+            val failed = runs.finish(startedRun.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
             runCatching { alerts.notifyFailed(failed) }
                 .onFailure { alertError ->
                     logger.warn(
