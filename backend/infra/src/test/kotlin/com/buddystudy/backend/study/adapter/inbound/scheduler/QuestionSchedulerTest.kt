@@ -10,6 +10,7 @@ import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResponse
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
@@ -353,6 +354,9 @@ class QuestionSchedulerTest {
 
         override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
             ScheduledJobRunPageResponse(emptyList(), 0, limit, offset)
+
+        override fun findStatuses(): ScheduledJobStatusResponse =
+            ScheduledJobStatusResponse(emptyList())
     }
 
     private class FakeUserPort : UserPort {

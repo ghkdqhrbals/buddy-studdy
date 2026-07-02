@@ -4,6 +4,7 @@ import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.springframework.beans.factory.annotation.Qualifier
@@ -102,6 +103,57 @@ class ScheduledJobRunPersistenceAdapter(
         return ScheduledJobRunPageResponse(rows, total, limit, offset)
     }
 
+    override fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> {
+        val params = MapSqlParameterSource()
+        val whereSql = if (jobNames.isEmpty()) {
+            ""
+        } else {
+            params.addValue("jobNames", jobNames)
+            "where j.job_name in (:jobNames)"
+        }
+        val snapshots = jdbc.query(
+            """
+            select j.job_name, j.enabled, j.schedule_type, j.schedule_value
+            from scheduled_jobs j
+            $whereSql
+            order by j.job_name
+            """.trimIndent(),
+            params,
+        ) { rs, _ ->
+            RawScheduledJobSnapshot(
+                jobName = rs.getString("job_name"),
+                enabled = rs.getBoolean("enabled"),
+                scheduleType = rs.getString("schedule_type"),
+                scheduleValue = rs.getString("schedule_value"),
+            )
+        }
+        if (snapshots.isEmpty()) return emptyList()
+
+        val latestRuns = jdbc.query(
+            """
+            select *
+            from (
+                select r.*,
+                       row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) as rn
+                from scheduled_job_runs r
+                where r.job_name in (:jobNames)
+            ) latest_runs
+            where rn = 1
+            """.trimIndent(),
+            MapSqlParameterSource("jobNames", snapshots.map { it.jobName }),
+        ) { rs, _ -> rs.toRun() }.associateBy { it.jobName }
+
+        return snapshots.map {
+            ScheduledJobSnapshot(
+                jobName = it.jobName,
+                enabled = it.enabled,
+                scheduleType = it.scheduleType,
+                scheduleValue = it.scheduleValue,
+                latestRun = latestRuns[it.jobName],
+            )
+        }
+    }
+
     private fun findById(id: Long): ScheduledJobRun =
         jdbc.query(
             "select * from scheduled_job_runs where id = :id",
@@ -122,6 +174,13 @@ class ScheduledJobRunPersistenceAdapter(
             retryOfRunId = getObject("retry_of_run_id")?.let { (it as Number).toLong() },
             createdBy = getString("created_by"),
         )
+
+    private data class RawScheduledJobSnapshot(
+        val jobName: String,
+        val enabled: Boolean,
+        val scheduleType: String,
+        val scheduleValue: String,
+    )
 }
 
 @Repository

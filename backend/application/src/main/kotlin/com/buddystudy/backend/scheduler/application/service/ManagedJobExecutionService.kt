@@ -1,9 +1,12 @@
 package com.buddystudy.backend.scheduler.application.service
 
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatus
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResponse
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
@@ -11,12 +14,15 @@ import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAl
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.time.Duration
+import java.time.Instant
 
 @Service
 class ManagedJobExecutionService(
     private val runs: ScheduledJobRunPort,
     private val locks: JobLockPort,
     private val alerts: ScheduledJobAlertPort,
+    private val properties: BuddyStudyProperties,
 ) : ManagedJobExecutionUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -59,6 +65,32 @@ class ManagedJobExecutionService(
 
     override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
         runs.findRuns(jobName, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+
+    override fun findStatuses(): ScheduledJobStatusResponse {
+        val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
+        val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
+        val threshold = Duration.ofMinutes(thresholdMinutes)
+        val now = Instant.now()
+        val jobs = runs.findSnapshots(monitoredJobs).map { snapshot ->
+            val latestRun = snapshot.latestRun
+            val stale = snapshot.enabled &&
+                (
+                    latestRun == null ||
+                        latestRun.status == JobRunStatus.FAILED ||
+                        Duration.between(latestRun.startedAt, now) > threshold
+                    )
+            ScheduledJobStatus(
+                jobName = snapshot.jobName,
+                enabled = snapshot.enabled,
+                scheduleType = snapshot.scheduleType,
+                scheduleValue = snapshot.scheduleValue,
+                latestRun = latestRun,
+                stale = stale,
+                staleThresholdMinutes = thresholdMinutes,
+            )
+        }
+        return ScheduledJobStatusResponse(jobs)
+    }
 
     private fun elapsedMs(started: Long): Long =
         ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0)

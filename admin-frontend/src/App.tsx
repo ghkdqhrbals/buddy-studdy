@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
-import { clearToken, fetchJobRuns, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
+import { clearToken, fetchJobRuns, fetchJobStatuses, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
 import { AdminShell } from "./AdminShell";
 import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
 import { OperationsPanel } from "./OperationsPanel";
-import type { AdminMetricSeries, ScheduledJobRun, ScheduledJobRunsResponse, SectionKey, Theme } from "./types";
+import type {
+  AdminMetricSeries,
+  ScheduledJobRun,
+  ScheduledJobRunsResponse,
+  ScheduledJobStatusResponse,
+  SectionKey,
+  Theme,
+} from "./types";
 
 const today = new Date();
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -25,6 +32,9 @@ const emptyJobPage: ScheduledJobRunsResponse = {
   totalCount: 0,
   limit: JOB_PAGE_SIZE,
   offset: 0,
+};
+const emptyJobStatuses: ScheduledJobStatusResponse = {
+  jobs: [],
 };
 
 function isIsoDate(value: string | null): value is string {
@@ -84,6 +94,7 @@ export function App() {
   const [endDate, setEndDate] = useState(() => routeState().endDate);
   const [series, setSeries] = useState<AdminMetricSeries[]>([]);
   const [jobPage, setJobPage] = useState<ScheduledJobRunsResponse>(emptyJobPage);
+  const [jobStatuses, setJobStatuses] = useState<ScheduledJobStatusResponse>(emptyJobStatuses);
   const [jobOffset, setJobOffset] = useState(() => routeState().jobOffset);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +151,12 @@ export function App() {
     setError(null);
     try {
       if (activeSection === "operations") {
-        setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
+        const [runs, statuses] = await Promise.all([
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+          fetchJobStatuses(handleUnauthorized).catch(() => emptyJobStatuses),
+        ]);
+        setJobPage(runs);
+        setJobStatuses(statuses);
         setSeries([]);
       } else {
         const [metrics, runs] = await Promise.all([
@@ -164,7 +180,12 @@ export function App() {
     setError(null);
     try {
       if (activeSection === "operations") {
-        setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
+        const [runs, statuses] = await Promise.all([
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+          fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+        ]);
+        setJobPage(runs);
+        setJobStatuses(statuses);
       } else {
         const [metrics, runs] = await Promise.all([
           refreshMetrics(startDate, endDate, handleUnauthorized),
@@ -186,7 +207,12 @@ export function App() {
     setError(null);
     try {
       await retryJob(job.jobName, job.id, handleUnauthorized);
-      setJobPage(await fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset));
+      const [runs, statuses] = await Promise.all([
+        fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+        fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+      ]);
+      setJobPage(runs);
+      setJobStatuses(statuses);
     } catch (err) {
       if (getStoredToken()) {
         setError(err instanceof Error ? err.message : "Retry failed");
@@ -199,6 +225,7 @@ export function App() {
     setToken(null);
     setSeries([]);
     setJobPage(emptyJobPage);
+    setJobStatuses(emptyJobStatuses);
     setJobOffset(0);
     setError(null);
     window.history.pushState(null, "", LOGIN_PATH);
@@ -260,6 +287,7 @@ export function App() {
       {activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}
+          statuses={jobStatuses.jobs}
           onRetry={handleRetry}
           hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit)}
           onPageChange={(nextPage) => navigateToJobPage((nextPage - 1) * jobPage.limit)}

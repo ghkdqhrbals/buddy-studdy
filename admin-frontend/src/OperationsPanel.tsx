@@ -1,10 +1,11 @@
 import { EmptyState } from "./EmptyState";
 import { formatDateTime, formatDurationMs, statusLabel } from "./format";
 import { Pagination } from "./Pagination";
-import type { ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
+import type { ScheduledJobRun, ScheduledJobRunsResponse, ScheduledJobStatus } from "./types";
 
 type OperationsPanelProps = {
   page: ScheduledJobRunsResponse;
+  statuses?: ScheduledJobStatus[];
   onRetry: (job: ScheduledJobRun) => void;
   hrefForPage: (page: number) => string;
   onPageChange?: (page: number) => void;
@@ -13,6 +14,7 @@ type OperationsPanelProps = {
 
 export function OperationsPanel({
   page,
+  statuses = [],
   onRetry,
   hrefForPage,
   onPageChange,
@@ -20,7 +22,12 @@ export function OperationsPanel({
 }: OperationsPanelProps) {
   const jobs = page.runs;
   if (jobs.length === 0) {
-    return <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />;
+    return (
+      <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
+        <SchedulerStatusGrid statuses={statuses} />
+        <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />
+      </section>
+    );
   }
   const start = page.offset + 1;
   const end = Math.min(page.offset + jobs.length, page.totalCount);
@@ -30,6 +37,7 @@ export function OperationsPanel({
 
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
+      <SchedulerStatusGrid statuses={statuses} />
       <div className="panel-header">
         <h2>Scheduler runs</h2>
         {compact ? (
@@ -86,5 +94,44 @@ export function OperationsPanel({
         />
       ) : null}
     </section>
+  );
+}
+
+function SchedulerStatusGrid({ statuses }: { statuses: ScheduledJobStatus[] }) {
+  if (statuses.length === 0) return null;
+  return (
+    <div className="scheduler-status-grid">
+      {statuses.map((job) => {
+        const latest = job.latestRun;
+        const state = !job.enabled
+          ? "disabled"
+          : latest?.status === "FAILED"
+            ? "failed"
+            : job.stale
+              ? "stale"
+              : latest?.status.toLowerCase() ?? "unknown";
+        const label = !job.enabled
+          ? "Disabled"
+          : latest?.status === "FAILED"
+            ? "Failed"
+            : job.stale
+              ? "Stale"
+              : latest
+                ? statusLabel(latest.status)
+                : "No run";
+        return (
+          <article className={`scheduler-status-card ${state}`} key={job.jobName}>
+            <div>
+              <strong>{job.jobName}</strong>
+              <span>{job.scheduleType} {job.scheduleValue}</span>
+            </div>
+            <div className="scheduler-status-meta">
+              <span className={`status ${state}`}>{label}</span>
+              <small>{latest ? formatDateTime(latest.startedAt) : `No run within ${job.staleThresholdMinutes}m`}</small>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }

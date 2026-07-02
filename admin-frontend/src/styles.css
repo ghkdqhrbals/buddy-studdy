@@ -895,6 +895,65 @@ h2 {
   border-bottom: 0;
 }
 
+.scheduler-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.scheduler-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.scheduler-status-card strong,
+.scheduler-status-card span,
+.scheduler-status-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduler-status-card strong {
+  font-size: 12px;
+}
+
+.scheduler-status-card div:first-child {
+  min-width: 0;
+}
+
+.scheduler-status-card div:first-child span,
+.scheduler-status-meta small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.scheduler-status-meta {
+  display: grid;
+  justify-items: end;
+  flex: 0 0 auto;
+  max-width: 116px;
+}
+
+.scheduler-status-card.stale,
+.scheduler-status-card.failed {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+
+.scheduler-status-card.disabled {
+  opacity: 0.7;
+}
+
 .table-wrap {
   overflow: auto;
 }
@@ -1147,6 +1206,15 @@ td small {
 
 .status.running {
   color: #1d4ed8;
+}
+
+.status.stale {
+  color: #b91c1c;
+}
+
+.status.disabled,
+.status.unknown {
+  color: var(--muted);
 }
 
 .empty-state {

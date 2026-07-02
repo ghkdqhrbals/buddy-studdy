@@ -36,3 +36,25 @@ data class ScheduledJobRunPageResponse(
     override val limit: Int,
     override val offset: Int,
 ) : PageResponse
+
+data class ScheduledJobSnapshot(
+    val jobName: String,
+    val enabled: Boolean,
+    val scheduleType: String,
+    val scheduleValue: String,
+    val latestRun: ScheduledJobRun?,
+)
+
+data class ScheduledJobStatus(
+    val jobName: String,
+    val enabled: Boolean,
+    val scheduleType: String,
+    val scheduleValue: String,
+    val latestRun: ScheduledJobRun?,
+    val stale: Boolean,
+    val staleThresholdMinutes: Long,
+)
+
+data class ScheduledJobStatusResponse(
+    val jobs: List<ScheduledJobStatus>,
+)

@@ -64,6 +64,32 @@ GET /api/v1/health/readiness
 It returns `200` when required dependencies are reachable and core scheduler
 jobs are fresh, otherwise `503` with component-level check results.
 
+Admin users can inspect scheduler freshness and the latest run for each
+monitored job:
+
+```http
+GET /api/v1/admin/jobs/statuses
+Authorization: Bearer <adminToken>
+```
+
+Response:
+
+```json
+{
+  "jobs": [
+    {
+      "jobName": "question-schedule",
+      "enabled": true,
+      "scheduleType": "FIXED_DELAY",
+      "scheduleValue": "30s",
+      "latestRun": null,
+      "stale": true,
+      "staleThresholdMinutes": 15
+    }
+  ]
+}
+```
+
 ### Register Device
 
 ```http

@@ -1,9 +1,11 @@
 package com.buddystudy.backend.scheduler
 
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
@@ -17,7 +19,13 @@ class ManagedJobExecutionServiceTest {
     private val runs = FakeScheduledJobRunPort()
     private val locks = FakeJobLockPort()
     private val alerts = FakeScheduledJobAlertPort()
-    private val service = ManagedJobExecutionService(runs, locks, alerts)
+    private val properties = BuddyStudyProperties(
+        monitoring = BuddyStudyProperties.Monitoring(
+            schedulerStaleThresholdMinutes = 15,
+            schedulerMonitoredJobs = listOf("question-schedule", "user-stats-refresh"),
+        ),
+    )
+    private val service = ManagedJobExecutionService(runs, locks, alerts, properties)
 
     @Test
     fun `execute records successful job run`() {
@@ -77,6 +85,53 @@ class ManagedJobExecutionServiceTest {
         assertThat(result.createdBy).isEqualTo("admin")
     }
 
+    @Test
+    fun `find statuses marks missing and failed enabled jobs as stale`() {
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = true,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            latestRun = null,
+        )
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "user-stats-refresh",
+            enabled = true,
+            scheduleType = "CRON",
+            scheduleValue = "0 */5 * * * *",
+            latestRun = ScheduledJobRun(
+                id = 9,
+                jobName = "user-stats-refresh",
+                triggerType = JobTriggerType.SCHEDULED,
+                status = JobRunStatus.FAILED,
+                startedAt = Instant.now(),
+                errorMessage = "boom",
+            ),
+        )
+
+        val response = service.findStatuses()
+
+        assertThat(response.jobs).hasSize(2)
+        assertThat(response.jobs.map { it.jobName }).containsExactly("question-schedule", "user-stats-refresh")
+        assertThat(response.jobs).allMatch { it.stale }
+        assertThat(response.jobs).allMatch { it.staleThresholdMinutes == 15L }
+    }
+
+    @Test
+    fun `find statuses ignores disabled stale jobs`() {
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = false,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            latestRun = null,
+        )
+
+        val response = service.findStatuses()
+
+        assertThat(response.jobs.single().stale).isFalse()
+    }
+
     private class FakeJob(
         override val name: String,
         private val block: () -> String,
@@ -105,6 +160,7 @@ class ManagedJobExecutionServiceTest {
     private class FakeScheduledJobRunPort : ScheduledJobRunPort {
         val enabled = mutableMapOf<String, Boolean>()
         val rows = mutableListOf<ScheduledJobRun>()
+        val snapshots = mutableListOf<ScheduledJobSnapshot>()
         private var nextId = 1L
 
         override fun isEnabled(jobName: String): Boolean = enabled[jobName] ?: true
@@ -140,5 +196,8 @@ class ManagedJobExecutionServiceTest {
             val filtered = rows.filter { jobName == null || it.jobName == jobName }
             return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
         }
+
+        override fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> =
+            snapshots.filter { jobNames.isEmpty() || it.jobName in jobNames }
     }
 }

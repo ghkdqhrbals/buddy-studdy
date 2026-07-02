@@ -127,6 +127,42 @@ class ScheduledJobRunPersistenceAdapterTest {
         assertThat(adapter.isEnabled("unknown-job")).isTrue()
     }
 
+    @Test
+    fun `finds scheduler snapshots with latest run`() {
+        jdbc.update(
+            """
+            insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value, created_at, updated_at)
+            values
+                ('question-schedule', true, 'FIXED_DELAY', '30s', current_timestamp, current_timestamp),
+                ('user-stats-refresh', false, 'CRON', '0 */5 * * * *', current_timestamp, current_timestamp)
+            """.trimIndent(),
+            emptyMap<String, Any>(),
+        )
+        val oldRun = adapter.finish(
+            adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "old",
+            null,
+            10,
+        )
+        val latestRun = adapter.finish(
+            adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.FAILED,
+            null,
+            "boom",
+            11,
+        )
+
+        val snapshots = adapter.findSnapshots(listOf("question-schedule", "user-stats-refresh"))
+
+        assertThat(snapshots.map { it.jobName }).containsExactly("question-schedule", "user-stats-refresh")
+        assertThat(snapshots.first().enabled).isTrue()
+        assertThat(snapshots.first().latestRun).isEqualTo(latestRun)
+        assertThat(snapshots.first().latestRun).isNotEqualTo(oldRun)
+        assertThat(snapshots.last().enabled).isFalse()
+        assertThat(snapshots.last().latestRun).isNull()
+    }
+
     private fun h2(): DataSource =
         DriverManagerDataSource().apply {
             setDriverClassName("org.h2.Driver")

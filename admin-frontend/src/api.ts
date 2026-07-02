@@ -1,4 +1,11 @@
-import type { AdminApiError, AdminLoginResponse, AdminMetricsResponse, ScheduledJobRun, ScheduledJobRunsResponse } from "./types";
+import type {
+  AdminApiError,
+  AdminLoginResponse,
+  AdminMetricsResponse,
+  ScheduledJobRun,
+  ScheduledJobRunsResponse,
+  ScheduledJobStatusResponse,
+} from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
 const TOKEN_KEY = "buddystudy.adminToken";
@@ -96,6 +103,10 @@ export async function fetchJobRuns(onUnauthorized: UnauthorizedHandler, limit = 
     };
   }
   return response;
+}
+
+export function fetchJobStatuses(onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobStatusResponse> {
+  return request("/api/v1/admin/jobs/statuses", { method: "GET" }, onUnauthorized);
 }
 
 export function retryJob(jobName: string, runId: number | null, onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobRun> {

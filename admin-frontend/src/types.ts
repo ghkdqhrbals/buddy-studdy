@@ -51,6 +51,20 @@ export type ScheduledJobRunsResponse = {
   offset: number;
 };
 
+export type ScheduledJobStatus = {
+  jobName: string;
+  enabled: boolean;
+  scheduleType: string;
+  scheduleValue: string;
+  latestRun?: ScheduledJobRun | null;
+  stale: boolean;
+  staleThresholdMinutes: number;
+};
+
+export type ScheduledJobStatusResponse = {
+  jobs: ScheduledJobStatus[];
+};
+
 export type AdminApiError = {
   error?: {
     code?: string;

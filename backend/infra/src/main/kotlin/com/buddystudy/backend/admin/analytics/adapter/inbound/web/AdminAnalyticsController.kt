@@ -8,6 +8,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResponse
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import jakarta.validation.Valid
@@ -67,6 +68,12 @@ class AdminAnalyticsController(
         @RequestParam(required = false) runId: Long?,
     ): ScheduledJobRun =
         admin.retryJob(authorization.bearerToken(), jobName, runId)
+
+    @GetMapping("/jobs/statuses")
+    fun jobStatuses(
+        @RequestHeader("Authorization") authorization: String?,
+    ): ScheduledJobStatusResponse =
+        admin.jobStatuses(authorization.bearerToken())
 }
 
 data class AdminLoginRequest(
@@ -80,6 +87,7 @@ interface AdminAnalyticsWebPort {
     fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
     fun jobRuns(adminToken: String, jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse
     fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
+    fun jobStatuses(adminToken: String): ScheduledJobStatusResponse
 }
 
 @Component
@@ -109,6 +117,11 @@ class AdminAnalyticsWebAdapter(
         val job = jobsByName[jobName]
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Scheduled job not found.")
         return jobExecutions.execute(job, JobTriggerType.RETRY, retryOfRunId = runId, createdBy = "admin")
+    }
+
+    override fun jobStatuses(adminToken: String): ScheduledJobStatusResponse {
+        admin.validate(adminToken)
+        return jobExecutions.findStatuses()
     }
 }
 
