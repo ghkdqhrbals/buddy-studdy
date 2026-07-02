@@ -29,7 +29,11 @@ npm install
 npx wrangler kv namespace create HEALTH_MONITOR_STATE
 ```
 
-Paste the returned KV namespace id into `wrangler.jsonc`.
+Write the returned KV namespace id into `wrangler.jsonc`:
+
+```sh
+npm run configure:kv -- <namespace_id>
+```
 
 Set Slack secret:
 

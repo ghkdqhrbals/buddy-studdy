@@ -8,7 +8,11 @@ const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 
 const namespace = config.kv_namespaces?.find((item) => item.binding === "HEALTH_MONITOR_STATE");
 if (!namespace?.id || namespace.id === "replace-with-kv-namespace-id") {
-  console.error("HEALTH_MONITOR_STATE KV namespace id is not configured in wrangler.jsonc.");
+  console.error(
+    "HEALTH_MONITOR_STATE KV namespace id is not configured in wrangler.jsonc. " +
+      "Create it with `npx wrangler kv namespace create HEALTH_MONITOR_STATE`, " +
+      "then run `npm run configure:kv -- <namespace_id>`.",
+  );
   process.exit(1);
 }
 
