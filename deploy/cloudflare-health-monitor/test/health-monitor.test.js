@@ -468,6 +468,27 @@ test("scheduled check catches unexpected monitor failures", async () => {
   assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
+test("scheduled check persists monitor error state when state write is available", async () => {
+  const environment = manualEnv({
+    stateGetError: new Error("kv read failed"),
+    onSlack: async () => new Response("ok", { status: 200 }),
+  });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+    await waitUntilPromises[0];
+  });
+
+  assert.equal(environment.stateWrites.length, 1);
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+  assert.equal(storedState.status, "monitor_error");
+  assert.equal(storedState.alertType, "monitor_error");
+  assert.equal(storedState.alertSent, true);
+  assert.match(storedState.error, /kv read failed/);
+});
+
 test("scheduled check persists configuration error state when kv is available", async () => {
   const environment = manualEnv();
   environment.SLACK_WEBHOOK_URL = "";

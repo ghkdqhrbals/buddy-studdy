@@ -75,7 +75,7 @@ async function runHealthCheckSafely(env, scheduledTime) {
       httpStatus: null,
       error: message,
       detail: null,
-      alertType: null,
+      alertType: "monitor_error",
       shouldAlert: false,
       alertSent: false,
       slackAlertError: null,
@@ -102,6 +102,7 @@ async function runHealthCheckSafely(env, scheduledTime) {
         error: message,
       }),
     );
+    await writeStateIfAvailable(env, state);
     return { ok: false, state, error: message };
   }
 }
