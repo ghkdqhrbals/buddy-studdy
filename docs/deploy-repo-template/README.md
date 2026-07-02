@@ -106,6 +106,12 @@ Only one scheduler leader is active during overlap windows. PostgreSQL advisory 
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
+This smoke test is deploy-time validation only. It is not runtime uptime
+monitoring, and it must not be converted into a recurring GitHub Actions health
+check. Runtime server-down alerts are handled by the Cloudflare Worker in
+`deploy/cloudflare-health-monitor`, which checks the public readiness endpoint
+and sends Slack alerts.
+
 ```sh
 curl -fsS https://api.ghkdqhrbals.org/health
 ```

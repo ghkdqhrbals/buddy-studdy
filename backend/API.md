@@ -53,7 +53,9 @@ Response:
 ```
 
 `/health` is intentionally lightweight for container and load-balancer probes.
-External uptime monitoring should use readiness:
+Runtime uptime monitoring must not run from GitHub Actions. Use the
+Cloudflare Worker in `deploy/cloudflare-health-monitor` for scheduled external
+checks and Slack alerts. That Worker should call readiness:
 
 ```http
 GET /api/v1/health/readiness

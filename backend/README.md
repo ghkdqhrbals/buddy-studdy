@@ -123,8 +123,11 @@ Protected endpoints require:
 Device credentials are used only to register a device and bootstrap or refresh `/api/v1/auth/token`.
 
 Spring Boot Actuator serves lightweight health checks at `/health` and
-`/api/v1/health`. External uptime monitoring should use
-`/api/v1/health/readiness`, which checks required backend dependencies and
+`/api/v1/health`. Runtime uptime monitoring must not run from GitHub Actions;
+GitHub Actions is only for build, deploy dispatch, and deploy-result watching.
+External uptime monitoring should use the Cloudflare Worker in
+`deploy/cloudflare-health-monitor`, which checks `/api/v1/health/readiness`
+and sends Slack alerts. Readiness checks required backend dependencies and
 core scheduler freshness, and returns `503` when the backend process is alive
 but not ready to serve traffic. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
