@@ -6,7 +6,7 @@
     "configure:kv": "node scripts/set-kv-namespace.js",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "check": "node scripts/check-config.js && wrangler deploy --dry-run",
+    "check": "node scripts/check-config.js && node scripts/check-workflow.js && wrangler deploy --dry-run",
     "smoke": "node scripts/smoke-check.js",
     "test": "node --test"
   },
