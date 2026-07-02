@@ -506,6 +506,28 @@ test("root reports state read errors as json", async () => {
   assert.match(body.message, /kv read failed/);
 });
 
+test("root returns service-unavailable when stored backend state is down", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "down",
+        checkedAt: "2026-07-03T00:05:00.000Z",
+        lastUpAt: "2026-07-02T23:55:00.000Z",
+        lastDownAt: "2026-07-03T00:05:00.000Z",
+        consecutiveFailures: 2,
+        httpStatus: 503,
+        error: "HTTP 503",
+      },
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "down");
+});
+
 test("manual check reports configuration errors after authorization", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/check", {

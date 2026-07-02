@@ -16,7 +16,7 @@ export default {
         );
       }
       const state = stateResult.state;
-      return json({ ok: true, state });
+      return json({ ok: state?.status === "up", state }, { status: rootStatusCode(state) });
     }
     if (request.method === "POST" && url.pathname === "/check") {
       if (!isAuthorizedManualCheck(request, env)) {
@@ -317,6 +317,11 @@ function json(body, init = {}) {
   });
 }
 
+function rootStatusCode(state) {
+  if (!state || state.status === "up" || state.status === "degraded") return 200;
+  return 503;
+}
+
 function isAuthorizedManualCheck(request, env) {
   if (!env.MANUAL_CHECK_TOKEN) return false;
   const expected = `Bearer ${env.MANUAL_CHECK_TOKEN}`;
@@ -504,6 +509,7 @@ export const internals = {
   healthcheckTimeoutMs,
   isAuthorizedManualCheck,
   nextState,
+  rootStatusCode,
   slackTimeoutMs,
   summarizeHealthJson,
   validateEnv,
