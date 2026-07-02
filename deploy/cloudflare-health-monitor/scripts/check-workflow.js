@@ -10,6 +10,7 @@ const deployTemplateDir = path.join(root, "docs", "deploy-repo-template");
 const backendHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/v1\/health(?:\/readiness)?|(?<!\/api)\/health(?:\/readiness)?)\b/;
 const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wget|http)\b[^\n]*\/api\/health\b/;
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
+const healthMonitorManualCheckPattern = /(?:curl|wget|http)\b[^\n]*(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 
 export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow") {
   const errors = [];
@@ -25,6 +26,9 @@ export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow"
   }
   if (/npm\s+run\s+smoke/.test(text) || /smoke-check\.js/.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run health monitor smoke checks.`);
+  }
+  if (healthMonitorManualCheckPattern.test(text)) {
+    errors.push(`${fileName}: GitHub Actions workflows must not call health monitor manual check endpoints.`);
   }
   if (/HEALTH_MONITOR_URL/.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not configure health monitor check URLs.`);

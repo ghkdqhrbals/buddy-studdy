@@ -151,6 +151,24 @@ jobs:
   assert.match(errors, /must not run health monitor smoke checks/);
 });
 
+test("all GitHub Actions workflows reject direct health monitor manual check calls", () => {
+  const workflow = `
+name: Health Smoke
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    steps:
+      - name: Manual health monitor check
+        run: curl -fsS -X POST https://buddystudy-health-monitor.example.workers.dev/check -H "Authorization: Bearer \${MANUAL_CHECK_TOKEN}"
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "health-smoke.yml").join("\n");
+
+  assert.match(errors, /health-smoke\.yml/);
+  assert.match(errors, /must not call health monitor manual check endpoints/);
+});
+
 test("deploy repo backend template does not run backend health probes in Actions", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 
