@@ -59,6 +59,8 @@ export type ScheduledJobStatus = {
   latestRun?: ScheduledJobRun | null;
   stale: boolean;
   staleThresholdMinutes: number;
+  timeoutSeconds: number;
+  stuck: boolean;
 };
 
 export type ScheduledJobStatusResponse = {

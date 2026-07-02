@@ -113,6 +113,8 @@ function SchedulerStatusGrid({
           ? "disabled"
           : latest?.status === "FAILED"
             ? "failed"
+            : job.stuck
+              ? "stuck"
             : job.stale
               ? "stale"
               : latest?.status.toLowerCase() ?? "unknown";
@@ -120,11 +122,18 @@ function SchedulerStatusGrid({
           ? "Disabled"
           : latest?.status === "FAILED"
             ? "Failed"
+            : job.stuck
+              ? "Stuck"
             : job.stale
               ? "Stale"
               : latest
                 ? statusLabel(latest.status)
                 : "No run";
+        const timingLabel = job.stuck && latest
+          ? `Running > ${job.timeoutSeconds}s`
+          : latest
+            ? formatDateTime(latest.startedAt)
+            : `No run within ${job.staleThresholdMinutes}m`;
         return (
           <article className={`scheduler-status-card ${state}`} key={job.jobName}>
             <div>
@@ -133,7 +142,7 @@ function SchedulerStatusGrid({
             </div>
             <div className="scheduler-status-meta">
               <span className={`status ${state}`}>{label}</span>
-              <small>{latest ? formatDateTime(latest.startedAt) : `No run within ${job.staleThresholdMinutes}m`}</small>
+              <small>{timingLabel}</small>
               {latest?.status === "FAILED" ? (
                 <button className="secondary-button compact status-retry-button" onClick={() => onRetry(latest)}>
                   Retry

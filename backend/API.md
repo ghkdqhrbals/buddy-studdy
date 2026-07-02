@@ -65,7 +65,8 @@ It returns `200` when required dependencies are reachable and core scheduler
 jobs have recent successful runs, otherwise `503` with component-level check
 results. Scheduler checks include structured `details` so external monitors
 and Slack alerts can show missing jobs, stale jobs, and configured thresholds
-without parsing free-form text.
+without parsing free-form text. A scheduler run that remains `RUNNING` past
+its configured `timeoutSeconds` is reported as a stuck job.
 
 Example readiness response:
 
@@ -80,17 +81,18 @@ Example readiness response:
     "redis": { "ok": true },
     "scheduler": {
       "ok": false,
-      "message": "Stale scheduler jobs: question-schedule lastSuccessfulStartedAt=2026-07-03T04:00:00Z",
+      "message": "Stuck scheduler jobs: question-schedule runningFor=600s timeout=300s",
       "details": {
         "monitoredJobs": ["question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent"],
         "thresholdSeconds": 900,
         "startupGraceSeconds": 900,
-        "staleJobs": [
+        "stuckJobs": [
           {
             "jobName": "question-schedule",
             "latestStartedAt": "2026-07-03T04:20:00Z",
-            "lastSuccessfulStartedAt": "2026-07-03T04:00:00Z",
-            "staleForSeconds": 1800
+            "latestStatus": "RUNNING",
+            "timeoutSeconds": 300,
+            "runningForSeconds": 600
           }
         ]
       }
@@ -119,7 +121,9 @@ Response:
       "scheduleValue": "30s",
       "latestRun": null,
       "stale": true,
-      "staleThresholdMinutes": 15
+      "staleThresholdMinutes": 15,
+      "timeoutSeconds": 300,
+      "stuck": false
     }
   ]
 }

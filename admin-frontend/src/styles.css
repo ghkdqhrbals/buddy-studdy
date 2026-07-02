@@ -952,6 +952,7 @@ h2 {
 }
 
 .scheduler-status-card.stale,
+.scheduler-status-card.stuck,
 .scheduler-status-card.failed {
   border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
   background: color-mix(in srgb, var(--danger) 7%, var(--surface));
@@ -1215,7 +1216,8 @@ td small {
   color: #1d4ed8;
 }
 
-.status.stale {
+.status.stale,
+.status.stuck {
   color: #b91c1c;
 }
 
