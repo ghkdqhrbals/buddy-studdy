@@ -67,6 +67,13 @@ test("health monitor config requires Cloudflare observability logs", () => {
   assert.match(validateConfig(config).join("\n"), /observability/);
 });
 
+test("health monitor config requires full observability sampling", () => {
+  const config = validConfig();
+  config.observability.head_sampling_rate = 0.1;
+
+  assert.match(validateConfig(config).join("\n"), /observability sampling/);
+});
+
 function validConfig() {
   return {
     name: "buddystudy-health-monitor",

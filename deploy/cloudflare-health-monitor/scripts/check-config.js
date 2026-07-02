@@ -21,6 +21,9 @@ export function validateConfig(config) {
   if (config.observability?.enabled !== true) {
     errors.push("Health monitor Worker observability must be enabled so Cron checks and Slack alert failures are logged.");
   }
+  if (config.observability?.head_sampling_rate !== 1) {
+    errors.push("Health monitor Worker observability sampling must be 1 so every Cron check and Slack alert failure is logged.");
+  }
   const crons = config.triggers?.crons;
   if (!Array.isArray(crons) || crons.length === 0) {
     errors.push("At least one Cloudflare Cron Trigger must be configured.");
