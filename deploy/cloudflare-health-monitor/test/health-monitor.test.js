@@ -79,6 +79,8 @@ test("slack payload contains environment, status, url, time, failures, error, an
   const payload = internals.buildSlackPayload(env, {
     status: "down",
     checkedAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: "2026-07-02T23:55:00.000Z",
+    lastDownAt: "2026-07-03T00:05:00.000Z",
     consecutiveFailures: 2,
     error: "fetch failed",
     detail: "scheduler: Stale scheduler jobs: question-schedule",
@@ -94,6 +96,27 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.match(fields, /2/);
   assert.match(fields, /fetch failed/);
   assert.match(fields, /Stale scheduler jobs/);
+  assert.match(fields, /Down since/);
+  assert.match(fields, /Last up/);
+  assert.match(fields, /Duration/);
+});
+
+test("recovery slack payload includes outage duration", () => {
+  const payload = internals.buildSlackPayload(env, {
+    status: "up",
+    checkedAt: "2026-07-03T01:10:00.000Z",
+    lastUpAt: "2026-07-03T01:10:00.000Z",
+    lastDownAt: "2026-07-03T00:05:00.000Z",
+    consecutiveFailures: 0,
+    error: null,
+    detail: null,
+    alertType: "recovered",
+  });
+  const fields = payload.blocks[1].fields.map((field) => field.text).join("\n");
+
+  assert.equal(payload.text, ":white_check_mark: BuddyStudy backend recovered");
+  assert.match(fields, /Duration/);
+  assert.match(fields, /1h 5m/);
 });
 
 test("summarizes failed readiness checks from JSON body", () => {

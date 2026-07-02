@@ -20,6 +20,8 @@ runtime monitoring.
 - Includes readiness failure details in Slack when the backend returns a JSON
   body with component checks, for example stale scheduler jobs or Redis
   failures.
+- Slack alerts include `Down since`, `Last up`, and outage `Duration` so
+  recovery messages show how long the service was unavailable.
 
 ## Setup
 

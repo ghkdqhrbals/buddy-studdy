@@ -231,6 +231,7 @@ function buildSlackPayload(env, state) {
   const isRecovery = state.alertType === "recovered";
   const title = isRecovery ? `${serviceName} recovered` : `${serviceName} is down`;
   const emoji = isRecovery ? ":white_check_mark:" : ":rotating_light:";
+  const outageDuration = state.lastDownAt ? formatElapsed(state.lastDownAt, state.checkedAt) : "unknown";
 
   return {
     text: `${emoji} ${title}`,
@@ -247,6 +248,9 @@ function buildSlackPayload(env, state) {
           { type: "mrkdwn", text: `*URL*\n${env.HEALTHCHECK_URL}` },
           { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
           { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
+          { type: "mrkdwn", text: `*Down since*\n${state.lastDownAt || "unknown"}` },
+          { type: "mrkdwn", text: `*Last up*\n${state.lastUpAt || "unknown"}` },
+          { type: "mrkdwn", text: `*Duration*\n${outageDuration}` },
           { type: "mrkdwn", text: `*Error*\n${state.error || "none"}` },
           { type: "mrkdwn", text: `*Detail*\n${state.detail || "none"}` },
         ],
@@ -255,9 +259,23 @@ function buildSlackPayload(env, state) {
   };
 }
 
+function formatElapsed(startIso, endIso) {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "unknown";
+  const totalSeconds = Math.floor((end - start) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 export const internals = {
   buildSlackPayload,
   checkHealth,
+  formatElapsed,
   healthcheckTimeoutMs,
   isAuthorizedManualCheck,
   nextState,
