@@ -291,6 +291,23 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
+test("kubernetes backend config monitors every managed scheduler job", () => {
+  const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+  const requiredJobs = [
+    "question-schedule",
+    "question-push-outbox-dispatch",
+    "user-stats-refresh",
+    "admin-analytics-recent",
+    "admin-analytics-correction",
+  ];
+
+  for (const jobName of requiredJobs) {
+    assert.match(backendConfig, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
+    assert.match(combinedManifest, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
+  }
+});
+
 test("kubernetes production apply path does not include placeholder backend secret", () => {
   const kustomization = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/kustomization.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
