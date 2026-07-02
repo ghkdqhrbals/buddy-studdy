@@ -8,7 +8,7 @@ runtime monitoring.
 
 ## Behavior
 
-- Runs every 5 minutes with a Cloudflare Cron Trigger.
+- Runs every minute with a Cloudflare Cron Trigger.
 - Checks `HEALTHCHECK_URL`.
 - Stores state in Workers KV to avoid repeated Slack spam.
 - Sends Slack when:
@@ -107,5 +107,8 @@ Default vars in `wrangler.jsonc`:
 - `FAILURE_THRESHOLD`: `2`
 - `ALERT_REPEAT_SECONDS`: `3600`
 - `HEALTHCHECK_TIMEOUT_MS`: `8000`
+
+With the default 1-minute cron and threshold `2`, a real outage usually alerts
+after about 1-2 minutes while still filtering out a single transient failure.
 
 Use Cloudflare Worker vars/secrets for environment-specific overrides.

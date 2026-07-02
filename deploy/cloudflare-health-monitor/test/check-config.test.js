@@ -8,7 +8,7 @@ test("health monitor config accepts required production shape", () => {
 
 test("health monitor config rejects missing runtime essentials", () => {
   const config = validConfig();
-  config.triggers.crons = [];
+  config.triggers.crons = ["*/5 * * * *"];
   config.kv_namespaces[0].id = "replace-with-kv-namespace-id";
   config.vars.HEALTHCHECK_URL = "http://api.lowfidev.cloud/api/v1/health/readiness";
   config.vars.FAILURE_THRESHOLD = "0";
@@ -17,7 +17,7 @@ test("health monitor config rejects missing runtime essentials", () => {
 
   const errors = validateConfig(config).join("\n");
 
-  assert.match(errors, /Cron Trigger/);
+  assert.match(errors, /1-minute cron/);
   assert.match(errors, /KV namespace/);
   assert.match(errors, /HTTPS URL/);
   assert.match(errors, /FAILURE_THRESHOLD/);
@@ -29,7 +29,7 @@ function validConfig() {
   return {
     name: "buddystudy-health-monitor",
     main: "src/index.js",
-    triggers: { crons: ["*/5 * * * *"] },
+    triggers: { crons: ["* * * * *"] },
     vars: {
       HEALTHCHECK_URL: "https://api.lowfidev.cloud/api/v1/health/readiness",
       FAILURE_THRESHOLD: "2",

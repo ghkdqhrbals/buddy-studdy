@@ -9,7 +9,7 @@
     "head_sampling_rate": 1
   },
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["* * * * *"]
   },
   "vars": {
     "HEALTHCHECK_URL": "https://api.lowfidev.cloud/api/v1/health/readiness",
