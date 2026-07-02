@@ -288,6 +288,35 @@ test("manual check keeps alert retryable when Slack delivery fails", async () =>
   assert.equal(storedState.lastAlertAt, null);
 });
 
+test("manual check reports unexpected monitor failures as json", async () => {
+  const environment = manualEnv({ stateGetError: new Error("kv unavailable") });
+
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/check", {
+      method: "POST",
+      headers: { Authorization: "Bearer manual-secret" },
+    }),
+    environment,
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "Health monitor execution failed.");
+  assert.match(body.message, /kv unavailable/);
+});
+
+test("scheduled check catches unexpected monitor failures", async () => {
+  const environment = manualEnv({ statePutError: new Error("kv write failed") });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+
+  assert.equal(waitUntilPromises.length, 1);
+  await assert.doesNotReject(waitUntilPromises[0]);
+});
+
 test("manual check token helper rejects absent and mismatched tokens", () => {
   assert.equal(internals.isAuthorizedManualCheck(new Request("https://monitor.example.com/check"), env), false);
   assert.equal(
@@ -343,7 +372,14 @@ test("validateEnv accepts required monitor bindings", () => {
   assert.deepEqual(internals.validateEnv(environment), { ok: true, missing: [] });
 });
 
-function manualEnv({ existingState = null, healthResponse = new Response("ok", { status: 200 }), onSlack = null, ...overrides } = {}) {
+function manualEnv({
+  existingState = null,
+  healthResponse = new Response("ok", { status: 200 }),
+  onSlack = null,
+  stateGetError = null,
+  statePutError = null,
+  ...overrides
+} = {}) {
   const stateWrites = [];
   return {
     ...env,
@@ -352,9 +388,11 @@ function manualEnv({ existingState = null, healthResponse = new Response("ok", {
     SLACK_WEBHOOK_URL: "https://slack.example.com/webhook",
     HEALTH_MONITOR_STATE: {
       async get() {
+        if (stateGetError) throw stateGetError;
         return existingState ? JSON.stringify(existingState) : null;
       },
       async put(key, value) {
+        if (statePutError) throw statePutError;
         stateWrites.push({ key, value });
       },
     },

@@ -19,16 +19,54 @@ export default {
       if (!config.ok) {
         return json({ ok: false, error: "Configuration error.", missingConfig: config.missing }, { status: 500 });
       }
-      const state = await runHealthCheck(env, Date.now());
+      const result = await runHealthCheckSafely(env, Date.now());
+      if (!result.ok) {
+        return json(
+          { ok: false, error: "Health monitor execution failed.", message: result.error, state: result.state },
+          { status: 500 },
+        );
+      }
+      const state = result.state;
       return json({ ok: state.status === "up", state });
     }
     return json({ ok: false, error: "Not found." }, { status: 404 });
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runHealthCheck(env, event.scheduledTime));
+    ctx.waitUntil(runHealthCheckSafely(env, event.scheduledTime));
   },
 };
+
+async function runHealthCheckSafely(env, scheduledTime) {
+  try {
+    return { ok: true, state: await runHealthCheck(env, scheduledTime), error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
+    const state = {
+      status: "monitor_error",
+      checkedAt,
+      lastUpAt: null,
+      lastDownAt: null,
+      lastAlertAt: null,
+      consecutiveFailures: 0,
+      httpStatus: null,
+      error: message,
+      detail: null,
+      alertType: null,
+      shouldAlert: false,
+      alertSent: false,
+      slackAlertError: null,
+    };
+    console.error(
+      JSON.stringify({
+        message: "health_monitor_execution_failed",
+        error: message,
+      }),
+    );
+    return { ok: false, state, error: message };
+  }
+}
 
 async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
