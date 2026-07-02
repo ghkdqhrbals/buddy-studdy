@@ -187,6 +187,7 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(backendManifest, /path:\s*\/api\/v1\/health\/dependencies/);
   assert.doesNotMatch(backendManifest, /path:\s*\/api\/v1\/health\/readiness/);
   assert.match(combinedManifest, /path:\s*\/api\/v1\/health\/dependencies/);
+  assert.doesNotMatch(combinedManifest, /path:\s*\/api\/v1\/health\/readiness/);
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
