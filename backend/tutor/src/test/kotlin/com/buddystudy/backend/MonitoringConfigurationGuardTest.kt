@@ -27,6 +27,22 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
+    fun `production profile matching is case insensitive for monitoring guard`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=Production",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "SLACK_WEBHOOK_URL is required when prod scheduler monitoring is enabled.",
+                )
+            }
+    }
+
+    @Test
     fun `dev scheduler can start without scheduler Slack webhook`() {
         contextRunner
             .withPropertyValues(

@@ -25,5 +25,9 @@ class MonitoringConfigurationGuard(
     }
 
     private fun isProdProfile(): Boolean =
-        environment.activeProfiles.any { it == "prod" || it == "production" }
+        environment.activeProfiles.any { profile ->
+            val normalized = profile.trim()
+            normalized.equals("prod", ignoreCase = true) ||
+                normalized.equals("production", ignoreCase = true)
+        }
 }
