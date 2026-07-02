@@ -7,7 +7,11 @@ test("health monitor workflow is deploy-only and not a runtime health checker", 
 name: Deploy Health Monitor Worker
 on:
   workflow_dispatch:
-jobs: {}
+jobs:
+  deploy:
+    steps:
+      - name: Smoke check deployed Worker
+        run: npm run smoke
 `;
 
   assert.deepEqual(validateWorkflowText(workflow), []);
@@ -24,4 +28,19 @@ jobs: {}
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /must not use GitHub Actions schedule/);
+});
+
+test("health monitor workflow rejects deployments without a post-deploy smoke check", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Deploy Worker
+        run: npm run deploy
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /post-deploy smoke check/);
 });

@@ -82,6 +82,14 @@ Required GitHub Actions secrets for that deployment workflow:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HEALTH_MONITOR_KV_NAMESPACE_ID`
 
+Optional GitHub Actions secrets for a post-deploy smoke check:
+
+- `HEALTH_MONITOR_URL`
+- `HEALTH_MONITOR_MANUAL_CHECK_TOKEN`
+
+The smoke check calls `POST /check` once after deployment. It is not a
+recurring health check; recurring checks are still Cloudflare Cron.
+
 ## Manual Smoke Check
 
 After deployment, trigger one immediate check without waiting for the cron:

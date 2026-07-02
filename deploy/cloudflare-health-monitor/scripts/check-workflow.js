@@ -15,6 +15,9 @@ export function validateWorkflowText(text) {
   if (/^\s*schedule\s*:/m.test(text)) {
     errors.push("Health monitor workflow must not use GitHub Actions schedule for runtime health checks.");
   }
+  if (!/npm\s+run\s+smoke/.test(text)) {
+    errors.push("Health monitor workflow must include a post-deploy smoke check.");
+  }
 
   return errors;
 }

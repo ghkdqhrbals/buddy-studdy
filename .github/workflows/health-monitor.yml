@@ -19,6 +19,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HEALTH_MONITOR_KV_NAMESPACE_ID: ${{ secrets.HEALTH_MONITOR_KV_NAMESPACE_ID }}
+      HEALTH_MONITOR_URL: ${{ secrets.HEALTH_MONITOR_URL }}
+      MANUAL_CHECK_TOKEN: ${{ secrets.HEALTH_MONITOR_MANUAL_CHECK_TOKEN }}
 
     steps:
       - name: Checkout
@@ -60,6 +62,10 @@ jobs:
       - name: Deploy Worker
         run: npm run deploy
 
+      - name: Smoke check deployed Worker
+        if: env.HEALTH_MONITOR_URL != '' && env.MANUAL_CHECK_TOKEN != ''
+        run: npm run smoke
+
       - name: Summary
         run: |
           {
@@ -68,4 +74,9 @@ jobs:
             echo "- Worker: \`buddystudy-health-monitor\`"
             echo "- Runtime health checks are performed by Cloudflare Cron, not GitHub Actions."
             echo "- Health URL is configured in \`deploy/cloudflare-health-monitor/wrangler.jsonc\`."
+            if [ -n "${HEALTH_MONITOR_URL}" ] && [ -n "${MANUAL_CHECK_TOKEN}" ]; then
+              echo "- Post-deploy smoke check: enabled."
+            else
+              echo "- Post-deploy smoke check: skipped because \`HEALTH_MONITOR_URL\` or \`HEALTH_MONITOR_MANUAL_CHECK_TOKEN\` is missing."
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
