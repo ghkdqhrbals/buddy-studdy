@@ -53,6 +53,17 @@ test("health monitor config rejects slow outage alert thresholds", () => {
   assert.match(validateConfig(config).join("\n"), /FAILURE_THRESHOLD must be 1 or 2/);
 });
 
+test("health monitor config rejects timeout values that are too slow for Worker cron", () => {
+  const config = validConfig();
+  config.vars.HEALTHCHECK_TIMEOUT_MS = "30000";
+  config.vars.SLACK_TIMEOUT_MS = "30000";
+
+  const errors = validateConfig(config).join("\n");
+
+  assert.match(errors, /HEALTHCHECK_TIMEOUT_MS must be between 1000 and 25000/);
+  assert.match(errors, /SLACK_TIMEOUT_MS must be between 1000 and 25000/);
+});
+
 test("health monitor config requires a public worker entrypoint", () => {
   const config = validConfig();
   config.workers_dev = false;

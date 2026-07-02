@@ -63,9 +63,13 @@ export function validateConfig(config) {
   }
   if (!positiveInt(config.vars?.HEALTHCHECK_TIMEOUT_MS)) {
     errors.push("HEALTHCHECK_TIMEOUT_MS must be a positive integer.");
+  } else if (!boundedInt(config.vars.HEALTHCHECK_TIMEOUT_MS, 1_000, 25_000)) {
+    errors.push("HEALTHCHECK_TIMEOUT_MS must be between 1000 and 25000.");
   }
   if (!positiveInt(config.vars?.SLACK_TIMEOUT_MS)) {
     errors.push("SLACK_TIMEOUT_MS must be a positive integer.");
+  } else if (!boundedInt(config.vars.SLACK_TIMEOUT_MS, 1_000, 25_000)) {
+    errors.push("SLACK_TIMEOUT_MS must be between 1000 and 25000.");
   }
 
   return errors;
@@ -73,6 +77,11 @@ export function validateConfig(config) {
 
 function positiveInt(value) {
   return Number.isInteger(Number(value)) && Number(value) > 0;
+}
+
+function boundedInt(value, min, max) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max;
 }
 
 function nonBlankString(value) {
