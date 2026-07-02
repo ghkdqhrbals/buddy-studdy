@@ -129,6 +129,23 @@ class AdminSchedulerStatusIntegrationTest {
     }
 
     @Test
+    fun `admin can see monitored scheduler jobs missing from seed table`() {
+        jdbc.update("delete from scheduled_job_runs where job_name = 'user-stats-refresh'")
+        jdbc.update("delete from scheduled_jobs where job_name = 'user-stats-refresh'")
+        val token = loginAdmin()
+
+        val response = get("/api/v1/admin/jobs/statuses", token)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        val missing = response.json()["jobs"].first { it["jobName"].asText() == "user-stats-refresh" }
+        assertThat(missing["enabled"].asBoolean()).isTrue()
+        assertThat(missing["scheduleType"].asText()).isEqualTo("MISSING")
+        assertThat(missing["scheduleValue"].asText()).isEqualTo("not seeded")
+        assertThat(missing["stale"].asBoolean()).isTrue()
+        assertThat(missing["latestRun"].isNull).isTrue()
+    }
+
+    @Test
     fun `scheduler statuses require admin token`() {
         val response = get("/api/v1/admin/jobs/statuses", bearerToken = null)
 

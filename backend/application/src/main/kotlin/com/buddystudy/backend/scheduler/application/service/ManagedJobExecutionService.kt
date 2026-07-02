@@ -5,6 +5,7 @@ import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatus
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResponse
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
@@ -71,7 +72,21 @@ class ManagedJobExecutionService(
         val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
         val threshold = Duration.ofMinutes(thresholdMinutes)
         val now = Instant.now()
-        val jobs = runs.findSnapshots(monitoredJobs).map { snapshot ->
+        val snapshots = runs.findSnapshots(monitoredJobs).associateBy { it.jobName }
+        val orderedSnapshots = if (monitoredJobs.isEmpty()) {
+            snapshots.values.sortedBy { it.jobName }
+        } else {
+            monitoredJobs.map { jobName ->
+                snapshots[jobName] ?: ScheduledJobSnapshot(
+                    jobName = jobName,
+                    enabled = true,
+                    scheduleType = "MISSING",
+                    scheduleValue = "not seeded",
+                    latestRun = null,
+                )
+            }
+        }
+        val jobs = orderedSnapshots.map { snapshot ->
             val latestRun = snapshot.latestRun
             val stale = snapshot.enabled &&
                 (

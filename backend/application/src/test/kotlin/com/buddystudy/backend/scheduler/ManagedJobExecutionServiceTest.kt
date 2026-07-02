@@ -118,6 +118,33 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
+    fun `find statuses includes monitored jobs that are missing from scheduler seed table`() {
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = true,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            latestRun = ScheduledJobRun(
+                id = 7,
+                jobName = "question-schedule",
+                triggerType = JobTriggerType.SCHEDULED,
+                status = JobRunStatus.SUCCESS,
+                startedAt = Instant.now(),
+            ),
+        )
+
+        val response = service.findStatuses()
+
+        assertThat(response.jobs.map { it.jobName }).containsExactly("question-schedule", "user-stats-refresh")
+        val missing = response.jobs.single { it.jobName == "user-stats-refresh" }
+        assertThat(missing.enabled).isTrue()
+        assertThat(missing.scheduleType).isEqualTo("MISSING")
+        assertThat(missing.scheduleValue).isEqualTo("not seeded")
+        assertThat(missing.latestRun).isNull()
+        assertThat(missing.stale).isTrue()
+    }
+
+    @Test
     fun `find statuses ignores disabled stale jobs`() {
         runs.snapshots += ScheduledJobSnapshot(
             jobName = "question-schedule",
@@ -129,7 +156,7 @@ class ManagedJobExecutionServiceTest {
 
         val response = service.findStatuses()
 
-        assertThat(response.jobs.single().stale).isFalse()
+        assertThat(response.jobs.single { it.jobName == "question-schedule" }.stale).isFalse()
     }
 
     private class FakeJob(
