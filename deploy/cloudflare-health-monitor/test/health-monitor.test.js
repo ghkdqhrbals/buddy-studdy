@@ -526,6 +526,15 @@ test("root reports state read errors as json", async () => {
   assert.match(body.message, /kv read failed/);
 });
 
+test("root returns service-unavailable when no monitor state has been written yet", async () => {
+  const response = await worker.fetch(new Request("https://monitor.example.com/"), manualEnv());
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.state, null);
+});
+
 test("root returns service-unavailable when stored backend state is down", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/"),

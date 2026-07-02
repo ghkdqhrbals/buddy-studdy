@@ -321,7 +321,8 @@ function json(body, init = {}) {
 }
 
 function rootStatusCode(state) {
-  if (!state || state.status === "up" || state.status === "degraded") return 200;
+  if (!state) return 503;
+  if (state.status === "up" || state.status === "degraded") return 200;
   return 503;
 }
 
