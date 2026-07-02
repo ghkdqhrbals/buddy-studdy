@@ -34,6 +34,12 @@ Set Slack secret:
 npx wrangler secret put SLACK_WEBHOOK_URL
 ```
 
+Set a manual check token for authenticated smoke tests:
+
+```sh
+npx wrangler secret put MANUAL_CHECK_TOKEN
+```
+
 Run local tests:
 
 ```sh
@@ -51,6 +57,18 @@ Deploy:
 ```sh
 npm run deploy
 ```
+
+## Manual Smoke Check
+
+After deployment, trigger one immediate check without waiting for the cron:
+
+```sh
+curl -X POST https://<worker-host>/check \
+  -H "Authorization: Bearer <MANUAL_CHECK_TOKEN>"
+```
+
+`POST /check` uses the same state transition and Slack alert path as the cron.
+If `MANUAL_CHECK_TOKEN` is not configured, the endpoint returns `401`.
 
 ## Configuration
 

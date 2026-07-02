@@ -1,9 +1,20 @@
 const STATE_KEY = "backend-health-state";
 
 export default {
-  async fetch(_request, env) {
-    const state = await readState(env);
-    return json({ ok: true, state });
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/") {
+      const state = await readState(env);
+      return json({ ok: true, state });
+    }
+    if (request.method === "POST" && url.pathname === "/check") {
+      if (!isAuthorizedManualCheck(request, env)) {
+        return json({ ok: false, error: "Unauthorized." }, { status: 401 });
+      }
+      const state = await runHealthCheck(env, Date.now());
+      return json({ ok: state.status === "up", state });
+    }
+    return json({ ok: false, error: "Not found." }, { status: 404 });
   },
 
   async scheduled(event, env, ctx) {
@@ -34,6 +45,8 @@ async function runHealthCheck(env, scheduledTime) {
       alertSent: next.shouldAlert,
     }),
   );
+
+  return next;
 }
 
 async function checkHealth(url) {
@@ -68,6 +81,12 @@ function json(body, init = {}) {
       ...(init.headers || {}),
     },
   });
+}
+
+function isAuthorizedManualCheck(request, env) {
+  if (!env.MANUAL_CHECK_TOKEN) return false;
+  const expected = `Bearer ${env.MANUAL_CHECK_TOKEN}`;
+  return request.headers.get("Authorization") === expected;
 }
 
 function nextState(previous, result, env, checkedAt) {
@@ -170,5 +189,6 @@ function buildSlackPayload(env, state) {
 
 export const internals = {
   buildSlackPayload,
+  isAuthorizedManualCheck,
   nextState,
 };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { internals } from "../src/index.js";
+import worker, { internals } from "../src/index.js";
 
 const env = {
   ALERT_REPEAT_SECONDS: "3600",
@@ -87,3 +87,120 @@ test("slack payload contains environment, status, url, time, failures, and error
   assert.match(fields, /2/);
   assert.match(fields, /fetch failed/);
 });
+
+test("manual check requires configured bearer token", async () => {
+  const unauthorized = await worker.fetch(new Request("https://monitor.example.com/check", { method: "POST" }), manualEnv());
+  const authorizedEnv = manualEnv({
+    healthResponse: new Response("ok", { status: 200 }),
+  });
+  const authorized = await withManualEnv(authorizedEnv, () =>
+    worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      authorizedEnv,
+    ),
+  );
+
+  assert.equal(unauthorized.status, 401);
+  assert.equal(authorized.status, 200);
+  assert.equal((await authorized.json()).state.status, "up");
+});
+
+test("manual check writes state and sends slack alert when threshold is reached", async () => {
+  const slackPayloads = [];
+  const environment = manualEnv({
+    existingState: {
+      status: "degraded",
+      consecutiveFailures: 1,
+      lastAlertAt: null,
+      lastUpAt: "2026-07-02T23:55:00.000Z",
+      lastDownAt: null,
+    },
+    healthResponse: new Response("bad gateway", { status: 502 }),
+    onSlack: async (request) => {
+      slackPayloads.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+
+  const response = await withManualEnv(environment, () =>
+    worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      environment,
+    ),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "down");
+  assert.equal(environment.stateWrites.length, 1);
+  assert.equal(JSON.parse(environment.stateWrites[0].value).status, "down");
+  assert.equal(slackPayloads.length, 1);
+  assert.equal(slackPayloads[0].text, ":rotating_light: BuddyStudy backend is down");
+});
+
+test("manual check token helper rejects absent and mismatched tokens", () => {
+  assert.equal(internals.isAuthorizedManualCheck(new Request("https://monitor.example.com/check"), env), false);
+  assert.equal(
+    internals.isAuthorizedManualCheck(
+      new Request("https://monitor.example.com/check", { headers: { Authorization: "Bearer wrong" } }),
+      { ...env, MANUAL_CHECK_TOKEN: "manual-secret" },
+    ),
+    false,
+  );
+  assert.equal(
+    internals.isAuthorizedManualCheck(
+      new Request("https://monitor.example.com/check", { headers: { Authorization: "Bearer manual-secret" } }),
+      { ...env, MANUAL_CHECK_TOKEN: "manual-secret" },
+    ),
+    true,
+  );
+});
+
+function manualEnv({ existingState = null, healthResponse = new Response("ok", { status: 200 }), onSlack = null } = {}) {
+  const stateWrites = [];
+  return {
+    ...env,
+    MANUAL_CHECK_TOKEN: "manual-secret",
+    SLACK_WEBHOOK_URL: "https://slack.example.com/webhook",
+    HEALTH_MONITOR_STATE: {
+      async get() {
+        return existingState ? JSON.stringify(existingState) : null;
+      },
+      async put(key, value) {
+        stateWrites.push({ key, value });
+      },
+    },
+    stateWrites,
+    healthResponse,
+    onSlack,
+  };
+}
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async function mockedFetch(input, init) {
+  const url = typeof input === "string" ? input : input.url;
+  const activeEnv = currentManualEnv;
+  if (activeEnv && url === activeEnv.HEALTHCHECK_URL) {
+    return activeEnv.healthResponse.clone();
+  }
+  if (activeEnv && url === activeEnv.SLACK_WEBHOOK_URL && activeEnv.onSlack) {
+    return activeEnv.onSlack(input instanceof Request ? input : new Request(input, init));
+  }
+  return originalFetch(input, init);
+};
+
+let currentManualEnv = null;
+
+function withManualEnv(environment, run) {
+  currentManualEnv = environment;
+  return Promise.resolve(run()).finally(() => {
+    currentManualEnv = null;
+  });
+}
