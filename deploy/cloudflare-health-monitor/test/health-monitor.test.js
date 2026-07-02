@@ -522,6 +522,18 @@ test("manual check reports configuration errors after authorization", async () =
   assert.deepEqual(body.missingConfig, ["SLACK_WEBHOOK_URL"]);
 });
 
+test("validateEnv requires service and environment identity", () => {
+  const environment = manualEnv({
+    SERVICE_NAME: " ",
+    ENVIRONMENT_NAME: "",
+  });
+
+  assert.deepEqual(internals.validateEnv(environment), {
+    ok: false,
+    missing: ["SERVICE_NAME", "ENVIRONMENT_NAME"],
+  });
+});
+
 test("validateEnv accepts required monitor bindings", () => {
   const environment = manualEnv();
 

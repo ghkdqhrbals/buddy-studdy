@@ -325,12 +325,18 @@ function isAuthorizedManualCheck(request, env) {
 
 function validateEnv(env) {
   const missing = [];
-  if (!env.HEALTHCHECK_URL) missing.push("HEALTHCHECK_URL");
-  if (!env.SLACK_WEBHOOK_URL) missing.push("SLACK_WEBHOOK_URL");
+  if (!nonBlankString(env.HEALTHCHECK_URL)) missing.push("HEALTHCHECK_URL");
+  if (!nonBlankString(env.SERVICE_NAME)) missing.push("SERVICE_NAME");
+  if (!nonBlankString(env.ENVIRONMENT_NAME)) missing.push("ENVIRONMENT_NAME");
+  if (!nonBlankString(env.SLACK_WEBHOOK_URL)) missing.push("SLACK_WEBHOOK_URL");
   if (!env.HEALTH_MONITOR_STATE || typeof env.HEALTH_MONITOR_STATE.get !== "function" || typeof env.HEALTH_MONITOR_STATE.put !== "function") {
     missing.push("HEALTH_MONITOR_STATE");
   }
   return { ok: missing.length === 0, missing };
+}
+
+function nonBlankString(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function nextState(previous, result, env, checkedAt) {
