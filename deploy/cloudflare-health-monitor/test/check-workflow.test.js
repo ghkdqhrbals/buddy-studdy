@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { validateNoActionsRuntimeHealthChecks, validateWorkflowText } from "../scripts/check-workflow.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 test("health monitor workflow is deploy-only and not a runtime health checker", () => {
   const workflow = `
@@ -103,6 +108,27 @@ jobs:
 
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /backend-image\.yml/);
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /must not directly call backend health endpoints/);
+});
+
+test("deploy repo backend template does not run backend health probes in Actions", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+
+  assert.deepEqual(validateNoActionsRuntimeHealthChecks(template, "deploy-backend.yml"), []);
+});
+
+test("workflow scan allows non-backend dependency health endpoints", () => {
+  const workflow = `
+name: Deploy Monitoring
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check Grafana
+        run: docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health
+`;
+
+  assert.deepEqual(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml"), []);
 });
 
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {

@@ -96,25 +96,19 @@ coordinator hostnames.
 The deploy process uses a blue/green rolling pattern:
 
 1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
-2. New slot health is validated with `/health`.
+2. GitHub Actions validates that the new container stays running and that
+   Nginx configuration is valid.
 3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
 4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
 
 Only one scheduler leader is active during overlap windows. PostgreSQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 
-## Smoke Test
-
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-This smoke test is deploy-time validation only. It is not runtime uptime
-monitoring, and it must not be converted into a recurring GitHub Actions health
-check. Runtime server-down alerts are handled by the Cloudflare Worker in
+GitHub Actions must not call backend `/health` or readiness endpoints. Runtime
+server-down alerts are handled by the Cloudflare Worker in
 `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint
-and sends Slack alerts.
-
-```sh
-curl -fsS https://api.ghkdqhrbals.org/health
-```
+from Cloudflare Cron and sends Slack alerts.
 
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
 const workflowsDir = path.join(root, ".github", "workflows");
-const backendHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/v1)?\/health(?:\/readiness)?\b/;
+const deployTemplateDir = path.join(root, "docs", "deploy-repo-template");
+const backendHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/v1\/health(?:\/readiness)?|(?<!\/api)\/health(?:\/readiness)?)\b/;
 
 export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow") {
   const errors = [];
@@ -65,6 +66,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
     const text = fs.readFileSync(path.join(workflowsDir, entry), "utf8");
     errors.push(...validateNoActionsRuntimeHealthChecks(text, entry));
+  }
+  for (const entry of fs.readdirSync(deployTemplateDir)) {
+    if (!entry.endsWith(".yml") && !entry.endsWith(".yaml")) {
+      continue;
+    }
+    const text = fs.readFileSync(path.join(deployTemplateDir, entry), "utf8");
+    errors.push(...validateNoActionsRuntimeHealthChecks(text, path.join("docs/deploy-repo-template", entry)));
   }
   if (errors.length > 0) {
     console.error(errors.join("\n"));

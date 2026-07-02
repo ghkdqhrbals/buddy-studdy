@@ -125,7 +125,25 @@ jobs:
           docker pull nginx:1.27-alpine
           docker pull postgres:16-alpine
           docker pull certbot/certbot:v2.11.0
-          docker pull curlimages/curl:8.11.0
+
+          wait_for_container_running() {
+            local container_name="$1"
+            local label="$2"
+            for attempt in $(seq 1 30); do
+              if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
+                sleep 5
+                if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
+                  return 0
+                fi
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "${label} did not stay running after ${attempt} attempts." >&2
+                docker logs "${container_name}" || true
+                return 1
+              fi
+              sleep 2
+            done
+          }
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
@@ -215,21 +233,10 @@ jobs:
             docker network connect redis-stream-coordinator-net "${NEW_SLOT}" >/dev/null 2>&1 || true
           fi
 
-          for attempt in $(seq 1 30); do
-            if docker run --rm \
-              --network buddystudy-net \
-              curlimages/curl:8.11.0 \
-              -fsS "http://${NEW_SLOT}:8080/health"; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "New backend slot ${NEW_SLOT} failed health check after ${attempt} attempts." >&2
-              docker logs "${NEW_SLOT}" || true
-              docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-              exit 1
-            fi
-            sleep 2
-          done
+          if ! wait_for_container_running "${NEW_SLOT}" "New backend slot ${NEW_SLOT}"; then
+            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
+            exit 1
+          fi
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
@@ -485,39 +492,17 @@ jobs:
             docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
           fi
 
-          for attempt in $(seq 1 30); do
-            if docker run --rm \
-              --network buddystudy-net \
-              curlimages/curl:8.11.0 \
-              -fsS "http://${NEW_SLOT}:8080/health"; then
-              break
+          if ! wait_for_container_running "${NEW_SLOT}" "Backend container ${NEW_SLOT}"; then
+            docker logs buddystudy-nginx || true
+            if [ -n "${OLD_SLOT}" ]; then
+              echo "Rolling Nginx back to ${OLD_SLOT}." >&2
+              write_nginx_config "${OLD_SLOT}"
+              docker exec buddystudy-nginx nginx -t || true
+              docker exec buddystudy-nginx nginx -s reload || true
             fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "Backend container health check failed after ${attempt} attempts." >&2
-              docker logs "${NEW_SLOT}" || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          for attempt in $(seq 1 30); do
-            if curl -kfsS https://127.0.0.1/health; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "Backend health check failed after ${attempt} attempts." >&2
-              docker logs "${NEW_SLOT}" || true
-              docker logs buddystudy-nginx || true
-              if [ -n "${OLD_SLOT}" ]; then
-                echo "Rolling Nginx back to ${OLD_SLOT}." >&2
-                write_nginx_config "${OLD_SLOT}"
-                docker exec buddystudy-nginx nginx -t || true
-                docker exec buddystudy-nginx nginx -s reload || true
-              fi
-              exit 1
-            fi
-            sleep 2
-          done
+            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
+            exit 1
+          fi
 
           printf '%s' "${NEW_SLOT}" > .active_backend_slot
           if [ -n "${OLD_SLOT}" ] && [ "${OLD_SLOT}" != "${NEW_SLOT}" ]; then
