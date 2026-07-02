@@ -284,6 +284,52 @@ jobs:
   assert.match(validateWorkflowText(workflow).join("\n"), /must configure KV namespace/);
 });
 
+test("health monitor workflow rejects deployment without running tests", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Configure KV namespace
+        run: npm run configure:kv -- "$HEALTH_MONITOR_KV_NAMESPACE_ID"
+      - name: Validate Worker bundle
+        run: npm run check
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+      - name: Deploy Worker
+        run: npm run deploy
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must run npm test before deploying/);
+});
+
+test("health monitor workflow rejects deployment without policy and bundle validation", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Run tests
+        run: npm test
+      - name: Configure KV namespace
+        run: npm run configure:kv -- "$HEALTH_MONITOR_KV_NAMESPACE_ID"
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+      - name: Deploy Worker
+        run: npm run deploy
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must run npm run check before deploying/);
+});
+
 test("health monitor workflow rejects deployments without Worker Slack secret sync", () => {
   const workflow = `
 name: Deploy Health Monitor Worker

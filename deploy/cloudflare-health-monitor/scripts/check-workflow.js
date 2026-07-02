@@ -59,9 +59,22 @@ export function validateWorkflowText(text) {
     errors.push("Slack alert secrets must be required, not optional, for health monitor deployment.");
   }
   const configureKvIndex = text.indexOf("npm run configure:kv");
+  const testIndex = text.indexOf("npm test");
   const validateBundleIndex = text.indexOf("npm run check");
   const syncSlackSecretIndex = text.indexOf("wrangler secret put SLACK_WEBHOOK_URL");
   const deployIndex = text.indexOf("npm run deploy");
+  if (deployIndex !== -1 && testIndex === -1) {
+    errors.push("Health monitor workflow must run npm test before deploying.");
+  }
+  if (testIndex !== -1 && deployIndex !== -1 && testIndex > deployIndex) {
+    errors.push("Health monitor workflow must run npm test before deploying.");
+  }
+  if (deployIndex !== -1 && validateBundleIndex === -1) {
+    errors.push("Health monitor workflow must run npm run check before deploying.");
+  }
+  if (validateBundleIndex !== -1 && deployIndex !== -1 && validateBundleIndex > deployIndex) {
+    errors.push("Health monitor workflow must run npm run check before deploying.");
+  }
   if (configureKvIndex === -1) {
     errors.push("Health monitor workflow must configure KV namespace before deployment.");
   }
