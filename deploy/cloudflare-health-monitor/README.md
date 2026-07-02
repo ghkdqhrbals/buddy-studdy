@@ -17,6 +17,8 @@ runtime monitoring.
   - the backend recovers after a down state.
 - Bounds each health request with `HEALTHCHECK_TIMEOUT_MS`, so a hanging
   connection is treated as a failure instead of delaying the monitor.
+- Bounds each Slack webhook request with `SLACK_TIMEOUT_MS`, so a slow Slack
+  endpoint does not hold the monitor run indefinitely.
 - Includes readiness failure details in Slack when the backend returns a JSON
   body with component checks, for example stale scheduler jobs or Redis
   failures.
@@ -115,6 +117,7 @@ Default vars in `wrangler.jsonc`:
 - `FAILURE_THRESHOLD`: `2`
 - `ALERT_REPEAT_SECONDS`: `3600`
 - `HEALTHCHECK_TIMEOUT_MS`: `8000`
+- `SLACK_TIMEOUT_MS`: `5000`
 
 With the default 1-minute cron and threshold `2`, a real outage usually alerts
 after about 1-2 minutes while still filtering out a single transient failure.

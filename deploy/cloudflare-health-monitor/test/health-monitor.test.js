@@ -192,6 +192,12 @@ test("healthcheck timeout is bounded to Cloudflare-safe limits", () => {
   assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "bad" }), 8000);
 });
 
+test("slack timeout is bounded to Cloudflare-safe limits", () => {
+  assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "1" }), 1000);
+  assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "999999" }), 15000);
+  assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "bad" }), 5000);
+});
+
 test("manual check requires configured bearer token", async () => {
   const unauthorized = await worker.fetch(new Request("https://monitor.example.com/check", { method: "POST" }), manualEnv());
   const authorizedEnv = manualEnv({
@@ -286,6 +292,45 @@ test("manual check keeps alert retryable when Slack delivery fails", async () =>
   assert.equal(storedState.alertSent, false);
   assert.equal(storedState.slackAlertError, "Slack webhook failed with HTTP 503");
   assert.equal(storedState.lastAlertAt, null);
+});
+
+test("manual check keeps alert retryable when Slack delivery times out", async () => {
+  const environment = manualEnv({
+    SLACK_TIMEOUT_MS: "1000",
+    existingState: {
+      status: "degraded",
+      consecutiveFailures: 1,
+      lastAlertAt: null,
+      lastUpAt: "2026-07-02T23:55:00.000Z",
+      lastDownAt: null,
+    },
+    healthResponse: new Response("bad gateway", { status: 502 }),
+    onSlack: async (request) =>
+      new Promise((_resolve, reject) => {
+        request.signal.addEventListener("abort", () => {
+          const error = new Error("slack timeout");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }),
+  });
+
+  const response = await withManualEnv(environment, () =>
+    worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      environment,
+    ),
+  );
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+
+  assert.equal(response.status, 200);
+  assert.equal(storedState.status, "down");
+  assert.equal(storedState.shouldAlert, true);
+  assert.equal(storedState.alertSent, false);
+  assert.equal(storedState.slackAlertError, "Slack alert timed out after 1000ms");
 });
 
 test("manual check reports unexpected monitor failures as json", async () => {

@@ -45,6 +45,9 @@ export function validateConfig(config) {
   if (!positiveInt(config.vars?.HEALTHCHECK_TIMEOUT_MS)) {
     errors.push("HEALTHCHECK_TIMEOUT_MS must be a positive integer.");
   }
+  if (!positiveInt(config.vars?.SLACK_TIMEOUT_MS)) {
+    errors.push("SLACK_TIMEOUT_MS must be a positive integer.");
+  }
 
   return errors;
 }

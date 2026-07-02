@@ -14,6 +14,7 @@ test("health monitor config rejects missing runtime essentials", () => {
   config.vars.FAILURE_THRESHOLD = "0";
   config.vars.ALERT_REPEAT_SECONDS = "bad";
   config.vars.HEALTHCHECK_TIMEOUT_MS = "";
+  config.vars.SLACK_TIMEOUT_MS = "bad";
 
   const errors = validateConfig(config).join("\n");
 
@@ -23,6 +24,7 @@ test("health monitor config rejects missing runtime essentials", () => {
   assert.match(errors, /FAILURE_THRESHOLD/);
   assert.match(errors, /ALERT_REPEAT_SECONDS/);
   assert.match(errors, /HEALTHCHECK_TIMEOUT_MS/);
+  assert.match(errors, /SLACK_TIMEOUT_MS/);
 });
 
 test("health monitor config rejects lightweight health endpoints", () => {
@@ -42,6 +44,7 @@ function validConfig() {
       FAILURE_THRESHOLD: "2",
       ALERT_REPEAT_SECONDS: "3600",
       HEALTHCHECK_TIMEOUT_MS: "8000",
+      SLACK_TIMEOUT_MS: "5000",
     },
     kv_namespaces: [{ binding: "HEALTH_MONITOR_STATE", id: "kv-id" }],
   };

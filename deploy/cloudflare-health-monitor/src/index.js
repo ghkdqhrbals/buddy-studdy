@@ -359,14 +359,32 @@ async function sendSlackAlert(env, state) {
   }
 
   const payload = buildSlackPayload(env, state);
-  const response = await fetch(env.SLACK_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`Slack webhook failed with HTTP ${response.status}`);
+  const timeoutMs = slackTimeoutMs(env);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort("slack timeout"), timeoutMs);
+  try {
+    const response = await fetch(env.SLACK_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Slack webhook failed with HTTP ${response.status}`);
+    }
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`Slack alert timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+function slackTimeoutMs(env) {
+  const raw = Number.parseInt(env?.SLACK_TIMEOUT_MS || "5000", 10);
+  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 15000) : 5000;
 }
 
 function buildSlackPayload(env, state) {
@@ -423,6 +441,7 @@ export const internals = {
   healthcheckTimeoutMs,
   isAuthorizedManualCheck,
   nextState,
+  slackTimeoutMs,
   summarizeHealthJson,
   validateEnv,
 };
