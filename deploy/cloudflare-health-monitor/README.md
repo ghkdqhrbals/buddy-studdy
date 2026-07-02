@@ -22,6 +22,9 @@ runtime monitoring.
   failures.
 - Slack alerts include `Down since`, `Last up`, and outage `Duration` so
   recovery messages show how long the service was unavailable.
+- `GET /` validates required runtime configuration and returns missing bindings
+  such as `HEALTH_MONITOR_STATE` or `SLACK_WEBHOOK_URL` before a silent monitor
+  failure can happen.
 
 ## Setup
 

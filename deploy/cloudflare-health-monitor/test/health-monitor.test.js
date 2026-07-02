@@ -289,6 +289,43 @@ test("manual check token helper rejects absent and mismatched tokens", () => {
   );
 });
 
+test("root reports configuration errors before reading state", async () => {
+  const response = await worker.fetch(new Request("https://monitor.example.com/"), {
+    ...env,
+    SLACK_WEBHOOK_URL: "https://slack.example.com/webhook",
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.missingConfig, ["HEALTH_MONITOR_STATE"]);
+});
+
+test("manual check reports configuration errors after authorization", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/check", {
+      method: "POST",
+      headers: { Authorization: "Bearer manual-secret" },
+    }),
+    {
+      ...env,
+      MANUAL_CHECK_TOKEN: "manual-secret",
+      HEALTH_MONITOR_STATE: manualEnv().HEALTH_MONITOR_STATE,
+    },
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.ok, false);
+  assert.deepEqual(body.missingConfig, ["SLACK_WEBHOOK_URL"]);
+});
+
+test("validateEnv accepts required monitor bindings", () => {
+  const environment = manualEnv();
+
+  assert.deepEqual(internals.validateEnv(environment), { ok: true, missing: [] });
+});
+
 function manualEnv({ existingState = null, healthResponse = new Response("ok", { status: 200 }), onSlack = null, ...overrides } = {}) {
   const stateWrites = [];
   return {

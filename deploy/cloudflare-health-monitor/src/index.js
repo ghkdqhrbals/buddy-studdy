@@ -4,12 +4,20 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/") {
+      const config = validateEnv(env);
+      if (!config.ok) {
+        return json({ ok: false, error: "Configuration error.", missingConfig: config.missing }, { status: 500 });
+      }
       const state = await readState(env);
       return json({ ok: true, state });
     }
     if (request.method === "POST" && url.pathname === "/check") {
       if (!isAuthorizedManualCheck(request, env)) {
         return json({ ok: false, error: "Unauthorized." }, { status: 401 });
+      }
+      const config = validateEnv(env);
+      if (!config.ok) {
+        return json({ ok: false, error: "Configuration error.", missingConfig: config.missing }, { status: 500 });
       }
       const state = await runHealthCheck(env, Date.now());
       return json({ ok: state.status === "up", state });
@@ -24,6 +32,29 @@ export default {
 
 async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
+  const config = validateEnv(env);
+  if (!config.ok) {
+    const state = {
+      status: "config_error",
+      checkedAt,
+      lastUpAt: null,
+      lastDownAt: null,
+      lastAlertAt: null,
+      consecutiveFailures: 0,
+      httpStatus: null,
+      error: `Missing monitor configuration: ${config.missing.join(", ")}`,
+      detail: null,
+      alertType: null,
+      shouldAlert: false,
+    };
+    console.error(
+      JSON.stringify({
+        message: "health_monitor_configuration_error",
+        missingConfig: config.missing,
+      }),
+    );
+    return state;
+  }
   const previous = await readState(env);
   const result = await checkHealth(env.HEALTHCHECK_URL, env);
   let next = nextState(previous, result, env, checkedAt);
@@ -154,6 +185,16 @@ function isAuthorizedManualCheck(request, env) {
   return request.headers.get("Authorization") === expected;
 }
 
+function validateEnv(env) {
+  const missing = [];
+  if (!env.HEALTHCHECK_URL) missing.push("HEALTHCHECK_URL");
+  if (!env.SLACK_WEBHOOK_URL) missing.push("SLACK_WEBHOOK_URL");
+  if (!env.HEALTH_MONITOR_STATE || typeof env.HEALTH_MONITOR_STATE.get !== "function" || typeof env.HEALTH_MONITOR_STATE.put !== "function") {
+    missing.push("HEALTH_MONITOR_STATE");
+  }
+  return { ok: missing.length === 0, missing };
+}
+
 function nextState(previous, result, env, checkedAt) {
   const failureThreshold = Number.parseInt(env.FAILURE_THRESHOLD || "2", 10);
   const repeatSeconds = Number.parseInt(env.ALERT_REPEAT_SECONDS || "3600", 10);
@@ -280,4 +321,5 @@ export const internals = {
   isAuthorizedManualCheck,
   nextState,
   summarizeHealthJson,
+  validateEnv,
 };
