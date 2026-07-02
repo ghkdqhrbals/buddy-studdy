@@ -21,6 +21,9 @@ export function validateWorkflowText(text) {
   if (/HEALTH_MONITOR_URL/.test(text)) {
     errors.push("Health monitor workflow must not depend on HEALTH_MONITOR_URL.");
   }
+  if (/(?:curl|wget|http)\b[^\n]*(?:\/api\/v1)?\/health(?:\/readiness)?\b/.test(text)) {
+    errors.push("Health monitor workflow must not directly call backend health endpoints.");
+  }
   if (!/wrangler\s+secret\s+put\s+SLACK_WEBHOOK_URL/.test(text)) {
     errors.push("Health monitor workflow must include Worker Slack secret sync.");
   }

@@ -70,6 +70,25 @@ jobs:
   assert.match(validateWorkflowText(workflow).join("\n"), /must not depend on HEALTH_MONITOR_URL/);
 });
 
+test("health monitor workflow rejects direct curl health checks", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+      - name: Check backend health
+        run: curl -fsS https://api.lowfidev.cloud/api/v1/health/readiness
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must not directly call backend health endpoints/);
+});
+
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
