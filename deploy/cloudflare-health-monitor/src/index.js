@@ -8,7 +8,14 @@ export default {
       if (!config.ok) {
         return json({ ok: false, error: "Configuration error.", missingConfig: config.missing }, { status: 500 });
       }
-      const state = await readState(env);
+      const stateResult = await readStateSafely(env);
+      if (!stateResult.ok) {
+        return json(
+          { ok: false, error: "Health monitor state read failed.", message: stateResult.error },
+          { status: 500 },
+        );
+      }
+      const state = stateResult.state;
       return json({ ok: true, state });
     }
     if (request.method === "POST" && url.pathname === "/check") {
@@ -36,6 +43,21 @@ export default {
     ctx.waitUntil(runHealthCheckSafely(env, event.scheduledTime));
   },
 };
+
+async function readStateSafely(env) {
+  try {
+    return { ok: true, state: await readState(env), error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      JSON.stringify({
+        message: "health_monitor_state_read_failed",
+        error: message,
+      }),
+    );
+    return { ok: false, state: null, error: message };
+  }
+}
 
 async function runHealthCheckSafely(env, scheduledTime) {
   try {

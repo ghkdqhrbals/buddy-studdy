@@ -347,6 +347,19 @@ test("root reports configuration errors before reading state", async () => {
   assert.deepEqual(body.missingConfig, ["HEALTH_MONITOR_STATE"]);
 });
 
+test("root reports state read errors as json", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({ stateGetError: new Error("kv read failed") }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "Health monitor state read failed.");
+  assert.match(body.message, /kv read failed/);
+});
+
 test("manual check reports configuration errors after authorization", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/check", {
