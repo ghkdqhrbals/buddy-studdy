@@ -116,6 +116,26 @@ test("deploy repo backend template does not run backend health probes in Actions
   assert.deepEqual(validateNoActionsRuntimeHealthChecks(template, "deploy-backend.yml"), []);
 });
 
+test("repository workflow files do not run backend health probes in Actions", () => {
+  const workflowDir = path.join(repoRoot, ".github", "workflows");
+  const deployTemplateDir = path.join(repoRoot, "docs", "deploy-repo-template");
+  const files = [
+    ...fs.readdirSync(workflowDir)
+      .filter((entry) => entry.endsWith(".yml") || entry.endsWith(".yaml"))
+      .map((entry) => path.join(workflowDir, entry)),
+    ...fs.readdirSync(deployTemplateDir)
+      .filter((entry) => entry.endsWith(".yml") || entry.endsWith(".yaml"))
+      .map((entry) => path.join(deployTemplateDir, entry)),
+  ];
+
+  const errors = files.flatMap((file) => {
+    const relativePath = path.relative(repoRoot, file);
+    return validateNoActionsRuntimeHealthChecks(fs.readFileSync(file, "utf8"), relativePath);
+  });
+
+  assert.deepEqual(errors, []);
+});
+
 test("workflow scan allows non-backend dependency health endpoints", () => {
   const workflow = `
 name: Deploy Monitoring
