@@ -471,6 +471,7 @@ function buildSlackPayload(env, state) {
           { type: "mrkdwn", text: `*Status*\n${state.status}` },
           { type: "mrkdwn", text: `*URL*\n${env.HEALTHCHECK_URL}` },
           { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
+          { type: "mrkdwn", text: `*HTTP status*\n${state.httpStatus || "unknown"}` },
           { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
           { type: "mrkdwn", text: `*Down since*\n${state.lastDownAt || "unknown"}` },
           { type: "mrkdwn", text: `*Last up*\n${state.lastUpAt || "unknown"}` },

@@ -113,6 +113,7 @@ test("recovery alert remains retryable when previous recovery Slack delivery fai
 test("slack payload contains environment, status, url, time, failures, error, and readiness detail", () => {
   const payload = internals.buildSlackPayload(env, {
     status: "down",
+    httpStatus: 503,
     checkedAt: "2026-07-03T00:05:00.000Z",
     lastUpAt: "2026-07-02T23:55:00.000Z",
     lastDownAt: "2026-07-03T00:05:00.000Z",
@@ -128,6 +129,8 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.match(fields, /down/);
   assert.match(fields, /https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
   assert.match(fields, /2026-07-03T00:05:00.000Z/);
+  assert.match(fields, /HTTP status/);
+  assert.match(fields, /503/);
   assert.match(fields, /2/);
   assert.match(fields, /fetch failed/);
   assert.match(fields, /Stale scheduler jobs/);
