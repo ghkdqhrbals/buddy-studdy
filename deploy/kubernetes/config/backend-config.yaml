@@ -32,3 +32,7 @@ data:
   GOOGLE_IOS_CLIENT_ID: "328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com"
   MONITORING_ENVIRONMENT_NAME: "production"
   MONITORING_SERVICE_NAME: "BuddyStudy backend"
+  MONITORING_SCHEDULER_READINESS_ENABLED: "true"
+  MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: "15"
+  MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"
+  MONITORING_SCHEDULER_MONITORED_JOBS: "question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent"

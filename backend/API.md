@@ -59,8 +59,8 @@ External uptime monitoring should use readiness:
 GET /api/v1/health/readiness
 ```
 
-It returns `200` when required dependencies are reachable, otherwise `503` with
-component-level check results.
+It returns `200` when required dependencies are reachable and core scheduler
+jobs are fresh, otherwise `503` with component-level check results.
 
 ### Register Device
 

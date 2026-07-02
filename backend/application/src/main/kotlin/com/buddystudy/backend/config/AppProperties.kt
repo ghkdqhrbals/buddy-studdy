@@ -62,6 +62,15 @@ data class BuddyStudyProperties(
         var slackWebhookUrl: String = "",
         var environmentName: String = "production",
         var serviceName: String = "BuddyStudy backend",
+        var schedulerReadinessEnabled: Boolean = true,
+        var schedulerStaleThresholdMinutes: Long = 15,
+        var schedulerStartupGraceMinutes: Long = 15,
+        var schedulerMonitoredJobs: List<String> = listOf(
+            "question-schedule",
+            "question-push-outbox-dispatch",
+            "user-stats-refresh",
+            "admin-analytics-recent",
+        ),
     )
     data class Analytics(
         var enabled: Boolean = true,

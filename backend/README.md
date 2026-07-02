@@ -125,7 +125,12 @@ Device credentials are used only to register a device and bootstrap or refresh `
 Spring Boot Actuator serves lightweight health checks at `/health` and
 `/api/v1/health`. External uptime monitoring should use
 `/api/v1/health/readiness`, which checks required backend dependencies and
-returns `503` when the backend process is alive but not ready to serve traffic.
+core scheduler freshness, and returns `503` when the backend process is alive
+but not ready to serve traffic. Scheduler freshness is controlled by
+`MONITORING_SCHEDULER_READINESS_ENABLED`,
+`MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
+`MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
+`MONITORING_SCHEDULER_MONITORED_JOBS`.
 
 ### DB Backups
 

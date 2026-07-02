@@ -1,32 +1,37 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import com.buddystudy.backend.config.BuddyStudyProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.redis.connection.RedisConnection
 import org.springframework.data.redis.connection.RedisConnectionFactory
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.io.PrintWriter
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.SQLException
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.logging.Logger
 import javax.sql.DataSource
 
 class ReadinessCheckerTest {
     @Test
     fun `readiness is ok when database and redis are reachable`() {
-        val checker = ReadinessChecker(h2DataSource(), redisFactory("PONG"))
+        val checker = ReadinessChecker(h2DataSource(), redisFactory("PONG"), BuddyStudyProperties())
 
         val response = checker.check()
 
         assertThat(response.ok).isTrue()
         assertThat(response.checks["database"]?.ok).isTrue()
         assertThat(response.checks["redis"]?.ok).isTrue()
+        assertThat(response.checks["scheduler"]?.ok).isTrue()
     }
 
     @Test
     fun `readiness fails when database is unavailable`() {
-        val checker = ReadinessChecker(failingDataSource(), redisFactory("PONG"))
+        val checker = ReadinessChecker(failingDataSource(), redisFactory("PONG"), BuddyStudyProperties())
 
         val response = checker.check()
 
@@ -38,7 +43,7 @@ class ReadinessCheckerTest {
 
     @Test
     fun `readiness fails when redis ping is unavailable`() {
-        val checker = ReadinessChecker(h2DataSource(), redisFactory(error = IllegalStateException("redis down")))
+        val checker = ReadinessChecker(h2DataSource(), redisFactory(error = IllegalStateException("redis down")), BuddyStudyProperties())
 
         val response = checker.check()
 
@@ -48,8 +53,110 @@ class ReadinessCheckerTest {
         assertThat(response.checks["redis"]?.message).contains("redis down")
     }
 
+    @Test
+    fun `readiness fails when monitored scheduler jobs are stale`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Stale scheduler jobs")
+        assertThat(response.checks["scheduler"]?.message).contains("question-schedule")
+    }
+
+    @Test
+    fun `readiness fails when monitored scheduler job seed is missing`() {
+        val dataSource = h2DataSource(lastStartedAt = null, seedJobs = false)
+        val checker = ReadinessChecker(dataSource, redisFactory("PONG"), BuddyStudyProperties())
+
+        val response = checker.check()
+
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Missing monitored scheduler jobs")
+    }
+
+    @Test
+    fun `readiness ignores stale scheduler jobs that are disabled intentionally`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
+        JdbcTemplate(dataSource).update("update scheduled_jobs set enabled = false where job_name = ?", "question-schedule")
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                    schedulerMonitoredJobs = listOf("question-schedule"),
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.checks["scheduler"]?.ok).isTrue()
+    }
+
     private fun h2DataSource(): DataSource =
-        DriverManagerDataSource("jdbc:h2:mem:readiness;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "")
+        h2DataSource(lastStartedAt = Instant.now(), seedJobs = true)
+
+    private fun h2DataSource(lastStartedAt: Instant?, seedJobs: Boolean): DataSource {
+        val dataSource = DriverManagerDataSource(
+            "jdbc:h2:mem:readiness-${System.nanoTime()};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+            "sa",
+            "",
+        )
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute(
+            """
+            create table scheduled_jobs (
+                job_name varchar(120) primary key,
+                enabled boolean not null default true,
+                schedule_type varchar(40) not null,
+                schedule_value varchar(120) not null
+            )
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            create table scheduled_job_runs (
+                id bigserial primary key,
+                job_name varchar(120) not null,
+                trigger_type varchar(40) not null,
+                status varchar(40) not null,
+                started_at timestamp not null,
+                created_by varchar(120) not null
+            )
+            """.trimIndent(),
+        )
+        if (seedJobs) {
+            listOf("question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent")
+                .forEach { jobName ->
+                    jdbc.update(
+                        "insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value) values (?, true, 'FIXED_DELAY', 'test')",
+                        jobName,
+                    )
+                    if (lastStartedAt != null) {
+                        jdbc.update(
+                            "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by) values (?, 'SCHEDULED', 'SUCCESS', ?, 'system')",
+                            jobName,
+                            Timestamp.from(lastStartedAt),
+                        )
+                    }
+                }
+        }
+        return dataSource
+    }
 
     private fun failingDataSource(): DataSource =
         object : DataSource {
