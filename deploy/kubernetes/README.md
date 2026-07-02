@@ -81,6 +81,30 @@ The coordinator bootstrap Job creates the required stream prefixes:
 The bootstrap Job has a completion TTL so repeated manifest applies do not keep
 an old immutable Job spec around indefinitely.
 
+## Health Probes and Alerts
+
+Backend Kubernetes readiness probes use:
+
+```http
+GET /api/v1/health/dependencies
+```
+
+This endpoint checks only hard serving dependencies such as PostgreSQL and
+Redis. Do not point Kubernetes readiness probes at
+`/api/v1/health/readiness`, because that endpoint also checks scheduler
+freshness and is meant for external alerting.
+
+Server-down Slack alerts are handled by the Cloudflare Worker in
+`deploy/cloudflare-health-monitor`. It checks:
+
+```http
+GET /api/v1/health/readiness
+```
+
+That external readiness endpoint includes scheduler freshness, stale job,
+failed job, and stuck job details so Slack alerts carry the operational cause
+without taking healthy API pods out of service.
+
 ## Local Persistent Data
 
 The Mac Kubernetes target stores state on the host:
