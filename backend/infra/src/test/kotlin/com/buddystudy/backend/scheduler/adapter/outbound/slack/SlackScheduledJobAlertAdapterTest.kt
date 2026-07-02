@@ -5,14 +5,17 @@ import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.content
 import org.springframework.test.web.client.match.MockRestRequestMatchers.method
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
+import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestClient
 import java.time.Duration
@@ -52,6 +55,27 @@ class SlackScheduledJobAlertAdapterTest {
         val adapter = SlackScheduledJobAlertAdapter(BuddyStudyProperties(), builder.build())
 
         adapter.notifyFailed(failedRun())
+
+        server.verify()
+    }
+
+    @Test
+    fun `notifyFailed propagates Slack delivery failure`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+            ),
+        )
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build())
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).body("slack unavailable"))
+
+        assertThatThrownBy { adapter.notifyFailed(failedRun()) }
+            .hasMessageContaining("500")
 
         server.verify()
     }
