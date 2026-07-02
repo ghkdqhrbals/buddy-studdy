@@ -24,7 +24,7 @@ data:
   SCHEDULER_BATCH_SIZE: "50"
   MAX_PENDING_PER_STUDY: "1"
   REACTION_STREAM_ENABLED: "true"
-  REACTION_STREAM_COORDINATOR_BASE_URL: "https://coordinator.ghkdqhrbals.org"
+  REACTION_STREAM_COORDINATOR_BASE_URL: "http://buddystudy-redis-stream-coordinator:8080"
   REACTION_STREAM_COORDINATOR_USERNAME: "admin"
   PUSH_STREAM_PREFIX: "push-v1"
   VIEW_STREAM_PREFIX: "view-v1"

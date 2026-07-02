@@ -14,6 +14,7 @@ or hang its local API server when used as a long-running server runtime.
 - `secrets/`: placeholder Kubernetes secrets. These are not applied by kustomize.
 - `postgres/`: PostgreSQL StatefulSet, service, hostPath PV/PVC, and init script.
 - `redis/`: Redis Cluster StatefulSet, services, hostPath PV/PVCs, and cluster init Job.
+- `coordinator/`: Redis Stream Coordinator Deployment, service, and stream bootstrap Job.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
 - `backend/`: BuddyStudy backend Deployment and service.
 - `admin-frontend/`: admin web frontend Deployment and service.
@@ -60,6 +61,24 @@ secrets would overwrite live cluster credentials. Create or patch
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
+
+## Redis Stream Coordinator
+
+The backend talks to the in-cluster coordinator service:
+
+```text
+http://buddystudy-redis-stream-coordinator:8080
+```
+
+The coordinator bootstrap Job creates the required stream prefixes:
+
+- `push-v1`
+- `view-v1`
+- `notification-v1`
+- `create-question-v1`
+
+The bootstrap Job has a completion TTL so repeated manifest applies do not keep
+an old immutable Job spec around indefinitely.
 
 ## Local Persistent Data
 

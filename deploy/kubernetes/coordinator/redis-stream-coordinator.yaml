@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: buddystudy-redis-stream-coordinator
+  labels:
+    app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buddystudy-redis-stream-coordinator
+  labels:
+    app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      initContainers:
+        - name: wait-for-redis-cluster
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+                sleep 2
+              done
+      containers:
+        - name: coordinator
+          image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:latest
+          imagePullPolicy: Always
+          env:
+            - name: SERVER_PORT
+              value: "8080"
+            - name: COORDINATOR_ID
+              value: "buddystudy-k8s-coordinator"
+            - name: COORDINATOR_STORE_TYPE
+              value: "redis"
+            - name: COORDINATOR_STREAMS_PROVISIONING_ENABLED
+              value: "true"
+            - name: SPRING_DATA_REDIS_CLUSTER_NODES
+              value: "buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_PASSWORD
+            - name: REDIS_STREAM_COORDINATOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_STREAM_COORDINATOR_PASSWORD
+            - name: REDIS_STREAM_COORDINATOR_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: AUTH_JWT_SECRET
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /coord/v1/monitoring/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /coord/v1/monitoring/health
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: buddystudy-redis-stream-coordinator-bootstrap
+  labels:
+    app.kubernetes.io/name: buddystudy-redis-stream-coordinator
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buddystudy-redis-stream-coordinator-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: curlimages/curl:8.11.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: COORDINATOR_BASE_URL
+              value: "http://buddystudy-redis-stream-coordinator:8080"
+            - name: COORDINATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: REDIS_STREAM_COORDINATOR_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              until curl -fsS "${COORDINATOR_BASE_URL}/coord/v1/monitoring/health" >/dev/null; do
+                sleep 2
+              done
+
+              token="$(
+                curl -fsS -H "Content-Type: application/json" \
+                  -X POST "${COORDINATOR_BASE_URL}/coord/v1/auth/login" \
+                  -d "{\"username\":\"admin\",\"password\":\"${COORDINATOR_PASSWORD}\"}" |
+                sed -n 's/.*"accessToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+              )"
+
+              create_stream() {
+                stream_prefix="$1"
+                shard_count="$2"
+                status="$(
+                  curl -sS -o /tmp/coord-response.json -w "%{http_code}" \
+                    -H "Authorization: Bearer ${token}" \
+                    -H "Content-Type: application/json" \
+                    -X POST "${COORDINATOR_BASE_URL}/coord/v1/streams/${stream_prefix}" \
+                    -d "{\"initialShardCount\":${shard_count},\"requestedBy\":\"buddystudy-k8s-bootstrap\",\"reason\":\"bootstrap ${stream_prefix}\"}"
+                )"
+                if [ "$status" = "201" ] || [ "$status" = "409" ]; then
+                  echo "stream ${stream_prefix} ready (${status})"
+                else
+                  cat /tmp/coord-response.json
+                  exit 1
+                fi
+              }
+
+              create_stream "push-v1" 8
+              create_stream "view-v1" 8
+              create_stream "notification-v1" 4
+              create_stream "create-question-v1" 2
