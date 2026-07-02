@@ -238,6 +238,47 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run runtime health probes/);
 });
 
+test("workflow scan rejects multiline curl backend health checks", () => {
+  const workflow = `
+name: Backend Deploy
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check backend readiness
+        run: |
+          curl -fsS \\
+            "https://api.lowfidev.cloud/api/v1/health/readiness"
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
+
+  assert.match(errors, /deploy-backend\.yml/);
+  assert.match(errors, /must not directly call backend health endpoints/);
+});
+
+test("workflow scan rejects multiline direct health monitor manual checks", () => {
+  const workflow = `
+name: Health Smoke
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    steps:
+      - name: Manual health monitor check
+        run: |
+          curl -fsS -X POST \\
+            "https://buddystudy-health-monitor.example.workers.dev/check" \\
+            -H "Authorization: Bearer \${MANUAL_CHECK_TOKEN}"
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "health-smoke.yml").join("\n");
+
+  assert.match(errors, /health-smoke\.yml/);
+  assert.match(errors, /must not call health monitor manual check endpoints/);
+});
+
 test("kubernetes backend probes use dependency readiness while external monitor uses scheduler readiness", () => {
   const backendManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/backend/backend.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");

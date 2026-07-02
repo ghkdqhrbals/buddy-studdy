@@ -12,25 +12,30 @@ const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wge
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
 const healthMonitorManualCheckPattern = /(?:curl|wget|http)\b[^\n]*(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 
+function normalizeShellContinuations(text) {
+  return text.replace(/\\\r?\n\s*/g, " ");
+}
+
 export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow") {
   const errors = [];
+  const scanText = normalizeShellContinuations(text);
 
-  if (backendHealthProbePattern.test(text)) {
+  if (backendHealthProbePattern.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not directly call backend health endpoints.`);
   }
-  if (runtimeHealthProbePattern.test(text)) {
+  if (runtimeHealthProbePattern.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run runtime health probes.`);
   }
-  if (localRuntimeHealthProbePattern.test(text)) {
+  if (localRuntimeHealthProbePattern.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run container health probes.`);
   }
-  if (/npm\s+run\s+smoke/.test(text) || /smoke-check\.js/.test(text)) {
+  if (/npm\s+run\s+smoke/.test(scanText) || /smoke-check\.js/.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run health monitor smoke checks.`);
   }
-  if (healthMonitorManualCheckPattern.test(text)) {
+  if (healthMonitorManualCheckPattern.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not call health monitor manual check endpoints.`);
   }
-  if (/HEALTH_MONITOR_URL/.test(text)) {
+  if (/HEALTH_MONITOR_URL/.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not configure health monitor check URLs.`);
   }
 
