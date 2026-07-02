@@ -101,9 +101,9 @@ Server-down Slack alerts are handled by the Cloudflare Worker in
 GET /api/v1/health/readiness
 ```
 
-That external readiness endpoint includes scheduler freshness, stale job,
-failed job, and stuck job details so Slack alerts carry the operational cause
-without taking healthy API pods out of service.
+That external readiness endpoint includes scheduler freshness, disabled job,
+stale job, failed job, and stuck job details so Slack alerts carry the
+operational cause without taking healthy API pods out of service.
 
 ## Local Persistent Data
 

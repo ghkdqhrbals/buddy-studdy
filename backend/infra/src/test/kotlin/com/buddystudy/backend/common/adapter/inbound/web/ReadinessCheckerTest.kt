@@ -137,7 +137,7 @@ class ReadinessCheckerTest {
     }
 
     @Test
-    fun `readiness ignores stale scheduler jobs that are disabled intentionally`() {
+    fun `readiness fails when monitored scheduler jobs are disabled`() {
         val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
         JdbcTemplate(dataSource).update("update scheduled_jobs set enabled = false where job_name = ?", "question-schedule")
         val checker = ReadinessChecker(
@@ -153,8 +153,10 @@ class ReadinessCheckerTest {
 
         val response = checker.check()
 
-        assertThat(response.ok).isTrue()
-        assertThat(response.checks["scheduler"]?.ok).isTrue()
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Disabled scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("disabledJobs")).isEqualTo(listOf("question-schedule"))
     }
 
     @Test

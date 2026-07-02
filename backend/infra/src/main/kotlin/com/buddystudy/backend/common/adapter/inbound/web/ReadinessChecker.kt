@@ -116,6 +116,9 @@ class ReadinessChecker(
             }.associateBy { it.jobName }
 
             val missingJobs = monitoredJobs.filterNot { rows.containsKey(it) }
+            val disabledJobs = rows.values
+                .filter { !it.enabled }
+                .map { it.jobName }
             val failedJobDetails = rows.values
                 .filter { it.enabled && it.latestStatus == "FAILED" }
                 .map { row ->
@@ -175,6 +178,11 @@ class ReadinessChecker(
                     ok = false,
                     message = "Missing monitored scheduler jobs: ${missingJobs.joinToString(", ")}",
                     details = schedulerDetails("missingJobs" to missingJobs),
+                )
+                disabledJobs.isNotEmpty() -> ReadinessCheckResponse(
+                    ok = false,
+                    message = "Disabled scheduler jobs: ${disabledJobs.joinToString(", ")}",
+                    details = schedulerDetails("disabledJobs" to disabledJobs),
                 )
                 failedJobDetails.isNotEmpty() -> ReadinessCheckResponse(
                     ok = false,

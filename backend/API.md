@@ -64,9 +64,10 @@ GET /api/v1/health/readiness
 It returns `200` when required dependencies are reachable and core scheduler
 jobs have recent successful runs, otherwise `503` with component-level check
 results. Scheduler checks include structured `details` so external monitors
-and Slack alerts can show missing jobs, stale jobs, and configured thresholds
-without parsing free-form text. A scheduler run that remains `RUNNING` past
-its configured `timeoutSeconds` is reported as a stuck job.
+and Slack alerts can show missing jobs, disabled jobs, stale jobs, and
+configured thresholds without parsing free-form text. A scheduler run that
+remains `RUNNING` past its configured `timeoutSeconds` is reported as a stuck
+job.
 
 Kubernetes readiness probes should use dependency readiness instead:
 

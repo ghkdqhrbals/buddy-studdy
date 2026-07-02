@@ -134,8 +134,8 @@ but not ready to serve traffic. The readiness response includes `checkedAt`,
 show the failing component. Scheduler readiness is based on the most recent
 successful run for each monitored job, so repeated failed runs do not mask a
 stale scheduler. It also includes structured `details` such as `missingJobs`,
-`staleJobs`, `thresholdSeconds`, and `startupGraceSeconds` for external
-monitors and runbooks. Scheduler freshness is controlled by
+`disabledJobs`, `staleJobs`, `thresholdSeconds`, and `startupGraceSeconds` for
+external monitors and runbooks. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
