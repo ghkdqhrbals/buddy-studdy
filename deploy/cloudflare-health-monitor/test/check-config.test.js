@@ -60,11 +60,22 @@ test("health monitor config requires a public worker entrypoint", () => {
   assert.match(validateConfig(config).join("\n"), /workers_dev or routes/);
 });
 
+test("health monitor config requires Cloudflare observability logs", () => {
+  const config = validConfig();
+  config.observability.enabled = false;
+
+  assert.match(validateConfig(config).join("\n"), /observability/);
+});
+
 function validConfig() {
   return {
     name: "buddystudy-health-monitor",
     main: "src/index.js",
     workers_dev: true,
+    observability: {
+      enabled: true,
+      head_sampling_rate: 1,
+    },
     triggers: { crons: ["* * * * *"] },
     vars: {
       HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",

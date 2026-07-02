@@ -18,6 +18,9 @@ export function validateConfig(config) {
   if (!hasPublicEntrypoint(config)) {
     errors.push("Health monitor Worker must expose workers_dev or routes for manual status checks.");
   }
+  if (config.observability?.enabled !== true) {
+    errors.push("Health monitor Worker observability must be enabled so Cron checks and Slack alert failures are logged.");
+  }
   const crons = config.triggers?.crons;
   if (!Array.isArray(crons) || crons.length === 0) {
     errors.push("At least one Cloudflare Cron Trigger must be configured.");
