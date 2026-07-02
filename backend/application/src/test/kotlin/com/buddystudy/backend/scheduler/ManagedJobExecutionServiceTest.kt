@@ -95,6 +95,20 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
+    fun `execute skips locked job without running work or sending alerts`() {
+        locks.acquired = false
+        var executed = false
+
+        val result = service.execute(FakeJob("question-schedule") { executed = true; "done" }, JobTriggerType.SCHEDULED)
+
+        assertThat(executed).isFalse()
+        assertThat(result.status).isEqualTo(JobRunStatus.SKIPPED)
+        assertThat(result.errorMessage).isEqualTo("Job lock was not acquired.")
+        assertThat(alerts.failedRuns).isEmpty()
+        assertThat(locks.released).isEmpty()
+    }
+
+    @Test
     fun `retry keeps retry source run id`() {
         val result = service.execute(
             FakeJob("admin-analytics-correction") { "corrected" },
@@ -216,8 +230,9 @@ class ManagedJobExecutionServiceTest {
 
     private class FakeJobLockPort : JobLockPort {
         val released = mutableListOf<String>()
+        var acquired = true
         var releaseError: RuntimeException? = null
-        override fun tryAcquire(jobName: String): Boolean = true
+        override fun tryAcquire(jobName: String): Boolean = acquired
         override fun release(jobName: String) {
             released += jobName
             releaseError?.let { throw it }
