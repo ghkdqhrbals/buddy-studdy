@@ -25,6 +25,13 @@ test("health monitor config rejects missing runtime essentials", () => {
   assert.match(errors, /HEALTHCHECK_TIMEOUT_MS/);
 });
 
+test("health monitor config rejects lightweight health endpoints", () => {
+  const config = validConfig();
+  config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/health";
+
+  assert.match(validateConfig(config).join("\n"), /readiness endpoint/);
+});
+
 function validConfig() {
   return {
     name: "buddystudy-health-monitor",

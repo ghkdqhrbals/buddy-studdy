@@ -33,6 +33,8 @@ export function validateConfig(config) {
 
   if (!config.vars?.HEALTHCHECK_URL?.startsWith("https://")) {
     errors.push("HEALTHCHECK_URL must be an HTTPS URL.");
+  } else if (!config.vars.HEALTHCHECK_URL.endsWith("/api/v1/health/readiness")) {
+    errors.push("HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.");
   }
   if (!positiveInt(config.vars?.FAILURE_THRESHOLD)) {
     errors.push("FAILURE_THRESHOLD must be a positive integer.");
