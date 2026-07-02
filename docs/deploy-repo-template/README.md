@@ -110,6 +110,12 @@ server-down alerts are handled by the Cloudflare Worker in
 `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint
 from Cloudflare Cron and sends Slack alerts.
 
+Backend scheduler failure alerts are separate from server-down alerts. Set the
+deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
+messages for failed managed scheduler jobs. The Cloudflare Worker uses
+`HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
+checker.
+
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 
 ## Backup restore (deploy host)

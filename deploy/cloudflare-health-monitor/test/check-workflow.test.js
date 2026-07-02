@@ -116,6 +116,13 @@ test("deploy repo backend template does not run backend health probes in Actions
   assert.deepEqual(validateNoActionsRuntimeHealthChecks(template, "deploy-backend.yml"), []);
 });
 
+test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+
+  assert.match(template, /SLACK_WEBHOOK_URL:\s*\$\{\{\s*secrets\.SLACK_WEBHOOK_URL\s*\}\}/);
+  assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
+});
+
 test("repository workflow files do not run backend health probes in Actions", () => {
   const workflowDir = path.join(repoRoot, ".github", "workflows");
   const deployTemplateDir = path.join(repoRoot, "docs", "deploy-repo-template");

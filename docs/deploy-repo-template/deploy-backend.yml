@@ -55,6 +55,7 @@ jobs:
           APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
           APNS_ENV: ${{ secrets.APNS_ENV }}
           REDIS_STREAM_COORDINATOR_PASSWORD: ${{ secrets.REDIS_STREAM_COORDINATOR_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
 
@@ -109,6 +110,7 @@ jobs:
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
           REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD}
+          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
           ENV
           chmod 600 .env
 
