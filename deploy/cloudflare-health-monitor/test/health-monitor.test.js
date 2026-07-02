@@ -131,6 +131,32 @@ test("checkHealth captures non ok readiness body detail", async () => {
   assert.equal(result.detail, "scheduler: Missing monitored scheduler jobs: question-schedule");
 });
 
+test("checkHealth times out slow health responses", async () => {
+  const environment = manualEnv({
+    HEALTHCHECK_TIMEOUT_MS: "1000",
+    healthResponse: (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const error = new Error("healthcheck timeout");
+          error.name = "AbortError";
+          reject(error);
+        });
+      }),
+  });
+
+  const result = await withManualEnv(environment, () => internals.checkHealth(environment.HEALTHCHECK_URL, environment));
+
+  assert.equal(result.healthy, false);
+  assert.equal(result.httpStatus, null);
+  assert.equal(result.error, "Healthcheck timed out after 1000ms");
+});
+
+test("healthcheck timeout is bounded to Cloudflare-safe limits", () => {
+  assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "1" }), 1000);
+  assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "999999" }), 25000);
+  assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "bad" }), 8000);
+});
+
 test("manual check requires configured bearer token", async () => {
   const unauthorized = await worker.fetch(new Request("https://monitor.example.com/check", { method: "POST" }), manualEnv());
   const authorizedEnv = manualEnv({
@@ -240,10 +266,11 @@ test("manual check token helper rejects absent and mismatched tokens", () => {
   );
 });
 
-function manualEnv({ existingState = null, healthResponse = new Response("ok", { status: 200 }), onSlack = null } = {}) {
+function manualEnv({ existingState = null, healthResponse = new Response("ok", { status: 200 }), onSlack = null, ...overrides } = {}) {
   const stateWrites = [];
   return {
     ...env,
+    ...overrides,
     MANUAL_CHECK_TOKEN: "manual-secret",
     SLACK_WEBHOOK_URL: "https://slack.example.com/webhook",
     HEALTH_MONITOR_STATE: {
@@ -265,6 +292,9 @@ globalThis.fetch = async function mockedFetch(input, init) {
   const url = typeof input === "string" ? input : input.url;
   const activeEnv = currentManualEnv;
   if (activeEnv && url === activeEnv.HEALTHCHECK_URL) {
+    if (typeof activeEnv.healthResponse === "function") {
+      return activeEnv.healthResponse(input, init);
+    }
     return activeEnv.healthResponse.clone();
   }
   if (activeEnv && url === activeEnv.SLACK_WEBHOOK_URL && activeEnv.onSlack) {

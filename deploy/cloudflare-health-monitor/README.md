@@ -15,6 +15,8 @@ runtime monitoring.
   - the failure threshold is reached,
   - the backend is still down after `ALERT_REPEAT_SECONDS`,
   - the backend recovers after a down state.
+- Bounds each health request with `HEALTHCHECK_TIMEOUT_MS`, so a hanging
+  connection is treated as a failure instead of delaying the monitor.
 - Includes readiness failure details in Slack when the backend returns a JSON
   body with component checks, for example stale scheduler jobs or Redis
   failures.
@@ -86,5 +88,6 @@ Default vars in `wrangler.jsonc`:
 - `ENVIRONMENT_NAME`: `production`
 - `FAILURE_THRESHOLD`: `2`
 - `ALERT_REPEAT_SECONDS`: `3600`
+- `HEALTHCHECK_TIMEOUT_MS`: `8000`
 
 Use Cloudflare Worker vars/secrets for environment-specific overrides.

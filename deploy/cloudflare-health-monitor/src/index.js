@@ -25,7 +25,7 @@ export default {
 async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
   const previous = await readState(env);
-  const result = await checkHealth(env.HEALTHCHECK_URL);
+  const result = await checkHealth(env.HEALTHCHECK_URL, env);
   let next = nextState(previous, result, env, checkedAt);
   let slackAlertError = null;
 
@@ -65,12 +65,16 @@ async function runHealthCheck(env, scheduledTime) {
   return next;
 }
 
-async function checkHealth(url) {
+async function checkHealth(url, env = {}) {
+  const timeoutMs = healthcheckTimeoutMs(env);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort("healthcheck timeout"), timeoutMs);
   try {
     const response = await fetch(url, {
       method: "GET",
       headers: { "Accept": "application/json" },
       cf: { cacheTtl: 0, cacheEverything: false },
+      signal: controller.signal,
     });
     if (response.ok) {
       return { healthy: true, httpStatus: response.status, error: null, detail: null };
@@ -86,10 +90,21 @@ async function checkHealth(url) {
     return {
       healthy: false,
       httpStatus: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: isAbortError(error) ? `Healthcheck timed out after ${timeoutMs}ms` : error instanceof Error ? error.message : String(error),
       detail: null,
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+function healthcheckTimeoutMs(env) {
+  const raw = Number.parseInt(env?.HEALTHCHECK_TIMEOUT_MS || "8000", 10);
+  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 25000) : 8000;
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError" || String(error).includes("healthcheck timeout");
 }
 
 async function responseDetail(response) {
@@ -243,6 +258,7 @@ function buildSlackPayload(env, state) {
 export const internals = {
   buildSlackPayload,
   checkHealth,
+  healthcheckTimeoutMs,
   isAuthorizedManualCheck,
   nextState,
   summarizeHealthJson,

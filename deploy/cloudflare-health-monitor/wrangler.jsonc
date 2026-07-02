@@ -16,7 +16,8 @@
     "SERVICE_NAME": "BuddyStudy backend",
     "ENVIRONMENT_NAME": "production",
     "FAILURE_THRESHOLD": "2",
-    "ALERT_REPEAT_SECONDS": "3600"
+    "ALERT_REPEAT_SECONDS": "3600",
+    "HEALTHCHECK_TIMEOUT_MS": "8000"
   },
   "kv_namespaces": [
     {
