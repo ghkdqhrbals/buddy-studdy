@@ -129,7 +129,9 @@ External uptime monitoring should use the Cloudflare Worker in
 `deploy/cloudflare-health-monitor`, which checks `/api/v1/health/readiness`
 and sends Slack alerts. Readiness checks required backend dependencies and
 core scheduler freshness, and returns `503` when the backend process is alive
-but not ready to serve traffic. Scheduler freshness is controlled by
+but not ready to serve traffic. The readiness response includes `checkedAt`,
+`service`, `environment`, and component-level `checks` so Slack alerts can
+show the failing component. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and

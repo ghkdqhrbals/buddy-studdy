@@ -24,9 +24,31 @@ class ReadinessCheckerTest {
         val response = checker.check()
 
         assertThat(response.ok).isTrue()
+        assertThat(response.checkedAt).isNotNull()
+        assertThat(response.service).isEqualTo("BuddyStudy backend")
+        assertThat(response.environment).isEqualTo("production")
         assertThat(response.checks["database"]?.ok).isTrue()
         assertThat(response.checks["redis"]?.ok).isTrue()
         assertThat(response.checks["scheduler"]?.ok).isTrue()
+    }
+
+    @Test
+    fun `readiness response uses configured monitoring identity`() {
+        val checker = ReadinessChecker(
+            h2DataSource(),
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    serviceName = "BuddyStudy API",
+                    environmentName = "dev",
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.service).isEqualTo("BuddyStudy API")
+        assertThat(response.environment).isEqualTo("dev")
     }
 
     @Test

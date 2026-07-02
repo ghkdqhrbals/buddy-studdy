@@ -30,6 +30,9 @@ class ReadinessChecker(
         }
         return ReadinessResponse(
             ok = checks.values.all { it.ok },
+            checkedAt = Instant.now(),
+            service = properties.monitoring.serviceName,
+            environment = properties.monitoring.environmentName,
             checks = checks,
         )
     }

@@ -64,6 +64,25 @@ GET /api/v1/health/readiness
 It returns `200` when required dependencies are reachable and core scheduler
 jobs are fresh, otherwise `503` with component-level check results.
 
+Example readiness response:
+
+```json
+{
+  "ok": false,
+  "checkedAt": "2026-07-03T04:30:00Z",
+  "service": "BuddyStudy backend",
+  "environment": "production",
+  "checks": {
+    "database": { "ok": true },
+    "redis": { "ok": true },
+    "scheduler": {
+      "ok": false,
+      "message": "Stale scheduler jobs: question-schedule lastStartedAt=2026-07-03T04:00:00Z"
+    }
+  }
+}
+```
+
 Admin users can inspect scheduler freshness and the latest run for each
 monitored job:
 
