@@ -305,3 +305,11 @@ jobs:
 
   assert.match(validateWorkflowText(workflow).join("\n"), /Slack alert secrets must be required/);
 });
+
+test("health monitor workflow summary documents manual status endpoints", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
+
+  assert.match(workflow, /workers\.dev/);
+  assert.match(workflow, /GET \\`\/\\`/);
+  assert.match(workflow, /POST \\`\/check\\`/);
+});
