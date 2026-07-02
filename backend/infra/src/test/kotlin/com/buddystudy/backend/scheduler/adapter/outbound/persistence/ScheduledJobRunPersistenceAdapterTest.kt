@@ -131,10 +131,10 @@ class ScheduledJobRunPersistenceAdapterTest {
     fun `finds scheduler snapshots with latest run`() {
         jdbc.update(
             """
-            insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value, created_at, updated_at)
+            insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value, timeout_seconds, created_at, updated_at)
             values
-                ('question-schedule', true, 'FIXED_DELAY', '30s', current_timestamp, current_timestamp),
-                ('user-stats-refresh', false, 'CRON', '0 */5 * * * *', current_timestamp, current_timestamp)
+                ('question-schedule', true, 'FIXED_DELAY', '30s', 90, current_timestamp, current_timestamp),
+                ('user-stats-refresh', false, 'CRON', '0 */5 * * * *', 600, current_timestamp, current_timestamp)
             """.trimIndent(),
             emptyMap<String, Any>(),
         )
@@ -157,9 +157,11 @@ class ScheduledJobRunPersistenceAdapterTest {
 
         assertThat(snapshots.map { it.jobName }).containsExactly("question-schedule", "user-stats-refresh")
         assertThat(snapshots.first().enabled).isTrue()
+        assertThat(snapshots.first().timeoutSeconds).isEqualTo(90)
         assertThat(snapshots.first().latestRun).isEqualTo(latestRun)
         assertThat(snapshots.first().latestRun).isNotEqualTo(oldRun)
         assertThat(snapshots.last().enabled).isFalse()
+        assertThat(snapshots.last().timeoutSeconds).isEqualTo(600)
         assertThat(snapshots.last().latestRun).isNull()
     }
 

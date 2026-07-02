@@ -113,7 +113,7 @@ class ScheduledJobRunPersistenceAdapter(
         }
         val snapshots = jdbc.query(
             """
-            select j.job_name, j.enabled, j.schedule_type, j.schedule_value
+            select j.job_name, j.enabled, j.schedule_type, j.schedule_value, j.timeout_seconds
             from scheduled_jobs j
             $whereSql
             order by j.job_name
@@ -125,6 +125,7 @@ class ScheduledJobRunPersistenceAdapter(
                 enabled = rs.getBoolean("enabled"),
                 scheduleType = rs.getString("schedule_type"),
                 scheduleValue = rs.getString("schedule_value"),
+                timeoutSeconds = rs.getInt("timeout_seconds").coerceAtLeast(1),
             )
         }
         if (snapshots.isEmpty()) return emptyList()
@@ -149,6 +150,7 @@ class ScheduledJobRunPersistenceAdapter(
                 enabled = it.enabled,
                 scheduleType = it.scheduleType,
                 scheduleValue = it.scheduleValue,
+                timeoutSeconds = it.timeoutSeconds,
                 latestRun = latestRuns[it.jobName],
             )
         }
@@ -180,6 +182,7 @@ class ScheduledJobRunPersistenceAdapter(
         val enabled: Boolean,
         val scheduleType: String,
         val scheduleValue: String,
+        val timeoutSeconds: Int,
     )
 }
 

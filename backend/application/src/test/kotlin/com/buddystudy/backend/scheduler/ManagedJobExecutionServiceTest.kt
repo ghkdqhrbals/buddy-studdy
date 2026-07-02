@@ -182,6 +182,31 @@ class ManagedJobExecutionServiceTest {
         assertThat(response.jobs.single { it.jobName == "question-schedule" }.stale).isFalse()
     }
 
+    @Test
+    fun `find statuses marks running job past timeout as stuck and stale`() {
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = true,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            timeoutSeconds = 60,
+            latestRun = ScheduledJobRun(
+                id = 12,
+                jobName = "question-schedule",
+                triggerType = JobTriggerType.SCHEDULED,
+                status = JobRunStatus.RUNNING,
+                startedAt = Instant.now().minusSeconds(120),
+            ),
+        )
+
+        val response = service.findStatuses()
+
+        val status = response.jobs.single { it.jobName == "question-schedule" }
+        assertThat(status.stuck).isTrue()
+        assertThat(status.stale).isTrue()
+        assertThat(status.timeoutSeconds).isEqualTo(60)
+    }
+
     private class FakeJob(
         override val name: String,
         private val block: () -> String,

@@ -42,6 +42,7 @@ data class ScheduledJobSnapshot(
     val enabled: Boolean,
     val scheduleType: String,
     val scheduleValue: String,
+    val timeoutSeconds: Int = 300,
     val latestRun: ScheduledJobRun?,
 )
 
@@ -53,6 +54,8 @@ data class ScheduledJobStatus(
     val latestRun: ScheduledJobRun?,
     val stale: Boolean,
     val staleThresholdMinutes: Long,
+    val timeoutSeconds: Int,
+    val stuck: Boolean,
 )
 
 data class ScheduledJobStatusResponse(
