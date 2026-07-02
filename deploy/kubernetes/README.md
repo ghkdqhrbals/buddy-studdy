@@ -3,9 +3,11 @@
 This directory contains the Kubernetes manifests for running BuddyStudy on a
 small ARM64 Kubernetes node, such as a Mac mini/MacBook Kubernetes target.
 
-For always-on server usage, prefer the k3s deployment path in `deploy/k3s`.
-Docker Desktop Kubernetes is only suitable for local development and can pause
-or hang its local API server when used as a long-running server runtime.
+Use this directory as the single Kubernetes deployment source. The manifests are
+standard Kubernetes resources and should be applied to the target cluster
+directly. Docker Desktop Kubernetes is only suitable for local development and
+can pause or hang its local API server when used as a long-running server
+runtime.
 
 ## Layout
 
