@@ -67,6 +67,16 @@ Deploy:
 npm run deploy
 ```
 
+Or deploy from GitHub Actions with **Deploy Health Monitor Worker**. That
+workflow only tests and deploys this Worker. It does not perform runtime health
+checks. Runtime checks still run from the Cloudflare Cron Trigger.
+
+Required GitHub Actions secrets for that deployment workflow:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `HEALTH_MONITOR_KV_NAMESPACE_ID`
+
 ## Manual Smoke Check
 
 After deployment, trigger one immediate check without waiting for the cron:

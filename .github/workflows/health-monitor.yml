@@ -1,0 +1,71 @@
+name: Deploy Health Monitor Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: deploy/cloudflare-health-monitor
+
+jobs:
+  deploy:
+    name: Test and Deploy Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HEALTH_MONITOR_KV_NAMESPACE_ID: ${{ secrets.HEALTH_MONITOR_KV_NAMESPACE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID HEALTH_MONITOR_KV_NAMESPACE_ID; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: deploy/cloudflare-health-monitor/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Configure KV namespace
+        run: npm run configure:kv -- "${HEALTH_MONITOR_KV_NAMESPACE_ID}"
+
+      - name: Validate Worker bundle
+        run: npm run check
+
+      - name: Deploy Worker
+        run: npm run deploy
+
+      - name: Summary
+        run: |
+          {
+            echo "## Health Monitor Worker"
+            echo ""
+            echo "- Worker: \`buddystudy-health-monitor\`"
+            echo "- Runtime health checks are performed by Cloudflare Cron, not GitHub Actions."
+            echo "- Health URL is configured in \`deploy/cloudflare-health-monitor/wrangler.jsonc\`."
+          } >> "${GITHUB_STEP_SUMMARY}"
