@@ -166,7 +166,10 @@ class UserStatsServiceTest {
         assertThat(response.days.last().topics).containsExactly("SwiftUI")
         assertThat(response.days.last().bestLevel).isEqualTo(6.0)
         assertThat(response.streakDays).isEqualTo(3)
-        assertThat(response.monthAnswerCount).isGreaterThanOrEqualTo(6)
+        val expectedMonthAnswerCount = userStats.rows
+            .filter { it.statDate.year == today.year && it.statDate.month == today.month }
+            .sumOf { it.responseCount }
+        assertThat(response.monthAnswerCount).isEqualTo(expectedMonthAnswerCount)
         assertThat(userStats.findByUserCalls).isEqualTo(1)
     }
 

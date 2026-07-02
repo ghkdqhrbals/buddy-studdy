@@ -18,6 +18,8 @@ data:
   FLYWAY_LOCATIONS: filesystem:/app/db/migration
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
+  MONITORING_ENVIRONMENT_NAME: production
+  MONITORING_SERVICE_NAME: BuddyStudy backend
   PUSH_STREAM_PREFIX: push-v1
   REACTION_STREAM_COORDINATOR_BASE_URL: http://buddystudy-redis-stream-coordinator:8080
   REACTION_STREAM_COORDINATOR_USERNAME: admin

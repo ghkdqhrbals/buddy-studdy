@@ -7,14 +7,19 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageRes
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
+import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
 @Service
 class ManagedJobExecutionService(
     private val runs: ScheduledJobRunPort,
     private val locks: JobLockPort,
+    private val alerts: ScheduledJobAlertPort,
 ) : ManagedJobExecutionUseCase {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override fun execute(
         job: ManagedJob,
         triggerType: JobTriggerType,
@@ -36,7 +41,17 @@ class ManagedJobExecutionService(
             val summary = job.run()
             runs.finish(run.id, JobRunStatus.SUCCESS, summary, null, elapsedMs(started))
         } catch (error: Exception) {
-            runs.finish(run.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
+            val failed = runs.finish(run.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
+            runCatching { alerts.notifyFailed(failed) }
+                .onFailure { alertError ->
+                    logger.warn(
+                        "scheduled_job_alert_failed jobName={} runId={} error={}",
+                        failed.jobName,
+                        failed.id,
+                        alertError.message,
+                    )
+                }
+            failed
         } finally {
             locks.release(job.name)
         }

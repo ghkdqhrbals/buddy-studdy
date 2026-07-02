@@ -6,6 +6,7 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
+import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import com.buddystudy.backend.scheduler.application.service.ManagedJobExecutionService
 import org.assertj.core.api.Assertions.assertThat
@@ -15,7 +16,8 @@ import java.time.Instant
 class ManagedJobExecutionServiceTest {
     private val runs = FakeScheduledJobRunPort()
     private val locks = FakeJobLockPort()
-    private val service = ManagedJobExecutionService(runs, locks)
+    private val alerts = FakeScheduledJobAlertPort()
+    private val service = ManagedJobExecutionService(runs, locks, alerts)
 
     @Test
     fun `execute records successful job run`() {
@@ -34,6 +36,19 @@ class ManagedJobExecutionServiceTest {
         assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
         assertThat(result.errorMessage).contains("boom")
         assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
+        assertThat(alerts.failedRuns).containsExactly(result)
+    }
+
+    @Test
+    fun `execute records failed job run even when alert delivery fails`() {
+        alerts.error = IllegalStateException("slack unavailable")
+
+        val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
+
+        assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
+        assertThat(result.errorMessage).contains("boom")
+        assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
+        assertThat(locks.released).containsExactly("user-stats-refresh")
     }
 
     @Test
@@ -70,8 +85,21 @@ class ManagedJobExecutionServiceTest {
     }
 
     private class FakeJobLockPort : JobLockPort {
+        val released = mutableListOf<String>()
         override fun tryAcquire(jobName: String): Boolean = true
-        override fun release(jobName: String) = Unit
+        override fun release(jobName: String) {
+            released += jobName
+        }
+    }
+
+    private class FakeScheduledJobAlertPort : ScheduledJobAlertPort {
+        val failedRuns = mutableListOf<ScheduledJobRun>()
+        var error: RuntimeException? = null
+
+        override fun notifyFailed(run: ScheduledJobRun) {
+            error?.let { throw it }
+            failedRuns += run
+        }
     }
 
     private class FakeScheduledJobRunPort : ScheduledJobRunPort {

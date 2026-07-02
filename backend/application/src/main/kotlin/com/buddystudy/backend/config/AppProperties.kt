@@ -16,6 +16,7 @@ data class BuddyStudyProperties(
     var openapi: OpenApi = OpenApi(),
     var admin: Admin = Admin(),
     var analytics: Analytics = Analytics(),
+    var monitoring: Monitoring = Monitoring(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -57,6 +58,11 @@ data class BuddyStudyProperties(
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
     data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)
+    data class Monitoring(
+        var slackWebhookUrl: String = "",
+        var environmentName: String = "production",
+        var serviceName: String = "BuddyStudy backend",
+    )
     data class Analytics(
         var enabled: Boolean = true,
         var recentDays: Long = 2,

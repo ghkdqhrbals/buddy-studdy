@@ -61,6 +61,7 @@ secrets would overwrite live cluster credentials. Create or patch
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
+- `SLACK_WEBHOOK_URL` when scheduled job failure alerts are required
 
 ## Redis Stream Coordinator
 

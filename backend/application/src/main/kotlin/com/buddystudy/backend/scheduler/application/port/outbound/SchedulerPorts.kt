@@ -12,6 +12,10 @@ interface ScheduledJobRunPort {
     fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse
 }
 
+interface ScheduledJobAlertPort {
+    fun notifyFailed(run: ScheduledJobRun)
+}
+
 interface JobLockPort {
     fun tryAcquire(jobName: String): Boolean
     fun release(jobName: String)

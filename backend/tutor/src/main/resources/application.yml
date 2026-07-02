@@ -99,6 +99,10 @@ buddystudy:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:admin}
     token-hours: ${ADMIN_TOKEN_HOURS:12}
+  monitoring:
+    slack-webhook-url: ${SLACK_WEBHOOK_URL:}
+    environment-name: ${MONITORING_ENVIRONMENT_NAME:${SPRING_PROFILES_ACTIVE:production}}
+    service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}
   analytics:
     enabled: ${ADMIN_ANALYTICS_ENABLED:true}
     recent-days: ${ADMIN_ANALYTICS_RECENT_DAYS:2}
