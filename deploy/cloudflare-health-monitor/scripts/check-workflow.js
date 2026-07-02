@@ -23,7 +23,7 @@ export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow"
   if (localRuntimeHealthProbePattern.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run container health probes.`);
   }
-  if (/npm\s+run\s+smoke/.test(text)) {
+  if (/npm\s+run\s+smoke/.test(text) || /smoke-check\.js/.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run health monitor smoke checks.`);
   }
   if (/HEALTH_MONITOR_URL/.test(text)) {
@@ -42,7 +42,7 @@ export function validateWorkflowText(text) {
   if (/^\s*schedule\s*:/m.test(text)) {
     errors.push("Health monitor workflow must not use GitHub Actions schedule for runtime health checks.");
   }
-  if (/npm\s+run\s+smoke/.test(text)) {
+  if (/npm\s+run\s+smoke/.test(text) || /smoke-check\.js/.test(text)) {
     errors.push("Health monitor workflow must not run smoke health checks in GitHub Actions.");
   }
   if (/HEALTH_MONITOR_URL/.test(text)) {

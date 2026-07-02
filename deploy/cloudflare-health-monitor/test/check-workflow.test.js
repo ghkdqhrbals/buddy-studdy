@@ -133,6 +133,24 @@ jobs:
   assert.match(errors, /must not configure health monitor check URLs/);
 });
 
+test("all GitHub Actions workflows reject direct health monitor smoke script execution", () => {
+  const workflow = `
+name: Health Smoke
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    steps:
+      - name: Smoke check
+        run: node deploy/cloudflare-health-monitor/scripts/smoke-check.js https://worker.example token
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "health-smoke.yml").join("\n");
+
+  assert.match(errors, /health-smoke\.yml/);
+  assert.match(errors, /must not run health monitor smoke checks/);
+});
+
 test("deploy repo backend template does not run backend health probes in Actions", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 
