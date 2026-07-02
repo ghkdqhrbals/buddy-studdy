@@ -51,4 +51,38 @@ class MonitoringConfigurationGuardTest {
                 assertThat(context).hasNotFailed()
             }
     }
+
+    @Test
+    fun `prod scheduler fails fast when scheduler readiness is disabled`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-readiness-enabled=false",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when no scheduler jobs are monitored`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-monitored-jobs=",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "At least one scheduler job must be monitored in prod when scheduler is enabled.",
+                )
+            }
+    }
 }

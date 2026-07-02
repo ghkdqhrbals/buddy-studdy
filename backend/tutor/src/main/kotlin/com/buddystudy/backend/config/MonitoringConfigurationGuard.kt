@@ -16,6 +16,12 @@ class MonitoringConfigurationGuard(
         if (properties.monitoring.slackWebhookUrl.isBlank()) {
             error("SLACK_WEBHOOK_URL is required when prod scheduler monitoring is enabled.")
         }
+        if (!properties.monitoring.schedulerReadinessEnabled) {
+            error("Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.")
+        }
+        if (properties.monitoring.schedulerMonitoredJobs.none { it.isNotBlank() }) {
+            error("At least one scheduler job must be monitored in prod when scheduler is enabled.")
+        }
     }
 
     private fun isProdProfile(): Boolean =
