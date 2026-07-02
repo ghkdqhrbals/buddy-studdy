@@ -70,8 +70,8 @@ export function validateConfig(config) {
   }
   if (!positiveInt(config.vars?.SLACK_TIMEOUT_MS)) {
     errors.push("SLACK_TIMEOUT_MS must be a positive integer.");
-  } else if (!boundedInt(config.vars.SLACK_TIMEOUT_MS, 1_000, 25_000)) {
-    errors.push("SLACK_TIMEOUT_MS must be between 1000 and 25000.");
+  } else if (!boundedInt(config.vars.SLACK_TIMEOUT_MS, 1_000, 15_000)) {
+    errors.push("SLACK_TIMEOUT_MS must be between 1000 and 15000.");
   }
 
   return errors;

@@ -71,7 +71,14 @@ test("health monitor config rejects timeout values that are too slow for Worker 
   const errors = validateConfig(config).join("\n");
 
   assert.match(errors, /HEALTHCHECK_TIMEOUT_MS must be between 1000 and 25000/);
-  assert.match(errors, /SLACK_TIMEOUT_MS must be between 1000 and 25000/);
+  assert.match(errors, /SLACK_TIMEOUT_MS must be between 1000 and 15000/);
+});
+
+test("health monitor config keeps Slack timeout limit aligned with runtime clamp", () => {
+  const config = validConfig();
+  config.vars.SLACK_TIMEOUT_MS = "20000";
+
+  assert.match(validateConfig(config).join("\n"), /SLACK_TIMEOUT_MS must be between 1000 and 15000/);
 });
 
 test("health monitor config requires a public worker entrypoint", () => {
