@@ -80,6 +80,7 @@ class ReadinessChecker(
                 select
                     j.job_name,
                     j.enabled,
+                    j.timeout_seconds,
                     max(r.started_at) as latest_started_at,
                     max(case when r.status = 'SUCCESS' then r.started_at end) as last_successful_started_at,
                     (
@@ -106,6 +107,7 @@ class ReadinessChecker(
                 SchedulerJobReadinessRow(
                     jobName = rs.getString("job_name"),
                     enabled = rs.getBoolean("enabled"),
+                    timeoutSeconds = rs.getInt("timeout_seconds").coerceAtLeast(1),
                     latestStartedAt = rs.getTimestamp("latest_started_at")?.toInstant(),
                     lastSuccessfulStartedAt = rs.getTimestamp("last_successful_started_at")?.toInstant(),
                     latestStatus = rs.getString("latest_status"),
@@ -122,6 +124,22 @@ class ReadinessChecker(
                         "latestStartedAt" to row.latestStartedAt?.toString(),
                         "latestStatus" to row.latestStatus,
                         "latestErrorMessage" to row.latestErrorMessage,
+                    )
+                }
+            val stuckJobDetails = rows.values
+                .filter { row ->
+                    row.enabled &&
+                        row.latestStatus == "RUNNING" &&
+                        row.latestStartedAt != null &&
+                        Duration.between(row.latestStartedAt, now).seconds > row.timeoutSeconds
+                }
+                .map { row ->
+                    mapOf(
+                        "jobName" to row.jobName,
+                        "latestStartedAt" to row.latestStartedAt?.toString(),
+                        "latestStatus" to row.latestStatus,
+                        "timeoutSeconds" to row.timeoutSeconds,
+                        "runningForSeconds" to Duration.between(row.latestStartedAt, now).seconds.coerceAtLeast(0),
                     )
                 }
             val staleJobDetails = rows.values
@@ -163,6 +181,11 @@ class ReadinessChecker(
                     message = "Failed scheduler jobs: ${failedJobDetails.joinToString("; ") { "${it["jobName"]} error=${it["latestErrorMessage"] ?: "unknown"}" }}",
                     details = schedulerDetails("failedJobs" to failedJobDetails),
                 )
+                stuckJobDetails.isNotEmpty() -> ReadinessCheckResponse(
+                    ok = false,
+                    message = "Stuck scheduler jobs: ${stuckJobDetails.joinToString("; ") { "${it["jobName"]} runningFor=${it["runningForSeconds"]}s timeout=${it["timeoutSeconds"]}s" }}",
+                    details = schedulerDetails("stuckJobs" to stuckJobDetails),
+                )
                 staleJobDetails.isNotEmpty() -> ReadinessCheckResponse(
                     ok = false,
                     message = "Stale scheduler jobs: ${staleJobMessages.joinToString("; ")}",
@@ -194,6 +217,7 @@ class ReadinessChecker(
     private data class SchedulerJobReadinessRow(
         val jobName: String,
         val enabled: Boolean,
+        val timeoutSeconds: Int,
         val latestStartedAt: Instant?,
         val lastSuccessfulStartedAt: Instant?,
         val latestStatus: String?,

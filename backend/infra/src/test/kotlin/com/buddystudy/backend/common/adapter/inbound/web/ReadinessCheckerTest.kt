@@ -194,6 +194,36 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.details?.get("failedJobs").toString()).contains("OpenAI timeout")
     }
 
+    @Test
+    fun `readiness fails when latest scheduler run is stuck running past timeout`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(1_200), seedJobs = true)
+        JdbcTemplate(dataSource).update(
+            """
+            insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by)
+            values (?, 'SCHEDULED', 'RUNNING', ?, 'system')
+            """.trimIndent(),
+            "question-schedule",
+            Timestamp.from(Instant.now().minusSeconds(600)),
+        )
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                    schedulerMonitoredJobs = listOf("question-schedule"),
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Stuck scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("stuckJobs").toString()).contains("question-schedule")
+    }
+
     private fun h2DataSource(): DataSource =
         h2DataSource(lastStartedAt = Instant.now(), seedJobs = true)
 
@@ -210,7 +240,8 @@ class ReadinessCheckerTest {
                 job_name varchar(120) primary key,
                 enabled boolean not null default true,
                 schedule_type varchar(40) not null,
-                schedule_value varchar(120) not null
+                schedule_value varchar(120) not null,
+                timeout_seconds integer not null default 300
             )
             """.trimIndent(),
         )

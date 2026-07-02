@@ -270,6 +270,19 @@ function summarizeCheckDetails(check) {
       .join(",");
     if (failedJobs) parts.push(`failedJobs=${failedJobs}`);
   }
+  if (Array.isArray(details.stuckJobs) && details.stuckJobs.length > 0) {
+    const stuckJobs = details.stuckJobs
+      .map((job) => {
+        if (!job || typeof job !== "object") return "";
+        const name = job.jobName || "unknown";
+        const runningFor = Number.isFinite(job.runningForSeconds) ? ` runningFor=${job.runningForSeconds}s` : "";
+        const timeout = Number.isFinite(job.timeoutSeconds) ? ` timeout=${job.timeoutSeconds}s` : "";
+        return `${name}${runningFor}${timeout}`;
+      })
+      .filter(Boolean)
+      .join(",");
+    if (stuckJobs) parts.push(`stuckJobs=${stuckJobs}`);
+  }
   return parts.join(", ");
 }
 

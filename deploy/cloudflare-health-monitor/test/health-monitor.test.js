@@ -180,6 +180,28 @@ test("summarizes failed readiness checks from JSON body", () => {
   );
 });
 
+test("summarizes stuck scheduler jobs from readiness JSON body", () => {
+  const summary = internals.summarizeHealthJson({
+    ok: false,
+    checks: {
+      scheduler: {
+        ok: false,
+        message: "Stuck scheduler jobs: question-schedule",
+        details: {
+          stuckJobs: [
+            { jobName: "question-schedule", runningForSeconds: 600, timeoutSeconds: 300 },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    summary,
+    "scheduler: Stuck scheduler jobs: question-schedule [stuckJobs=question-schedule runningFor=600s timeout=300s]",
+  );
+});
+
 test("checkHealth captures non ok readiness body detail", async () => {
   const environment = manualEnv({
     healthResponse: new Response(
