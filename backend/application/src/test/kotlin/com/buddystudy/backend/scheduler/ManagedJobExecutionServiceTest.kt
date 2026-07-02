@@ -72,6 +72,17 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
+    fun `execute keeps successful job result when lock release fails`() {
+        locks.releaseError = IllegalStateException("unlock failed")
+
+        val result = service.execute(FakeJob("user-stats-refresh") { "done" }, JobTriggerType.SCHEDULED)
+
+        assertThat(result.status).isEqualTo(JobRunStatus.SUCCESS)
+        assertThat(result.summary).isEqualTo("done")
+        assertThat(locks.released).containsExactly("user-stats-refresh")
+    }
+
+    @Test
     fun `execute skips disabled job without running work`() {
         runs.enabled["user-stats-refresh"] = false
         var executed = false
@@ -180,9 +191,11 @@ class ManagedJobExecutionServiceTest {
 
     private class FakeJobLockPort : JobLockPort {
         val released = mutableListOf<String>()
+        var releaseError: RuntimeException? = null
         override fun tryAcquire(jobName: String): Boolean = true
         override fun release(jobName: String) {
             released += jobName
+            releaseError?.let { throw it }
         }
     }
 

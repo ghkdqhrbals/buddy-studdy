@@ -62,7 +62,7 @@ class ManagedJobExecutionService(
                 }
             failed
         } finally {
-            locks.release(job.name)
+            releaseLock(job.name)
         }
     }
 
@@ -111,4 +111,15 @@ class ManagedJobExecutionService(
 
     private fun elapsedMs(started: Long): Long =
         ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0)
+
+    private fun releaseLock(jobName: String) {
+        runCatching { locks.release(jobName) }
+            .onFailure { error ->
+                logger.warn(
+                    "scheduled_job_lock_release_failed jobName={} error={}",
+                    jobName,
+                    error.message,
+                )
+            }
+    }
 }
