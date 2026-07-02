@@ -94,7 +94,13 @@ Example readiness response:
       "ok": false,
       "message": "Stuck scheduler jobs: question-schedule runningFor=600s timeout=300s",
       "details": {
-        "monitoredJobs": ["question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent"],
+        "monitoredJobs": [
+          "question-schedule",
+          "question-push-outbox-dispatch",
+          "user-stats-refresh",
+          "admin-analytics-recent",
+          "admin-analytics-correction"
+        ],
         "thresholdSeconds": 900,
         "startupGraceSeconds": 900,
         "stuckJobs": [
