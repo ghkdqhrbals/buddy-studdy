@@ -166,7 +166,7 @@ test("repository workflow files do not run backend health probes in Actions", ()
   assert.deepEqual(errors, []);
 });
 
-test("workflow scan allows non-backend dependency health endpoints", () => {
+test("workflow scan rejects container health probes in Actions", () => {
   const workflow = `
 name: Deploy Monitoring
 on:
@@ -178,7 +178,7 @@ jobs:
         run: docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health
 `;
 
-  assert.deepEqual(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml"), []);
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
 });
 
 test("kubernetes backend probes use dependency readiness while external monitor uses scheduler readiness", () => {

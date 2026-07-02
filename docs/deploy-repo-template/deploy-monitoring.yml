@@ -209,16 +209,4 @@ jobs:
           docker network connect buddystudy-net rsc-grafana >/dev/null 2>&1 || true
           docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
 
-          for attempt in $(seq 1 30); do
-            if docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health >/dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "Grafana did not become healthy." >&2
-              docker logs rsc-grafana || true
-              exit 1
-            fi
-            sleep 2
-          done
-
           echo "Monitoring stack is running. Open https://${MONITOR_DOMAIN}/"
