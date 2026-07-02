@@ -34,6 +34,13 @@ test("health monitor config rejects lightweight health endpoints", () => {
   assert.match(validateConfig(config).join("\n"), /readiness endpoint/);
 });
 
+test("health monitor config rejects slow outage alert thresholds", () => {
+  const config = validConfig();
+  config.vars.FAILURE_THRESHOLD = "3";
+
+  assert.match(validateConfig(config).join("\n"), /FAILURE_THRESHOLD must be 1 or 2/);
+});
+
 function validConfig() {
   return {
     name: "buddystudy-health-monitor",

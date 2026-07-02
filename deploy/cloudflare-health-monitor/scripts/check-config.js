@@ -38,6 +38,8 @@ export function validateConfig(config) {
   }
   if (!positiveInt(config.vars?.FAILURE_THRESHOLD)) {
     errors.push("FAILURE_THRESHOLD must be a positive integer.");
+  } else if (Number(config.vars.FAILURE_THRESHOLD) > 2) {
+    errors.push("FAILURE_THRESHOLD must be 1 or 2 for fast outage alerts.");
   }
   if (!positiveInt(config.vars?.ALERT_REPEAT_SECONDS)) {
     errors.push("ALERT_REPEAT_SECONDS must be a positive integer.");
