@@ -612,6 +612,8 @@ test("scheduled check persists configuration error state when kv is available", 
   const storedState = JSON.parse(environment.stateWrites[0].value);
   assert.equal(storedState.status, "config_error");
   assert.match(storedState.error, /SLACK_WEBHOOK_URL/);
+  assert.equal(storedState.alertSent, false);
+  assert.equal(storedState.slackAlertError, null);
 });
 
 test("manual check token helper rejects absent and mismatched tokens", () => {

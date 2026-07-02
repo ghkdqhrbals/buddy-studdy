@@ -123,6 +123,8 @@ async function runHealthCheck(env, scheduledTime) {
       detail: null,
       alertType: null,
       shouldAlert: false,
+      alertSent: false,
+      slackAlertError: null,
     };
     console.error(
       JSON.stringify({
