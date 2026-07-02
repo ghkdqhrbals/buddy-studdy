@@ -664,8 +664,25 @@ test("root returns service-unavailable when no monitor state has been written ye
   const body = await response.json();
 
   assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(body.ok, false);
   assert.equal(body.state, null);
+});
+
+test("manual check response is not cached", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/check", {
+      method: "POST",
+      headers: { Authorization: "Bearer manual-secret" },
+    }),
+    manualEnv({
+      token: "manual-secret",
+      onHealth: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
 });
 
 test("root returns service-unavailable when stored backend state is down", async () => {

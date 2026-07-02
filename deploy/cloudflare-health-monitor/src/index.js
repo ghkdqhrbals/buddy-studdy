@@ -333,6 +333,7 @@ function json(body, init = {}) {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "Cache-Control": "no-store",
       ...(init.headers || {}),
     },
   });
