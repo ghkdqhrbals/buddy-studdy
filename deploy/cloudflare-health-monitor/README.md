@@ -34,6 +34,18 @@ Set Slack secret:
 npx wrangler secret put SLACK_WEBHOOK_URL
 ```
 
+Run local tests:
+
+```sh
+npm test
+```
+
+Validate config and Cloudflare Worker bundle before deploying:
+
+```sh
+npm run check
+```
+
 Deploy:
 
 ```sh

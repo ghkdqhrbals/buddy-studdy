@@ -128,13 +128,25 @@ async function sendSlackAlert(env, state) {
     return;
   }
 
+  const payload = buildSlackPayload(env, state);
+  const response = await fetch(env.SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`Slack webhook failed with HTTP ${response.status}`);
+  }
+}
+
+function buildSlackPayload(env, state) {
   const serviceName = env.SERVICE_NAME || "BuddyStudy backend";
   const environmentName = env.ENVIRONMENT_NAME || "production";
   const isRecovery = state.alertType === "recovered";
   const title = isRecovery ? `${serviceName} recovered` : `${serviceName} is down`;
   const emoji = isRecovery ? ":white_check_mark:" : ":rotating_light:";
 
-  const payload = {
+  return {
     text: `${emoji} ${title}`,
     blocks: [
       {
@@ -154,17 +166,9 @@ async function sendSlackAlert(env, state) {
       },
     ],
   };
-
-  const response = await fetch(env.SLACK_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`Slack webhook failed with HTTP ${response.status}`);
-  }
 }
 
 export const internals = {
+  buildSlackPayload,
   nextState,
 };
