@@ -179,6 +179,17 @@ jobs:
   assert.deepEqual(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml"), []);
 });
 
+test("kubernetes backend probes use dependency readiness while external monitor uses scheduler readiness", () => {
+  const backendManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/backend/backend.yaml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+  const workerConfig = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/wrangler.jsonc"), "utf8");
+
+  assert.match(backendManifest, /path:\s*\/api\/v1\/health\/dependencies/);
+  assert.doesNotMatch(backendManifest, /path:\s*\/api\/v1\/health\/readiness/);
+  assert.match(combinedManifest, /path:\s*\/api\/v1\/health\/dependencies/);
+  assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
+});
+
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
