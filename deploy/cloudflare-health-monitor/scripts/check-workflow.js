@@ -30,6 +30,16 @@ export function validateWorkflowText(text) {
   if (/if:\s*env\.HEALTH_MONITOR_SLACK_WEBHOOK_URL\s*!=\s*''/m.test(text) || /if:\s*env\.MANUAL_CHECK_TOKEN\s*!=\s*''/m.test(text)) {
     errors.push("Slack alert secrets must be required, not optional, for health monitor deployment.");
   }
+  const configureKvIndex = text.indexOf("npm run configure:kv");
+  const validateBundleIndex = text.indexOf("npm run check");
+  const syncSlackSecretIndex = text.indexOf("wrangler secret put SLACK_WEBHOOK_URL");
+  const deployIndex = text.indexOf("npm run deploy");
+  if (configureKvIndex !== -1 && validateBundleIndex !== -1 && configureKvIndex > validateBundleIndex) {
+    errors.push("Health monitor workflow must configure KV namespace before validating the Worker bundle.");
+  }
+  if (syncSlackSecretIndex !== -1 && deployIndex !== -1 && syncSlackSecretIndex > deployIndex) {
+    errors.push("Health monitor workflow must sync Worker secrets before deploying.");
+  }
 
   return errors;
 }

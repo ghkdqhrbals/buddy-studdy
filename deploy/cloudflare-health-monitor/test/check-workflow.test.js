@@ -70,6 +70,46 @@ jobs:
   assert.match(validateWorkflowText(workflow).join("\n"), /must not depend on HEALTH_MONITOR_URL/);
 });
 
+test("health monitor workflow rejects deploying before syncing Worker secrets", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Deploy Worker
+        run: npm run deploy
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must sync Worker secrets before deploying/);
+});
+
+test("health monitor workflow rejects validating bundle before configuring KV namespace", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Validate Worker bundle
+        run: npm run check
+      - name: Configure KV namespace
+        run: npm run configure:kv -- "$HEALTH_MONITOR_KV_NAMESPACE_ID"
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must configure KV namespace before validating/);
+});
+
 test("health monitor workflow rejects deployments without Worker Slack secret sync", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
