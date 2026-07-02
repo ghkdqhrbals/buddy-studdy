@@ -113,6 +113,7 @@ async function runHealthCheck(env, scheduledTime) {
         missingConfig: config.missing,
       }),
     );
+    await writeStateIfAvailable(env, state);
     return state;
   }
   const previous = await readState(env);
@@ -334,6 +335,20 @@ async function readState(env) {
     return JSON.parse(raw);
   } catch (_error) {
     return null;
+  }
+}
+
+async function writeStateIfAvailable(env, state) {
+  if (!env.HEALTH_MONITOR_STATE || typeof env.HEALTH_MONITOR_STATE.put !== "function") return;
+  try {
+    await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        message: "health_monitor_state_write_failed",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 }
 

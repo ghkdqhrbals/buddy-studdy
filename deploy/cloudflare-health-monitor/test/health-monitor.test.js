@@ -317,6 +317,21 @@ test("scheduled check catches unexpected monitor failures", async () => {
   await assert.doesNotReject(waitUntilPromises[0]);
 });
 
+test("scheduled check persists configuration error state when kv is available", async () => {
+  const environment = manualEnv();
+  environment.SLACK_WEBHOOK_URL = "";
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+  await assert.doesNotReject(waitUntilPromises[0]);
+
+  assert.equal(environment.stateWrites.length, 1);
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+  assert.equal(storedState.status, "config_error");
+  assert.match(storedState.error, /SLACK_WEBHOOK_URL/);
+});
+
 test("manual check token helper rejects absent and mismatched tokens", () => {
   assert.equal(internals.isAuthorizedManualCheck(new Request("https://monitor.example.com/check"), env), false);
   assert.equal(
