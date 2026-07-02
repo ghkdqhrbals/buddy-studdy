@@ -146,6 +146,12 @@ test("deploy repo backend template wires scheduler Slack webhook into backend en
   assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
 });
 
+test("deploy repo backend template fails fast when scheduler Slack webhook is missing", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+
+  assert.match(template, /Missing GitHub Actions secret: SLACK_WEBHOOK_URL/);
+});
+
 test("repository workflow files do not run backend health probes in Actions", () => {
   const workflowDir = path.join(repoRoot, ".github", "workflows");
   const deployTemplateDir = path.join(repoRoot, "docs", "deploy-repo-template");
