@@ -141,7 +141,9 @@ external monitors and runbooks. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS`. Backend scheduler failure Slack
 delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
-not hold scheduler failure handling indefinitely.
+not hold scheduler failure handling indefinitely. In the `prod` profile,
+`SLACK_WEBHOOK_URL` is required when `buddystudy.scheduler.enabled=true`; the
+application fails fast instead of silently disabling scheduler failure alerts.
 
 Kubernetes readiness probes should use `/api/v1/health/dependencies`.
 Dependency readiness checks database and Redis only, so a stale scheduler sends

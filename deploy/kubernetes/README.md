@@ -61,7 +61,11 @@ secrets would overwrite live cluster credentials. Create or patch
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
-- `SLACK_WEBHOOK_URL` when scheduled job failure alerts are required
+- `SLACK_WEBHOOK_URL` for production scheduler failure alerts
+
+Production backend pods fail fast when `SLACK_WEBHOOK_URL` is empty and the
+scheduler is enabled. This prevents scheduler failure alerts from being
+silently disabled.
 
 ## Redis Stream Coordinator
 
