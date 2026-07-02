@@ -34,6 +34,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate no runtime health checks in Actions
+        run: node deploy/cloudflare-health-monitor/scripts/check-workflow.js
+
       - name: Resolve image tag
         id: resolve
         run: |
