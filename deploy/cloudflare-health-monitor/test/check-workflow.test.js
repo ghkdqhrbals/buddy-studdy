@@ -14,8 +14,6 @@ jobs:
         run: |
           printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
           printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
-      - name: Smoke check deployed Worker
-        run: npm run smoke
 `;
 
   assert.deepEqual(validateWorkflowText(workflow), []);
@@ -34,7 +32,7 @@ jobs: {}
   assert.match(validateWorkflowText(workflow).join("\n"), /must not use GitHub Actions schedule/);
 });
 
-test("health monitor workflow rejects deployments without a post-deploy smoke check", () => {
+test("health monitor workflow rejects GitHub Actions smoke health checks", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
 on:
@@ -42,11 +40,15 @@ on:
 jobs:
   deploy:
     steps:
-      - name: Deploy Worker
-        run: npm run deploy
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+      - name: Smoke check deployed Worker
+        run: npm run smoke
 `;
 
-  assert.match(validateWorkflowText(workflow).join("\n"), /post-deploy smoke check/);
+  assert.match(validateWorkflowText(workflow).join("\n"), /must not run smoke health checks/);
 });
 
 test("health monitor workflow rejects deployments without Worker Slack secret sync", () => {
@@ -62,4 +64,22 @@ jobs:
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /Worker Slack secret sync/);
+});
+
+test("health monitor workflow rejects optional Slack alert deployment", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Sync Worker secrets
+        if: env.HEALTH_MONITOR_SLACK_WEBHOOK_URL != '' && env.MANUAL_CHECK_TOKEN != ''
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /Slack alert secrets must be required/);
 });

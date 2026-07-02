@@ -15,14 +15,17 @@ export function validateWorkflowText(text) {
   if (/^\s*schedule\s*:/m.test(text)) {
     errors.push("Health monitor workflow must not use GitHub Actions schedule for runtime health checks.");
   }
-  if (!/npm\s+run\s+smoke/.test(text)) {
-    errors.push("Health monitor workflow must include a post-deploy smoke check.");
+  if (/npm\s+run\s+smoke/.test(text)) {
+    errors.push("Health monitor workflow must not run smoke health checks in GitHub Actions.");
   }
   if (!/wrangler\s+secret\s+put\s+SLACK_WEBHOOK_URL/.test(text)) {
     errors.push("Health monitor workflow must include Worker Slack secret sync.");
   }
   if (!/wrangler\s+secret\s+put\s+MANUAL_CHECK_TOKEN/.test(text)) {
     errors.push("Health monitor workflow must include Worker manual check token sync.");
+  }
+  if (/if:\s*env\.HEALTH_MONITOR_SLACK_WEBHOOK_URL\s*!=\s*''/m.test(text) || /if:\s*env\.MANUAL_CHECK_TOKEN\s*!=\s*''/m.test(text)) {
+    errors.push("Slack alert secrets must be required, not optional, for health monitor deployment.");
   }
 
   return errors;
