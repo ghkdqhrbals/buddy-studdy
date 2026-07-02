@@ -65,7 +65,7 @@ async function runHealthCheckSafely(env, scheduledTime) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
-    const state = {
+    let state = {
       status: "monitor_error",
       checkedAt,
       lastUpAt: null,
@@ -80,6 +80,22 @@ async function runHealthCheckSafely(env, scheduledTime) {
       alertSent: false,
       slackAlertError: null,
     };
+    if (env.SLACK_WEBHOOK_URL) {
+      try {
+        await sendSlackAlert(env, { ...state, alertType: "monitor_error" });
+        state = { ...state, alertSent: true, slackAlertError: null };
+      } catch (slackError) {
+        const slackAlertError = slackError instanceof Error ? slackError.message : String(slackError);
+        state = { ...state, alertSent: false, slackAlertError };
+        console.error(
+          JSON.stringify({
+            message: "health_monitor_error_slack_alert_failed",
+            healthUrl: env.HEALTHCHECK_URL,
+            error: slackAlertError,
+          }),
+        );
+      }
+    }
     console.error(
       JSON.stringify({
         message: "health_monitor_execution_failed",
@@ -426,8 +442,13 @@ function buildSlackPayload(env, state) {
   const serviceName = env.SERVICE_NAME || "BuddyStudy backend";
   const environmentName = env.ENVIRONMENT_NAME || "production";
   const isRecovery = state.alertType === "recovered";
-  const title = isRecovery ? `${serviceName} recovered` : `${serviceName} is down`;
-  const emoji = isRecovery ? ":white_check_mark:" : ":rotating_light:";
+  const isMonitorError = state.alertType === "monitor_error";
+  const title = isRecovery
+    ? `${serviceName} recovered`
+    : isMonitorError
+      ? `${serviceName} health monitor error`
+      : `${serviceName} is down`;
+  const emoji = isRecovery ? ":white_check_mark:" : isMonitorError ? ":warning:" : ":rotating_light:";
   const outageDuration = state.lastDownAt ? formatElapsed(state.lastDownAt, state.checkedAt) : "unknown";
 
   return {

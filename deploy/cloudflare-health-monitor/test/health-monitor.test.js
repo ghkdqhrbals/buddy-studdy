@@ -391,15 +391,24 @@ test("manual check keeps alert retryable when Slack delivery times out", async (
   assert.equal(storedState.slackAlertError, "Slack alert timed out after 1000ms");
 });
 
-test("manual check reports unexpected monitor failures as json", async () => {
-  const environment = manualEnv({ stateGetError: new Error("kv unavailable") });
+test("manual check reports unexpected monitor failures as json and alerts slack", async () => {
+  const slackRequests = [];
+  const environment = manualEnv({
+    stateGetError: new Error("kv unavailable"),
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
 
-  const response = await worker.fetch(
-    new Request("https://monitor.example.com/check", {
-      method: "POST",
-      headers: { Authorization: "Bearer manual-secret" },
-    }),
-    environment,
+  const response = await withManualEnv(environment, () =>
+    worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      environment,
+    ),
   );
   const body = await response.json();
 
@@ -407,17 +416,33 @@ test("manual check reports unexpected monitor failures as json", async () => {
   assert.equal(body.ok, false);
   assert.equal(body.error, "Health monitor execution failed.");
   assert.match(body.message, /kv unavailable/);
+  assert.equal(body.state.alertSent, true);
+  assert.equal(slackRequests.length, 1);
+  assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
 test("scheduled check catches unexpected monitor failures", async () => {
-  const environment = manualEnv({ statePutError: new Error("kv write failed") });
+  const slackRequests = [];
+  const environment = manualEnv({
+    statePutError: new Error("kv write failed"),
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
   const waitUntilPromises = [];
   const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
 
-  await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+  const result = await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+    assert.equal(waitUntilPromises.length, 1);
+    return waitUntilPromises[0];
+  });
 
-  assert.equal(waitUntilPromises.length, 1);
-  await assert.doesNotReject(waitUntilPromises[0]);
+  assert.equal(result.ok, false);
+  assert.equal(result.state.alertSent, true);
+  assert.equal(slackRequests.length, 1);
+  assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
 test("scheduled check persists configuration error state when kv is available", async () => {
