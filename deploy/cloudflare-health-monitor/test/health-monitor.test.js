@@ -125,11 +125,23 @@ test("summarizes failed readiness checks from JSON body", () => {
     checks: {
       database: { ok: true },
       redis: { ok: false, message: "Redis ping failed" },
-      scheduler: { ok: false, message: "Stale scheduler jobs: question-schedule" },
+      scheduler: {
+        ok: false,
+        message: "Stale scheduler jobs: question-schedule",
+        details: {
+          thresholdSeconds: 900,
+          staleJobs: [
+            { jobName: "question-schedule", lastStartedAt: "2026-07-03T04:00:00Z", staleForSeconds: 1800 },
+          ],
+        },
+      },
     },
   });
 
-  assert.equal(summary, "redis: Redis ping failed; scheduler: Stale scheduler jobs: question-schedule");
+  assert.equal(
+    summary,
+    "redis: Redis ping failed; scheduler: Stale scheduler jobs: question-schedule [threshold=900s, staleJobs=question-schedule staleFor=1800s]",
+  );
 });
 
 test("checkHealth captures non ok readiness body detail", async () => {

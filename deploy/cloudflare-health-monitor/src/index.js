@@ -158,10 +158,38 @@ function summarizeHealthJson(body) {
     .filter(([, value]) => value && value.ok === false)
     .map(([name, value]) => {
       const message = typeof value.message === "string" && value.message.trim() ? `: ${value.message.trim()}` : "";
-      return `${name}${message}`;
+      const details = summarizeCheckDetails(value.details);
+      return `${name}${message}${details ? ` [${details}]` : ""}`;
     });
   if (failed.length === 0) return truncate(JSON.stringify(body), 900);
   return truncate(failed.join("; "), 900);
+}
+
+function summarizeCheckDetails(details) {
+  if (!details || typeof details !== "object") return "";
+  const parts = [];
+  if (Array.isArray(details.missingJobs) && details.missingJobs.length > 0) {
+    parts.push(`missingJobs=${details.missingJobs.join(",")}`);
+  }
+  if (Number.isFinite(details.thresholdSeconds)) {
+    parts.push(`threshold=${details.thresholdSeconds}s`);
+  }
+  if (Number.isFinite(details.startupGraceSeconds)) {
+    parts.push(`startupGrace=${details.startupGraceSeconds}s`);
+  }
+  if (Array.isArray(details.staleJobs) && details.staleJobs.length > 0) {
+    const staleJobs = details.staleJobs
+      .map((job) => {
+        if (!job || typeof job !== "object") return "";
+        const name = job.jobName || "unknown";
+        const staleFor = Number.isFinite(job.staleForSeconds) ? ` staleFor=${job.staleForSeconds}s` : "";
+        return `${name}${staleFor}`;
+      })
+      .filter(Boolean)
+      .join(",");
+    if (staleJobs) parts.push(`staleJobs=${staleJobs}`);
+  }
+  return parts.join(", ");
 }
 
 function truncate(value, maxLength) {
