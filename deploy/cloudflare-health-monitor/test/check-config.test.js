@@ -53,10 +53,18 @@ test("health monitor config rejects slow outage alert thresholds", () => {
   assert.match(validateConfig(config).join("\n"), /FAILURE_THRESHOLD must be 1 or 2/);
 });
 
+test("health monitor config requires a public worker entrypoint", () => {
+  const config = validConfig();
+  config.workers_dev = false;
+
+  assert.match(validateConfig(config).join("\n"), /workers_dev or routes/);
+});
+
 function validConfig() {
   return {
     name: "buddystudy-health-monitor",
     main: "src/index.js",
+    workers_dev: true,
     triggers: { crons: ["* * * * *"] },
     vars: {
       HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",

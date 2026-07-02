@@ -15,6 +15,9 @@ export function validateConfig(config) {
   if (config.main !== "src/index.js") {
     errors.push("Worker main must be src/index.js.");
   }
+  if (!hasPublicEntrypoint(config)) {
+    errors.push("Health monitor Worker must expose workers_dev or routes for manual status checks.");
+  }
   const crons = config.triggers?.crons;
   if (!Array.isArray(crons) || crons.length === 0) {
     errors.push("At least one Cloudflare Cron Trigger must be configured.");
@@ -68,6 +71,13 @@ function positiveInt(value) {
 
 function nonBlankString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasPublicEntrypoint(config) {
+  if (config.workers_dev === true) {
+    return true;
+  }
+  return Array.isArray(config.routes) && config.routes.length > 0;
 }
 
 function healthcheckHost(value) {

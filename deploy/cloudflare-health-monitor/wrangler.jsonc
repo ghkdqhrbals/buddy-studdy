@@ -2,6 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "buddystudy-health-monitor",
   "main": "src/index.js",
+  "workers_dev": true,
   "compatibility_date": "2026-07-03",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {

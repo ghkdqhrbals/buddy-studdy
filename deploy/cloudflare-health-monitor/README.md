@@ -9,6 +9,8 @@ runtime monitoring.
 ## Behavior
 
 - Runs every minute with a Cloudflare Cron Trigger.
+- Exposes the Worker on the workers.dev host so `/` and `/check` can be used
+  for manual status and smoke checks after deployment.
 - Checks `HEALTHCHECK_URL`.
 - Stores state in Workers KV to avoid repeated Slack spam.
 - Sends Slack when:
