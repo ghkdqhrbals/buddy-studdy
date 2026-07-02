@@ -15,6 +15,12 @@ export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow"
   if (backendHealthProbePattern.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not directly call backend health endpoints.`);
   }
+  if (/npm\s+run\s+smoke/.test(text)) {
+    errors.push(`${fileName}: GitHub Actions workflows must not run health monitor smoke checks.`);
+  }
+  if (/HEALTH_MONITOR_URL/.test(text)) {
+    errors.push(`${fileName}: GitHub Actions workflows must not configure health monitor check URLs.`);
+  }
 
   return errors;
 }

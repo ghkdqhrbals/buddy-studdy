@@ -36,6 +36,12 @@ export function validateConfig(config) {
   } else if (!config.vars.HEALTHCHECK_URL.endsWith("/api/v1/health/readiness")) {
     errors.push("HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.");
   }
+  if (!nonBlankString(config.vars?.SERVICE_NAME)) {
+    errors.push("SERVICE_NAME must be configured so Slack alerts identify the affected service.");
+  }
+  if (!nonBlankString(config.vars?.ENVIRONMENT_NAME)) {
+    errors.push("ENVIRONMENT_NAME must be configured so Slack alerts identify the affected environment.");
+  }
   if (!positiveInt(config.vars?.FAILURE_THRESHOLD)) {
     errors.push("FAILURE_THRESHOLD must be a positive integer.");
   } else if (Number(config.vars.FAILURE_THRESHOLD) > 2) {
@@ -56,6 +62,10 @@ export function validateConfig(config) {
 
 function positiveInt(value) {
   return Number.isInteger(Number(value)) && Number(value) > 0;
+}
+
+function nonBlankString(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
