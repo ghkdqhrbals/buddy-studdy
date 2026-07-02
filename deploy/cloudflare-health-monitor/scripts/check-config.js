@@ -35,7 +35,7 @@ export function validateConfig(config) {
     errors.push("HEALTHCHECK_URL must be an HTTPS URL.");
   } else if (!config.vars.HEALTHCHECK_URL.endsWith("/api/v1/health/readiness")) {
     errors.push("HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.");
-  } else if (config.vars?.ENVIRONMENT_NAME === "production" && healthcheckHost(config.vars.HEALTHCHECK_URL) !== "api.ghkdqhrbals.org") {
+  } else if (environmentName(config) === "production" && healthcheckHost(config.vars.HEALTHCHECK_URL) !== "api.ghkdqhrbals.org") {
     errors.push("Production HEALTHCHECK_URL must point to `api.ghkdqhrbals.org`.");
   }
   if (!nonBlankString(config.vars?.SERVICE_NAME)) {
@@ -72,10 +72,14 @@ function nonBlankString(value) {
 
 function healthcheckHost(value) {
   try {
-    return new URL(value).host;
+    return new URL(value).hostname;
   } catch (_error) {
     return "";
   }
+}
+
+function environmentName(config) {
+  return typeof config.vars?.ENVIRONMENT_NAME === "string" ? config.vars.ENVIRONMENT_NAME.trim().toLowerCase() : "";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

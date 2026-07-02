@@ -41,6 +41,7 @@ test("health monitor config rejects lightweight health endpoints", () => {
 test("health monitor config rejects dev health url for production", () => {
   const config = validConfig();
   config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/api/v1/health/readiness";
+  config.vars.ENVIRONMENT_NAME = " Production ";
 
   assert.match(validateConfig(config).join("\n"), /Production HEALTHCHECK_URL/);
 });
