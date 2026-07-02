@@ -290,6 +290,8 @@ function nextState(previous, result, env, checkedAt) {
   const previousStatus = previous?.status || "unknown";
 
   if (result.healthy) {
+    const retryRecoveryAlert = previous?.shouldAlert === true && previous?.alertType === "recovered";
+    const recoveredFromDown = previousStatus === "down";
     return {
       status: "up",
       checkedAt,
@@ -300,8 +302,8 @@ function nextState(previous, result, env, checkedAt) {
       httpStatus: result.httpStatus,
       error: null,
       detail: null,
-      alertType: previousStatus === "down" ? "recovered" : null,
-      shouldAlert: previousStatus === "down",
+      alertType: recoveredFromDown || retryRecoveryAlert ? "recovered" : null,
+      shouldAlert: recoveredFromDown || retryRecoveryAlert,
     };
   }
 

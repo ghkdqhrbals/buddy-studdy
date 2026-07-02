@@ -75,6 +75,26 @@ test("recovery after down sends recovery alert", () => {
   assert.equal(state.alertType, "recovered");
 });
 
+test("recovery alert remains retryable when previous recovery Slack delivery failed", () => {
+  const previous = {
+    status: "up",
+    consecutiveFailures: 0,
+    lastAlertAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: "2026-07-03T01:10:00.000Z",
+    lastDownAt: "2026-07-03T00:05:00.000Z",
+    shouldAlert: true,
+    alertType: "recovered",
+    alertSent: false,
+    slackAlertError: "Slack alert timed out after 1000ms",
+  };
+
+  const state = internals.nextState(previous, { healthy: true, httpStatus: 200, error: null, detail: null }, env, "2026-07-03T01:11:00.000Z");
+
+  assert.equal(state.status, "up");
+  assert.equal(state.shouldAlert, true);
+  assert.equal(state.alertType, "recovered");
+});
+
 test("slack payload contains environment, status, url, time, failures, error, and readiness detail", () => {
   const payload = internals.buildSlackPayload(env, {
     status: "down",
