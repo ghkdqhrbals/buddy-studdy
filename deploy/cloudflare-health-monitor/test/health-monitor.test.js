@@ -205,6 +205,26 @@ test("summarizes stuck scheduler jobs from readiness JSON body", () => {
   );
 });
 
+test("summarizes disabled scheduler jobs from readiness JSON body", () => {
+  const summary = internals.summarizeHealthJson({
+    ok: false,
+    checks: {
+      scheduler: {
+        ok: false,
+        message: "Disabled scheduler jobs: question-schedule",
+        details: {
+          disabledJobs: ["question-schedule", "user-stats-refresh"],
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    summary,
+    "scheduler: Disabled scheduler jobs: question-schedule [disabledJobs=question-schedule,user-stats-refresh]",
+  );
+});
+
 test("checkHealth captures non ok readiness body detail", async () => {
   const environment = manualEnv({
     healthResponse: new Response(

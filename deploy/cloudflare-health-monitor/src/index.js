@@ -256,6 +256,9 @@ function summarizeCheckDetails(check) {
   if (Array.isArray(details.missingJobs) && details.missingJobs.length > 0) {
     parts.push(`missingJobs=${details.missingJobs.join(",")}`);
   }
+  if (Array.isArray(details.disabledJobs) && details.disabledJobs.length > 0) {
+    parts.push(`disabledJobs=${details.disabledJobs.join(",")}`);
+  }
   if (Number.isFinite(details.thresholdSeconds)) {
     parts.push(`threshold=${details.thresholdSeconds}s`);
   }
