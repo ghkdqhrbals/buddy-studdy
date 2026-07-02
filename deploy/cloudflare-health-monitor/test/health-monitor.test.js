@@ -690,6 +690,61 @@ test("root returns service-unavailable when stored backend state is down", async
   assert.equal(body.state.status, "down");
 });
 
+test("root returns service-unavailable when monitor stored a configuration error", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "config_error",
+        checkedAt: "2026-07-03T00:05:00.000Z",
+        lastUpAt: null,
+        lastDownAt: null,
+        lastAlertAt: null,
+        consecutiveFailures: 0,
+        httpStatus: null,
+        error: "Missing monitor configuration: SLACK_WEBHOOK_URL",
+        alertSent: false,
+        slackAlertError: null,
+      },
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "config_error");
+  assert.equal(body.state.alertSent, false);
+  assert.equal(body.state.slackAlertError, null);
+});
+
+test("root returns service-unavailable when monitor execution failed", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "monitor_error",
+        checkedAt: "2026-07-03T00:05:00.000Z",
+        lastUpAt: null,
+        lastDownAt: null,
+        lastAlertAt: null,
+        consecutiveFailures: 0,
+        httpStatus: null,
+        error: "kv unavailable",
+        alertType: "monitor_error",
+        alertSent: true,
+        slackAlertError: null,
+      },
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "monitor_error");
+  assert.equal(body.state.alertType, "monitor_error");
+  assert.equal(body.state.alertSent, true);
+});
+
 test("manual check reports configuration errors after authorization", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/check", {
