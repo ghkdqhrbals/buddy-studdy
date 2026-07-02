@@ -81,7 +81,21 @@ class ReadinessChecker(
                     j.job_name,
                     j.enabled,
                     max(r.started_at) as latest_started_at,
-                    max(case when r.status = 'SUCCESS' then r.started_at end) as last_successful_started_at
+                    max(case when r.status = 'SUCCESS' then r.started_at end) as last_successful_started_at,
+                    (
+                        select r2.status
+                        from scheduled_job_runs r2
+                        where r2.job_name = j.job_name
+                        order by r2.started_at desc, r2.id desc
+                        limit 1
+                    ) as latest_status,
+                    (
+                        select r2.error_message
+                        from scheduled_job_runs r2
+                        where r2.job_name = j.job_name
+                        order by r2.started_at desc, r2.id desc
+                        limit 1
+                    ) as latest_error_message
                 from scheduled_jobs j
                 left join scheduled_job_runs r on r.job_name = j.job_name
                 where j.job_name in (:jobNames)
@@ -94,10 +108,22 @@ class ReadinessChecker(
                     enabled = rs.getBoolean("enabled"),
                     latestStartedAt = rs.getTimestamp("latest_started_at")?.toInstant(),
                     lastSuccessfulStartedAt = rs.getTimestamp("last_successful_started_at")?.toInstant(),
+                    latestStatus = rs.getString("latest_status"),
+                    latestErrorMessage = rs.getString("latest_error_message"),
                 )
             }.associateBy { it.jobName }
 
             val missingJobs = monitoredJobs.filterNot { rows.containsKey(it) }
+            val failedJobDetails = rows.values
+                .filter { it.enabled && it.latestStatus == "FAILED" }
+                .map { row ->
+                    mapOf(
+                        "jobName" to row.jobName,
+                        "latestStartedAt" to row.latestStartedAt?.toString(),
+                        "latestStatus" to row.latestStatus,
+                        "latestErrorMessage" to row.latestErrorMessage,
+                    )
+                }
             val staleJobDetails = rows.values
                 .filter { it.enabled }
                 .mapNotNull { row ->
@@ -109,6 +135,8 @@ class ReadinessChecker(
                     mapOf(
                         "jobName" to row.jobName,
                         "latestStartedAt" to row.latestStartedAt?.toString(),
+                        "latestStatus" to row.latestStatus,
+                        "latestErrorMessage" to row.latestErrorMessage,
                         "lastSuccessfulStartedAt" to successfulStartedAt?.toString(),
                         "staleForSeconds" to staleFor.seconds.coerceAtLeast(0),
                     )
@@ -129,6 +157,11 @@ class ReadinessChecker(
                     ok = false,
                     message = "Missing monitored scheduler jobs: ${missingJobs.joinToString(", ")}",
                     details = schedulerDetails("missingJobs" to missingJobs),
+                )
+                failedJobDetails.isNotEmpty() -> ReadinessCheckResponse(
+                    ok = false,
+                    message = "Failed scheduler jobs: ${failedJobDetails.joinToString("; ") { "${it["jobName"]} error=${it["latestErrorMessage"] ?: "unknown"}" }}",
+                    details = schedulerDetails("failedJobs" to failedJobDetails),
                 )
                 staleJobDetails.isNotEmpty() -> ReadinessCheckResponse(
                     ok = false,
@@ -163,5 +196,7 @@ class ReadinessChecker(
         val enabled: Boolean,
         val latestStartedAt: Instant?,
         val lastSuccessfulStartedAt: Instant?,
+        val latestStatus: String?,
+        val latestErrorMessage: String?,
     )
 }

@@ -138,7 +138,7 @@ class ReadinessCheckerTest {
     }
 
     @Test
-    fun `readiness fails when scheduler recently ran but last successful run is stale`() {
+    fun `readiness prioritizes latest failed scheduler run over stale successful run`() {
         val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
         JdbcTemplate(dataSource).update(
             "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by) values (?, 'SCHEDULED', 'FAILED', ?, 'system')",
@@ -160,8 +160,38 @@ class ReadinessCheckerTest {
 
         assertThat(response.ok).isFalse()
         assertThat(response.checks["scheduler"]?.ok).isFalse()
-        assertThat(response.checks["scheduler"]?.message).contains("Stale scheduler jobs")
-        assertThat(response.checks["scheduler"]?.details?.get("staleJobs").toString()).contains("lastSuccessfulStartedAt")
+        assertThat(response.checks["scheduler"]?.message).contains("Failed scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("failedJobs").toString()).contains("question-schedule")
+    }
+
+    @Test
+    fun `readiness fails when latest scheduler run failed even if last successful run is recent`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now(), seedJobs = true)
+        JdbcTemplate(dataSource).update(
+            """
+            insert into scheduled_job_runs (job_name, trigger_type, status, started_at, error_message, created_by)
+            values (?, 'SCHEDULED', 'FAILED', ?, 'OpenAI timeout', 'system')
+            """.trimIndent(),
+            "question-schedule",
+            Timestamp.from(Instant.now()),
+        )
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                    schedulerMonitoredJobs = listOf("question-schedule"),
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Failed scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("failedJobs").toString()).contains("OpenAI timeout")
     }
 
     private fun h2DataSource(): DataSource =
@@ -192,6 +222,7 @@ class ReadinessCheckerTest {
                 trigger_type varchar(40) not null,
                 status varchar(40) not null,
                 started_at timestamp not null,
+                error_message varchar(500),
                 created_by varchar(120) not null
             )
             """.trimIndent(),
