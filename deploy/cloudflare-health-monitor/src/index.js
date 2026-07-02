@@ -156,7 +156,22 @@ async function runHealthCheck(env, scheduledTime) {
     }
   }
 
-  await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(next));
+  try {
+    await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(next));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      JSON.stringify({
+        message: "health_monitor_state_write_failed",
+        error: message,
+      }),
+    );
+    if (next.alertSent === true) {
+      next = { ...next, stateWriteError: message };
+    } else {
+      throw error;
+    }
+  }
 
   console.log(
     JSON.stringify({

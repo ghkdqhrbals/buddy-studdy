@@ -468,6 +468,38 @@ test("scheduled check catches unexpected monitor failures", async () => {
   assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
+test("scheduled down alert does not send a second monitor-error alert when state write fails", async () => {
+  const slackRequests = [];
+  const environment = manualEnv({
+    existingState: {
+      status: "degraded",
+      consecutiveFailures: 1,
+      lastAlertAt: null,
+      lastUpAt: "2026-07-02T23:55:00.000Z",
+      lastDownAt: null,
+    },
+    healthResponse: new Response("bad gateway", { status: 502 }),
+    statePutError: new Error("kv write failed"),
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  const result = await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+    return waitUntilPromises[0];
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.status, "down");
+  assert.equal(result.state.stateWriteError, "kv write failed");
+  assert.equal(slackRequests.length, 1);
+  assert.equal(slackRequests[0].text, ":rotating_light: BuddyStudy backend is down");
+});
+
 test("scheduled check persists monitor error state when state write is available", async () => {
   const environment = manualEnv({
     stateGetError: new Error("kv read failed"),
