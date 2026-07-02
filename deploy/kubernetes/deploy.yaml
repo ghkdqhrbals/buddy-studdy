@@ -423,7 +423,7 @@ spec:
         readinessProbe:
           failureThreshold: 12
           httpGet:
-            path: /api/v1/health/readiness
+            path: /api/v1/health/dependencies
             port: http
           initialDelaySeconds: 15
           periodSeconds: 10

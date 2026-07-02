@@ -143,6 +143,10 @@ monitors and runbooks. Scheduler freshness is controlled by
 delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
 not hold scheduler failure handling indefinitely.
 
+Kubernetes readiness probes should use `/api/v1/health/dependencies`.
+Dependency readiness checks database and Redis only, so a stale scheduler sends
+external alerts without removing otherwise healthy API pods from service.
+
 ### DB Backups
 
 - Data is persisted with Docker volume `buddystudy-postgres-data`.

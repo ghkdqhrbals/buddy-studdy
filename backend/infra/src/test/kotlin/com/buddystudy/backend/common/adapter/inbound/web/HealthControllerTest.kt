@@ -50,6 +50,38 @@ class HealthControllerTest {
         assertThat(response.body).hasFieldOrPropertyWithValue("ok", false)
     }
 
+    @Test
+    fun `dependency readiness returns ok when hard dependencies are ready`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = singleConnectionDataSource(),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(),
+            ),
+        )
+
+        val response = controller.dependencyReadiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(response.body).hasFieldOrPropertyWithValue("ok", true)
+    }
+
+    @Test
+    fun `dependency readiness returns service unavailable when a hard dependency fails`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = failingDataSource(),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(),
+            ),
+        )
+
+        val response = controller.dependencyReadiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body).hasFieldOrPropertyWithValue("ok", false)
+    }
+
     private fun singleConnectionDataSource(): DataSource =
         object : DataSource {
             override fun getConnection(): Connection =

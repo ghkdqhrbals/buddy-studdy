@@ -1,6 +1,7 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.buddystudy.backend.common.adapter.inbound.web.dto.HealthResponse
+import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
@@ -21,6 +22,20 @@ class HealthController(
     @GetMapping("/health/readiness", "/api/v1/health/readiness")
     fun readiness(): ResponseEntity<*> {
         val response = readiness.check()
+        return readinessResponse(response)
+    }
+
+    @Operation(
+        summary = "Dependency readiness check",
+        description = "Checks only hard serving dependencies for Kubernetes readiness probes. Scheduler freshness is excluded.",
+    )
+    @GetMapping("/health/dependencies", "/api/v1/health/dependencies")
+    fun dependencyReadiness(): ResponseEntity<*> {
+        val response = readiness.check(includeScheduler = false)
+        return readinessResponse(response)
+    }
+
+    private fun readinessResponse(response: ReadinessResponse): ResponseEntity<*> {
         return ResponseEntity
             .status(if (response.ok) HttpStatus.OK else HttpStatus.SERVICE_UNAVAILABLE)
             .body(response)

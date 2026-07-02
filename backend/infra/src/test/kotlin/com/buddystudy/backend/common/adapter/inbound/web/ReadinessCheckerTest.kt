@@ -102,6 +102,26 @@ class ReadinessCheckerTest {
     }
 
     @Test
+    fun `readiness can exclude scheduler checks for Kubernetes probes`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                ),
+            ),
+        )
+
+        val response = checker.check(includeScheduler = false)
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.checks).containsKeys("database", "redis")
+        assertThat(response.checks).doesNotContainKey("scheduler")
+    }
+
+    @Test
     fun `readiness fails when monitored scheduler job seed is missing`() {
         val dataSource = h2DataSource(lastStartedAt = null, seedJobs = false)
         val checker = ReadinessChecker(dataSource, redisFactory("PONG"), BuddyStudyProperties())

@@ -20,12 +20,12 @@ class ReadinessChecker(
     private val startedAt: Instant = Instant.now()
     private val jdbc = NamedParameterJdbcTemplate(dataSource)
 
-    fun check(): ReadinessResponse {
+    fun check(includeScheduler: Boolean = true): ReadinessResponse {
         val checks = linkedMapOf<String, ReadinessCheckResponse>(
             "database" to checkDatabase(),
             "redis" to checkRedis(),
         )
-        if (properties.monitoring.schedulerReadinessEnabled) {
+        if (includeScheduler && properties.monitoring.schedulerReadinessEnabled) {
             checks["scheduler"] = checkScheduler()
         }
         return ReadinessResponse(

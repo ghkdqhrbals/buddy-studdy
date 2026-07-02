@@ -68,6 +68,16 @@ and Slack alerts can show missing jobs, stale jobs, and configured thresholds
 without parsing free-form text. A scheduler run that remains `RUNNING` past
 its configured `timeoutSeconds` is reported as a stuck job.
 
+Kubernetes readiness probes should use dependency readiness instead:
+
+```http
+GET /api/v1/health/dependencies
+```
+
+That endpoint checks only hard serving dependencies such as database and Redis.
+It intentionally excludes scheduler freshness so a stale background job alerts
+operators without removing otherwise healthy API pods from service.
+
 Example readiness response:
 
 ```json
