@@ -1,12 +1,16 @@
 package com.buddystudy.backend.study.adapter.inbound.scheduler
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.scheduler.application.model.JobTriggerType
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -21,14 +25,16 @@ class QuestionPushOutboxDispatcher(
 ) : QuestionPushOutboxDispatchPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @Scheduled(fixedDelayString = "\${buddystudy.scheduler.poll-ms:30000}")
-    fun dispatchPendingPushes() {
-        if (!properties.scheduler.enabled || !properties.streams.enabled) return
+    fun dispatchPendingPushes(): Int {
+        if (!properties.scheduler.enabled || !properties.streams.enabled) return 0
 
         val now = Instant.now()
+        var processed = 0
         outbox.findPending(now, PageRequest.of(0, 50)).forEach { item ->
             dispatchItem(item, now)
+            processed += 1
         }
+        return processed
     }
 
     fun dispatchItem(item: QuestionPushOutboxEntity, now: Instant = Instant.now()) {
@@ -111,4 +117,26 @@ class QuestionPushOutboxDispatcher(
             sound = sound,
             intervalMinutes = intervalMinutes,
         )
+}
+
+@Component
+@ConditionalOnProperty(prefix = "buddystudy.scheduler", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+class QuestionPushOutboxScheduler(
+    private val jobs: ManagedJobExecutionUseCase,
+    private val questionPushOutboxDispatchJob: QuestionPushOutboxDispatchJob,
+) {
+    @Scheduled(fixedDelayString = "\${buddystudy.scheduler.poll-ms:30000}")
+    fun dispatchPendingPushes() {
+        jobs.execute(questionPushOutboxDispatchJob, JobTriggerType.SCHEDULED)
+    }
+}
+
+@Component
+class QuestionPushOutboxDispatchJob(
+    private val dispatcher: QuestionPushOutboxDispatcher,
+) : ManagedJob {
+    override val name: String = "question-push-outbox-dispatch"
+
+    override fun run(): String =
+        "processed=${dispatcher.dispatchPendingPushes()}"
 }

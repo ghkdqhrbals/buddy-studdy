@@ -1,6 +1,7 @@
 package com.buddystudy.backend
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.adapter.inbound.scheduler.QuestionPushOutboxDispatchJob
 import com.buddystudy.backend.study.adapter.inbound.scheduler.QuestionPushOutboxDispatcher
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
@@ -156,6 +157,35 @@ class QuestionPushOutboxDispatcherTest {
         assertThat(retry.lastError).contains("boom")
         assertThat(published.status).isEqualTo("PUBLISHED")
         assertThat(published.publishedAt).isNotNull()
+    }
+
+    @Test
+    fun `managed job dispatches pending push outbox and returns processed summary`() {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        outbox.save(
+            QuestionPushOutboxEntity(
+                recordId = 14,
+                deviceId = "device-job",
+                userId = 24,
+                question = "Managed?",
+                topic = "Ops",
+                nextAttemptAt = now.minusSeconds(1),
+                createdAt = now.minusSeconds(10),
+                updatedAt = now.minusSeconds(10),
+            )
+        )
+        val dispatcher = QuestionPushOutboxDispatcher(
+            BuddyStudyProperties(
+                scheduler = BuddyStudyProperties.Scheduler(enabled = true),
+                streams = BuddyStudyProperties.Streams(enabled = true),
+            ),
+            outbox,
+            CapturingPushPublisher(true),
+        )
+        val job = QuestionPushOutboxDispatchJob(dispatcher)
+
+        assertThat(job.name).isEqualTo("question-push-outbox-dispatch")
+        assertThat(job.run()).isEqualTo("processed=1")
     }
 
     private class CapturingPushPublisher(private val result: Boolean) : QuestionPushPublishPort {

@@ -6,6 +6,12 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
+import com.buddystudy.backend.scheduler.application.model.JobRunStatus
+import com.buddystudy.backend.scheduler.application.model.JobTriggerType
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
@@ -70,12 +76,16 @@ class QuestionSchedulerTest {
     )
 
     @Test
-    fun `question scheduler delegates to schedule input port`() {
+    fun `question scheduler runs through managed job executor`() {
         val useCase = FakeRunQuestionScheduleUseCase()
-        val adapter = QuestionScheduler(useCase)
+        val job = QuestionScheduleJob(useCase)
+        val jobs = FakeManagedJobExecutionUseCase()
+        val adapter = QuestionScheduler(jobs, job)
 
         adapter.runScheduled()
 
+        assertThat(jobs.executedJobNames).containsExactly("question-schedule")
+        assertThat(jobs.triggerTypes).containsExactly(JobTriggerType.SCHEDULED)
         assertThat(useCase.calls).isEqualTo(1)
     }
 
@@ -313,6 +323,36 @@ class QuestionSchedulerTest {
         override fun runDueQuestions() {
             calls += 1
         }
+    }
+
+    private class FakeManagedJobExecutionUseCase : ManagedJobExecutionUseCase {
+        val executedJobNames = mutableListOf<String>()
+        val triggerTypes = mutableListOf<JobTriggerType>()
+
+        override fun execute(
+            job: ManagedJob,
+            triggerType: JobTriggerType,
+            retryOfRunId: Long?,
+            createdBy: String,
+        ): ScheduledJobRun {
+            executedJobNames += job.name
+            triggerTypes += triggerType
+            val summary = job.run()
+            return ScheduledJobRun(
+                id = executedJobNames.size.toLong(),
+                jobName = job.name,
+                triggerType = triggerType,
+                status = JobRunStatus.SUCCESS,
+                startedAt = Instant.EPOCH,
+                finishedAt = Instant.EPOCH,
+                summary = summary,
+                retryOfRunId = retryOfRunId,
+                createdBy = createdBy,
+            )
+        }
+
+        override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+            ScheduledJobRunPageResponse(emptyList(), 0, limit, offset)
     }
 
     private class FakeUserPort : UserPort {
