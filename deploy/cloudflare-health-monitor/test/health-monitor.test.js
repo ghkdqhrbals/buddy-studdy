@@ -341,6 +341,46 @@ test("manual check writes state and sends slack alert when threshold is reached"
   assert.equal(slackPayloads[0].text, ":rotating_light: BuddyStudy backend is down");
 });
 
+test("manual check sends slack alert when backend fetch fails twice", async () => {
+  const slackPayloads = [];
+  const environment = manualEnv({
+    existingState: {
+      status: "degraded",
+      consecutiveFailures: 1,
+      lastAlertAt: null,
+      lastUpAt: "2026-07-03T00:00:00.000Z",
+      lastDownAt: null,
+    },
+    healthResponse: async () => {
+      throw new TypeError("fetch failed");
+    },
+    onSlack: async (request) => {
+      slackPayloads.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+
+  await withManualEnv(environment, async () => {
+    const response = await worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      environment,
+    );
+
+    assert.equal(response.status, 200);
+  });
+
+  const storedState = JSON.parse(environment.stateWrites.at(-1).value);
+  assert.equal(storedState.status, "down");
+  assert.equal(storedState.httpStatus, null);
+  assert.equal(storedState.error, "fetch failed");
+  assert.equal(storedState.alertSent, true);
+  assert.equal(slackPayloads.length, 1);
+  assert.equal(slackPayloads[0].text, ":rotating_light: BuddyStudy backend is down");
+});
+
 test("manual check keeps alert retryable when Slack delivery fails", async () => {
   const environment = manualEnv({
     existingState: {
