@@ -131,7 +131,9 @@ and sends Slack alerts. Readiness checks required backend dependencies and
 core scheduler freshness, and returns `503` when the backend process is alive
 but not ready to serve traffic. The readiness response includes `checkedAt`,
 `service`, `environment`, and component-level `checks` so Slack alerts can
-show the failing component. Scheduler freshness is controlled by
+show the failing component. Scheduler readiness also includes structured
+`details` such as `missingJobs`, `staleJobs`, `thresholdSeconds`, and
+`startupGraceSeconds` for external monitors and runbooks. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
