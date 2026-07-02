@@ -523,7 +523,6 @@ spec:
         name: redis-cluster-proxy
         ports:
         - containerPort: 6379
-          hostPort: 6379
           name: redis
         readinessProbe:
           initialDelaySeconds: 5
@@ -601,7 +600,6 @@ spec:
         name: postgres
         ports:
         - containerPort: 5432
-          hostPort: 5432
           name: postgres
         readinessProbe:
           exec:
