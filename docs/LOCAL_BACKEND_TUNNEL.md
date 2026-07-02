@@ -17,13 +17,7 @@ PostgreSQL:   localhost:30432
 Redis:        localhost:30379
 ```
 
-## 2. Open a Cloudflare tunnel
-
-From the repository root:
-
-```sh
-scripts/start-local-api-tunnel.sh
-```
+## 2. Open or verify the Cloudflare tunnel
 
 On the Mac Kubernetes target, `~/.cloudflared/config.yaml` should match
 `deploy/cloudflared/lowfidev-config.yaml` and define these ingress routes:
@@ -34,10 +28,11 @@ db.lowfidev.cloud    -> tcp://localhost:30432
 redis.lowfidev.cloud -> tcp://localhost:30379
 ```
 
-If no named tunnel config exists, Cloudflare prints a temporary HTTPS URL like:
+Run the named tunnel directly from the Mac Kubernetes target when it is not
+already managed by the local Cloudflare connector:
 
-```text
-https://example.trycloudflare.com
+```sh
+cloudflared tunnel --config ~/.cloudflared/config.yaml run
 ```
 
 ## 3. Point the iOS app at the tunnel
@@ -66,37 +61,9 @@ cloudflared access tcp --hostname redis.lowfidev.cloud --url localhost:16379
 redis-cli -p 16379 -a "<password>"
 ```
 
-## Auto Start On Login
-
-The persistent local tunnel is registered as a user LaunchAgent:
-
-```text
-~/Library/LaunchAgents/com.buddystudy.local-api-tunnel.plist
-```
-
-It runs:
-
-```text
-scripts/start-local-api-tunnel.sh
-```
-
-Logs are written to:
-
-```text
-~/Library/Logs/BuddyStudy/local-api-tunnel.log
-~/Library/Logs/BuddyStudy/local-api-tunnel.err
-```
-
-Useful commands:
-
-```sh
-launchctl print "gui/$(id -u)/com.buddystudy.local-api-tunnel"
-launchctl kickstart -k "gui/$(id -u)/com.buddystudy.local-api-tunnel"
-```
-
 ## Notes
 
 - Do not use `localhost` or `127.0.0.1` in the iPhone app. Those point to the iPhone, not the Mac.
-- Quick tunnel URLs change each time the tunnel starts. Named tunnel URLs such as `https://api.lowfidev.cloud` do not.
+- Do not use a LaunchAgent for Kubernetes DB/Redis port forwarding. The Kubernetes services expose fixed NodePorts, and LaunchAgent port-forwarding can hide the actual network path.
 - The tunnel can be healthy while the backend is down. In that case Cloudflare returns 502 until `localhost:30080` is running.
 - Keep production debugging off before App Store or TestFlight verification.
