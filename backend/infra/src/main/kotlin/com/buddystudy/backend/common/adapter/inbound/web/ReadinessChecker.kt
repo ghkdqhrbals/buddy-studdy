@@ -100,7 +100,7 @@ class ReadinessChecker(
                 from scheduled_jobs j
                 left join scheduled_job_runs r on r.job_name = j.job_name
                 where j.job_name in (:jobNames)
-                group by j.job_name, j.enabled
+                group by j.job_name, j.enabled, j.timeout_seconds
                 """.trimIndent(),
                 params,
             ) { rs, _ ->
