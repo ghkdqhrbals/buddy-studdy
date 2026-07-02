@@ -9,12 +9,16 @@ const workflowsDir = path.join(root, ".github", "workflows");
 const deployTemplateDir = path.join(root, "docs", "deploy-repo-template");
 const backendHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/v1\/health(?:\/readiness)?|(?<!\/api)\/health(?:\/readiness)?)\b/;
 const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wget|http)\b[^\n]*\/api\/health\b/;
+const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
 
 export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow") {
   const errors = [];
 
   if (backendHealthProbePattern.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not directly call backend health endpoints.`);
+  }
+  if (runtimeHealthProbePattern.test(text)) {
+    errors.push(`${fileName}: GitHub Actions workflows must not run runtime health probes.`);
   }
   if (localRuntimeHealthProbePattern.test(text)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run container health probes.`);

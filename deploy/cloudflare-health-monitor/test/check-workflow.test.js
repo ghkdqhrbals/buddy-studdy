@@ -181,6 +181,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects local runtime health probes even when they are not backend readiness urls", () => {
+  const workflow = `
+name: Deploy Monitoring
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check local service
+        run: curl -fsS http://127.0.0.1:3000/api/health
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run runtime health probes/);
+});
+
 test("kubernetes backend probes use dependency readiness while external monitor uses scheduler readiness", () => {
   const backendManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/backend/backend.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
