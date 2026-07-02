@@ -54,6 +54,9 @@ export function validateWorkflowText(text) {
   const validateBundleIndex = text.indexOf("npm run check");
   const syncSlackSecretIndex = text.indexOf("wrangler secret put SLACK_WEBHOOK_URL");
   const deployIndex = text.indexOf("npm run deploy");
+  if (configureKvIndex === -1) {
+    errors.push("Health monitor workflow must configure KV namespace before deployment.");
+  }
   if (configureKvIndex !== -1 && validateBundleIndex !== -1 && configureKvIndex > validateBundleIndex) {
     errors.push("Health monitor workflow must configure KV namespace before validating the Worker bundle.");
   }
