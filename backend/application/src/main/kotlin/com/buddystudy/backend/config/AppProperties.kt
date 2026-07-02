@@ -62,6 +62,7 @@ data class BuddyStudyProperties(
         var slackWebhookUrl: String = "",
         var environmentName: String = "production",
         var serviceName: String = "BuddyStudy backend",
+        var slackTimeoutMs: Long = 5_000,
         var schedulerReadinessEnabled: Boolean = true,
         var schedulerStaleThresholdMinutes: Long = 15,
         var schedulerStartupGraceMinutes: Long = 15,

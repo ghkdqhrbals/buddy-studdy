@@ -3,17 +3,30 @@ package com.buddystudy.backend.scheduler.adapter.outbound.slack
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
+import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
+import java.net.http.HttpClient
+import java.time.Duration
 import java.time.format.DateTimeFormatter
 
 @Component
-class SlackScheduledJobAlertAdapter(
+class SlackScheduledJobAlertAdapter internal constructor(
     private val properties: BuddyStudyProperties,
-    restClientBuilder: RestClient.Builder,
+    private val restClient: RestClient,
 ) : ScheduledJobAlertPort {
-    private val restClient = restClientBuilder.build()
+    @Autowired
+    constructor(
+        properties: BuddyStudyProperties,
+        restClientBuilder: RestClient.Builder,
+    ) : this(
+        properties,
+        restClientBuilder
+            .requestFactory(slackRequestFactory(properties))
+            .build(),
+    )
 
     override fun notifyFailed(run: ScheduledJobRun) {
         val webhookUrl = properties.monitoring.slackWebhookUrl.trim()
@@ -57,5 +70,23 @@ class SlackScheduledJobAlertAdapter(
                 ),
             ),
         )
+    }
+
+    internal fun slackTimeout(): Duration =
+        slackTimeout(properties)
+
+    private companion object {
+        fun slackTimeout(properties: BuddyStudyProperties): Duration =
+            Duration.ofMillis(properties.monitoring.slackTimeoutMs.coerceIn(1_000, 25_000))
+
+        fun slackRequestFactory(properties: BuddyStudyProperties): JdkClientHttpRequestFactory {
+            val timeout = slackTimeout(properties)
+            val client = HttpClient.newBuilder()
+                .connectTimeout(timeout)
+                .build()
+            return JdkClientHttpRequestFactory(client).apply {
+                setReadTimeout(timeout)
+            }
+        }
     }
 }

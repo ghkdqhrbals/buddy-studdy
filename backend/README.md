@@ -135,7 +135,9 @@ show the failing component. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
-`MONITORING_SCHEDULER_MONITORED_JOBS`.
+`MONITORING_SCHEDULER_MONITORED_JOBS`. Backend scheduler failure Slack
+delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
+not hold scheduler failure handling indefinitely.
 
 ### DB Backups
 
