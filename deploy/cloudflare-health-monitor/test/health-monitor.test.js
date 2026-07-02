@@ -33,7 +33,7 @@ test("second consecutive failure marks down and alerts slack", () => {
   assert.equal(state.consecutiveFailures, 2);
   assert.equal(state.shouldAlert, true);
   assert.equal(state.alertType, "down");
-  assert.equal(state.lastAlertAt, "2026-07-03T00:05:00.000Z");
+  assert.equal(state.lastAlertAt, null);
 });
 
 test("down service repeats alert only after repeat interval", () => {
@@ -140,9 +140,43 @@ test("manual check writes state and sends slack alert when threshold is reached"
   assert.equal(body.ok, false);
   assert.equal(body.state.status, "down");
   assert.equal(environment.stateWrites.length, 1);
-  assert.equal(JSON.parse(environment.stateWrites[0].value).status, "down");
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+  assert.equal(storedState.status, "down");
+  assert.equal(storedState.lastAlertAt, storedState.checkedAt);
   assert.equal(slackPayloads.length, 1);
   assert.equal(slackPayloads[0].text, ":rotating_light: BuddyStudy backend is down");
+});
+
+test("manual check keeps alert retryable when Slack delivery fails", async () => {
+  const environment = manualEnv({
+    existingState: {
+      status: "degraded",
+      consecutiveFailures: 1,
+      lastAlertAt: null,
+      lastUpAt: "2026-07-02T23:55:00.000Z",
+      lastDownAt: null,
+    },
+    healthResponse: new Response("bad gateway", { status: 502 }),
+    onSlack: async () => new Response("slack unavailable", { status: 503 }),
+  });
+
+  const response = await withManualEnv(environment, () =>
+    worker.fetch(
+      new Request("https://monitor.example.com/check", {
+        method: "POST",
+        headers: { Authorization: "Bearer manual-secret" },
+      }),
+      environment,
+    ),
+  );
+  const body = await response.json();
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+
+  assert.equal(response.status, 200);
+  assert.equal(body.state.status, "down");
+  assert.equal(storedState.status, "down");
+  assert.equal(storedState.shouldAlert, true);
+  assert.equal(storedState.lastAlertAt, null);
 });
 
 test("manual check token helper rejects absent and mismatched tokens", () => {

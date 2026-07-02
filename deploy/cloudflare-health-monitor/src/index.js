@@ -26,13 +26,28 @@ async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
   const previous = await readState(env);
   const result = await checkHealth(env.HEALTHCHECK_URL);
-  const next = nextState(previous, result, env, checkedAt);
-
-  await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(next));
+  let next = nextState(previous, result, env, checkedAt);
+  let slackAlertError = null;
 
   if (next.shouldAlert) {
-    await sendSlackAlert(env, next);
+    try {
+      await sendSlackAlert(env, next);
+      next = { ...next, lastAlertAt: checkedAt };
+    } catch (error) {
+      slackAlertError = error instanceof Error ? error.message : String(error);
+      next = { ...next, lastAlertAt: previous?.lastAlertAt || null };
+      console.error(
+        JSON.stringify({
+          message: "health_monitor_slack_alert_failed",
+          status: next.status,
+          healthUrl: env.HEALTHCHECK_URL,
+          error: slackAlertError,
+        }),
+      );
+    }
   }
+
+  await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(next));
 
   console.log(
     JSON.stringify({
@@ -42,7 +57,8 @@ async function runHealthCheck(env, scheduledTime) {
       healthUrl: env.HEALTHCHECK_URL,
       httpStatus: result.httpStatus,
       error: result.error,
-      alertSent: next.shouldAlert,
+      alertSent: next.shouldAlert && !slackAlertError,
+      slackAlertError,
     }),
   );
 
@@ -122,7 +138,7 @@ function nextState(previous, result, env, checkedAt) {
     checkedAt,
     lastUpAt: previous?.lastUpAt || null,
     lastDownAt: thresholdReached ? checkedAt : previous?.lastDownAt || null,
-    lastAlertAt: shouldAlert ? checkedAt : lastAlertAt,
+    lastAlertAt,
     consecutiveFailures,
     httpStatus: result.httpStatus,
     error: result.error,
