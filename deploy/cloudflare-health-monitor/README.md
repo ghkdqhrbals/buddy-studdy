@@ -87,12 +87,15 @@ Required GitHub Actions secrets for that deployment workflow:
 After deployment, trigger one immediate check without waiting for the cron:
 
 ```sh
-curl -X POST https://<worker-host>/check \
-  -H "Authorization: Bearer <MANUAL_CHECK_TOKEN>"
+HEALTH_MONITOR_URL=https://<worker-host> \
+MANUAL_CHECK_TOKEN=<MANUAL_CHECK_TOKEN> \
+npm run smoke
 ```
 
 `POST /check` uses the same state transition and Slack alert path as the cron.
 If `MANUAL_CHECK_TOKEN` is not configured, the endpoint returns `401`.
+If the backend is intentionally down during the smoke test, set
+`ALLOW_DOWN=true` to verify the Worker path without failing the command.
 
 ## Configuration
 
