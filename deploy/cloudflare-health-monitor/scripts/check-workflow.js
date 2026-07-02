@@ -18,6 +18,9 @@ export function validateWorkflowText(text) {
   if (/npm\s+run\s+smoke/.test(text)) {
     errors.push("Health monitor workflow must not run smoke health checks in GitHub Actions.");
   }
+  if (/HEALTH_MONITOR_URL/.test(text)) {
+    errors.push("Health monitor workflow must not depend on HEALTH_MONITOR_URL.");
+  }
   if (!/wrangler\s+secret\s+put\s+SLACK_WEBHOOK_URL/.test(text)) {
     errors.push("Health monitor workflow must include Worker Slack secret sync.");
   }

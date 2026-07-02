@@ -51,6 +51,25 @@ jobs:
   assert.match(validateWorkflowText(workflow).join("\n"), /must not run smoke health checks/);
 });
 
+test("health monitor workflow rejects deployed health check urls", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    env:
+      HEALTH_MONITOR_URL: \${{ secrets.HEALTH_MONITOR_URL }}
+    steps:
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must not depend on HEALTH_MONITOR_URL/);
+});
+
 test("health monitor workflow rejects deployments without Worker Slack secret sync", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
