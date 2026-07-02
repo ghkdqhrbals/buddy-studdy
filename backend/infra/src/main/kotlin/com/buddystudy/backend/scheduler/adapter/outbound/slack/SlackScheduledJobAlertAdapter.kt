@@ -47,7 +47,9 @@ class SlackScheduledJobAlertAdapter internal constructor(
             "*Job*: ${run.jobName}",
             "*Run*: ${run.id}",
             "*Trigger*: ${run.triggerType}",
+            "*Status*: ${run.status}",
             "*Started*: ${DateTimeFormatter.ISO_INSTANT.format(run.startedAt)}",
+            "*Finished*: ${run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"}",
             "*Duration*: ${run.durationMs ?: 0}ms",
             "*Error*: ${run.errorMessage?.take(600) ?: "Unknown error"}",
         )

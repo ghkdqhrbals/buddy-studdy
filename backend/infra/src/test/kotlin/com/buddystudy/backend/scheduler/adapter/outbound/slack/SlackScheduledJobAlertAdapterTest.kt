@@ -40,6 +40,8 @@ class SlackScheduledJobAlertAdapterTest {
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(content().string(containsString("BuddyStudy test job failed")))
             .andExpect(content().string(containsString("question-scheduler")))
+            .andExpect(content().string(containsString("*Status*: FAILED")))
+            .andExpect(content().string(containsString("*Finished*: 2026-07-02T00:00:02Z")))
             .andExpect(content().string(containsString("boom")))
             .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
 
