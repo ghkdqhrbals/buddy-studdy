@@ -117,9 +117,9 @@ Default vars in `wrangler.jsonc`:
 - `SERVICE_NAME`: `BuddyStudy backend`
 - `ENVIRONMENT_NAME`: `production`
 - `FAILURE_THRESHOLD`: `2`
-- `ALERT_REPEAT_SECONDS`: `3600`
-- `HEALTHCHECK_TIMEOUT_MS`: `8000`
-- `SLACK_TIMEOUT_MS`: `5000`
+- `ALERT_REPEAT_SECONDS`: `3600` (`300` to `86400`)
+- `HEALTHCHECK_TIMEOUT_MS`: `8000` (`1000` to `25000`)
+- `SLACK_TIMEOUT_MS`: `5000` (`1000` to `25000`)
 
 With the default 1-minute cron and threshold `2`, a real outage usually alerts
 after about 1-2 minutes while still filtering out a single transient failure.

@@ -60,6 +60,8 @@ export function validateConfig(config) {
   }
   if (!positiveInt(config.vars?.ALERT_REPEAT_SECONDS)) {
     errors.push("ALERT_REPEAT_SECONDS must be a positive integer.");
+  } else if (!boundedInt(config.vars.ALERT_REPEAT_SECONDS, 300, 86_400)) {
+    errors.push("ALERT_REPEAT_SECONDS must be between 300 and 86400.");
   }
   if (!positiveInt(config.vars?.HEALTHCHECK_TIMEOUT_MS)) {
     errors.push("HEALTHCHECK_TIMEOUT_MS must be a positive integer.");

@@ -53,6 +53,16 @@ test("health monitor config rejects slow outage alert thresholds", () => {
   assert.match(validateConfig(config).join("\n"), /FAILURE_THRESHOLD must be 1 or 2/);
 });
 
+test("health monitor config rejects repeat intervals that are too noisy or too delayed", () => {
+  const tooNoisy = validConfig();
+  tooNoisy.vars.ALERT_REPEAT_SECONDS = "60";
+  assert.match(validateConfig(tooNoisy).join("\n"), /ALERT_REPEAT_SECONDS must be between 300 and 86400/);
+
+  const tooDelayed = validConfig();
+  tooDelayed.vars.ALERT_REPEAT_SECONDS = "172800";
+  assert.match(validateConfig(tooDelayed).join("\n"), /ALERT_REPEAT_SECONDS must be between 300 and 86400/);
+});
+
 test("health monitor config rejects timeout values that are too slow for Worker cron", () => {
   const config = validConfig();
   config.vars.HEALTHCHECK_TIMEOUT_MS = "30000";
