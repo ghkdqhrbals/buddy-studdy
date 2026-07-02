@@ -10,6 +10,10 @@ on:
 jobs:
   deploy:
     steps:
+      - name: Sync Worker secrets
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
       - name: Smoke check deployed Worker
         run: npm run smoke
 `;
@@ -43,4 +47,19 @@ jobs:
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /post-deploy smoke check/);
+});
+
+test("health monitor workflow rejects deployments without Worker Slack secret sync", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Smoke check deployed Worker
+        run: npm run smoke
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /Worker Slack secret sync/);
 });

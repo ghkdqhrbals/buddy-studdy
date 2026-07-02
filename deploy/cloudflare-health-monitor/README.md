@@ -87,8 +87,12 @@ Required GitHub Actions secrets for that deployment workflow:
 Optional GitHub Actions secrets for a post-deploy smoke check:
 
 - `HEALTH_MONITOR_URL`
+- `HEALTH_MONITOR_SLACK_WEBHOOK_URL`
 - `HEALTH_MONITOR_MANUAL_CHECK_TOKEN`
 
+When both `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
+`HEALTH_MONITOR_MANUAL_CHECK_TOKEN` are present, the workflow syncs them into
+Cloudflare Worker secrets as `SLACK_WEBHOOK_URL` and `MANUAL_CHECK_TOKEN`.
 The smoke check calls `POST /check` once after deployment. It is not a
 recurring health check; recurring checks are still Cloudflare Cron.
 

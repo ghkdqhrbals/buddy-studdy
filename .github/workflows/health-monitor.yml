@@ -20,6 +20,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HEALTH_MONITOR_KV_NAMESPACE_ID: ${{ secrets.HEALTH_MONITOR_KV_NAMESPACE_ID }}
       HEALTH_MONITOR_URL: ${{ secrets.HEALTH_MONITOR_URL }}
+      HEALTH_MONITOR_SLACK_WEBHOOK_URL: ${{ secrets.HEALTH_MONITOR_SLACK_WEBHOOK_URL }}
       MANUAL_CHECK_TOKEN: ${{ secrets.HEALTH_MONITOR_MANUAL_CHECK_TOKEN }}
 
     steps:
@@ -59,11 +60,17 @@ jobs:
       - name: Validate Worker bundle
         run: npm run check
 
+      - name: Sync Worker secrets
+        if: env.HEALTH_MONITOR_SLACK_WEBHOOK_URL != '' && env.MANUAL_CHECK_TOKEN != ''
+        run: |
+          printf '%s' "${HEALTH_MONITOR_SLACK_WEBHOOK_URL}" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "${MANUAL_CHECK_TOKEN}" | npx wrangler secret put MANUAL_CHECK_TOKEN
+
       - name: Deploy Worker
         run: npm run deploy
 
       - name: Smoke check deployed Worker
-        if: env.HEALTH_MONITOR_URL != '' && env.MANUAL_CHECK_TOKEN != ''
+        if: env.HEALTH_MONITOR_URL != '' && env.HEALTH_MONITOR_SLACK_WEBHOOK_URL != '' && env.MANUAL_CHECK_TOKEN != ''
         run: npm run smoke
 
       - name: Summary
@@ -74,9 +81,14 @@ jobs:
             echo "- Worker: \`buddystudy-health-monitor\`"
             echo "- Runtime health checks are performed by Cloudflare Cron, not GitHub Actions."
             echo "- Health URL is configured in \`deploy/cloudflare-health-monitor/wrangler.jsonc\`."
-            if [ -n "${HEALTH_MONITOR_URL}" ] && [ -n "${MANUAL_CHECK_TOKEN}" ]; then
+            if [ -n "${HEALTH_MONITOR_SLACK_WEBHOOK_URL}" ] && [ -n "${MANUAL_CHECK_TOKEN}" ]; then
+              echo "- Worker secrets: synced from GitHub Actions secrets."
+            else
+              echo "- Worker secrets: skipped because \`HEALTH_MONITOR_SLACK_WEBHOOK_URL\` or \`HEALTH_MONITOR_MANUAL_CHECK_TOKEN\` is missing."
+            fi
+            if [ -n "${HEALTH_MONITOR_URL}" ] && [ -n "${HEALTH_MONITOR_SLACK_WEBHOOK_URL}" ] && [ -n "${MANUAL_CHECK_TOKEN}" ]; then
               echo "- Post-deploy smoke check: enabled."
             else
-              echo "- Post-deploy smoke check: skipped because \`HEALTH_MONITOR_URL\` or \`HEALTH_MONITOR_MANUAL_CHECK_TOKEN\` is missing."
+              echo "- Post-deploy smoke check: skipped because \`HEALTH_MONITOR_URL\`, \`HEALTH_MONITOR_SLACK_WEBHOOK_URL\`, or \`HEALTH_MONITOR_MANUAL_CHECK_TOKEN\` is missing."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"

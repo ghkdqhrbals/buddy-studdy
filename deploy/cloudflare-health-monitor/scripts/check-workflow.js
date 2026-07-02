@@ -18,6 +18,12 @@ export function validateWorkflowText(text) {
   if (!/npm\s+run\s+smoke/.test(text)) {
     errors.push("Health monitor workflow must include a post-deploy smoke check.");
   }
+  if (!/wrangler\s+secret\s+put\s+SLACK_WEBHOOK_URL/.test(text)) {
+    errors.push("Health monitor workflow must include Worker Slack secret sync.");
+  }
+  if (!/wrangler\s+secret\s+put\s+MANUAL_CHECK_TOKEN/.test(text)) {
+    errors.push("Health monitor workflow must include Worker manual check token sync.");
+  }
 
   return errors;
 }
