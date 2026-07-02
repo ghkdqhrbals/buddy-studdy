@@ -8,9 +8,9 @@ ingress:
   # administration because it exposes the MacBook Air node IP once instead of
   # managing one hostname per TCP service.
   - hostname: db.lowfidev.cloud
-    service: tcp://localhost:5432
+    service: tcp://localhost:30432
   - hostname: redis.lowfidev.cloud
-    service: tcp://localhost:6379
+    service: tcp://localhost:30379
   - hostname: coordinator.lowfidev.cloud
     service: http://localhost:8080
   - hostname: grafana.lowfidev.cloud
