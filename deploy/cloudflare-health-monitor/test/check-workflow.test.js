@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateWorkflowText } from "../scripts/check-workflow.js";
+import { validateNoActionsRuntimeHealthChecks, validateWorkflowText } from "../scripts/check-workflow.js";
 
 test("health monitor workflow is deploy-only and not a runtime health checker", () => {
   const workflow = `
@@ -87,6 +87,22 @@ jobs:
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /must not directly call backend health endpoints/);
+});
+
+test("all GitHub Actions workflows reject direct backend health checks", () => {
+  const workflow = `
+name: Backend Image
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    steps:
+      - name: Health check
+        run: wget -qO- https://api.lowfidev.cloud/health
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /backend-image\.yml/);
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /must not directly call backend health endpoints/);
 });
 
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {

@@ -5,6 +5,18 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
+const workflowsDir = path.join(root, ".github", "workflows");
+const backendHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/v1)?\/health(?:\/readiness)?\b/;
+
+export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow") {
+  const errors = [];
+
+  if (backendHealthProbePattern.test(text)) {
+    errors.push(`${fileName}: GitHub Actions workflows must not directly call backend health endpoints.`);
+  }
+
+  return errors;
+}
 
 export function validateWorkflowText(text) {
   const errors = [];
@@ -21,9 +33,7 @@ export function validateWorkflowText(text) {
   if (/HEALTH_MONITOR_URL/.test(text)) {
     errors.push("Health monitor workflow must not depend on HEALTH_MONITOR_URL.");
   }
-  if (/(?:curl|wget|http)\b[^\n]*(?:\/api\/v1)?\/health(?:\/readiness)?\b/.test(text)) {
-    errors.push("Health monitor workflow must not directly call backend health endpoints.");
-  }
+  errors.push(...validateNoActionsRuntimeHealthChecks(text));
   if (!/wrangler\s+secret\s+put\s+SLACK_WEBHOOK_URL/.test(text)) {
     errors.push("Health monitor workflow must include Worker Slack secret sync.");
   }
@@ -49,6 +59,13 @@ export function validateWorkflowText(text) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const errors = validateWorkflowText(fs.readFileSync(workflowPath, "utf8"));
+  for (const entry of fs.readdirSync(workflowsDir)) {
+    if (!entry.endsWith(".yml") && !entry.endsWith(".yaml")) {
+      continue;
+    }
+    const text = fs.readFileSync(path.join(workflowsDir, entry), "utf8");
+    errors.push(...validateNoActionsRuntimeHealthChecks(text, entry));
+  }
   if (errors.length > 0) {
     console.error(errors.join("\n"));
     process.exit(1);
