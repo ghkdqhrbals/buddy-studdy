@@ -56,7 +56,7 @@ npm run deploy
 
 Default vars in `wrangler.jsonc`:
 
-- `HEALTHCHECK_URL`: `https://api.lowfidev.cloud/health`
+- `HEALTHCHECK_URL`: `https://api.lowfidev.cloud/api/v1/health/readiness`
 - `SERVICE_NAME`: `BuddyStudy backend`
 - `ENVIRONMENT_NAME`: `production`
 - `FAILURE_THRESHOLD`: `2`

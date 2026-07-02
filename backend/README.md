@@ -122,7 +122,10 @@ Protected endpoints require:
 
 Device credentials are used only to register a device and bootstrap or refresh `/api/v1/auth/token`.
 
-Spring Boot Actuator serves health checks at `/health` and `/api/v1/health`.
+Spring Boot Actuator serves lightweight health checks at `/health` and
+`/api/v1/health`. External uptime monitoring should use
+`/api/v1/health/readiness`, which checks required backend dependencies and
+returns `503` when the backend process is alive but not ready to serve traffic.
 
 ### DB Backups
 

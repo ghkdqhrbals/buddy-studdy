@@ -52,6 +52,16 @@ Response:
 }
 ```
 
+`/health` is intentionally lightweight for container and load-balancer probes.
+External uptime monitoring should use readiness:
+
+```http
+GET /api/v1/health/readiness
+```
+
+It returns `200` when required dependencies are reachable, otherwise `503` with
+component-level check results.
+
 ### Register Device
 
 ```http
