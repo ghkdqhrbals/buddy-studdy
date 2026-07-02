@@ -97,26 +97,45 @@ class ReadinessChecker(
             }.associateBy { it.jobName }
 
             val missingJobs = monitoredJobs.filterNot { rows.containsKey(it) }
-            val staleJobs = rows.values
+            val staleJobDetails = rows.values
                 .filter { it.enabled }
-                .filter { row ->
-                    row.lastStartedAt == null && Duration.between(startedAt, now) > startupGrace ||
-                        row.lastStartedAt != null && Duration.between(row.lastStartedAt, now) > staleThreshold
+                .mapNotNull { row ->
+                    val staleFor = Duration.between(row.lastStartedAt ?: startedAt, now)
+                    val stale = row.lastStartedAt == null && Duration.between(startedAt, now) > startupGrace ||
+                        row.lastStartedAt != null && staleFor > staleThreshold
+                    if (!stale) return@mapNotNull null
+                    mapOf(
+                        "jobName" to row.jobName,
+                        "lastStartedAt" to row.lastStartedAt?.toString(),
+                        "staleForSeconds" to staleFor.seconds.coerceAtLeast(0),
+                    )
                 }
-                .map { row ->
-                    "${row.jobName} lastStartedAt=${row.lastStartedAt ?: "never"}"
-                }
+            val staleJobMessages = staleJobDetails.map { detail ->
+                "${detail["jobName"]} lastStartedAt=${detail["lastStartedAt"] ?: "never"}"
+            }
+
+            fun schedulerDetails(vararg extra: Pair<String, Any?>): Map<String, Any?> =
+                mapOf(
+                    "monitoredJobs" to monitoredJobs,
+                    "thresholdSeconds" to staleThreshold.seconds,
+                    "startupGraceSeconds" to startupGrace.seconds,
+                ) + extra.toMap()
 
             when {
                 missingJobs.isNotEmpty() -> ReadinessCheckResponse(
                     ok = false,
                     message = "Missing monitored scheduler jobs: ${missingJobs.joinToString(", ")}",
+                    details = schedulerDetails("missingJobs" to missingJobs),
                 )
-                staleJobs.isNotEmpty() -> ReadinessCheckResponse(
+                staleJobDetails.isNotEmpty() -> ReadinessCheckResponse(
                     ok = false,
-                    message = "Stale scheduler jobs: ${staleJobs.joinToString("; ")}",
+                    message = "Stale scheduler jobs: ${staleJobMessages.joinToString("; ")}",
+                    details = schedulerDetails("staleJobs" to staleJobDetails),
                 )
-                else -> ReadinessCheckResponse(ok = true)
+                else -> ReadinessCheckResponse(
+                    ok = true,
+                    details = schedulerDetails(),
+                )
             }
         }.getOrElse { error ->
             ReadinessCheckResponse(ok = false, message = error.safeMessage())

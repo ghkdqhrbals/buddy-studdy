@@ -94,6 +94,8 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.ok).isFalse()
         assertThat(response.checks["scheduler"]?.message).contains("Stale scheduler jobs")
         assertThat(response.checks["scheduler"]?.message).contains("question-schedule")
+        assertThat(response.checks["scheduler"]?.details?.get("staleJobs").toString()).contains("question-schedule")
+        assertThat(response.checks["scheduler"]?.details?.get("thresholdSeconds")).isEqualTo(900L)
     }
 
     @Test
@@ -106,6 +108,9 @@ class ReadinessCheckerTest {
         assertThat(response.ok).isFalse()
         assertThat(response.checks["scheduler"]?.ok).isFalse()
         assertThat(response.checks["scheduler"]?.message).contains("Missing monitored scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("missingJobs")).isEqualTo(
+            listOf("question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent"),
+        )
     }
 
     @Test
