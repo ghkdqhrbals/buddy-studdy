@@ -35,6 +35,8 @@ export function validateConfig(config) {
     errors.push("HEALTHCHECK_URL must be an HTTPS URL.");
   } else if (!config.vars.HEALTHCHECK_URL.endsWith("/api/v1/health/readiness")) {
     errors.push("HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.");
+  } else if (config.vars?.ENVIRONMENT_NAME === "production" && healthcheckHost(config.vars.HEALTHCHECK_URL) !== "api.ghkdqhrbals.org") {
+    errors.push("Production HEALTHCHECK_URL must point to `api.ghkdqhrbals.org`.");
   }
   if (!nonBlankString(config.vars?.SERVICE_NAME)) {
     errors.push("SERVICE_NAME must be configured so Slack alerts identify the affected service.");
@@ -66,6 +68,14 @@ function positiveInt(value) {
 
 function nonBlankString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function healthcheckHost(value) {
+  try {
+    return new URL(value).host;
+  } catch (_error) {
+    return "";
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

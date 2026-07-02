@@ -5,7 +5,7 @@ import worker, { internals } from "../src/index.js";
 const env = {
   ALERT_REPEAT_SECONDS: "3600",
   FAILURE_THRESHOLD: "2",
-  HEALTHCHECK_URL: "https://api.lowfidev.cloud/api/v1/health/readiness",
+  HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
   SERVICE_NAME: "BuddyStudy backend",
   ENVIRONMENT_NAME: "production",
 };
@@ -126,7 +126,7 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.equal(payload.text, ":rotating_light: BuddyStudy backend is down");
   assert.match(fields, /production/);
   assert.match(fields, /down/);
-  assert.match(fields, /https:\/\/api\.lowfidev\.cloud\/api\/v1\/health\/readiness/);
+  assert.match(fields, /https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
   assert.match(fields, /2026-07-03T00:05:00.000Z/);
   assert.match(fields, /2/);
   assert.match(fields, /fetch failed/);

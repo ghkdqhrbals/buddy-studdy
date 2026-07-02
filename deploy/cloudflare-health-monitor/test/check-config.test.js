@@ -33,9 +33,16 @@ test("health monitor config rejects missing runtime essentials", () => {
 
 test("health monitor config rejects lightweight health endpoints", () => {
   const config = validConfig();
-  config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/health";
+  config.vars.HEALTHCHECK_URL = "https://api.ghkdqhrbals.org/health";
 
   assert.match(validateConfig(config).join("\n"), /readiness endpoint/);
+});
+
+test("health monitor config rejects dev health url for production", () => {
+  const config = validConfig();
+  config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/api/v1/health/readiness";
+
+  assert.match(validateConfig(config).join("\n"), /Production HEALTHCHECK_URL/);
 });
 
 test("health monitor config rejects slow outage alert thresholds", () => {
@@ -51,7 +58,7 @@ function validConfig() {
     main: "src/index.js",
     triggers: { crons: ["* * * * *"] },
     vars: {
-      HEALTHCHECK_URL: "https://api.lowfidev.cloud/api/v1/health/readiness",
+      HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
       SERVICE_NAME: "BuddyStudy backend",
       ENVIRONMENT_NAME: "production",
       FAILURE_THRESHOLD: "2",

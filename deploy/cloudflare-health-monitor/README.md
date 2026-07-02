@@ -111,7 +111,7 @@ If the backend is intentionally down during the smoke test, set
 
 Default vars in `wrangler.jsonc`:
 
-- `HEALTHCHECK_URL`: `https://api.lowfidev.cloud/api/v1/health/readiness`
+- `HEALTHCHECK_URL`: `https://api.ghkdqhrbals.org/api/v1/health/readiness`
 - `SERVICE_NAME`: `BuddyStudy backend`
 - `ENVIRONMENT_NAME`: `production`
 - `FAILURE_THRESHOLD`: `2`
