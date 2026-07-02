@@ -214,6 +214,11 @@ test("image build workflows run static health-check policy scanner", () => {
     const workflow = fs.readFileSync(path.join(workflowDir, workflowName), "utf8");
     assert.match(
       workflow,
+      /actions\/setup-node@v4[\s\S]*node-version:\s*"22"[\s\S]*node\s+deploy\/cloudflare-health-monitor\/scripts\/check-workflow\.js/,
+      `${workflowName} must set up Node before scanning workflow files`,
+    );
+    assert.match(
+      workflow,
       /node\s+deploy\/cloudflare-health-monitor\/scripts\/check-workflow\.js/,
       `${workflowName} must scan workflow files before publishing images`,
     );
