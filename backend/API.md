@@ -62,10 +62,10 @@ GET /api/v1/health/readiness
 ```
 
 It returns `200` when required dependencies are reachable and core scheduler
-jobs are fresh, otherwise `503` with component-level check results.
-Scheduler checks include structured `details` so external monitors and Slack
-alerts can show missing jobs, stale jobs, and configured thresholds without
-parsing free-form text.
+jobs have recent successful runs, otherwise `503` with component-level check
+results. Scheduler checks include structured `details` so external monitors
+and Slack alerts can show missing jobs, stale jobs, and configured thresholds
+without parsing free-form text.
 
 Example readiness response:
 
@@ -80,7 +80,7 @@ Example readiness response:
     "redis": { "ok": true },
     "scheduler": {
       "ok": false,
-      "message": "Stale scheduler jobs: question-schedule lastStartedAt=2026-07-03T04:00:00Z",
+      "message": "Stale scheduler jobs: question-schedule lastSuccessfulStartedAt=2026-07-03T04:00:00Z",
       "details": {
         "monitoredJobs": ["question-schedule", "question-push-outbox-dispatch", "user-stats-refresh", "admin-analytics-recent"],
         "thresholdSeconds": 900,
@@ -88,7 +88,8 @@ Example readiness response:
         "staleJobs": [
           {
             "jobName": "question-schedule",
-            "lastStartedAt": "2026-07-03T04:00:00Z",
+            "latestStartedAt": "2026-07-03T04:20:00Z",
+            "lastSuccessfulStartedAt": "2026-07-03T04:00:00Z",
             "staleForSeconds": 1800
           }
         ]

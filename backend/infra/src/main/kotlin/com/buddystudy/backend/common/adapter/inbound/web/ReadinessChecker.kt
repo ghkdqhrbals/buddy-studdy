@@ -81,7 +81,11 @@ class ReadinessChecker(
                 .addValue("jobNames", monitoredJobs)
             val rows = jdbc.query(
                 """
-                select j.job_name, j.enabled, max(r.started_at) as last_started_at
+                select
+                    j.job_name,
+                    j.enabled,
+                    max(r.started_at) as latest_started_at,
+                    max(case when r.status = 'SUCCESS' then r.started_at end) as last_successful_started_at
                 from scheduled_jobs j
                 left join scheduled_job_runs r on r.job_name = j.job_name
                 where j.job_name in (:jobNames)
@@ -92,7 +96,8 @@ class ReadinessChecker(
                 SchedulerJobReadinessRow(
                     jobName = rs.getString("job_name"),
                     enabled = rs.getBoolean("enabled"),
-                    lastStartedAt = rs.getTimestamp("last_started_at")?.toInstant(),
+                    latestStartedAt = rs.getTimestamp("latest_started_at")?.toInstant(),
+                    lastSuccessfulStartedAt = rs.getTimestamp("last_successful_started_at")?.toInstant(),
                 )
             }.associateBy { it.jobName }
 
@@ -100,18 +105,20 @@ class ReadinessChecker(
             val staleJobDetails = rows.values
                 .filter { it.enabled }
                 .mapNotNull { row ->
-                    val staleFor = Duration.between(row.lastStartedAt ?: startedAt, now)
-                    val stale = row.lastStartedAt == null && Duration.between(startedAt, now) > startupGrace ||
-                        row.lastStartedAt != null && staleFor > staleThreshold
+                    val successfulStartedAt = row.lastSuccessfulStartedAt
+                    val staleFor = Duration.between(successfulStartedAt ?: startedAt, now)
+                    val stale = successfulStartedAt == null && Duration.between(startedAt, now) > startupGrace ||
+                        successfulStartedAt != null && staleFor > staleThreshold
                     if (!stale) return@mapNotNull null
                     mapOf(
                         "jobName" to row.jobName,
-                        "lastStartedAt" to row.lastStartedAt?.toString(),
+                        "latestStartedAt" to row.latestStartedAt?.toString(),
+                        "lastSuccessfulStartedAt" to successfulStartedAt?.toString(),
                         "staleForSeconds" to staleFor.seconds.coerceAtLeast(0),
                     )
                 }
             val staleJobMessages = staleJobDetails.map { detail ->
-                "${detail["jobName"]} lastStartedAt=${detail["lastStartedAt"] ?: "never"}"
+                "${detail["jobName"]} lastSuccessfulStartedAt=${detail["lastSuccessfulStartedAt"] ?: "never"}"
             }
 
             fun schedulerDetails(vararg extra: Pair<String, Any?>): Map<String, Any?> =
@@ -149,6 +156,7 @@ class ReadinessChecker(
     private data class SchedulerJobReadinessRow(
         val jobName: String,
         val enabled: Boolean,
-        val lastStartedAt: Instant?,
+        val latestStartedAt: Instant?,
+        val lastSuccessfulStartedAt: Instant?,
     )
 }

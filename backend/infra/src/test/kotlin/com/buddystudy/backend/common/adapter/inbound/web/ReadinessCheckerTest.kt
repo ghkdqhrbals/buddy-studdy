@@ -134,6 +134,33 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.ok).isTrue()
     }
 
+    @Test
+    fun `readiness fails when scheduler recently ran but last successful run is stale`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
+        JdbcTemplate(dataSource).update(
+            "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by) values (?, 'SCHEDULED', 'FAILED', ?, 'system')",
+            "question-schedule",
+            Timestamp.from(Instant.now()),
+        )
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStaleThresholdMinutes = 15,
+                    schedulerMonitoredJobs = listOf("question-schedule"),
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.ok).isFalse()
+        assertThat(response.checks["scheduler"]?.message).contains("Stale scheduler jobs")
+        assertThat(response.checks["scheduler"]?.details?.get("staleJobs").toString()).contains("lastSuccessfulStartedAt")
+    }
+
     private fun h2DataSource(): DataSource =
         h2DataSource(lastStartedAt = Instant.now(), seedJobs = true)
 
