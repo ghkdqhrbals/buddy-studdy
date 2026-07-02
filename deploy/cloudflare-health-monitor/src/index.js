@@ -319,7 +319,7 @@ function nextState(previous, result, env, checkedAt) {
     status: thresholdReached ? "down" : "degraded",
     checkedAt,
     lastUpAt: previous?.lastUpAt || null,
-    lastDownAt: thresholdReached ? checkedAt : previous?.lastDownAt || null,
+    lastDownAt: thresholdReached ? previous?.lastDownAt || checkedAt : previous?.lastDownAt || null,
     lastAlertAt,
     consecutiveFailures,
     httpStatus: result.httpStatus,

@@ -59,6 +59,21 @@ test("down service repeats alert only after repeat interval", () => {
   assert.equal(repeatDue.alertType, "still_down");
 });
 
+test("down service preserves original down time across repeated failures", () => {
+  const previous = {
+    status: "down",
+    consecutiveFailures: 4,
+    lastAlertAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: "2026-07-02T23:55:00.000Z",
+    lastDownAt: "2026-07-03T00:05:00.000Z",
+  };
+
+  const state = internals.nextState(previous, { healthy: false, httpStatus: 503, error: "HTTP 503", detail: null }, env, "2026-07-03T02:05:00.000Z");
+
+  assert.equal(state.status, "down");
+  assert.equal(state.lastDownAt, "2026-07-03T00:05:00.000Z");
+});
+
 test("recovery after down sends recovery alert", () => {
   const previous = {
     status: "down",
