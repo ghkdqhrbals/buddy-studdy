@@ -247,6 +247,9 @@ test("manual check writes state and sends slack alert when threshold is reached"
   const storedState = JSON.parse(environment.stateWrites[0].value);
   assert.equal(storedState.status, "down");
   assert.equal(storedState.lastAlertAt, storedState.checkedAt);
+  assert.equal(storedState.shouldAlert, false);
+  assert.equal(storedState.alertSent, true);
+  assert.equal(storedState.slackAlertError, null);
   assert.equal(slackPayloads.length, 1);
   assert.equal(slackPayloads[0].text, ":rotating_light: BuddyStudy backend is down");
 });
@@ -280,6 +283,8 @@ test("manual check keeps alert retryable when Slack delivery fails", async () =>
   assert.equal(body.state.status, "down");
   assert.equal(storedState.status, "down");
   assert.equal(storedState.shouldAlert, true);
+  assert.equal(storedState.alertSent, false);
+  assert.equal(storedState.slackAlertError, "Slack webhook failed with HTTP 503");
   assert.equal(storedState.lastAlertAt, null);
 });
 

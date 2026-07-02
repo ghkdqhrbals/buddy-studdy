@@ -63,10 +63,10 @@ async function runHealthCheck(env, scheduledTime) {
   if (next.shouldAlert) {
     try {
       await sendSlackAlert(env, next);
-      next = { ...next, lastAlertAt: checkedAt };
+      next = { ...next, lastAlertAt: checkedAt, shouldAlert: false, alertSent: true, slackAlertError: null };
     } catch (error) {
       slackAlertError = error instanceof Error ? error.message : String(error);
-      next = { ...next, lastAlertAt: previous?.lastAlertAt || null };
+      next = { ...next, lastAlertAt: previous?.lastAlertAt || null, alertSent: false, slackAlertError };
       console.error(
         JSON.stringify({
           message: "health_monitor_slack_alert_failed",
@@ -88,8 +88,8 @@ async function runHealthCheck(env, scheduledTime) {
       healthUrl: env.HEALTHCHECK_URL,
       httpStatus: result.httpStatus,
       error: result.error,
-      alertSent: next.shouldAlert && !slackAlertError,
-      slackAlertError,
+      alertSent: next.alertSent === true,
+      slackAlertError: next.slackAlertError || null,
     }),
   );
 
