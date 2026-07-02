@@ -15,6 +15,9 @@ runtime monitoring.
   - the failure threshold is reached,
   - the backend is still down after `ALERT_REPEAT_SECONDS`,
   - the backend recovers after a down state.
+- Includes readiness failure details in Slack when the backend returns a JSON
+  body with component checks, for example stale scheduler jobs or Redis
+  failures.
 
 ## Setup
 

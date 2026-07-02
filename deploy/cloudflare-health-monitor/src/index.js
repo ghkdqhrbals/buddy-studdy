@@ -73,20 +73,54 @@ async function checkHealth(url) {
       cf: { cacheTtl: 0, cacheEverything: false },
     });
     if (response.ok) {
-      return { healthy: true, httpStatus: response.status, error: null };
+      return { healthy: true, httpStatus: response.status, error: null, detail: null };
     }
+    const detail = await responseDetail(response);
     return {
       healthy: false,
       httpStatus: response.status,
       error: `HTTP ${response.status}`,
+      detail,
     };
   } catch (error) {
     return {
       healthy: false,
       httpStatus: null,
       error: error instanceof Error ? error.message : String(error),
+      detail: null,
     };
   }
+}
+
+async function responseDetail(response) {
+  const contentType = response.headers.get("Content-Type") || "";
+  const text = await response.text().catch(() => "");
+  if (!text) return null;
+  if (!contentType.includes("application/json")) return truncate(text, 900);
+  try {
+    return summarizeHealthJson(JSON.parse(text));
+  } catch (_error) {
+    return truncate(text, 900);
+  }
+}
+
+function summarizeHealthJson(body) {
+  if (!body || typeof body !== "object") return null;
+  const checks = body.checks && typeof body.checks === "object" ? body.checks : null;
+  if (!checks) return truncate(JSON.stringify(body), 900);
+  const failed = Object.entries(checks)
+    .filter(([, value]) => value && value.ok === false)
+    .map(([name, value]) => {
+      const message = typeof value.message === "string" && value.message.trim() ? `: ${value.message.trim()}` : "";
+      return `${name}${message}`;
+    });
+  if (failed.length === 0) return truncate(JSON.stringify(body), 900);
+  return truncate(failed.join("; "), 900);
+}
+
+function truncate(value, maxLength) {
+  const text = String(value);
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
 }
 
 function json(body, init = {}) {
@@ -120,6 +154,7 @@ function nextState(previous, result, env, checkedAt) {
       consecutiveFailures: 0,
       httpStatus: result.httpStatus,
       error: null,
+      detail: null,
       alertType: previousStatus === "down" ? "recovered" : null,
       shouldAlert: previousStatus === "down",
     };
@@ -142,6 +177,7 @@ function nextState(previous, result, env, checkedAt) {
     consecutiveFailures,
     httpStatus: result.httpStatus,
     error: result.error,
+    detail: result.detail || null,
     alertType: shouldAlert ? (firstDownAlert ? "down" : "still_down") : null,
     shouldAlert,
   };
@@ -197,6 +233,7 @@ function buildSlackPayload(env, state) {
           { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
           { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
           { type: "mrkdwn", text: `*Error*\n${state.error || "none"}` },
+          { type: "mrkdwn", text: `*Detail*\n${state.detail || "none"}` },
         ],
       },
     ],
@@ -205,6 +242,8 @@ function buildSlackPayload(env, state) {
 
 export const internals = {
   buildSlackPayload,
+  checkHealth,
   isAuthorizedManualCheck,
   nextState,
+  summarizeHealthJson,
 };

@@ -11,12 +11,18 @@ const env = {
 };
 
 test("first failure is degraded and does not alert before threshold", () => {
-  const state = internals.nextState(null, { healthy: false, httpStatus: 502, error: "HTTP 502" }, env, "2026-07-03T00:00:00.000Z");
+  const state = internals.nextState(
+    null,
+    { healthy: false, httpStatus: 502, error: "HTTP 502", detail: "upstream failed" },
+    env,
+    "2026-07-03T00:00:00.000Z",
+  );
 
   assert.equal(state.status, "degraded");
   assert.equal(state.consecutiveFailures, 1);
   assert.equal(state.shouldAlert, false);
   assert.equal(state.alertType, null);
+  assert.equal(state.detail, "upstream failed");
 });
 
 test("second consecutive failure marks down and alerts slack", () => {
@@ -27,7 +33,7 @@ test("second consecutive failure marks down and alerts slack", () => {
     lastUpAt: "2026-07-02T23:55:00.000Z",
     lastDownAt: null,
   };
-  const state = internals.nextState(previous, { healthy: false, httpStatus: null, error: "fetch failed" }, env, "2026-07-03T00:05:00.000Z");
+  const state = internals.nextState(previous, { healthy: false, httpStatus: null, error: "fetch failed", detail: null }, env, "2026-07-03T00:05:00.000Z");
 
   assert.equal(state.status, "down");
   assert.equal(state.consecutiveFailures, 2);
@@ -45,8 +51,8 @@ test("down service repeats alert only after repeat interval", () => {
     lastDownAt: "2026-07-03T00:05:00.000Z",
   };
 
-  const tooEarly = internals.nextState(previous, { healthy: false, httpStatus: 503, error: "HTTP 503" }, env, "2026-07-03T00:30:00.000Z");
-  const repeatDue = internals.nextState(previous, { healthy: false, httpStatus: 503, error: "HTTP 503" }, env, "2026-07-03T01:06:00.000Z");
+  const tooEarly = internals.nextState(previous, { healthy: false, httpStatus: 503, error: "HTTP 503", detail: null }, env, "2026-07-03T00:30:00.000Z");
+  const repeatDue = internals.nextState(previous, { healthy: false, httpStatus: 503, error: "HTTP 503", detail: null }, env, "2026-07-03T01:06:00.000Z");
 
   assert.equal(tooEarly.shouldAlert, false);
   assert.equal(repeatDue.shouldAlert, true);
@@ -61,7 +67,7 @@ test("recovery after down sends recovery alert", () => {
     lastUpAt: "2026-07-02T23:55:00.000Z",
     lastDownAt: "2026-07-03T00:05:00.000Z",
   };
-  const state = internals.nextState(previous, { healthy: true, httpStatus: 200, error: null }, env, "2026-07-03T01:10:00.000Z");
+  const state = internals.nextState(previous, { healthy: true, httpStatus: 200, error: null, detail: null }, env, "2026-07-03T01:10:00.000Z");
 
   assert.equal(state.status, "up");
   assert.equal(state.consecutiveFailures, 0);
@@ -69,12 +75,13 @@ test("recovery after down sends recovery alert", () => {
   assert.equal(state.alertType, "recovered");
 });
 
-test("slack payload contains environment, status, url, time, failures, and error", () => {
+test("slack payload contains environment, status, url, time, failures, error, and readiness detail", () => {
   const payload = internals.buildSlackPayload(env, {
     status: "down",
     checkedAt: "2026-07-03T00:05:00.000Z",
     consecutiveFailures: 2,
     error: "fetch failed",
+    detail: "scheduler: Stale scheduler jobs: question-schedule",
     alertType: "down",
   });
   const fields = payload.blocks[1].fields.map((field) => field.text).join("\n");
@@ -86,6 +93,42 @@ test("slack payload contains environment, status, url, time, failures, and error
   assert.match(fields, /2026-07-03T00:05:00.000Z/);
   assert.match(fields, /2/);
   assert.match(fields, /fetch failed/);
+  assert.match(fields, /Stale scheduler jobs/);
+});
+
+test("summarizes failed readiness checks from JSON body", () => {
+  const summary = internals.summarizeHealthJson({
+    ok: false,
+    checks: {
+      database: { ok: true },
+      redis: { ok: false, message: "Redis ping failed" },
+      scheduler: { ok: false, message: "Stale scheduler jobs: question-schedule" },
+    },
+  });
+
+  assert.equal(summary, "redis: Redis ping failed; scheduler: Stale scheduler jobs: question-schedule");
+});
+
+test("checkHealth captures non ok readiness body detail", async () => {
+  const environment = manualEnv({
+    healthResponse: new Response(
+      JSON.stringify({
+        ok: false,
+        checks: {
+          database: { ok: true },
+          scheduler: { ok: false, message: "Missing monitored scheduler jobs: question-schedule" },
+        },
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    ),
+  });
+
+  const result = await withManualEnv(environment, () => internals.checkHealth(environment.HEALTHCHECK_URL));
+
+  assert.equal(result.healthy, false);
+  assert.equal(result.httpStatus, 503);
+  assert.equal(result.error, "HTTP 503");
+  assert.equal(result.detail, "scheduler: Missing monitored scheduler jobs: question-schedule");
 });
 
 test("manual check requires configured bearer token", async () => {
