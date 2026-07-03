@@ -620,20 +620,20 @@ function buildSlackPayload(env, state) {
   const outageDuration = state.lastDownAt ? formatElapsed(state.lastDownAt, state.checkedAt) : "unknown";
   const observabilityUrl = nonBlankString(env.OBSERVABILITY_URL) ? env.OBSERVABILITY_URL.trim() : null;
   const fields = [
-    { type: "mrkdwn", text: `*Environment*\n${environmentName}` },
-    { type: "mrkdwn", text: `*Status*\n${state.status}` },
-    { type: "mrkdwn", text: `*URL*\n${env.HEALTHCHECK_URL}` },
-    { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
-    { type: "mrkdwn", text: `*HTTP status*\n${state.httpStatus || "unknown"}` },
-    { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
-    { type: "mrkdwn", text: `*Down since*\n${state.lastDownAt || "unknown"}` },
-    { type: "mrkdwn", text: `*Last up*\n${state.lastUpAt || "unknown"}` },
-    { type: "mrkdwn", text: `*Duration*\n${outageDuration}` },
-    { type: "mrkdwn", text: `*Error*\n${state.error || "none"}` },
-    { type: "mrkdwn", text: `*Detail*\n${state.detail || "none"}` },
+    slackField("Environment", environmentName),
+    slackField("Status", state.status),
+    slackField("URL", env.HEALTHCHECK_URL),
+    slackField("Checked at", state.checkedAt),
+    slackField("HTTP status", state.httpStatus || "unknown"),
+    slackField("Failures", state.consecutiveFailures),
+    slackField("Down since", state.lastDownAt || "unknown"),
+    slackField("Last up", state.lastUpAt || "unknown"),
+    slackField("Duration", outageDuration),
+    slackField("Error", state.error || "none"),
+    slackField("Detail", state.detail || "none"),
   ];
   if (observabilityUrl) {
-    fields.push({ type: "mrkdwn", text: `*Observability*\n${observabilityUrl}` });
+    fields.push(slackField("Observability", observabilityUrl));
   }
   const actionElements = [
     slackButton("Open health", env.HEALTHCHECK_URL),
@@ -668,6 +668,14 @@ function slackButton(text, url) {
     type: "button",
     text: { type: "plain_text", text },
     url: url.trim(),
+  };
+}
+
+function slackField(label, value) {
+  const prefix = `*${label}*\n`;
+  return {
+    type: "mrkdwn",
+    text: `${prefix}${truncate(value, 2_000 - prefix.length)}`,
   };
 }
 

@@ -238,6 +238,22 @@ test("monitor error slack payload stays within Block Kit section limits", () => 
   assert.match(fields, /Observability/);
 });
 
+test("slack payload truncates long field values before delivery", () => {
+  const payload = internals.buildSlackPayload(env, {
+    status: "monitor_error",
+    httpStatus: null,
+    checkedAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: null,
+    lastDownAt: null,
+    consecutiveFailures: 0,
+    error: "x".repeat(5_000),
+    detail: "y".repeat(5_000),
+    alertType: "monitor_error",
+  });
+
+  assertSlackFieldTextLimit(payload);
+});
+
 test("summarizes failed readiness checks from JSON body", () => {
   const summary = internals.summarizeHealthJson({
     ok: false,
@@ -1127,6 +1143,12 @@ function assertSlackSectionFieldLimit(payload) {
   const sectionBlocks = payload.blocks.filter((block) => block.type === "section");
   assert.ok(sectionBlocks.length > 0, "Slack payload must include section blocks");
   assert.ok(sectionBlocks.every((block) => block.fields.length <= 10), "Slack section fields must not exceed Block Kit limit");
+}
+
+function assertSlackFieldTextLimit(payload) {
+  const fields = payload.blocks.filter((block) => block.type === "section").flatMap((block) => block.fields);
+  assert.ok(fields.length > 0, "Slack payload must include fields");
+  assert.ok(fields.every((field) => field.text.length <= 2_000), "Slack field text must stay within Block Kit limit");
 }
 
 const originalFetch = globalThis.fetch;
