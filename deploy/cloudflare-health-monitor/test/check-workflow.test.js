@@ -252,6 +252,22 @@ test("deploy repo monitoring template persists Loki and Grafana state", () => {
   assert.match(template, /retention_enabled:\s*true/);
 });
 
+test("k3s operations docs describe the actual exposed node ports", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/k3s/README.md"), "utf8");
+  const postgresManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/postgres/postgres.yaml"), "utf8");
+  const redisManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/redis/redis.yaml"), "utf8");
+
+  const postgresNodePort = postgresManifest.match(/nodePort:\s*(\d+)/)?.[1];
+  const redisNodePort = redisManifest.match(/name:\s*buddystudy-redis-external[\s\S]*?nodePort:\s*(\d+)/)?.[1];
+
+  assert.equal(postgresNodePort, "30432");
+  assert.equal(redisNodePort, "30379");
+  assert.match(readme, new RegExp(`^.*${postgresNodePort}.*PostgreSQL.*$`, "m"));
+  assert.match(readme, new RegExp(`^.*${redisNodePort}.*Redis.*$`, "m"));
+  assert.doesNotMatch(readme, /PostgreSQL:[^\n]*<host-ip>:5432/);
+  assert.doesNotMatch(readme, /Redis[^:\n]*:[^\n]*<host-ip>:6379/);
+});
+
 test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 

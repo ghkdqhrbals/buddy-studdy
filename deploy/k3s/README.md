@@ -30,8 +30,8 @@ better fit for a small always-on single-node server.
 - 2 vCPU / 4 GiB memory minimum recommended.
 - Ports:
   - `30080/tcp`: backend NodePort
-  - `5432/tcp`: PostgreSQL hostPort
-  - `6379/tcp`: Redis Cluster proxy hostPort
+  - `30432/tcp`: PostgreSQL NodePort
+  - `30379/tcp`: Redis Cluster proxy NodePort
 - Images must be available in GHCR, or configure `ghcr-pull-secret`.
 
 ## Persistent Data
@@ -85,8 +85,8 @@ deploy/k3s/scripts/status.sh
 Cloudflared should run on the same Linux host and route:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
-- DB administration via Tailscale/private network -> `<host-ip>:5432`
-- Redis administration via Tailscale/private network -> `<host-ip>:6379`
+- DB administration via Tailscale/private network -> `<host-ip>:30432`
+- Redis administration via Tailscale/private network -> `<host-ip>:30379`
 
 Do not expose PostgreSQL or Redis publicly without a private network or
 additional authentication layer.
@@ -102,8 +102,8 @@ additional authentication layer.
 3. Install k3s and apply manifests on the Linux host.
 4. Restore into the new PostgreSQL:
    ```sh
-   pg_restore -h <new-host> -p 5432 -U buddystudy -d buddystudy --clean --if-exists buddystudy.dump
-   pg_restore -h <new-host> -p 5432 -U buddystudy -d buddystudy_aggregation --clean --if-exists buddystudy_aggregation.dump
+   pg_restore -h <new-host> -p 30432 -U buddystudy -d buddystudy --clean --if-exists buddystudy.dump
+   pg_restore -h <new-host> -p 30432 -U buddystudy -d buddystudy_aggregation --clean --if-exists buddystudy_aggregation.dump
    ```
 5. Redis is cache/stream runtime state. Recreate Redis Cluster rather than
    copying Docker Desktop Redis node metadata.
@@ -125,4 +125,3 @@ additional authentication layer.
   kubectl -n buddystudy exec buddystudy-redis-0 -- \
     sh -c 'redis-cli -a "$REDIS_PASSWORD" cluster info'
   ```
-
