@@ -368,8 +368,9 @@ function summarizeCheckDetails(check) {
       .map((job) => {
         if (!job || typeof job !== "object") return "";
         const name = job.jobName || "unknown";
+        const runId = job.latestRunId != null ? ` runId=${job.latestRunId}` : "";
         const staleFor = Number.isFinite(job.staleForSeconds) ? ` staleFor=${job.staleForSeconds}s` : "";
-        return `${name}${staleFor}`;
+        return `${name}${runId}${staleFor}`;
       })
       .filter(Boolean)
       .join(",");

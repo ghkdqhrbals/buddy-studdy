@@ -302,6 +302,29 @@ test("summarizes stuck scheduler jobs from readiness JSON body", () => {
   );
 });
 
+test("summarizes stale scheduler jobs with latest run id from readiness JSON body", () => {
+  const summary = internals.summarizeHealthJson({
+    ok: false,
+    checks: {
+      scheduler: {
+        ok: false,
+        message: "Stale scheduler jobs: question-schedule",
+        details: {
+          thresholdSeconds: 900,
+          staleJobs: [
+            { jobName: "question-schedule", latestRunId: 77, staleForSeconds: 1800 },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    summary,
+    "scheduler: Stale scheduler jobs: question-schedule [threshold=900s, staleJobs=question-schedule runId=77 staleFor=1800s]",
+  );
+});
+
 test("summarizes disabled scheduler jobs from readiness JSON body", () => {
   const summary = internals.summarizeHealthJson({
     ok: false,
