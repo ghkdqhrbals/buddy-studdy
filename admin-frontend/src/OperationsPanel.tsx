@@ -6,6 +6,7 @@ import type { ScheduledJobRun, ScheduledJobRunsResponse, ScheduledJobStatus } fr
 type OperationsPanelProps = {
   page: ScheduledJobRunsResponse;
   statuses?: ScheduledJobStatus[];
+  highlightRunId?: number | null;
   onRetry: (job: ScheduledJobRun) => void;
   hrefForPage: (page: number) => string;
   onPageChange?: (page: number) => void;
@@ -15,6 +16,7 @@ type OperationsPanelProps = {
 export function OperationsPanel({
   page,
   statuses = [],
+  highlightRunId = null,
   onRetry,
   hrefForPage,
   onPageChange,
@@ -59,7 +61,7 @@ export function OperationsPanel({
           </thead>
           <tbody>
             {jobs.map((job) => (
-              <tr key={job.id}>
+              <tr className={job.id === highlightRunId ? "highlighted-run" : undefined} key={job.id}>
                 <td>
                   <strong>{job.jobName}</strong>
                   {job.errorMessage ? <small>{job.errorMessage}</small> : null}

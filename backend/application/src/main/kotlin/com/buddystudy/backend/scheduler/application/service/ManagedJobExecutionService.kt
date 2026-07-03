@@ -66,8 +66,8 @@ class ManagedJobExecutionService(
         }
     }
 
-    override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
-        runs.findRuns(jobName, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+    override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+        runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
 
     override fun findStatuses(): ScheduledJobStatusResponse {
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs

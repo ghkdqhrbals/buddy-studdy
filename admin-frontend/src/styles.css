@@ -1137,6 +1137,18 @@ td {
   text-overflow: ellipsis;
 }
 
+tr.highlighted-run td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 28%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+tr.highlighted-run td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent),
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 28%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 .result-cell {
   overflow: hidden;
   text-overflow: ellipsis;

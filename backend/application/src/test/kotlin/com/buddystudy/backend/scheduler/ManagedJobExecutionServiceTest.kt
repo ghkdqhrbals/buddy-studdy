@@ -320,8 +320,10 @@ class ManagedJobExecutionServiceTest {
             return updated
         }
 
-        override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
-            val filtered = rows.filter { jobName == null || it.jobName == jobName }
+        override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+            val filtered = rows.filter {
+                (jobName == null || it.jobName == jobName) && (runId == null || it.id == runId)
+            }
             return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
         }
 

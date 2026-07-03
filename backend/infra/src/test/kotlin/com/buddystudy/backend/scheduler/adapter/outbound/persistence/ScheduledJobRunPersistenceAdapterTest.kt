@@ -61,7 +61,7 @@ class ScheduledJobRunPersistenceAdapterTest {
 
         assertThat(finished.status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(finished.summary).isEqualTo("rows=9")
-        val page = adapter.findRuns("admin-analytics-recent", 10, 0)
+        val page = adapter.findRuns("admin-analytics-recent", null, 10, 0)
         assertThat(page.runs).containsExactly(finished)
         assertThat(page.totalCount).isEqualTo(1)
     }
@@ -83,7 +83,7 @@ class ScheduledJobRunPersistenceAdapterTest {
             32,
         )
 
-        val page = adapter.findRuns(null, 10, 0)
+        val page = adapter.findRuns(null, null, 10, 0)
         assertThat(page.runs).containsExactly(second, first)
         assertThat(page.totalCount).isEqualTo(2)
     }
@@ -105,8 +105,8 @@ class ScheduledJobRunPersistenceAdapterTest {
             32,
         )
 
-        val blankPage = adapter.findRuns("", 10, 0)
-        val spacedPage = adapter.findRuns("   ", 10, 0)
+        val blankPage = adapter.findRuns("", null, 10, 0)
+        val spacedPage = adapter.findRuns("   ", null, 10, 0)
 
         assertThat(blankPage.runs).containsExactly(second, first)
         assertThat(blankPage.totalCount).isEqualTo(2)
@@ -131,12 +131,36 @@ class ScheduledJobRunPersistenceAdapterTest {
             32,
         )
 
-        val page = adapter.findRuns(null, 1, 1)
+        val page = adapter.findRuns(null, null, 1, 1)
 
         assertThat(page.runs).containsExactly(first)
         assertThat(page.totalCount).isEqualTo(2)
         assertThat(page.limit).isEqualTo(1)
         assertThat(page.offset).isEqualTo(1)
+    }
+
+    @Test
+    fun `finds one run by run id within a job name filter`() {
+        val older = adapter.finish(
+            adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.FAILED,
+            null,
+            "older failure",
+            17,
+        )
+        val newer = adapter.finish(
+            adapter.start("admin-analytics-recent", JobTriggerType.RETRY, older.id, "admin").id,
+            JobRunStatus.SUCCESS,
+            "retry ok",
+            null,
+            9,
+        )
+
+        val page = adapter.findRuns("admin-analytics-recent", older.id, 10, 0)
+
+        assertThat(page.runs).containsExactly(older)
+        assertThat(page.runs).doesNotContain(newer)
+        assertThat(page.totalCount).isEqualTo(1)
     }
 
     @Test

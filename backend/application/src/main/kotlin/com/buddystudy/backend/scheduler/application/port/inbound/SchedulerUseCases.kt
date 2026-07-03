@@ -18,7 +18,7 @@ interface ManagedJobExecutionUseCase {
         createdBy: String = "system",
     ): ScheduledJobRun
 
-    fun findRuns(jobName: String? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
+    fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
 
     fun findStatuses(): ScheduledJobStatusResponse
 }

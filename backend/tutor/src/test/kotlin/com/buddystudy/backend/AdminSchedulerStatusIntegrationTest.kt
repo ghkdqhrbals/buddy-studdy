@@ -107,6 +107,16 @@ class AdminSchedulerStatusIntegrationTest {
             Timestamp.from(Instant.now()),
             Timestamp.from(Instant.now()),
         )
+        jdbc.update(
+            """
+            insert into scheduled_job_runs (
+                job_name, trigger_type, status, started_at, finished_at, duration_ms, error_message, created_by
+            ) values (?, 'RETRY', 'FAILED', ?, ?, 9, 'older retry failed', 'admin')
+            """.trimIndent(),
+            "question-schedule",
+            Timestamp.from(Instant.now().minusSeconds(60)),
+            Timestamp.from(Instant.now().minusSeconds(60)),
+        )
     }
 
     @Test
@@ -137,10 +147,28 @@ class AdminSchedulerStatusIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(200)
         val body = response.json()
         assertThat(body["runs"]).hasSize(1)
-        assertThat(body["totalCount"].asLong()).isEqualTo(2)
+        assertThat(body["totalCount"].asLong()).isEqualTo(3)
         assertThat(body["limit"].asInt()).isEqualTo(1)
         assertThat(body["offset"].asInt()).isEqualTo(0)
         assertThat(body["runs"][0]["jobName"].asText()).isIn("question-schedule", "user-stats-refresh")
+    }
+
+    @Test
+    fun `admin can open a scheduler run by run id through HTTP`() {
+        val token = loginAdmin()
+        val olderRunId = jdbc.queryForObject(
+            "select id from scheduled_job_runs where job_name = 'question-schedule' and error_message = 'older retry failed'",
+            Long::class.java,
+        )!!
+
+        val response = get("/api/v1/admin/jobs/runs?jobName=question-schedule&runId=$olderRunId&limit=10&offset=0", token)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        val body = response.json()
+        assertThat(body["runs"]).hasSize(1)
+        assertThat(body["totalCount"].asLong()).isEqualTo(1)
+        assertThat(body["runs"][0]["id"].asLong()).isEqualTo(olderRunId)
+        assertThat(body["runs"][0]["jobName"].asText()).isEqualTo("question-schedule")
     }
 
     @Test

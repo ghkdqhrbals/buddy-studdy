@@ -10,7 +10,7 @@ interface ScheduledJobRunPort {
     fun isEnabled(jobName: String): Boolean
     fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun
     fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun
-    fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
     fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot>
 }
 

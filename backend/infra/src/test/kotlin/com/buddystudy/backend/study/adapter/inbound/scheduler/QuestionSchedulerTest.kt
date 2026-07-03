@@ -352,7 +352,7 @@ class QuestionSchedulerTest {
             )
         }
 
-        override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+        override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
             ScheduledJobRunPageResponse(emptyList(), 0, limit, offset)
 
         override fun findStatuses(): ScheduledJobStatusResponse =

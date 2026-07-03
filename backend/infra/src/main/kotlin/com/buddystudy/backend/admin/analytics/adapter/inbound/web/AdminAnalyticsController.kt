@@ -56,10 +56,11 @@ class AdminAnalyticsController(
     fun jobRuns(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam(required = false) jobName: String?,
+        @RequestParam(required = false) runId: Long?,
         @RequestParam(defaultValue = "10") limit: Int,
         @RequestParam(defaultValue = "0") offset: Int,
     ): ScheduledJobRunPageResponse =
-        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, limit, offset)
+        admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, runId, limit, offset)
 
     @PostMapping("/jobs/{jobName}/retry")
     fun retryJob(
@@ -85,7 +86,7 @@ interface AdminAnalyticsWebPort {
     fun login(request: AdminLoginRequest): AdminLoginResponse
     fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
     fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
-    fun jobRuns(adminToken: String, jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
     fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
     fun jobStatuses(adminToken: String): ScheduledJobStatusResponse
 }
@@ -107,9 +108,9 @@ class AdminAnalyticsWebAdapter(
     override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse =
         admin.metrics(adminToken, startDate, endDate, metricKeys)
 
-    override fun jobRuns(adminToken: String, jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+    override fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
         admin.validate(adminToken)
-        return jobExecutions.findRuns(jobName, limit, offset)
+        return jobExecutions.findRuns(jobName, runId, limit, offset)
     }
 
     override fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun {

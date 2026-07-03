@@ -92,10 +92,14 @@ export async function fetchJobRuns(
   limit = 20,
   offset = 0,
   jobName: string | null = null,
+  runId: number | null = null,
 ): Promise<ScheduledJobRunsResponse> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (jobName?.trim()) {
     params.set("jobName", jobName.trim());
+  }
+  if (runId !== null) {
+    params.set("runId", String(runId));
   }
   const response = await request<ScheduledJobRunsResponse | ScheduledJobRun[]>(
     `/api/v1/admin/jobs/runs?${params}`,
