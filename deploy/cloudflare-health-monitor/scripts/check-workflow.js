@@ -10,7 +10,7 @@ const deployTemplateDir = path.join(root, "docs", "deploy-repo-template");
 const backendHealthProbePattern = /(?:https?:\/\/[^\s"'\\]+)?(?:\/api\/v1\/health(?:\/readiness)?|(?<!\/api)\/health(?:\/readiness)?)\b/;
 const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wget|http)\b[^\n]*\/api\/health\b/;
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
-const healthMonitorManualCheckPattern = /(?:curl|wget|http|fetch)\b[^\n]*(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
+const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 
 function normalizeShellContinuations(text) {
   return text.replace(/\\\r?\n\s*/g, " ");

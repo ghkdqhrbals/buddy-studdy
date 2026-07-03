@@ -373,6 +373,24 @@ jobs:
   assert.match(errors, /must not call health monitor manual check endpoints/);
 });
 
+test("workflow scan rejects bare health monitor manual check urls in wait commands", () => {
+  const workflow = `
+name: Health Smoke
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    steps:
+      - name: Wait for manual check
+        run: npx wait-on https://buddystudy-health-monitor.example.workers.dev/check
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "health-smoke.yml").join("\n");
+
+  assert.match(errors, /health-smoke\.yml/);
+  assert.match(errors, /must not call health monitor manual check endpoints/);
+});
+
 test("kubernetes backend probes use dependency readiness while external monitor uses scheduler readiness", () => {
   const backendManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/backend/backend.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
