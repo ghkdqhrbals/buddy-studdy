@@ -1,15 +1,18 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.redis.connection.RedisConnection
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.io.PrintWriter
 import java.lang.reflect.Proxy
+import java.lang.reflect.ParameterizedType
 import java.sql.Connection
 import java.sql.SQLException
 import java.sql.Timestamp
@@ -18,6 +21,15 @@ import java.util.logging.Logger
 import javax.sql.DataSource
 
 class HealthControllerTest {
+    @Test
+    fun `readiness endpoints expose concrete readiness response type`() {
+        val readinessReturnType = HealthController::class.java.getDeclaredMethod("readiness").genericReturnType
+        val dependencyReturnType = HealthController::class.java.getDeclaredMethod("dependencyReadiness").genericReturnType
+
+        assertThat(readinessReturnType).isEqualTo(readinessResponseEntityType())
+        assertThat(dependencyReturnType).isEqualTo(readinessResponseEntityType())
+    }
+
     @Test
     fun `readiness returns ok when dependencies are ready`() {
         val controller = HealthController(
@@ -236,4 +248,11 @@ class HealthControllerTest {
         )
         return dataSource
     }
+
+    private fun readinessResponseEntityType(): ParameterizedType =
+        object : ParameterizedType {
+            override fun getActualTypeArguments(): Array<java.lang.reflect.Type> = arrayOf(ReadinessResponse::class.java)
+            override fun getRawType(): java.lang.reflect.Type = ResponseEntity::class.java
+            override fun getOwnerType(): java.lang.reflect.Type? = null
+        }
 }
