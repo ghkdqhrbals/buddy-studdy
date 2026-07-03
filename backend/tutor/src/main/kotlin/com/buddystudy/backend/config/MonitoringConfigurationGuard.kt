@@ -21,6 +21,9 @@ class MonitoringConfigurationGuard(
         if (!properties.monitoring.schedulerReadinessEnabled) {
             error("Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.")
         }
+        if (properties.monitoring.slackTimeoutMs !in 1_000..25_000) {
+            error("MONITORING_SLACK_TIMEOUT_MS must be between 1000 and 25000 in prod.")
+        }
         if (properties.monitoring.schedulerMonitoredJobs.none { it.isNotBlank() }) {
             error("At least one scheduler job must be monitored in prod when scheduler is enabled.")
         }
@@ -35,6 +38,18 @@ class MonitoringConfigurationGuard(
             .filterNot { it in monitoredJobs }
         if (missingManagedJobs.isNotEmpty()) {
             error("Prod scheduler monitoring is missing managed jobs: ${missingManagedJobs.joinToString(", ")}.")
+        }
+        val managedJobNames = managedJobs
+            .map { it.name.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val unknownMonitoredJobs = if (managedJobNames.isEmpty()) {
+            emptyList()
+        } else {
+            monitoredJobs.filterNot { it in managedJobNames }
+        }
+        if (unknownMonitoredJobs.isNotEmpty()) {
+            error("Prod scheduler monitoring includes unknown jobs: ${unknownMonitoredJobs.joinToString(", ")}.")
         }
     }
 

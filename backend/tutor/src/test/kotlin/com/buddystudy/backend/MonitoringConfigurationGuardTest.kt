@@ -123,6 +123,41 @@ class MonitoringConfigurationGuardTest {
             }
     }
 
+    @Test
+    fun `prod scheduler fails fast when monitored job name is unknown`() {
+        contextRunner
+            .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule,question-schedul",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "Prod scheduler monitoring includes unknown jobs: question-schedul.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when Slack timeout is outside supported bounds`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.slack-timeout-ms=999999",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_SLACK_TIMEOUT_MS must be between 1000 and 25000 in prod.",
+                )
+            }
+    }
+
     private fun fakeJob(jobName: String): ManagedJob =
         object : ManagedJob {
             override val name: String = jobName
