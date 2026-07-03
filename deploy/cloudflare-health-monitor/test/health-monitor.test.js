@@ -1006,6 +1006,28 @@ test("validateEnv rejects runtime health urls that skip scheduler readiness", ()
   });
 });
 
+test("validateEnv rejects non https and wrong production health hosts at runtime", () => {
+  const insecure = internals.validateEnv(
+    manualEnv({
+      HEALTHCHECK_URL: "http://api.ghkdqhrbals.org/api/v1/health/readiness",
+    }),
+  );
+  const wrongHost = internals.validateEnv(
+    manualEnv({
+      HEALTHCHECK_URL: "https://api.lowfidev.cloud/api/v1/health/readiness",
+    }),
+  );
+
+  assert.deepEqual(insecure, {
+    ok: false,
+    missing: ["HEALTHCHECK_URL_HTTPS"],
+  });
+  assert.deepEqual(wrongHost, {
+    ok: false,
+    missing: ["HEALTHCHECK_URL_PRODUCTION_HOST"],
+  });
+});
+
 test("validateEnv accepts required monitor bindings", () => {
   const environment = manualEnv();
 

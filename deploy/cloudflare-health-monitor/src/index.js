@@ -426,8 +426,12 @@ function validateEnv(env) {
   const missing = [];
   if (!nonBlankString(env.HEALTHCHECK_URL)) {
     missing.push("HEALTHCHECK_URL");
+  } else if (!isHttpsUrl(env.HEALTHCHECK_URL)) {
+    missing.push("HEALTHCHECK_URL_HTTPS");
   } else if (!isSchedulerReadinessUrl(env.HEALTHCHECK_URL)) {
     missing.push("HEALTHCHECK_URL_READINESS_PATH");
+  } else if (environmentName(env) === "production" && healthcheckHost(env.HEALTHCHECK_URL) !== "api.ghkdqhrbals.org") {
+    missing.push("HEALTHCHECK_URL_PRODUCTION_HOST");
   }
   if (!nonBlankString(env.SERVICE_NAME)) missing.push("SERVICE_NAME");
   if (!nonBlankString(env.ENVIRONMENT_NAME)) missing.push("ENVIRONMENT_NAME");
@@ -448,6 +452,26 @@ function isSchedulerReadinessUrl(value) {
   } catch (_error) {
     return false;
   }
+}
+
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function healthcheckHost(value) {
+  try {
+    return new URL(value).hostname;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function environmentName(env) {
+  return typeof env.ENVIRONMENT_NAME === "string" ? env.ENVIRONMENT_NAME.trim().toLowerCase() : "";
 }
 
 function nextState(previous, result, env, checkedAt) {
