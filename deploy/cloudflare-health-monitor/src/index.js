@@ -111,7 +111,7 @@ async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
   const config = validateEnv(env);
   if (!config.ok) {
-    const state = {
+    let state = {
       status: "config_error",
       checkedAt,
       lastUpAt: null,
@@ -121,11 +121,27 @@ async function runHealthCheck(env, scheduledTime) {
       httpStatus: null,
       error: `Missing monitor configuration: ${config.missing.join(", ")}`,
       detail: null,
-      alertType: null,
+      alertType: env.SLACK_WEBHOOK_URL ? "monitor_error" : null,
       shouldAlert: false,
       alertSent: false,
       slackAlertError: null,
     };
+    if (env.SLACK_WEBHOOK_URL) {
+      try {
+        await sendSlackAlert(env, state);
+        state = { ...state, alertSent: true, slackAlertError: null };
+      } catch (slackError) {
+        const slackAlertError = slackError instanceof Error ? slackError.message : String(slackError);
+        state = { ...state, alertSent: false, slackAlertError };
+        console.error(
+          JSON.stringify({
+            message: "health_monitor_config_error_slack_alert_failed",
+            healthUrl: env.HEALTHCHECK_URL,
+            error: slackAlertError,
+          }),
+        );
+      }
+    }
     console.error(
       JSON.stringify({
         message: "health_monitor_configuration_error",

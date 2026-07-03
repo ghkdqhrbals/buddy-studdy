@@ -616,6 +616,34 @@ test("scheduled check persists configuration error state when kv is available", 
   assert.equal(storedState.slackAlertError, null);
 });
 
+test("scheduled check alerts slack when monitor configuration breaks but slack is available", async () => {
+  const slackRequests = [];
+  const environment = manualEnv({
+    HEALTHCHECK_URL: "",
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") }, environment, ctx);
+    await assert.doesNotReject(waitUntilPromises[0]);
+  });
+
+  assert.equal(environment.stateWrites.length, 1);
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+  assert.equal(storedState.status, "config_error");
+  assert.equal(storedState.alertType, "monitor_error");
+  assert.equal(storedState.alertSent, true);
+  assert.equal(storedState.slackAlertError, null);
+  assert.match(storedState.error, /HEALTHCHECK_URL/);
+  assert.equal(slackRequests.length, 1);
+  assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
+});
+
 test("manual check token helper rejects absent and mismatched tokens", () => {
   assert.equal(internals.isAuthorizedManualCheck(new Request("https://monitor.example.com/check"), env), false);
   assert.equal(
