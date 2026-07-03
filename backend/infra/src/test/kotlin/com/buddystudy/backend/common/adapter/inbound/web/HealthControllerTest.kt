@@ -106,6 +106,29 @@ class HealthControllerTest {
     }
 
     @Test
+    fun `dependency readiness excludes stale scheduler so Kubernetes does not evict serving pods`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(lastStartedAt = Instant.now().minusSeconds(3_600)),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerStaleThresholdMinutes = 15,
+                        schedulerMonitoredJobs = listOf("question-schedule"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.dependencyReadiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(response.body).hasFieldOrPropertyWithValue("ok", true)
+        assertThat(response.body?.checks).containsKeys("database", "redis")
+        assertThat(response.body?.checks).doesNotContainKey("scheduler")
+    }
+
+    @Test
     fun `dependency readiness returns service unavailable when a hard dependency fails`() {
         val controller = HealthController(
             ReadinessChecker(
