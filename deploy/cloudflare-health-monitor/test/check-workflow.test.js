@@ -255,6 +255,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects docker health status inspection in Actions", () => {
+  const workflow = `
+name: Deploy Backend
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check container health
+        run: docker inspect -f '{{.State.Health.Status}}' buddystudy-backend
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
+});
+
 test("workflow scan rejects coordinator runtime health probes in Actions", () => {
   const workflow = `
 name: Deploy Coordinator
