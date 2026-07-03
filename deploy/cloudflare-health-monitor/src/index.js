@@ -402,7 +402,11 @@ function isAuthorizedManualCheck(request, env) {
 
 function validateEnv(env) {
   const missing = [];
-  if (!nonBlankString(env.HEALTHCHECK_URL)) missing.push("HEALTHCHECK_URL");
+  if (!nonBlankString(env.HEALTHCHECK_URL)) {
+    missing.push("HEALTHCHECK_URL");
+  } else if (!isSchedulerReadinessUrl(env.HEALTHCHECK_URL)) {
+    missing.push("HEALTHCHECK_URL_READINESS_PATH");
+  }
   if (!nonBlankString(env.SERVICE_NAME)) missing.push("SERVICE_NAME");
   if (!nonBlankString(env.ENVIRONMENT_NAME)) missing.push("ENVIRONMENT_NAME");
   if (!nonBlankString(env.SLACK_WEBHOOK_URL)) missing.push("SLACK_WEBHOOK_URL");
@@ -414,6 +418,14 @@ function validateEnv(env) {
 
 function nonBlankString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSchedulerReadinessUrl(value) {
+  try {
+    return new URL(value).pathname === "/api/v1/health/readiness";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function nextState(previous, result, env, checkedAt) {

@@ -973,6 +973,17 @@ test("validateEnv requires service and environment identity", () => {
   });
 });
 
+test("validateEnv rejects runtime health urls that skip scheduler readiness", () => {
+  const environment = manualEnv({
+    HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/health",
+  });
+
+  assert.deepEqual(internals.validateEnv(environment), {
+    ok: false,
+    missing: ["HEALTHCHECK_URL_READINESS_PATH"],
+  });
+});
+
 test("validateEnv accepts required monitor bindings", () => {
   const environment = manualEnv();
 

@@ -12,6 +12,9 @@ runtime monitoring.
 - Exposes the Worker on the workers.dev host so `/` and `/check` can be used
   for manual status and smoke checks after deployment.
 - Checks `HEALTHCHECK_URL`.
+- Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
+  scheduler freshness cannot be bypassed by accidentally using lightweight
+  `/health`.
 - Stores state in Workers KV to avoid repeated Slack spam.
 - Sends Slack when:
   - the failure threshold is reached,
