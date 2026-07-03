@@ -63,6 +63,27 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
+    fun `notifyFailed encodes scheduler run url query parameters`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+                adminBaseUrl = "https://admin.ghkdqhrbals.org",
+            ),
+        )
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build())
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andExpect(content().string(containsString("jobName=question+schedule%2Fprod%26urgent&runId=12")))
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+
+        adapter.notifyFailed(failedRun(jobName = "question schedule/prod&urgent"))
+
+        server.verify()
+    }
+
+    @Test
     fun `notifyFailed is no-op when Slack webhook is not configured`() {
         val builder = RestClient.builder()
         val server = MockRestServiceServer.bindTo(builder).build()
