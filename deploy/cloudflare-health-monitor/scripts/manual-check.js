@@ -16,6 +16,10 @@ if (!monitorUrl || !token) {
   );
   process.exit(1);
 }
+if (!isHttpsOrLocalhostUrl(monitorUrl)) {
+  console.error("HEALTH_MONITOR_URL must use HTTPS unless it points to localhost.");
+  process.exit(1);
+}
 
 const response = await fetch(`${monitorUrl}/check`, {
   method: "POST",
@@ -50,6 +54,16 @@ function normalizeMonitorUrl(value) {
   if (!trimmed) return "";
   if (!/^https?:\/\//.test(trimmed)) return `https://${trimmed}`;
   return trimmed;
+}
+
+function isHttpsOrLocalhostUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function readJson(response) {
