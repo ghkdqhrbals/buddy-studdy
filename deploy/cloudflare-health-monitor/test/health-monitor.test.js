@@ -644,6 +644,46 @@ test("scheduled check alerts slack when monitor configuration breaks but slack i
   assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
+test("scheduled configuration error alert respects repeat interval", async () => {
+  const slackRequests = [];
+  const environment = manualEnv({
+    HEALTHCHECK_URL: "",
+    existingState: {
+      status: "config_error",
+      checkedAt: "2026-07-03T00:00:00.000Z",
+      lastUpAt: null,
+      lastDownAt: null,
+      lastAlertAt: "2026-07-03T00:00:00.000Z",
+      consecutiveFailures: 0,
+      httpStatus: null,
+      error: "Missing monitor configuration: HEALTHCHECK_URL",
+      detail: null,
+      alertType: "monitor_error",
+      alertSent: true,
+      slackAlertError: null,
+    },
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:30:00.000Z") }, environment, ctx);
+    await assert.doesNotReject(waitUntilPromises[0]);
+  });
+
+  assert.equal(slackRequests.length, 0);
+  assert.equal(environment.stateWrites.length, 1);
+  const storedState = JSON.parse(environment.stateWrites[0].value);
+  assert.equal(storedState.status, "config_error");
+  assert.equal(storedState.alertType, "monitor_error");
+  assert.equal(storedState.alertSent, false);
+  assert.equal(storedState.lastAlertAt, "2026-07-03T00:00:00.000Z");
+});
+
 test("manual check token helper rejects absent and mismatched tokens", () => {
   assert.equal(internals.isAuthorizedManualCheck(new Request("https://monitor.example.com/check"), env), false);
   assert.equal(

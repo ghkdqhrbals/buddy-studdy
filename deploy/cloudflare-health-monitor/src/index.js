@@ -111,25 +111,27 @@ async function runHealthCheck(env, scheduledTime) {
   const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
   const config = validateEnv(env);
   if (!config.ok) {
+    const previous = await readState(env);
+    const shouldAlert = Boolean(env.SLACK_WEBHOOK_URL) && shouldAlertMonitorError(previous, env, checkedAt);
     let state = {
       status: "config_error",
       checkedAt,
       lastUpAt: null,
       lastDownAt: null,
-      lastAlertAt: null,
+      lastAlertAt: previous?.lastAlertAt || null,
       consecutiveFailures: 0,
       httpStatus: null,
       error: `Missing monitor configuration: ${config.missing.join(", ")}`,
       detail: null,
       alertType: env.SLACK_WEBHOOK_URL ? "monitor_error" : null,
-      shouldAlert: false,
+      shouldAlert,
       alertSent: false,
       slackAlertError: null,
     };
-    if (env.SLACK_WEBHOOK_URL) {
+    if (shouldAlert) {
       try {
         await sendSlackAlert(env, state);
-        state = { ...state, alertSent: true, slackAlertError: null };
+        state = { ...state, lastAlertAt: checkedAt, shouldAlert: false, alertSent: true, slackAlertError: null };
       } catch (slackError) {
         const slackAlertError = slackError instanceof Error ? slackError.message : String(slackError);
         state = { ...state, alertSent: false, slackAlertError };
@@ -205,6 +207,16 @@ async function runHealthCheck(env, scheduledTime) {
   );
 
   return next;
+}
+
+function shouldAlertMonitorError(previous, env, checkedAt) {
+  if (!previous || (previous.status !== "config_error" && previous.status !== "monitor_error")) return true;
+  if (!previous.lastAlertAt) return true;
+  const checkedAtMs = Date.parse(checkedAt);
+  const lastAlertAtMs = Date.parse(previous.lastAlertAt);
+  if (!Number.isFinite(checkedAtMs) || !Number.isFinite(lastAlertAtMs)) return true;
+  const repeatSeconds = Number.parseInt(env.ALERT_REPEAT_SECONDS || "3600", 10);
+  return checkedAtMs - lastAlertAtMs >= repeatSeconds * 1000;
 }
 
 async function checkHealth(url, env = {}) {
