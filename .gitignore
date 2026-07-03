@@ -6,6 +6,7 @@ xcuserdata/
 *.xcuserdatad/
 *.xcuserstate
 .DS_Store
+node_modules/
 __pycache__/
 *.py[cod]
 .venv/
@@ -17,3 +18,4 @@ backend/.idea/
 backend/.kotlin/
 backend/.env
 .superpowers/
+**/.wrangler/

@@ -26,7 +26,7 @@
   "kv_namespaces": [
     {
       "binding": "HEALTH_MONITOR_STATE",
-      "id": "replace-with-kv-namespace-id"
+      "id": "2a868dcc414f4db0a8616c1c633f10b6"
     }
   ]
 }
