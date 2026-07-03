@@ -79,5 +79,4 @@ jobs:
             echo "- GitHub Actions health checks: disabled."
             echo "- Public entrypoint: workers.dev URL printed by \`wrangler deploy\`."
             echo "- Manual status: GET \`/\`."
-            echo "- Manual check: POST \`/check\` with \`Authorization: Bearer <HEALTH_MONITOR_MANUAL_CHECK_TOKEN>\`."
           } >> "${GITHUB_STEP_SUMMARY}"
