@@ -632,6 +632,19 @@ test("kubernetes backend config monitors every managed scheduler job", () => {
   }
 });
 
+test("kubernetes backend config enables coordinator readiness for external monitor", () => {
+  const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
+  const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+
+  assert.match(applicationConfig, /coordinator-readiness-enabled:\s*\$\{MONITORING_COORDINATOR_READINESS_ENABLED:false\}/);
+  for (const text of [backendConfig, combinedManifest]) {
+    assert.match(text, /MONITORING_COORDINATOR_READINESS_ENABLED:\s*"true"/);
+    assert.match(text, /MONITORING_COORDINATOR_BASE_URL:\s*"http:\/\/buddystudy-redis-stream-coordinator:8080"/);
+    assert.match(text, /MONITORING_COORDINATOR_TIMEOUT_MS:\s*"3000"/);
+  }
+});
+
 test("backend scheduler readiness defaults and seed migrations cover every managed scheduler job", () => {
   const appProperties = fs.readFileSync(
     path.join(repoRoot, "backend/application/src/main/kotlin/com/buddystudy/backend/config/AppProperties.kt"),

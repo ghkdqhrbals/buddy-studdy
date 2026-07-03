@@ -19,6 +19,9 @@ data:
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
+  MONITORING_COORDINATOR_BASE_URL: "http://buddystudy-redis-stream-coordinator:8080"
+  MONITORING_COORDINATOR_READINESS_ENABLED: "true"
+  MONITORING_COORDINATOR_TIMEOUT_MS: "3000"
   MONITORING_ENVIRONMENT_NAME: production
   MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"

@@ -106,6 +106,9 @@ buddystudy:
     admin-base-url: ${MONITORING_ADMIN_BASE_URL:}
     slack-timeout-ms: ${MONITORING_SLACK_TIMEOUT_MS:5000}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
+    coordinator-readiness-enabled: ${MONITORING_COORDINATOR_READINESS_ENABLED:false}
+    coordinator-base-url: ${MONITORING_COORDINATOR_BASE_URL:${REACTION_STREAM_COORDINATOR_BASE_URL:}}
+    coordinator-timeout-ms: ${MONITORING_COORDINATOR_TIMEOUT_MS:3000}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
     scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction}

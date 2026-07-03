@@ -65,6 +65,9 @@ data class BuddyStudyProperties(
         var adminBaseUrl: String = "",
         var slackTimeoutMs: Long = 5_000,
         var schedulerReadinessEnabled: Boolean = true,
+        var coordinatorReadinessEnabled: Boolean = false,
+        var coordinatorBaseUrl: String = "",
+        var coordinatorTimeoutMs: Long = 3_000,
         var schedulerStaleThresholdMinutes: Long = 15,
         var schedulerStartupGraceMinutes: Long = 15,
         var schedulerMonitoredJobs: List<String> = listOf(

@@ -16,6 +16,7 @@ class ReadinessChecker(
     private val dataSource: DataSource,
     private val redisConnectionFactory: RedisConnectionFactory,
     private val properties: BuddyStudyProperties,
+    private val coordinatorHealthClient: CoordinatorHealthClient = RestClientCoordinatorHealthClient(),
 ) {
     private val startedAt: Instant = Instant.now()
     private val jdbc = NamedParameterJdbcTemplate(dataSource)
@@ -27,6 +28,9 @@ class ReadinessChecker(
         )
         if (includeScheduler && properties.monitoring.schedulerReadinessEnabled) {
             checks["scheduler"] = checkScheduler()
+        }
+        if (includeScheduler && properties.monitoring.coordinatorReadinessEnabled) {
+            checks["redisStreamCoordinator"] = checkRedisStreamCoordinator()
         }
         return ReadinessResponse(
             ok = checks.values.all { it.ok },
@@ -59,6 +63,20 @@ class ReadinessChecker(
                 connection.close()
             }
             ReadinessCheckResponse(ok = true)
+        }
+
+    private fun checkRedisStreamCoordinator(): ReadinessCheckResponse =
+        timedCheck {
+            val baseUrl = properties.monitoring.coordinatorBaseUrl.trim()
+            if (baseUrl.isBlank()) {
+                throw IllegalStateException("Redis Stream Coordinator base URL is not configured.")
+            }
+            val timeout = Duration.ofMillis(properties.monitoring.coordinatorTimeoutMs.coerceIn(500, 25_000))
+            coordinatorHealthClient.check(baseUrl, timeout)
+            ReadinessCheckResponse(
+                ok = true,
+                details = mapOf("baseUrl" to baseUrl),
+            )
         }
 
     private fun checkScheduler(): ReadinessCheckResponse {
