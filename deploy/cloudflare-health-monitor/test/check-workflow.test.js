@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   buildDeploymentReadinessReport,
+  requiredHealthMonitorGitHubSecrets,
   validateNoActionsRuntimeHealthChecks,
   validateWorkflowText,
 } from "../scripts/check-workflow.js";
@@ -746,6 +747,16 @@ jobs:
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /Slack alert secrets must be required/);
+});
+
+test("health monitor workflow validates every required GitHub secret by repository secret name", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
+
+  for (const name of requiredHealthMonitorGitHubSecrets) {
+    assert.match(workflow, new RegExp(`${name}:\\s*\\$\\{\\{\\s*secrets\\.${name}\\s*\\}\\}`));
+    assert.match(workflow, new RegExp(`for name in[\\s\\S]*\\b${name}\\b`));
+  }
+  assert.match(workflow, /wrangler\s+secret\s+put\s+MANUAL_CHECK_TOKEN/);
 });
 
 test("health monitor workflow summary documents status without manual health checks", () => {
