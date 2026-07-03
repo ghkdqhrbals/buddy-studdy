@@ -816,6 +816,30 @@ test("health monitor deployment readiness distinguishes unknown GitHub secret st
   assert.doesNotMatch(report.blockers.join("\n"), /is missing from GitHub Actions secrets/);
 });
 
+test("health monitor deployment readiness checks every workflow secret", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    requiredGitHubSecrets: {
+      CLOUDFLARE_API_TOKEN: true,
+      CLOUDFLARE_ACCOUNT_ID: false,
+      HEALTH_MONITOR_KV_NAMESPACE_ID: true,
+      HEALTH_MONITOR_SLACK_WEBHOOK_URL: true,
+      HEALTH_MONITOR_MANUAL_CHECK_TOKEN: false,
+    },
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "CLOUDFLARE_ACCOUNT_ID is missing from GitHub Actions secrets.",
+    "HEALTH_MONITOR_MANUAL_CHECK_TOKEN is missing from GitHub Actions secrets.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /set CLOUDFLARE_ACCOUNT_ID in the study-mate repository secrets/);
+  assert.match(report.nextActions.join("\n"), /set HEALTH_MONITOR_MANUAL_CHECK_TOKEN in the study-mate repository secrets/);
+  assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
+});
+
 test("health monitor package exposes a deployment readiness command", () => {
   const packageJson = JSON.parse(
     fs.readFileSync(path.join(repoRoot, "deploy", "cloudflare-health-monitor", "package.json"), "utf8"),
@@ -838,7 +862,11 @@ if [ "$1" = "workflow" ]; then
   exit 0
 fi
 if [ "$1" = "secret" ]; then
+  printf 'CLOUDFLARE_API_TOKEN\\t2026-07-03\\n'
+  printf 'CLOUDFLARE_ACCOUNT_ID\\t2026-07-03\\n'
+  printf 'HEALTH_MONITOR_KV_NAMESPACE_ID\\t2026-07-03\\n'
   printf 'HEALTH_MONITOR_SLACK_WEBHOOK_URL\\t2026-07-03\\n'
+  printf 'HEALTH_MONITOR_MANUAL_CHECK_TOKEN\\t2026-07-03\\n'
   exit 0
 fi
 exit 1

@@ -88,9 +88,9 @@ npm run readiness
 ```
 
 This checks whether the local workflow exists, whether the remote default
-branch exposes **Deploy Health Monitor Worker**, and whether the GitHub Slack
-webhook secret is present. Run it before relying on Slack outage alerts; it
-prints blockers before relying on Slack outage alerts.
+branch exposes **Deploy Health Monitor Worker**, and whether every GitHub
+Actions secret required by that workflow is present. Run it before relying on
+Slack outage alerts; it prints blockers before relying on Slack outage alerts.
 
 Validate config and Cloudflare Worker bundle before deploying:
 

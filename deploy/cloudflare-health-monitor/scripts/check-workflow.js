@@ -18,6 +18,13 @@ const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?
 const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
 const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
+export const requiredHealthMonitorGitHubSecrets = [
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "HEALTH_MONITOR_KV_NAMESPACE_ID",
+  "HEALTH_MONITOR_SLACK_WEBHOOK_URL",
+  "HEALTH_MONITOR_MANUAL_CHECK_TOKEN",
+];
 
 function normalizeShellContinuations(text) {
   return text.replace(/\\\r?\n\s*/g, " ");
@@ -121,11 +128,17 @@ export function buildDeploymentReadinessReport({
   localWorkflowExists,
   remoteWorkflowNames = [],
   hasGitHubSlackSecret,
+  requiredGitHubSecrets,
   hasCloudflareApiToken,
 }) {
   const blockers = [];
   const nextActions = [];
   const remoteWorkflowExists = remoteWorkflowNames.includes(healthMonitorWorkflowName);
+  const secretStates = requiredGitHubSecrets ?? {
+    HEALTH_MONITOR_SLACK_WEBHOOK_URL: hasGitHubSlackSecret,
+  };
+  const secretNames = requiredGitHubSecrets ? requiredHealthMonitorGitHubSecrets : Object.keys(secretStates);
+  const hasAllRequiredSecrets = secretNames.every((name) => secretStates[name] === true);
 
   if (!localWorkflowExists) {
     blockers.push("Local .github/workflows/health-monitor.yml is missing.");
@@ -136,18 +149,21 @@ export function buildDeploymentReadinessReport({
       "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
     );
     nextActions.push("merge or push `.github/workflows/health-monitor.yml` to the remote default branch");
-    if (hasGitHubSlackSecret) {
+    if (hasAllRequiredSecrets) {
       nextActions.push("dispatch Deploy Health Monitor Worker after the workflow is available on the remote default branch");
     }
   }
-  if (hasGitHubSlackSecret == null) {
-    blockers.push("Could not verify HEALTH_MONITOR_SLACK_WEBHOOK_URL in GitHub Actions secrets.");
-    nextActions.push("rerun readiness with GitHub CLI authentication and network access");
-  } else if (!hasGitHubSlackSecret) {
-    blockers.push("HEALTH_MONITOR_SLACK_WEBHOOK_URL is missing from GitHub Actions secrets.");
-    nextActions.push("set HEALTH_MONITOR_SLACK_WEBHOOK_URL in the study-mate repository secrets");
+  for (const name of secretNames) {
+    const state = secretStates[name];
+    if (state == null) {
+      blockers.push(`Could not verify ${name} in GitHub Actions secrets.`);
+      nextActions.push("rerun readiness with GitHub CLI authentication and network access");
+    } else if (!state) {
+      blockers.push(`${name} is missing from GitHub Actions secrets.`);
+      nextActions.push(`set ${name} in the study-mate repository secrets`);
+    }
   }
-  if (localWorkflowExists && remoteWorkflowExists && hasGitHubSlackSecret) {
+  if (localWorkflowExists && remoteWorkflowExists && hasAllRequiredSecrets) {
     nextActions.push("dispatch Deploy Health Monitor Worker to sync Cloudflare Worker secrets");
   } else if (hasCloudflareApiToken) {
     nextActions.push("alternatively run `wrangler secret put SLACK_WEBHOOK_URL` with CLOUDFLARE_API_TOKEN");

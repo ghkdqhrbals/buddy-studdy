@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
-import { buildDeploymentReadinessReport } from "./check-workflow.js";
+import { buildDeploymentReadinessReport, requiredHealthMonitorGitHubSecrets } from "./check-workflow.js";
 
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
@@ -25,16 +25,22 @@ function readRemoteWorkflowNames() {
   }
 }
 
-function hasGitHubSlackSecret() {
+function readRequiredGitHubSecretStates() {
   try {
     const output = execFileSync("gh", ["secret", "list", "--repo", repo], {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return /^HEALTH_MONITOR_SLACK_WEBHOOK_URL\b/m.test(output);
+    const names = new Set(
+      output
+        .split(/\r?\n/)
+        .map((line) => line.trim().split(/\t+/)[0])
+        .filter(Boolean),
+    );
+    return Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, names.has(name)]));
   } catch (error) {
-    return null;
+    return Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, null]));
   }
 }
 
@@ -51,7 +57,7 @@ function printSection(title, items) {
 const report = buildDeploymentReadinessReport({
   localWorkflowExists: fs.existsSync(workflowPath),
   remoteWorkflowNames: readRemoteWorkflowNames(),
-  hasGitHubSlackSecret: hasGitHubSlackSecret(),
+  requiredGitHubSecrets: readRequiredGitHubSecretStates(),
   hasCloudflareApiToken: Boolean(process.env.CLOUDFLARE_API_TOKEN),
 });
 
