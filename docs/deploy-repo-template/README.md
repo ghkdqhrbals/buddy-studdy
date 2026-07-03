@@ -116,7 +116,12 @@ messages for failed managed scheduler jobs. Set the deploy repository variable
 `https://api.ghkdqhrbals.org/admin`; scheduler alerts use it to link directly
 to the matching run list. Repeated failed-run alerts for the same scheduler job
 are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`, which
-defaults to `300`. The Cloudflare Worker uses
+defaults to `300`. The template also passes `MONITORING_SLACK_TIMEOUT_MS`,
+`MONITORING_SCHEDULER_READINESS_ENABLED`,
+`MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
+`MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
+`MONITORING_SCHEDULER_MONITORED_JOBS` into the backend so Docker deployments
+use the same scheduler readiness policy as Kubernetes. The Cloudflare Worker uses
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
 checker.
 

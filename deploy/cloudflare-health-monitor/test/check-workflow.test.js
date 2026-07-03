@@ -645,6 +645,7 @@ test("kubernetes backend config monitors every managed scheduler job", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+  const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
   const requiredJobs = managedJobNames();
 
   assert.ok(requiredJobs.length > 0, "expected at least one ManagedJob implementation");
@@ -652,7 +653,26 @@ test("kubernetes backend config monitors every managed scheduler job", () => {
     assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`));
     assert.match(backendConfig, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(combinedManifest, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
+    assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
+    assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS=\\$\\{MONITORING_SCHEDULER_MONITORED_JOBS\\}`));
   }
+});
+
+test("deploy repo backend template wires scheduler readiness policy into backend env", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+
+  assert.match(template, /MONITORING_ENVIRONMENT_NAME:\s*\$\{\{\s*vars\.MONITORING_ENVIRONMENT_NAME\s*\|\|\s*'production'\s*\}\}/);
+  assert.match(template, /MONITORING_SERVICE_NAME:\s*\$\{\{\s*vars\.MONITORING_SERVICE_NAME\s*\|\|\s*'BuddyStudy backend'\s*\}\}/);
+  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS:\s*\$\{\{\s*vars\.MONITORING_SLACK_TIMEOUT_MS\s*\|\|\s*'5000'\s*\}\}/);
+  assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_READINESS_ENABLED\s*\|\|\s*'true'\s*\}\}/);
+  assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\s*\|\|\s*'15'\s*\}\}/);
+  assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\s*\|\|\s*'15'\s*\}\}/);
+  assert.match(template, /MONITORING_ENVIRONMENT_NAME=\$\{MONITORING_ENVIRONMENT_NAME\}/);
+  assert.match(template, /MONITORING_SERVICE_NAME=\$\{MONITORING_SERVICE_NAME\}/);
+  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS=\$\{MONITORING_SLACK_TIMEOUT_MS\}/);
+  assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED=\$\{MONITORING_SCHEDULER_READINESS_ENABLED\}/);
+  assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES=\$\{MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\}/);
+  assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=\$\{MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\}/);
 });
 
 test("kubernetes backend config enables coordinator readiness for external monitor", () => {
