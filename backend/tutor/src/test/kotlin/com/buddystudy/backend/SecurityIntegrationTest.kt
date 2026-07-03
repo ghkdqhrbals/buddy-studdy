@@ -48,6 +48,7 @@ class SecurityIntegrationTest {
     @Test
     fun `public endpoints are reachable without an access token`() {
         assertThat(get("/health").statusCode()).isEqualTo(200)
+        assertThat(get("/api/v1/health").statusCode()).isEqualTo(200)
         assertThat(get("/api/v1/health/readiness").statusCode()).isIn(200, 503)
         assertThat(get("/api/v1/health/dependencies").statusCode()).isIn(200, 503)
         assertThat(get("/api/v1/public/questions").statusCode()).isEqualTo(200)
@@ -78,11 +79,14 @@ class SecurityIntegrationTest {
     @Test
     fun `invalid bearer token is ignored on public endpoints`() {
         val publicQuestions = get("/api/v1/public/questions", "not-a-token")
+        val health = get("/api/v1/health", "not-a-token")
         val readiness = get("/api/v1/health/readiness", "not-a-token")
         val dependencies = get("/api/v1/health/dependencies", "not-a-token")
 
         assertThat(publicQuestions.statusCode()).isEqualTo(200)
         assertThat(publicQuestions.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
+        assertThat(health.statusCode()).isEqualTo(200)
+        assertThat(health.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
         assertThat(readiness.statusCode()).isIn(200, 503)
         assertThat(readiness.body()).doesNotContain("AUTH_INVALID_ACCESS_TOKEN")
         assertThat(dependencies.statusCode()).isIn(200, 503)

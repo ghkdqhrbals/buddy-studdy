@@ -149,12 +149,10 @@ private object NonApiRoutes {
 
 private object AnonymousRoutes {
     private val routes = listOf(
-        Route(HttpMethod.GET, "/health"),
-        Route(HttpMethod.GET, "/health/readiness"),
-        Route(HttpMethod.GET, "/health/dependencies"),
-        Route(HttpMethod.GET, "/api/v1/health"),
-        Route(HttpMethod.GET, "/api/v1/health/readiness"),
-        Route(HttpMethod.GET, "/api/v1/health/dependencies"),
+        Route(null, "/health"),
+        Route(null, "/health/**"),
+        Route(null, "/api/v1/health"),
+        Route(null, "/api/v1/health/**"),
         Route(null, "/actuator/**"),
         Route(HttpMethod.GET, "/docs"),
         Route(HttpMethod.GET, "/docs/**"),
