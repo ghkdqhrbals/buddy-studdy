@@ -17,6 +17,7 @@ const dockerStatusHealthPattern = /docker\s+(?:compose\s+)?ps\b[^\n]*\.Status\b[
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
 const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
+const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
 
 function normalizeShellContinuations(text) {
   return text.replace(/\\\r?\n\s*/g, " ");
@@ -114,6 +115,46 @@ export function validateWorkflowText(text) {
   }
 
   return errors;
+}
+
+export function buildDeploymentReadinessReport({
+  localWorkflowExists,
+  remoteWorkflowNames = [],
+  hasGitHubSlackSecret,
+  hasCloudflareApiToken,
+}) {
+  const blockers = [];
+  const nextActions = [];
+  const remoteWorkflowExists = remoteWorkflowNames.includes(healthMonitorWorkflowName);
+
+  if (!localWorkflowExists) {
+    blockers.push("Local .github/workflows/health-monitor.yml is missing.");
+    nextActions.push("restore .github/workflows/health-monitor.yml before configuring Slack alerts");
+  }
+  if (localWorkflowExists && !remoteWorkflowExists) {
+    blockers.push(
+      "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
+    );
+    nextActions.push("merge or push `.github/workflows/health-monitor.yml` to the remote default branch");
+    if (hasGitHubSlackSecret) {
+      nextActions.push("dispatch Deploy Health Monitor Worker after the workflow is available on the remote default branch");
+    }
+  }
+  if (!hasGitHubSlackSecret) {
+    blockers.push("HEALTH_MONITOR_SLACK_WEBHOOK_URL is missing from GitHub Actions secrets.");
+    nextActions.push("set HEALTH_MONITOR_SLACK_WEBHOOK_URL in the study-mate repository secrets");
+  }
+  if (localWorkflowExists && remoteWorkflowExists && hasGitHubSlackSecret) {
+    nextActions.push("dispatch Deploy Health Monitor Worker to sync Cloudflare Worker secrets");
+  } else if (hasCloudflareApiToken) {
+    nextActions.push("alternatively run `wrangler secret put SLACK_WEBHOOK_URL` with CLOUDFLARE_API_TOKEN");
+  }
+
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    nextActions,
+  };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { validateNoActionsRuntimeHealthChecks, validateWorkflowText } from "../scripts/check-workflow.js";
+import {
+  buildDeploymentReadinessReport,
+  validateNoActionsRuntimeHealthChecks,
+  validateWorkflowText,
+} from "../scripts/check-workflow.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const kotlinSourceRoot = path.join(repoRoot, "backend", "infra", "src", "main", "kotlin", "com", "buddystudy", "backend");
@@ -778,6 +782,22 @@ test("health monitor docs distinguish GitHub secret storage from Worker secret s
   assert.match(readme, /the running Worker will not send Slack alerts until\s+`SLACK_WEBHOOK_URL`\s+exists in Cloudflare Worker secrets/);
   assert.match(readme, /workflow not found/);
   assert.match(readme, /merge\/push the workflow first/);
+});
+
+test("health monitor deployment readiness reports remote workflow absence as Slack sync blocker", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: ["Build Backend Image", "Release iOS App"],
+    hasGitHubSlackSecret: true,
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /merge or push `.github\/workflows\/health-monitor\.yml`/);
+  assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
 test("health monitor docs include post deploy verification without Actions checks", () => {
