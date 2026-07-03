@@ -18,7 +18,10 @@ class HealthController(
     @GetMapping("/health", "/api/v1/health")
     fun health() = HealthResponse()
 
-    @Operation(summary = "Readiness check", description = "Checks required backend dependencies for external uptime monitoring.")
+    @Operation(
+        summary = "Readiness check",
+        description = "Checks required backend dependencies and scheduler freshness for external Slack monitoring.",
+    )
     @GetMapping("/health/readiness", "/api/v1/health/readiness")
     fun readiness(): ResponseEntity<*> {
         val response = readiness.check()
