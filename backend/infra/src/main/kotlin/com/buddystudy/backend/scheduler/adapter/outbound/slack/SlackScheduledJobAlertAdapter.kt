@@ -104,7 +104,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
         val baseUrl = properties.monitoring.adminBaseUrl.trim().trimEnd('/')
         if (baseUrl.isBlank()) return null
         val jobName = URLEncoder.encode(run.jobName, StandardCharsets.UTF_8)
-        return "$baseUrl/operations/scheduler-runs?jobName=$jobName"
+        return "$baseUrl/operations/scheduler-runs?jobName=$jobName&runId=${run.id}"
     }
 
     private companion object {

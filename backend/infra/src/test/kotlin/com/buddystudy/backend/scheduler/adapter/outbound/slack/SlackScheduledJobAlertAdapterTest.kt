@@ -50,10 +50,10 @@ class SlackScheduledJobAlertAdapterTest {
             .andExpect(content().string(containsString("*Created by*: admin")))
             .andExpect(content().string(containsString("*Retry of run*: 3")))
             .andExpect(content().string(containsString("*Finished*: 2026-07-02T00:00:02Z")))
-            .andExpect(content().string(containsString("*Run URL*: https://admin.ghkdqhrbals.org/operations/scheduler-runs?jobName=question-scheduler")))
+            .andExpect(content().string(containsString("*Run URL*: https://admin.ghkdqhrbals.org/operations/scheduler-runs?jobName=question-scheduler&runId=12")))
             .andExpect(content().string(containsString("\"type\":\"button\"")))
             .andExpect(content().string(containsString("\"text\":\"Open scheduler run\"")))
-            .andExpect(content().string(containsString("\"url\":\"https://admin.ghkdqhrbals.org/operations/scheduler-runs?jobName=question-scheduler\"")))
+            .andExpect(content().string(containsString("\"url\":\"https://admin.ghkdqhrbals.org/operations/scheduler-runs?jobName=question-scheduler&runId=12\"")))
             .andExpect(content().string(containsString("boom")))
             .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
 
