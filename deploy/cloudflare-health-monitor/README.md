@@ -8,7 +8,8 @@ runtime monitoring.
 
 ## Behavior
 
-- Runs every minute with a Cloudflare Cron Trigger.
+- Runs every minute with exactly one Cloudflare Cron Trigger, preventing
+  duplicate checks and duplicate Slack alerts.
 - Exposes the Worker on the workers.dev host so operators can inspect `GET /`
   and, when needed, manually trigger `POST /check`.
 - Checks `HEALTHCHECK_URL`.
@@ -144,7 +145,7 @@ Default vars in `wrangler.jsonc`:
 - `OBSERVABILITY_URL`: optional HTTPS Grafana/Loki entrypoint linked from
   Slack alerts
 
-With the default 1-minute cron and threshold `2`, a real outage usually alerts
+With the required single 1-minute cron and threshold `2`, a real outage usually alerts
 after about 1-2 minutes while still filtering out a single transient failure.
 
 Use Cloudflare Worker vars/secrets for environment-specific overrides.

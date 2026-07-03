@@ -33,6 +33,13 @@ test("health monitor config rejects missing runtime essentials", () => {
   assert.match(errors, /SLACK_TIMEOUT_MS/);
 });
 
+test("health monitor config rejects duplicate cron triggers", () => {
+  const config = validConfig();
+  config.triggers.crons = ["* * * * *", "*/5 * * * *"];
+
+  assert.match(validateConfig(config).join("\n"), /exactly one 1-minute cron/);
+});
+
 test("health monitor config rejects lightweight health endpoints", () => {
   const config = validConfig();
   config.vars.HEALTHCHECK_URL = "https://api.ghkdqhrbals.org/health";
