@@ -19,7 +19,8 @@ const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.d
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
 const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
 const githubCliAuthAction = "verify GitHub CLI auth with `gh auth status`; if invalid, run `gh auth login -h github.com`, then rerun readiness";
-const wranglerAuthAction = "run `npx wrangler login`, then rerun readiness to obtain Cloudflare account and KV setup values";
+const wranglerAuthAction =
+  "run `npx wrangler login`, then `npm run bootstrap:cloudflare` to create KV and print GitHub secret commands";
 export const requiredHealthMonitorGitHubSecrets = [
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
@@ -33,7 +34,7 @@ const cloudflareSetupSecrets = new Set([
   "HEALTH_MONITOR_KV_NAMESPACE_ID",
 ]);
 const cloudflareSetupAction =
-  "read deploy/cloudflare-health-monitor/README.md for Cloudflare API token, account id, and KV namespace setup";
+  "run `npm run bootstrap:cloudflare` after Wrangler login, then set the printed GitHub secrets";
 
 function normalizeShellContinuations(text) {
   return text.replace(/\\\r?\n\s*/g, " ");

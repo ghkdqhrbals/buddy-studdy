@@ -108,6 +108,21 @@ Or deploy from GitHub Actions with **Deploy Health Monitor Worker**. That
 workflow only tests and deploys this Worker. It does not perform runtime health
 checks. Runtime checks still run from the Cloudflare Cron Trigger.
 
+If readiness is blocked on Cloudflare setup values, authenticate Wrangler and
+run the bootstrap helper:
+
+```sh
+npx wrangler login
+npm run bootstrap:cloudflare
+```
+
+The helper creates the `HEALTH_MONITOR_STATE` KV namespace, writes its id into
+`wrangler.jsonc`, prints `CLOUDFLARE_ACCOUNT_ID`, and prints the exact
+`gh secret set` commands needed for the remaining GitHub Actions secrets. It
+cannot create `CLOUDFLARE_API_TOKEN`; create that token in the Cloudflare
+dashboard, then paste it when prompted by the printed `gh secret set
+CLOUDFLARE_API_TOKEN ...` command.
+
 Required GitHub Actions secrets for that deployment workflow:
 
 - `CLOUDFLARE_API_TOKEN`

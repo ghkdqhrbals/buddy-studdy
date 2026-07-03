@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "configure:kv": "node scripts/set-kv-namespace.js",
+    "bootstrap:cloudflare": "node scripts/bootstrap-cloudflare.js",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check": "node scripts/check-config.js && node scripts/check-workflow.js && wrangler deploy --dry-run",
