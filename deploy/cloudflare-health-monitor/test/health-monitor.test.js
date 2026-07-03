@@ -152,7 +152,7 @@ test("recovery alert remains retryable when previous recovery Slack delivery fai
 });
 
 test("slack payload contains environment, status, url, time, failures, error, and readiness detail", () => {
-  const payload = internals.buildSlackPayload(env, {
+  const payload = internals.buildSlackPayload({ ...env, OBSERVABILITY_URL: "https://grafana.ghkdqhrbals.org/d/backend" }, {
     status: "down",
     httpStatus: 503,
     checkedAt: "2026-07-03T00:05:00.000Z",
@@ -178,6 +178,8 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.match(fields, /Down since/);
   assert.match(fields, /Last up/);
   assert.match(fields, /Duration/);
+  assert.match(fields, /Observability/);
+  assert.match(fields, /https:\/\/grafana\.ghkdqhrbals\.org\/d\/backend/);
 });
 
 test("recovery slack payload includes outage duration", () => {

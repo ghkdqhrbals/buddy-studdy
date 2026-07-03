@@ -618,6 +618,23 @@ function buildSlackPayload(env, state) {
       : `${serviceName} is down`;
   const emoji = isRecovery ? ":white_check_mark:" : isMonitorError ? ":warning:" : ":rotating_light:";
   const outageDuration = state.lastDownAt ? formatElapsed(state.lastDownAt, state.checkedAt) : "unknown";
+  const observabilityUrl = nonBlankString(env.OBSERVABILITY_URL) ? env.OBSERVABILITY_URL.trim() : null;
+  const fields = [
+    { type: "mrkdwn", text: `*Environment*\n${environmentName}` },
+    { type: "mrkdwn", text: `*Status*\n${state.status}` },
+    { type: "mrkdwn", text: `*URL*\n${env.HEALTHCHECK_URL}` },
+    { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
+    { type: "mrkdwn", text: `*HTTP status*\n${state.httpStatus || "unknown"}` },
+    { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
+    { type: "mrkdwn", text: `*Down since*\n${state.lastDownAt || "unknown"}` },
+    { type: "mrkdwn", text: `*Last up*\n${state.lastUpAt || "unknown"}` },
+    { type: "mrkdwn", text: `*Duration*\n${outageDuration}` },
+    { type: "mrkdwn", text: `*Error*\n${state.error || "none"}` },
+    { type: "mrkdwn", text: `*Detail*\n${state.detail || "none"}` },
+  ];
+  if (observabilityUrl) {
+    fields.push({ type: "mrkdwn", text: `*Observability*\n${observabilityUrl}` });
+  }
 
   return {
     text: `${emoji} ${title}`,
@@ -628,19 +645,7 @@ function buildSlackPayload(env, state) {
       },
       {
         type: "section",
-        fields: [
-          { type: "mrkdwn", text: `*Environment*\n${environmentName}` },
-          { type: "mrkdwn", text: `*Status*\n${state.status}` },
-          { type: "mrkdwn", text: `*URL*\n${env.HEALTHCHECK_URL}` },
-          { type: "mrkdwn", text: `*Checked at*\n${state.checkedAt}` },
-          { type: "mrkdwn", text: `*HTTP status*\n${state.httpStatus || "unknown"}` },
-          { type: "mrkdwn", text: `*Failures*\n${state.consecutiveFailures}` },
-          { type: "mrkdwn", text: `*Down since*\n${state.lastDownAt || "unknown"}` },
-          { type: "mrkdwn", text: `*Last up*\n${state.lastUpAt || "unknown"}` },
-          { type: "mrkdwn", text: `*Duration*\n${outageDuration}` },
-          { type: "mrkdwn", text: `*Error*\n${state.error || "none"}` },
-          { type: "mrkdwn", text: `*Detail*\n${state.detail || "none"}` },
-        ],
+        fields,
       },
     ],
   };

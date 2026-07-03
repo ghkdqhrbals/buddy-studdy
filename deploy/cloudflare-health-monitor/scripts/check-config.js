@@ -78,6 +78,9 @@ export function validateConfig(config) {
   } else if (!boundedInt(config.vars.SLACK_TIMEOUT_MS, 1_000, 15_000)) {
     errors.push("SLACK_TIMEOUT_MS must be between 1000 and 15000.");
   }
+  if (nonBlankString(config.vars?.OBSERVABILITY_URL) && !isHttpsUrl(config.vars.OBSERVABILITY_URL)) {
+    errors.push("OBSERVABILITY_URL must be an HTTPS URL.");
+  }
 
   return errors;
 }

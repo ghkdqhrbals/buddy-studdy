@@ -93,6 +93,13 @@ test("health monitor config rejects timeout values that are too slow for Worker 
   assert.match(errors, /SLACK_TIMEOUT_MS must be between 1000 and 15000/);
 });
 
+test("health monitor config rejects invalid observability urls", () => {
+  const config = validConfig();
+  config.vars.OBSERVABILITY_URL = "ftp://grafana.example.com/d/backend";
+
+  assert.match(validateConfig(config).join("\n"), /OBSERVABILITY_URL must be an HTTPS URL/);
+});
+
 test("health monitor config keeps Slack timeout limit aligned with runtime clamp", () => {
   const config = validConfig();
   config.vars.SLACK_TIMEOUT_MS = "20000";

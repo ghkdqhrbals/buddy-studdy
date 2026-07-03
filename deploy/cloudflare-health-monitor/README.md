@@ -38,6 +38,8 @@ runtime monitoring.
   failures.
 - Slack alerts include `Down since`, `Last up`, and outage `Duration` so
   recovery messages show how long the service was unavailable.
+- Slack alerts include `OBSERVABILITY_URL` when configured, so operators can
+  open Grafana/Loki from the alert.
 - `GET /` validates required runtime configuration and returns missing bindings
   such as `HEALTH_MONITOR_STATE` or `SLACK_WEBHOOK_URL` before a silent monitor
   failure can happen.
@@ -137,6 +139,8 @@ Default vars in `wrangler.jsonc`:
 - `STATUS_STALE_AFTER_SECONDS`: `180` (`60` to `3600`)
 - `HEALTHCHECK_TIMEOUT_MS`: `8000` (`1000` to `25000`)
 - `SLACK_TIMEOUT_MS`: `5000` (`1000` to `15000`)
+- `OBSERVABILITY_URL`: optional HTTPS Grafana/Loki entrypoint linked from
+  Slack alerts
 
 With the default 1-minute cron and threshold `2`, a real outage usually alerts
 after about 1-2 minutes while still filtering out a single transient failure.
