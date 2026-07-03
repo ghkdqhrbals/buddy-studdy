@@ -127,6 +127,7 @@ export function validateWorkflowText(text) {
 
 export function buildDeploymentReadinessReport({
   localWorkflowExists,
+  localWorkflowErrors = [],
   remoteWorkflowNames = [],
   remoteWorkflowError = null,
   hasGitHubSlackSecret,
@@ -146,6 +147,12 @@ export function buildDeploymentReadinessReport({
   if (!localWorkflowExists) {
     blockers.push("Local .github/workflows/health-monitor.yml is missing.");
     nextActions.push("restore .github/workflows/health-monitor.yml before configuring Slack alerts");
+  }
+  for (const error of localWorkflowErrors) {
+    blockers.push(`Local .github/workflows/health-monitor.yml is invalid: ${error}`);
+  }
+  if (localWorkflowErrors.length > 0) {
+    nextActions.push("fix local `.github/workflows/health-monitor.yml` validation errors before deployment");
   }
   if (localWorkflowExists && remoteWorkflowStateUnknown) {
     blockers.push(`Could not verify Deploy Health Monitor Worker on the remote default branch${formatReason(remoteWorkflowError)}.`);
@@ -169,7 +176,7 @@ export function buildDeploymentReadinessReport({
       nextActions.push(`set ${name} in the study-mate repository secrets`);
     }
   }
-  if (localWorkflowExists && remoteWorkflowExists && hasAllRequiredSecrets) {
+  if (localWorkflowExists && localWorkflowErrors.length === 0 && remoteWorkflowExists && hasAllRequiredSecrets) {
     nextActions.push("dispatch Deploy Health Monitor Worker to sync Cloudflare Worker secrets");
   } else if (hasCloudflareApiToken) {
     nextActions.push("alternatively run `wrangler secret put SLACK_WEBHOOK_URL` with CLOUDFLARE_API_TOKEN");

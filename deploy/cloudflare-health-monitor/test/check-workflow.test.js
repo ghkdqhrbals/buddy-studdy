@@ -832,6 +832,23 @@ test("health monitor deployment readiness reports remote workflow absence as Sla
   assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness blocks invalid local workflow", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    localWorkflowErrors: ["Health monitor workflow must run npm test before deploying."],
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    requiredGitHubSecrets: Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, true])),
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "Local .github/workflows/health-monitor.yml is invalid: Health monitor workflow must run npm test before deploying.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /fix local `.github\/workflows\/health-monitor\.yml` validation errors/);
+  assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
+});
+
 test("health monitor deployment readiness reports unknown remote workflow state separately", () => {
   const report = buildDeploymentReadinessReport({
     localWorkflowExists: true,

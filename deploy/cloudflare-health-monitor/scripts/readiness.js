@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
-import { buildDeploymentReadinessReport, requiredHealthMonitorGitHubSecrets } from "./check-workflow.js";
+import { buildDeploymentReadinessReport, requiredHealthMonitorGitHubSecrets, validateWorkflowText } from "./check-workflow.js";
 
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
@@ -55,8 +55,12 @@ function printSection(title, items) {
 }
 
 const remoteWorkflowNames = readRemoteWorkflowNames();
+const localWorkflowErrors = fs.existsSync(workflowPath)
+  ? validateWorkflowText(fs.readFileSync(workflowPath, "utf8"))
+  : [];
 const report = buildDeploymentReadinessReport({
   localWorkflowExists: fs.existsSync(workflowPath),
+  localWorkflowErrors,
   remoteWorkflowNames: Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames : null,
   remoteWorkflowError: remoteWorkflowNames && !Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames.error : null,
   requiredGitHubSecrets: readRequiredGitHubSecretStates(),
