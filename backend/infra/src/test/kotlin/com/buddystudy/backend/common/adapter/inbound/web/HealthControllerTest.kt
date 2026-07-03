@@ -90,6 +90,102 @@ class HealthControllerTest {
     }
 
     @Test
+    fun `readiness returns service unavailable when monitored scheduler job is missing`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(lastStartedAt = Instant.now()),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerMonitoredJobs = listOf("missing-job"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.readiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body?.checks?.get("scheduler")?.message)
+            .contains("Missing monitored scheduler jobs")
+            .contains("missing-job")
+    }
+
+    @Test
+    fun `readiness returns service unavailable when monitored scheduler job is disabled`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(lastStartedAt = Instant.now(), enabled = false),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerMonitoredJobs = listOf("question-schedule"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.readiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body?.checks?.get("scheduler")?.message)
+            .contains("Disabled scheduler jobs")
+            .contains("question-schedule")
+    }
+
+    @Test
+    fun `readiness returns service unavailable when monitored scheduler job failed`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(
+                    lastStartedAt = Instant.now(),
+                    latestStatus = "FAILED",
+                    latestErrorMessage = "boom",
+                ),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerMonitoredJobs = listOf("question-schedule"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.readiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body?.checks?.get("scheduler")?.message)
+            .contains("Failed scheduler jobs")
+            .contains("boom")
+    }
+
+    @Test
+    fun `readiness returns service unavailable when monitored scheduler job is stuck running`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(
+                    lastStartedAt = Instant.now().minusSeconds(120),
+                    latestStatus = "RUNNING",
+                    timeoutSeconds = 1,
+                ),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerMonitoredJobs = listOf("question-schedule"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.readiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body?.checks?.get("scheduler")?.message)
+            .contains("Stuck scheduler jobs")
+            .contains("timeout=1s")
+    }
+
+    @Test
     fun `dependency readiness returns ok when hard dependencies are ready`() {
         val controller = HealthController(
             ReadinessChecker(
@@ -229,7 +325,13 @@ class HealthControllerTest {
             else -> null
         }
 
-    private fun schedulerDataSource(lastStartedAt: Instant): DataSource {
+    private fun schedulerDataSource(
+        lastStartedAt: Instant,
+        latestStatus: String = "SUCCESS",
+        latestErrorMessage: String? = null,
+        enabled: Boolean = true,
+        timeoutSeconds: Int = 300,
+    ): DataSource {
         val dataSource = DriverManagerDataSource(
             "jdbc:h2:mem:health-controller-${System.nanoTime()};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
             "sa",
@@ -261,13 +363,17 @@ class HealthControllerTest {
             """.trimIndent(),
         )
         jdbc.update(
-            "insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value) values (?, true, 'FIXED_DELAY', '30s')",
+            "insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value, timeout_seconds) values (?, ?, 'FIXED_DELAY', '30s', ?)",
             "question-schedule",
+            enabled,
+            timeoutSeconds,
         )
         jdbc.update(
-            "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by) values (?, 'SCHEDULED', 'SUCCESS', ?, 'system')",
+            "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, error_message, created_by) values (?, 'SCHEDULED', ?, ?, ?, 'system')",
             "question-schedule",
+            latestStatus,
             Timestamp.from(lastStartedAt),
+            latestErrorMessage,
         )
         return dataSource
     }
