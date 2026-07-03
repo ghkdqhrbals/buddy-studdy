@@ -288,6 +288,28 @@ test("checkHealth captures non ok readiness body detail", async () => {
   assert.equal(result.detail, "scheduler: Missing monitored scheduler jobs: question-schedule");
 });
 
+test("checkHealth treats HTTP 200 readiness body with ok false as unhealthy", async () => {
+  const environment = manualEnv({
+    healthResponse: new Response(
+      JSON.stringify({
+        ok: false,
+        checks: {
+          database: { ok: true },
+          scheduler: { ok: false, message: "Stale scheduler jobs: question-schedule" },
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  });
+
+  const result = await withManualEnv(environment, () => internals.checkHealth(environment.HEALTHCHECK_URL));
+
+  assert.equal(result.healthy, false);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(result.error, "Readiness reported ok=false");
+  assert.equal(result.detail, "scheduler: Stale scheduler jobs: question-schedule");
+});
+
 test("checkHealth times out slow health responses", async () => {
   const environment = manualEnv({
     HEALTHCHECK_TIMEOUT_MS: "1000",

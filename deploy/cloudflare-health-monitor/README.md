@@ -15,6 +15,8 @@ runtime monitoring.
 - Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
   scheduler freshness cannot be bypassed by accidentally using lightweight
   `/health`.
+- Treats a JSON readiness body with `ok:false` as unhealthy even if an
+  upstream layer incorrectly returns HTTP 200.
 - Stores state in Workers KV to avoid repeated Slack spam.
 - Sends Slack when:
   - the failure threshold is reached,

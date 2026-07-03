@@ -231,6 +231,15 @@ async function checkHealth(url, env = {}) {
       signal: controller.signal,
     });
     if (response.ok) {
+      const readinessFailure = await successfulReadinessFailure(response);
+      if (readinessFailure) {
+        return {
+          healthy: false,
+          httpStatus: response.status,
+          error: "Readiness reported ok=false",
+          detail: readinessFailure,
+        };
+      }
       return { healthy: true, httpStatus: response.status, error: null, detail: null };
     }
     const detail = await responseDetail(response);
@@ -249,6 +258,19 @@ async function checkHealth(url, env = {}) {
     };
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function successfulReadinessFailure(response) {
+  const contentType = response.headers.get("Content-Type") || "";
+  if (!contentType.includes("application/json")) return null;
+  const text = await response.text().catch(() => "");
+  if (!text) return null;
+  try {
+    const body = JSON.parse(text);
+    return body?.ok === false ? summarizeHealthJson(body) : null;
+  } catch (_error) {
+    return null;
   }
 }
 
