@@ -770,6 +770,16 @@ test("health monitor docs keep manual checks out of GitHub Actions", () => {
   assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
 });
 
+test("health monitor docs distinguish GitHub secret storage from Worker secret sync", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /Slack setup is complete only after the Worker secret sync has run/);
+  assert.match(readme, /Adding\s+`HEALTH_MONITOR_SLACK_WEBHOOK_URL`\s+to GitHub Actions secrets stores the webhook\s+for deployment/);
+  assert.match(readme, /the running Worker will not send Slack alerts until\s+`SLACK_WEBHOOK_URL`\s+exists in Cloudflare Worker secrets/);
+  assert.match(readme, /workflow not found/);
+  assert.match(readme, /merge\/push the workflow first/);
+});
+
 test("health monitor docs include post deploy verification without Actions checks", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 

@@ -111,6 +111,14 @@ The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
 It does not call the deployed Worker for health checks. Runtime checks are
 owned by Cloudflare Cron.
 
+Slack setup is complete only after the Worker secret sync has run. Adding
+`HEALTH_MONITOR_SLACK_WEBHOOK_URL` to GitHub Actions secrets stores the webhook
+for deployment, but the running Worker will not send Slack alerts until
+`SLACK_WEBHOOK_URL` exists in Cloudflare Worker secrets. If
+`gh workflow run health-monitor.yml` returns `workflow not found`, the workflow
+has not been merged to the default branch yet; merge/push the workflow first,
+then dispatch it.
+
 ## Post-deploy Verification
 
 After deploying, verify the monitor without using GitHub Actions as a runtime
