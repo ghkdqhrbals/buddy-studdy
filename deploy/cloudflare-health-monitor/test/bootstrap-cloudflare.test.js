@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   buildSecretCommands,
@@ -80,4 +81,14 @@ test("buildSecretPlan includes non-secret values and skips absent api token valu
     { name: "HEALTH_MONITOR_KV_NAMESPACE_ID", value: "namespace-id", requiredValue: true, repository: "owner/repo" },
     { name: "CLOUDFLARE_API_TOKEN", value: null, requiredValue: false, repository: "owner/repo" },
   ]);
+});
+
+test("bootstrap rejects workflow dispatch without writing GitHub secrets", () => {
+  const result = spawnSync("node", ["scripts/bootstrap-cloudflare.js", "--dispatch-workflow"], {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires `--set-github-secrets`/);
 });

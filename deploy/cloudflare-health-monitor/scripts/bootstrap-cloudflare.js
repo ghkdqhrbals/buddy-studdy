@@ -83,6 +83,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const configPath = path.join(root, "wrangler.jsonc");
   const shouldSetGitHubSecrets = process.argv.includes("--set-github-secrets");
   const shouldDispatchWorkflow = process.argv.includes("--dispatch-workflow");
+  if (shouldDispatchWorkflow && !shouldSetGitHubSecrets) {
+    console.error("`--dispatch-workflow` requires `--set-github-secrets` so the generated KV namespace id is available to the deploy workflow.");
+    process.exit(1);
+  }
 
   let whoamiOutput;
   try {
