@@ -137,6 +137,16 @@ an environment variable for that run:
 CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secrets
 ```
 
+To continue directly into the deploy-only GitHub Actions workflow after the
+values are generated, add `--dispatch-workflow`:
+
+```sh
+CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secrets --dispatch-workflow
+```
+
+This only dispatches **Deploy Health Monitor Worker**. It does not run runtime
+health checks from GitHub Actions.
+
 Required GitHub Actions secrets for that deployment workflow:
 
 - `CLOUDFLARE_API_TOKEN`

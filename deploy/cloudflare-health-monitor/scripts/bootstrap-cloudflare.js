@@ -59,6 +59,10 @@ export function buildSecretPlan({ accountId, namespaceId, hasCloudflareApiToken,
   ];
 }
 
+export function buildDispatchCommand({ repository = repo } = {}) {
+  return ["workflow", "run", "health-monitor.yml", "--repo", repository];
+}
+
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
@@ -78,6 +82,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
   const configPath = path.join(root, "wrangler.jsonc");
   const shouldSetGitHubSecrets = process.argv.includes("--set-github-secrets");
+  const shouldDispatchWorkflow = process.argv.includes("--dispatch-workflow");
 
   let whoamiOutput;
   try {
@@ -146,6 +151,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     }
   }
+  if (shouldDispatchWorkflow) {
+    console.log("");
+    console.log("Dispatching Deploy Health Monitor Worker workflow...");
+    execFileSync("gh", buildDispatchCommand(), {
+      cwd: root,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+  }
   console.log("");
-  console.log("Then run `npm run readiness -- --json`.");
+  console.log(shouldDispatchWorkflow ? "Then watch the GitHub Actions run until deployment completes." : "Then run `npm run readiness -- --json`.");
 }

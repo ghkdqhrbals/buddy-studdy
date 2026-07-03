@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildSecretCommands,
+  buildDispatchCommand,
   buildSecretPlan,
   parseKvNamespaceId,
   parseWranglerAccountId,
@@ -14,6 +15,16 @@ Account ID: 0123456789abcdef0123456789abcdef
 `;
 
   assert.equal(parseWranglerAccountId(output), "0123456789abcdef0123456789abcdef");
+});
+
+test("buildDispatchCommand targets deploy-only health monitor workflow", () => {
+  assert.deepEqual(buildDispatchCommand({ repository: "owner/repo" }), [
+    "workflow",
+    "run",
+    "health-monitor.yml",
+    "--repo",
+    "owner/repo",
+  ]);
 });
 
 test("parseWranglerAccountId reads wrangler config style output", () => {
