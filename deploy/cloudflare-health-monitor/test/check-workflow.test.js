@@ -301,6 +301,13 @@ test("image build workflows do not run health-check scanners or probes", () => {
   }
 });
 
+test("backend image does not define Docker health metadata", () => {
+  const dockerfile = fs.readFileSync(path.join(repoRoot, "backend/Dockerfile"), "utf8");
+
+  assert.doesNotMatch(dockerfile, /^\s*HEALTHCHECK\b/im);
+  assert.doesNotMatch(dockerfile, /curl\s+-fsS\s+http:\/\/127\.0\.0\.1:8080\/health/);
+});
+
 test("workflow scan rejects container health probes in Actions", () => {
   const workflow = `
 name: Deploy Monitoring

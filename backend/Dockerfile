@@ -15,7 +15,7 @@ FROM oraclelinux:9-slim
 ENV APP_PORT=8080
 WORKDIR /app
 
-RUN microdnf install -y curl shadow-utils && \
+RUN microdnf install -y shadow-utils && \
     microdnf clean all && \
     groupadd --system app && \
     useradd --system --gid app --home-dir /app --shell /sbin/nologin app
@@ -25,8 +25,5 @@ RUN chown -R app:app /app
 
 USER app
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
 
 CMD ["/app/buddystudy-backend"]
