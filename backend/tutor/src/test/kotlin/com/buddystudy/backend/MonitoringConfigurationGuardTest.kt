@@ -58,13 +58,15 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler can start when scheduler Slack webhook is configured`() {
+    fun `prod scheduler can start when scheduler monitoring dependencies are configured`() {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
             )
             .run { context ->
                 assertThat(context).hasNotFailed()
@@ -113,12 +115,52 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-readiness-enabled=false",
             )
             .run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasRootCauseMessage(
                     "Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when coordinator readiness is disabled`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=false",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "Redis Stream Coordinator readiness monitoring must be enabled in prod when scheduler is enabled.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when coordinator base url is invalid`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=rsc-coordinator:8080",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_COORDINATOR_BASE_URL must be an HTTP or HTTPS URL in prod.",
                 )
             }
     }
@@ -131,6 +173,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-monitored-jobs=",
             )
             .run { context ->
@@ -151,6 +195,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule",
             )
             .run { context ->
@@ -170,6 +216,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule,question-schedul",
             )
             .run { context ->
@@ -188,6 +236,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.slack-timeout-ms=999999",
             )
             .run { context ->
@@ -206,6 +256,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-stale-threshold-minutes=120",
             )
             .run { context ->
@@ -224,6 +276,8 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
                 "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
+                "buddystudy.monitoring.coordinator-readiness-enabled=true",
+                "buddystudy.monitoring.coordinator-base-url=http://rsc-coordinator:8080",
                 "buddystudy.monitoring.scheduler-startup-grace-minutes=120",
             )
             .run { context ->
