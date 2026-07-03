@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(import.meta.dirname, "..");
 const configPath = path.join(root, "wrangler.jsonc");
 
-export function validateConfig(config) {
+export function validateConfig(config, options = {}) {
   const errors = [];
+  const allowPlaceholderKvNamespace = options.allowPlaceholderKvNamespace === true;
 
   if (config.name !== "buddystudy-health-monitor") {
     errors.push("Worker name must be buddystudy-health-monitor.");
@@ -32,7 +33,7 @@ export function validateConfig(config) {
   }
 
   const namespace = config.kv_namespaces?.find((item) => item.binding === "HEALTH_MONITOR_STATE");
-  if (!namespace?.id || namespace.id === "replace-with-kv-namespace-id") {
+  if (!namespace?.id || (!allowPlaceholderKvNamespace && namespace.id === "replace-with-kv-namespace-id")) {
     errors.push(
       "HEALTH_MONITOR_STATE KV namespace id is not configured in wrangler.jsonc. " +
         "Create it with `npx wrangler kv namespace create HEALTH_MONITOR_STATE`, " +

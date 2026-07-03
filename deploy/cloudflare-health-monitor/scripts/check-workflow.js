@@ -128,6 +128,7 @@ export function validateWorkflowText(text) {
 export function buildDeploymentReadinessReport({
   localWorkflowExists,
   localWorkflowErrors = [],
+  localWorkerConfigErrors = [],
   remoteWorkflowNames = [],
   remoteWorkflowError = null,
   hasGitHubSlackSecret,
@@ -154,6 +155,12 @@ export function buildDeploymentReadinessReport({
   if (localWorkflowErrors.length > 0) {
     nextActions.push("fix local `.github/workflows/health-monitor.yml` validation errors before deployment");
   }
+  for (const error of localWorkerConfigErrors) {
+    blockers.push(`Local deploy/cloudflare-health-monitor/wrangler.jsonc is invalid: ${error}`);
+  }
+  if (localWorkerConfigErrors.length > 0) {
+    nextActions.push("fix local `deploy/cloudflare-health-monitor/wrangler.jsonc` validation errors before deployment");
+  }
   if (localWorkflowExists && remoteWorkflowStateUnknown) {
     blockers.push(`Could not verify Deploy Health Monitor Worker on the remote default branch${formatReason(remoteWorkflowError)}.`);
     nextActions.push(githubCliAuthAction);
@@ -176,7 +183,7 @@ export function buildDeploymentReadinessReport({
       nextActions.push(`set ${name} in the study-mate repository secrets`);
     }
   }
-  if (localWorkflowExists && localWorkflowErrors.length === 0 && remoteWorkflowExists && hasAllRequiredSecrets) {
+  if (localWorkflowExists && localWorkflowErrors.length === 0 && localWorkerConfigErrors.length === 0 && remoteWorkflowExists && hasAllRequiredSecrets) {
     nextActions.push("dispatch Deploy Health Monitor Worker to sync Cloudflare Worker secrets");
   } else if (hasCloudflareApiToken) {
     nextActions.push("alternatively run `wrangler secret put SLACK_WEBHOOK_URL` with CLOUDFLARE_API_TOKEN");

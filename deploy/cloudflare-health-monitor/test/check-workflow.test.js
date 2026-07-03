@@ -849,6 +849,23 @@ test("health monitor deployment readiness blocks invalid local workflow", () => 
   assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness blocks invalid worker config", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    localWorkerConfigErrors: ["HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`."],
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    requiredGitHubSecrets: Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, true])),
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "Local deploy/cloudflare-health-monitor/wrangler.jsonc is invalid: HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /fix local `deploy\/cloudflare-health-monitor\/wrangler\.jsonc` validation errors/);
+  assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
+});
+
 test("health monitor deployment readiness reports unknown remote workflow state separately", () => {
   const report = buildDeploymentReadinessReport({
     localWorkflowExists: true,

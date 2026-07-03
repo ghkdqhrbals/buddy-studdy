@@ -128,6 +128,14 @@ test("health monitor config requires Cloudflare observability logs", () => {
   assert.match(validateConfig(config).join("\n"), /observability/);
 });
 
+test("health monitor config allows placeholder kv namespace only for pre-deploy readiness", () => {
+  const config = validConfig();
+  config.kv_namespaces[0].id = "replace-with-kv-namespace-id";
+
+  assert.match(validateConfig(config).join("\n"), /KV namespace id is not configured/);
+  assert.deepEqual(validateConfig(config, { allowPlaceholderKvNamespace: true }), []);
+});
+
 test("health monitor config requires full observability sampling", () => {
   const config = validConfig();
   config.observability.head_sampling_rate = 0.1;

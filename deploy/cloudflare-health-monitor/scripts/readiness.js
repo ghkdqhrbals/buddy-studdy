@@ -3,9 +3,11 @@ import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 import { buildDeploymentReadinessReport, requiredHealthMonitorGitHubSecrets, validateWorkflowText } from "./check-workflow.js";
+import { validateConfig } from "./check-config.js";
 
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
+const workerConfigPath = path.join(root, "deploy", "cloudflare-health-monitor", "wrangler.jsonc");
 const repo = process.env.HEALTH_MONITOR_REPO || "ghkdqhrbals/study-mate";
 const jsonOutput = process.argv.includes("--json");
 
@@ -58,9 +60,13 @@ const remoteWorkflowNames = readRemoteWorkflowNames();
 const localWorkflowErrors = fs.existsSync(workflowPath)
   ? validateWorkflowText(fs.readFileSync(workflowPath, "utf8"))
   : [];
+const localWorkerConfigErrors = fs.existsSync(workerConfigPath)
+  ? validateConfig(JSON.parse(fs.readFileSync(workerConfigPath, "utf8")), { allowPlaceholderKvNamespace: true })
+  : ["deploy/cloudflare-health-monitor/wrangler.jsonc is missing."];
 const report = buildDeploymentReadinessReport({
   localWorkflowExists: fs.existsSync(workflowPath),
   localWorkflowErrors,
+  localWorkerConfigErrors,
   remoteWorkflowNames: Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames : null,
   remoteWorkflowError: remoteWorkflowNames && !Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames.error : null,
   requiredGitHubSecrets: readRequiredGitHubSecretStates(),
