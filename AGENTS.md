@@ -23,7 +23,7 @@ Read these first:
 - On iOS 26 toolbars, avoid unintended shared capsule/glass backgrounds around custom toolbar controls. For custom search/profile toolbar items that already draw their own shape, apply `ToolbarItem.sharedBackgroundVisibility(.hidden)` with an iOS 26 availability guard instead of changing the inner view's `Capsule().stroke(...)`.
 - Do not connect to production servers directly with SSH. Backend deployment must go through GitHub Actions and the personal-deploy repository workflow unless the user explicitly re-allows direct SSH for a specific incident.
 - Backend and Redis Stream Coordinator Docker images must be built on GitHub-hosted runners and pushed to GHCR. The EC2 self-hosted runner is deploy-only: it may pull GHCR images and run containers, but it must not compile backend code or build Docker images.
-- GitHub Actions must not perform runtime health checks or smoke checks against backend, Grafana, local containers, or public health endpoints. Runtime monitoring belongs to the Cloudflare Health Monitor Worker and its Cron trigger.
+- GitHub Actions must not perform runtime health checks or smoke checks against backend, Grafana, local containers, or public health endpoints. This includes indirect container health gates such as `docker compose up --wait` and `docker compose wait`. Runtime monitoring belongs to the Cloudflare Health Monitor Worker and its Cron trigger.
 - Production monitoring on the backend host is PLG only: Promtail, Loki, and Grafana. Do not reintroduce Prometheus or Redis exporter containers on the small EC2 host unless explicitly requested.
 
 ## Backend Architecture Rules

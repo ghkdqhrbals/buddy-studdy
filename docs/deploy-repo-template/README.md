@@ -107,7 +107,7 @@ Only one scheduler leader is active during overlap windows. PostgreSQL advisory 
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by the Cloudflare Worker in `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint from Cloudflare Cron and sends Slack alerts.
+GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by the Cloudflare Worker in `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint from Cloudflare Cron and sends Slack alerts.
 
 Backend scheduler failure alerts are separate from server-down alerts. Set the
 deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack

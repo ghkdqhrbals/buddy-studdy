@@ -223,6 +223,9 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
 
   assert.match(readme, /must not call backend `\/health` or readiness endpoints/i);
   assert.match(readme, /must not inspect Docker `Health\.Status`/i);
+  assert.match(readme, /must not use indirect container health gates/i);
+  assert.match(readme, /`docker compose up --wait`/i);
+  assert.match(readme, /`docker compose wait`/i);
   assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
 });
 
