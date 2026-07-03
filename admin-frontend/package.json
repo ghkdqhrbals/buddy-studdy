@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "node scripts/verify-pagination.mjs && node scripts/verify-scheduler-link.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "verify:pagination": "node scripts/verify-pagination.mjs"
+    "verify:pagination": "node scripts/verify-pagination.mjs",
+    "verify:scheduler-link": "node scripts/verify-scheduler-link.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

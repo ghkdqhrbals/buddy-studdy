@@ -41,7 +41,7 @@ function isIsoDate(value: string | null): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
-function routeState(): { section: SectionKey; jobOffset: number; startDate: string; endDate: string } {
+function routeState(): { section: SectionKey; jobOffset: number; jobName: string | null; startDate: string; endDate: string } {
   const path = stripBasePath(window.location.pathname);
   const params = new URLSearchParams(window.location.search);
   const section: SectionKey = path.startsWith(sectionPaths.operations)
@@ -52,6 +52,7 @@ function routeState(): { section: SectionKey; jobOffset: number; startDate: stri
   return {
     section,
     jobOffset: section === "operations" ? (Math.max(1, Number.isFinite(page) ? page : 1) - 1) * JOB_PAGE_SIZE : 0,
+    jobName: section === "operations" ? params.get("jobName")?.trim() || null : null,
     startDate: isIsoDate(params.get("startDate")) ? params.get("startDate")! : defaultStart,
     endDate: isIsoDate(params.get("endDate")) ? params.get("endDate")! : defaultEnd,
   };
@@ -72,7 +73,22 @@ function withBasePath(path: string): string {
   return path === "/" ? `${basePath}/` : `${basePath}${path}`;
 }
 
-function sectionHref(section: SectionKey, offset = 0, range?: { startDate: string; endDate: string }): string {
+function currentPathWithSearch(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function loginHref(returnTo: string): string {
+  return `${LOGIN_PATH}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function safeReturnPath(value: string | null): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  if (basePath && value !== basePath && !value.startsWith(`${basePath}/`)) return null;
+  if (stripBasePath(value.split("?")[0]) === "/login") return null;
+  return value;
+}
+
+function sectionHref(section: SectionKey, offset = 0, range?: { startDate: string; endDate: string }, jobName: string | null = null): string {
   const params = new URLSearchParams();
   if (section !== "operations") {
     if (range) {
@@ -83,7 +99,12 @@ function sectionHref(section: SectionKey, offset = 0, range?: { startDate: strin
     return `${withBasePath(sectionPaths[section])}${query ? `?${query}` : ""}`;
   }
   const page = Math.floor(Math.max(0, offset) / JOB_PAGE_SIZE) + 1;
-  return page <= 1 ? withBasePath(sectionPaths.operations) : withBasePath(`${sectionPaths.operations}/page/${page}`);
+  if (jobName?.trim()) {
+    params.set("jobName", jobName.trim());
+  }
+  const query = params.toString();
+  const path = page <= 1 ? withBasePath(sectionPaths.operations) : withBasePath(`${sectionPaths.operations}/page/${page}`);
+  return `${path}${query ? `?${query}` : ""}`;
 }
 
 export function App() {
@@ -96,6 +117,7 @@ export function App() {
   const [jobPage, setJobPage] = useState<ScheduledJobRunsResponse>(emptyJobPage);
   const [jobStatuses, setJobStatuses] = useState<ScheduledJobStatusResponse>(emptyJobStatuses);
   const [jobOffset, setJobOffset] = useState(() => routeState().jobOffset);
+  const [jobNameFilter, setJobNameFilter] = useState(() => routeState().jobName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,12 +142,21 @@ export function App() {
 
   useEffect(() => {
     if (isAuthenticated || window.location.pathname === LOGIN_PATH) return;
-    window.history.replaceState(null, "", LOGIN_PATH);
+    window.history.replaceState(null, "", loginHref(currentPathWithSearch()));
   }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated || window.location.pathname !== LOGIN_PATH) return;
-    window.history.replaceState(null, "", sectionHref(activeSection, jobOffset, { startDate, endDate }));
+    const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"));
+    window.history.replaceState(null, "", returnTo ?? sectionHref(activeSection, jobOffset, { startDate, endDate }, jobNameFilter));
+    if (returnTo) {
+      const next = routeState();
+      setActiveSection(next.section);
+      setJobOffset(next.jobOffset);
+      setJobNameFilter(next.jobName);
+      setStartDate(next.startDate);
+      setEndDate(next.endDate);
+    }
   }, [isAuthenticated, activeSection, jobOffset, startDate, endDate]);
 
   useEffect(() => {
@@ -133,6 +164,7 @@ export function App() {
       const next = routeState();
       setActiveSection(next.section);
       setJobOffset(next.jobOffset);
+      setJobNameFilter(next.jobName);
       setStartDate(next.startDate);
       setEndDate(next.endDate);
     };
@@ -152,7 +184,7 @@ export function App() {
     try {
       if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
-          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter),
           fetchJobStatuses(handleUnauthorized).catch(() => emptyJobStatuses),
         ]);
         setJobPage(runs);
@@ -181,7 +213,7 @@ export function App() {
     try {
       if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
-          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+          fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter),
           fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
         ]);
         setJobPage(runs);
@@ -208,7 +240,7 @@ export function App() {
     try {
       await retryJob(job.jobName, job.id, handleUnauthorized);
       const [runs, statuses] = await Promise.all([
-        fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset),
+        fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter),
         fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
       ]);
       setJobPage(runs);
@@ -235,11 +267,12 @@ export function App() {
     window.history.pushState(null, "", sectionHref(section, 0, { startDate, endDate }));
     setActiveSection(section);
     setJobOffset(0);
+    setJobNameFilter(null);
   }
 
   function navigateToJobPage(offset: number) {
     const safeOffset = Math.max(0, offset);
-    window.history.pushState(null, "", sectionHref("operations", safeOffset));
+    window.history.pushState(null, "", sectionHref("operations", safeOffset, undefined, jobNameFilter));
     setActiveSection("operations");
     setJobOffset(safeOffset);
   }
@@ -257,9 +290,14 @@ export function App() {
       <LoginScreen
         onLoggedIn={(newToken) => {
           setToken(newToken);
-          window.history.replaceState(null, "", sectionHref("overview", 0, { startDate, endDate }));
-          setActiveSection("overview");
-          setJobOffset(0);
+          const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get("returnTo"));
+          window.history.replaceState(null, "", returnTo ?? sectionHref("overview", 0, { startDate, endDate }));
+          const next = routeState();
+          setActiveSection(next.section);
+          setJobOffset(next.jobOffset);
+          setJobNameFilter(next.jobName);
+          setStartDate(next.startDate);
+          setEndDate(next.endDate);
         }}
         theme={theme}
         setTheme={setTheme}
@@ -289,7 +327,7 @@ export function App() {
           page={jobPage}
           statuses={jobStatuses.jobs}
           onRetry={handleRetry}
-          hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit)}
+          hrefForPage={(nextPage) => sectionHref("operations", (nextPage - 1) * jobPage.limit, undefined, jobNameFilter)}
           onPageChange={(nextPage) => navigateToJobPage((nextPage - 1) * jobPage.limit)}
         />
       ) : (

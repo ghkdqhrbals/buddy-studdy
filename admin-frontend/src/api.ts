@@ -87,8 +87,16 @@ export function refreshMetrics(
   return request(`/api/v1/admin/analytics/refresh?${params}`, { method: "POST" }, onUnauthorized);
 }
 
-export async function fetchJobRuns(onUnauthorized: UnauthorizedHandler, limit = 20, offset = 0): Promise<ScheduledJobRunsResponse> {
+export async function fetchJobRuns(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  jobName: string | null = null,
+): Promise<ScheduledJobRunsResponse> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (jobName?.trim()) {
+    params.set("jobName", jobName.trim());
+  }
   const response = await request<ScheduledJobRunsResponse | ScheduledJobRun[]>(
     `/api/v1/admin/jobs/runs?${params}`,
     { method: "GET" },
