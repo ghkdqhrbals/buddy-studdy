@@ -21,8 +21,10 @@ import org.springframework.test.web.client.match.MockRestRequestMatchers.request
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestClient
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
 
 class SlackScheduledJobAlertAdapterTest {
     private val objectMapper = jacksonObjectMapper()
@@ -171,6 +173,55 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
+    fun `notifyFailed suppresses repeated failure alerts within repeat interval`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+                schedulerFailureAlertRepeatSeconds = 300,
+            ),
+        )
+        val clock = MutableClock(Instant.parse("2026-07-02T00:00:00Z"))
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build(), clock)
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+
+        adapter.notifyFailed(failedRun())
+        clock.advance(Duration.ofSeconds(120))
+        adapter.notifyFailed(failedRun())
+
+        server.verify()
+    }
+
+    @Test
+    fun `notifyFailed sends repeated failure alert after repeat interval`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+                schedulerFailureAlertRepeatSeconds = 300,
+            ),
+        )
+        val clock = MutableClock(Instant.parse("2026-07-02T00:00:00Z"))
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build(), clock)
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+
+        adapter.notifyFailed(failedRun())
+        clock.advance(Duration.ofSeconds(301))
+        adapter.notifyFailed(failedRun())
+
+        server.verify()
+    }
+
+    @Test
     fun `notifyFailed preserves error label when payload values are long`() {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
@@ -226,4 +277,16 @@ class SlackScheduledJobAlertAdapterTest {
             retryOfRunId = 3,
             createdBy = createdBy,
         )
+
+    private class MutableClock(private var current: Instant) : Clock() {
+        fun advance(duration: Duration) {
+            current = current.plus(duration)
+        }
+
+        override fun instant(): Instant = current
+
+        override fun getZone() = ZoneOffset.UTC
+
+        override fun withZone(zone: java.time.ZoneId?): Clock = this
+    }
 }

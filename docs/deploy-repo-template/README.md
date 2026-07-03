@@ -114,7 +114,9 @@ deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
 messages for failed managed scheduler jobs. Set the deploy repository variable
 `MONITORING_ADMIN_BASE_URL` when the admin frontend origin differs from
 `https://api.ghkdqhrbals.org/admin`; scheduler alerts use it to link directly
-to the matching run list. The Cloudflare Worker uses
+to the matching run list. Repeated failed-run alerts for the same scheduler job
+are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`, which
+defaults to `300`. The Cloudflare Worker uses
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
 checker.
 

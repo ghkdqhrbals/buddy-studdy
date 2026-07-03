@@ -105,6 +105,7 @@ buddystudy:
     service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}
     admin-base-url: ${MONITORING_ADMIN_BASE_URL:}
     slack-timeout-ms: ${MONITORING_SLACK_TIMEOUT_MS:5000}
+    scheduler-failure-alert-repeat-seconds: ${MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS:300}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
     coordinator-readiness-enabled: ${MONITORING_COORDINATOR_READINESS_ENABLED:false}
     coordinator-base-url: ${MONITORING_COORDINATOR_BASE_URL:${REACTION_STREAM_COORDINATOR_BASE_URL:}}

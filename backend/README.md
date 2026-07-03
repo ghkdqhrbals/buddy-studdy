@@ -143,7 +143,9 @@ admin scheduler run. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS`. Backend scheduler failure Slack
 delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
-not hold scheduler failure handling indefinitely. Set
+not hold scheduler failure handling indefinitely. Repeated failure alerts for
+the same job are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`
+and default to five minutes. Set
 `MONITORING_ADMIN_BASE_URL` to the HTTPS admin frontend origin so scheduler
 Slack alerts include a direct link to the matching scheduler run list. In the
 `prod` profile, `SLACK_WEBHOOK_URL` and a valid HTTPS

@@ -324,6 +324,17 @@ test("deploy repo backend template wires scheduler Slack webhook into backend en
   assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
 });
 
+test("kubernetes backend config throttles scheduler failure Slack alerts", () => {
+  const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
+  const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+
+  assert.match(applicationConfig, /scheduler-failure-alert-repeat-seconds:\s*\$\{MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS:300\}/);
+  for (const text of [backendConfig, combinedManifest]) {
+    assert.match(text, /MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS:\s*"300"/);
+  }
+});
+
 test("deploy repo backend template wires scheduler admin alert links into backend env", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 

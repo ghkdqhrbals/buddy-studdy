@@ -64,6 +64,7 @@ data class BuddyStudyProperties(
         var serviceName: String = "BuddyStudy backend",
         var adminBaseUrl: String = "",
         var slackTimeoutMs: Long = 5_000,
+        var schedulerFailureAlertRepeatSeconds: Long = 300,
         var schedulerReadinessEnabled: Boolean = true,
         var coordinatorReadinessEnabled: Boolean = false,
         var coordinatorBaseUrl: String = "",

@@ -11,14 +11,20 @@ import org.springframework.web.client.RestClient
 import java.net.http.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
 
 @Component
 class SlackScheduledJobAlertAdapter internal constructor(
     private val properties: BuddyStudyProperties,
     private val restClient: RestClient,
+    private val clock: Clock = Clock.systemUTC(),
 ) : ScheduledJobAlertPort {
+    private val lastSuccessfulAlertAtByJob = ConcurrentHashMap<String, Instant>()
+
     @Autowired
     constructor(
         properties: BuddyStudyProperties,
@@ -33,6 +39,8 @@ class SlackScheduledJobAlertAdapter internal constructor(
     override fun notifyFailed(run: ScheduledJobRun) {
         val webhookUrl = properties.monitoring.slackWebhookUrl.trim()
         if (webhookUrl.isBlank()) return
+        val now = clock.instant()
+        if (isSuppressed(run.jobName, now)) return
 
         restClient.post()
             .uri(webhookUrl)
@@ -40,6 +48,12 @@ class SlackScheduledJobAlertAdapter internal constructor(
             .body(payload(run))
             .retrieve()
             .toBodilessEntity()
+        lastSuccessfulAlertAtByJob[run.jobName] = now
+    }
+
+    private fun isSuppressed(jobName: String, now: Instant): Boolean {
+        val lastAlertAt = lastSuccessfulAlertAtByJob[jobName] ?: return false
+        return Duration.between(lastAlertAt, now) < schedulerFailureAlertRepeat()
     }
 
     private fun payload(run: ScheduledJobRun): Map<String, Any> {
@@ -100,6 +114,9 @@ class SlackScheduledJobAlertAdapter internal constructor(
     internal fun slackTimeout(): Duration =
         slackTimeout(properties)
 
+    internal fun schedulerFailureAlertRepeat(): Duration =
+        schedulerFailureAlertRepeat(properties)
+
     private fun adminRunUrl(run: ScheduledJobRun): String? {
         val baseUrl = properties.monitoring.adminBaseUrl.trim().trimEnd('/')
         if (baseUrl.isBlank()) return null
@@ -116,6 +133,9 @@ class SlackScheduledJobAlertAdapter internal constructor(
 
         fun slackTimeout(properties: BuddyStudyProperties): Duration =
             Duration.ofMillis(properties.monitoring.slackTimeoutMs.coerceIn(1_000, 25_000))
+
+        fun schedulerFailureAlertRepeat(properties: BuddyStudyProperties): Duration =
+            Duration.ofSeconds(properties.monitoring.schedulerFailureAlertRepeatSeconds.coerceIn(60, 86_400))
 
         fun slackRequestFactory(properties: BuddyStudyProperties): JdkClientHttpRequestFactory {
             val timeout = slackTimeout(properties)
