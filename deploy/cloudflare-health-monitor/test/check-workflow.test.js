@@ -572,3 +572,10 @@ test("health monitor docs keep manual checks out of GitHub Actions", () => {
   assert.match(readme, /Do not run this from GitHub Actions/);
   assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
 });
+
+test("backend API docs do not describe admin scheduler as deployment smoke health check", () => {
+  const apiDoc = fs.readFileSync(path.join(repoRoot, "backend/API.md"), "utf8");
+
+  assert.doesNotMatch(apiDoc, /deployment smoke tests/i);
+  assert.match(apiDoc, /must not be called from GitHub Actions health checks/i);
+});
