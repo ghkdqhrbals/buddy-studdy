@@ -186,10 +186,6 @@ jobs:
               --env-file db.env \
               -p 5432:5432 \
               -v buddystudy-postgres-data:/var/lib/postgresql/data \
-              --health-cmd "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" \
-              --health-interval 10s \
-              --health-timeout 5s \
-              --health-retries 5 \
               postgres:16-alpine
           fi
 

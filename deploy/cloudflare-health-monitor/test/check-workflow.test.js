@@ -308,6 +308,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects docker health metadata in Actions", () => {
+  const workflow = `
+name: Deploy Backend
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Start database
+        run: docker run --health-cmd "pg_isready" postgres:16-alpine
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
+});
+
 test("workflow scan rejects docker ps health filters in Actions", () => {
   const workflow = `
 name: Deploy Backend
