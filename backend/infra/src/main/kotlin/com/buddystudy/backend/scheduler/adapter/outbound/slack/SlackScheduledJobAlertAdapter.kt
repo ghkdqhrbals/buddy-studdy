@@ -9,6 +9,8 @@ import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import java.net.http.HttpClient
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.format.DateTimeFormatter
 
@@ -53,6 +55,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
             "*Started*: ${DateTimeFormatter.ISO_INSTANT.format(run.startedAt)}",
             "*Finished*: ${run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"}",
             "*Duration*: ${run.durationMs ?: 0}ms",
+            "*Run URL*: ${adminRunUrl(run) ?: "not configured"}",
             "*Error*: ${run.errorMessage?.take(600) ?: "Unknown error"}",
         )
         return mapOf(
@@ -78,6 +81,13 @@ class SlackScheduledJobAlertAdapter internal constructor(
 
     internal fun slackTimeout(): Duration =
         slackTimeout(properties)
+
+    private fun adminRunUrl(run: ScheduledJobRun): String? {
+        val baseUrl = properties.monitoring.adminBaseUrl.trim().trimEnd('/')
+        if (baseUrl.isBlank()) return null
+        val jobName = URLEncoder.encode(run.jobName, StandardCharsets.UTF_8)
+        return "$baseUrl/operations/scheduler-runs?jobName=$jobName"
+    }
 
     private companion object {
         fun slackTimeout(properties: BuddyStudyProperties): Duration =

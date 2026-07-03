@@ -29,6 +29,7 @@ class SlackScheduledJobAlertAdapterTest {
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
                 environmentName = "test",
                 serviceName = "BuddyStudy test",
+                adminBaseUrl = "https://admin.ghkdqhrbals.org",
             ),
         )
         val builder = RestClient.builder()
@@ -44,6 +45,7 @@ class SlackScheduledJobAlertAdapterTest {
             .andExpect(content().string(containsString("*Created by*: admin")))
             .andExpect(content().string(containsString("*Retry of run*: 3")))
             .andExpect(content().string(containsString("*Finished*: 2026-07-02T00:00:02Z")))
+            .andExpect(content().string(containsString("*Run URL*: https://admin.ghkdqhrbals.org/operations/scheduler-runs?jobName=question-scheduler")))
             .andExpect(content().string(containsString("boom")))
             .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
 

@@ -103,6 +103,7 @@ buddystudy:
     slack-webhook-url: ${SLACK_WEBHOOK_URL:}
     environment-name: ${MONITORING_ENVIRONMENT_NAME:${SPRING_PROFILES_ACTIVE:production}}
     service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}
+    admin-base-url: ${MONITORING_ADMIN_BASE_URL:}
     slack-timeout-ms: ${MONITORING_SLACK_TIMEOUT_MS:5000}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}

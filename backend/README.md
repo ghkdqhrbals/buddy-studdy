@@ -141,7 +141,10 @@ external monitors and runbooks. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS`. Backend scheduler failure Slack
 delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
-not hold scheduler failure handling indefinitely. In the `prod` profile,
+not hold scheduler failure handling indefinitely. Set
+`MONITORING_ADMIN_BASE_URL` to the admin frontend origin when scheduler Slack
+alerts should include a direct link to the matching scheduler run list. In the
+`prod` profile,
 `SLACK_WEBHOOK_URL` is required when `buddystudy.scheduler.enabled=true`; the
 application fails fast instead of silently disabling scheduler failure alerts.
 Production startup also verifies that every registered `ManagedJob` is listed
