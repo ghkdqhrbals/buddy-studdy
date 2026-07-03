@@ -689,6 +689,17 @@ test("health monitor workflow summary documents status without manual health che
   assert.doesNotMatch(workflow, /POST \\`\/check\\`/);
 });
 
+test("health monitor workflow npm ci has a committed lockfile", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
+  const packageJson = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/package.json"), "utf8");
+  const packageLockPath = path.join(repoRoot, "deploy/cloudflare-health-monitor/package-lock.json");
+
+  assert.match(workflow, /npm ci/);
+  assert.match(workflow, /cache-dependency-path:\s*deploy\/cloudflare-health-monitor\/package-lock\.json/);
+  assert.ok(fs.existsSync(packageLockPath), "package-lock.json must be committed because the workflow uses npm ci");
+  assert.equal(JSON.parse(fs.readFileSync(packageLockPath, "utf8")).name, JSON.parse(packageJson).name);
+});
+
 test("health monitor docs keep manual checks out of GitHub Actions", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
