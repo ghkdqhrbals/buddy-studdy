@@ -310,6 +310,22 @@ test("checkHealth treats HTTP 200 readiness body with ok false as unhealthy", as
   assert.equal(result.detail, "scheduler: Stale scheduler jobs: question-schedule");
 });
 
+test("checkHealth treats HTTP 200 non JSON readiness responses as unhealthy", async () => {
+  const environment = manualEnv({
+    healthResponse: new Response("<html>not the backend readiness endpoint</html>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    }),
+  });
+
+  const result = await withManualEnv(environment, () => internals.checkHealth(environment.HEALTHCHECK_URL, environment));
+
+  assert.equal(result.healthy, false);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(result.error, "Readiness response contract invalid");
+  assert.equal(result.detail, "Expected JSON readiness body with ok:true.");
+});
+
 test("checkHealth times out slow health responses", async () => {
   const environment = manualEnv({
     HEALTHCHECK_TIMEOUT_MS: "1000",
@@ -345,7 +361,10 @@ test("slack timeout is bounded to Cloudflare-safe limits", () => {
 test("manual check requires configured bearer token", async () => {
   const unauthorized = await worker.fetch(new Request("https://monitor.example.com/check", { method: "POST" }), manualEnv());
   const authorizedEnv = manualEnv({
-    healthResponse: new Response("ok", { status: 200 }),
+    healthResponse: new Response(JSON.stringify({ ok: true, checks: { scheduler: { ok: true } } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
   });
   const authorized = await withManualEnv(authorizedEnv, () =>
     worker.fetch(

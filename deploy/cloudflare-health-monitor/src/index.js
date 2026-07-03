@@ -231,13 +231,13 @@ async function checkHealth(url, env = {}) {
       signal: controller.signal,
     });
     if (response.ok) {
-      const readinessFailure = await successfulReadinessFailure(response);
-      if (readinessFailure) {
+      const readiness = await successfulReadinessResult(response);
+      if (!readiness.valid) {
         return {
           healthy: false,
           httpStatus: response.status,
-          error: "Readiness reported ok=false",
-          detail: readinessFailure,
+          error: readiness.error,
+          detail: readiness.detail,
         };
       }
       return { healthy: true, httpStatus: response.status, error: null, detail: null };
@@ -261,16 +261,37 @@ async function checkHealth(url, env = {}) {
   }
 }
 
-async function successfulReadinessFailure(response) {
+async function successfulReadinessResult(response) {
   const contentType = response.headers.get("Content-Type") || "";
-  if (!contentType.includes("application/json")) return null;
+  if (!contentType.includes("application/json")) {
+    return {
+      valid: false,
+      error: "Readiness response contract invalid",
+      detail: "Expected JSON readiness body with ok:true.",
+    };
+  }
   const text = await response.text().catch(() => "");
-  if (!text) return null;
+  if (!text) {
+    return {
+      valid: false,
+      error: "Readiness response contract invalid",
+      detail: "Expected JSON readiness body with ok:true.",
+    };
+  }
   try {
     const body = JSON.parse(text);
-    return body?.ok === false ? summarizeHealthJson(body) : null;
+    if (body?.ok === true) return { valid: true, error: null, detail: null };
+    return {
+      valid: false,
+      error: body?.ok === false ? "Readiness reported ok=false" : "Readiness response contract invalid",
+      detail: body?.ok === false ? summarizeHealthJson(body) : "Expected JSON readiness body with ok:true.",
+    };
   } catch (_error) {
-    return null;
+    return {
+      valid: false,
+      error: "Readiness response contract invalid",
+      detail: "Expected JSON readiness body with ok:true.",
+    };
   }
 }
 
