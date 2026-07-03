@@ -84,6 +84,13 @@ class ReadinessChecker(
                     max(r.started_at) as latest_started_at,
                     max(case when r.status = 'SUCCESS' then r.started_at end) as last_successful_started_at,
                     (
+                        select r2.id
+                        from scheduled_job_runs r2
+                        where r2.job_name = j.job_name
+                        order by r2.started_at desc, r2.id desc
+                        limit 1
+                    ) as latest_run_id,
+                    (
                         select r2.status
                         from scheduled_job_runs r2
                         where r2.job_name = j.job_name
@@ -110,6 +117,7 @@ class ReadinessChecker(
                     timeoutSeconds = rs.getInt("timeout_seconds").coerceAtLeast(1),
                     latestStartedAt = rs.getTimestamp("latest_started_at")?.toInstant(),
                     lastSuccessfulStartedAt = rs.getTimestamp("last_successful_started_at")?.toInstant(),
+                    latestRunId = rs.getLong("latest_run_id").takeUnless { rs.wasNull() },
                     latestStatus = rs.getString("latest_status"),
                     latestErrorMessage = rs.getString("latest_error_message"),
                 )
@@ -124,6 +132,7 @@ class ReadinessChecker(
                 .map { row ->
                     mapOf(
                         "jobName" to row.jobName,
+                        "latestRunId" to row.latestRunId,
                         "latestStartedAt" to row.latestStartedAt?.toString(),
                         "latestStatus" to row.latestStatus,
                         "latestErrorMessage" to row.latestErrorMessage,
@@ -139,6 +148,7 @@ class ReadinessChecker(
                 .map { row ->
                     mapOf(
                         "jobName" to row.jobName,
+                        "latestRunId" to row.latestRunId,
                         "latestStartedAt" to row.latestStartedAt?.toString(),
                         "latestStatus" to row.latestStatus,
                         "timeoutSeconds" to row.timeoutSeconds,
@@ -155,6 +165,7 @@ class ReadinessChecker(
                     if (!stale) return@mapNotNull null
                     mapOf(
                         "jobName" to row.jobName,
+                        "latestRunId" to row.latestRunId,
                         "latestStartedAt" to row.latestStartedAt?.toString(),
                         "latestStatus" to row.latestStatus,
                         "latestErrorMessage" to row.latestErrorMessage,
@@ -228,6 +239,7 @@ class ReadinessChecker(
         val timeoutSeconds: Int,
         val latestStartedAt: Instant?,
         val lastSuccessfulStartedAt: Instant?,
+        val latestRunId: Long?,
         val latestStatus: String?,
         val latestErrorMessage: String?,
     )

@@ -267,7 +267,7 @@ test("summarizes failed readiness checks from JSON body", () => {
         details: {
           thresholdSeconds: 900,
           failedJobs: [
-            { jobName: "question-schedule", latestErrorMessage: "OpenAI timeout" },
+            { jobName: "question-schedule", latestRunId: 42, latestErrorMessage: "OpenAI timeout" },
           ],
         },
       },
@@ -276,7 +276,7 @@ test("summarizes failed readiness checks from JSON body", () => {
 
   assert.equal(
     summary,
-    "redis: Redis ping failed [duration=240ms]; scheduler: Failed scheduler jobs: question-schedule [duration=31ms, threshold=900s, failedJobs=question-schedule error=OpenAI timeout]",
+    "redis: Redis ping failed [duration=240ms]; scheduler: Failed scheduler jobs: question-schedule [duration=31ms, threshold=900s, failedJobs=question-schedule runId=42 error=OpenAI timeout]",
   );
 });
 
@@ -289,7 +289,7 @@ test("summarizes stuck scheduler jobs from readiness JSON body", () => {
         message: "Stuck scheduler jobs: question-schedule",
         details: {
           stuckJobs: [
-            { jobName: "question-schedule", runningForSeconds: 600, timeoutSeconds: 300 },
+            { jobName: "question-schedule", latestRunId: 51, runningForSeconds: 600, timeoutSeconds: 300 },
           ],
         },
       },
@@ -298,7 +298,7 @@ test("summarizes stuck scheduler jobs from readiness JSON body", () => {
 
   assert.equal(
     summary,
-    "scheduler: Stuck scheduler jobs: question-schedule [stuckJobs=question-schedule runningFor=600s timeout=300s]",
+    "scheduler: Stuck scheduler jobs: question-schedule [stuckJobs=question-schedule runId=51 runningFor=600s timeout=300s]",
   );
 });
 

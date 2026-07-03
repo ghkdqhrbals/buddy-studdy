@@ -106,6 +106,7 @@ Example readiness response:
         "stuckJobs": [
           {
             "jobName": "question-schedule",
+            "latestRunId": 42,
             "latestStartedAt": "2026-07-03T04:20:00Z",
             "latestStatus": "RUNNING",
             "timeoutSeconds": 300,

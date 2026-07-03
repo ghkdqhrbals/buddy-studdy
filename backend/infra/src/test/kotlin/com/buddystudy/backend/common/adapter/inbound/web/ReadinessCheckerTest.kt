@@ -261,6 +261,7 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.ok).isFalse()
         assertThat(response.checks["scheduler"]?.message).contains("Failed scheduler jobs")
         assertThat(response.checks["scheduler"]?.details?.get("failedJobs").toString()).contains("OpenAI timeout")
+        assertThat(response.checks["scheduler"]?.details?.get("failedJobs").toString()).contains("latestRunId")
     }
 
     @Test
@@ -291,6 +292,7 @@ class ReadinessCheckerTest {
         assertThat(response.checks["scheduler"]?.ok).isFalse()
         assertThat(response.checks["scheduler"]?.message).contains("Stuck scheduler jobs")
         assertThat(response.checks["scheduler"]?.details?.get("stuckJobs").toString()).contains("question-schedule")
+        assertThat(response.checks["scheduler"]?.details?.get("stuckJobs").toString()).contains("latestRunId")
     }
 
     private fun h2DataSource(): DataSource =

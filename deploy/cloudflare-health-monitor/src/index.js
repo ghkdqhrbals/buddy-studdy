@@ -380,8 +380,9 @@ function summarizeCheckDetails(check) {
       .map((job) => {
         if (!job || typeof job !== "object") return "";
         const name = job.jobName || "unknown";
+        const runId = job.latestRunId != null ? ` runId=${job.latestRunId}` : "";
         const error = typeof job.latestErrorMessage === "string" && job.latestErrorMessage.trim() ? ` error=${job.latestErrorMessage.trim()}` : "";
-        return `${name}${error}`;
+        return `${name}${runId}${error}`;
       })
       .filter(Boolean)
       .join(",");
@@ -392,9 +393,10 @@ function summarizeCheckDetails(check) {
       .map((job) => {
         if (!job || typeof job !== "object") return "";
         const name = job.jobName || "unknown";
+        const runId = job.latestRunId != null ? ` runId=${job.latestRunId}` : "";
         const runningFor = Number.isFinite(job.runningForSeconds) ? ` runningFor=${job.runningForSeconds}s` : "";
         const timeout = Number.isFinite(job.timeoutSeconds) ? ` timeout=${job.timeoutSeconds}s` : "";
-        return `${name}${runningFor}${timeout}`;
+        return `${name}${runId}${runningFor}${timeout}`;
       })
       .filter(Boolean)
       .join(",");
