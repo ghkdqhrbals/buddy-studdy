@@ -172,7 +172,7 @@ export function buildDeploymentReadinessReport({
   return {
     ready: blockers.length === 0,
     blockers,
-    nextActions,
+    nextActions: [...new Set(nextActions)],
   };
 }
 

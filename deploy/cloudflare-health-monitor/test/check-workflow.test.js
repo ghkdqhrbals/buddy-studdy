@@ -870,6 +870,27 @@ test("health monitor deployment readiness checks every workflow secret", () => {
   assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness deduplicates repeated next actions", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    requiredGitHubSecrets: {
+      CLOUDFLARE_API_TOKEN: null,
+      CLOUDFLARE_ACCOUNT_ID: null,
+      HEALTH_MONITOR_KV_NAMESPACE_ID: null,
+      HEALTH_MONITOR_SLACK_WEBHOOK_URL: null,
+      HEALTH_MONITOR_MANUAL_CHECK_TOKEN: null,
+    },
+    hasCloudflareApiToken: false,
+  });
+
+  const repeatedAction = "rerun readiness with GitHub CLI authentication and network access";
+  assert.equal(
+    report.nextActions.filter((action) => action === repeatedAction).length,
+    1,
+  );
+});
+
 test("health monitor package exposes a deployment readiness command", () => {
   const packageJson = JSON.parse(
     fs.readFileSync(path.join(repoRoot, "deploy", "cloudflare-health-monitor", "package.json"), "utf8"),
