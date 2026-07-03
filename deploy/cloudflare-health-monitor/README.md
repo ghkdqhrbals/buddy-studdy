@@ -40,6 +40,8 @@ runtime monitoring.
   recovery messages show how long the service was unavailable.
 - Slack alerts include `OBSERVABILITY_URL` when configured, so operators can
   open Grafana/Loki from the alert.
+- Slack alerts include action buttons for the readiness endpoint and, when
+  configured, observability.
 - `GET /` validates required runtime configuration and returns missing bindings
   such as `HEALTH_MONITOR_STATE` or `SLACK_WEBHOOK_URL` before a silent monitor
   failure can happen.

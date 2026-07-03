@@ -180,6 +180,21 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.match(fields, /Duration/);
   assert.match(fields, /Observability/);
   assert.match(fields, /https:\/\/grafana\.ghkdqhrbals\.org\/d\/backend/);
+  assert.deepEqual(payload.blocks[2], {
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: "Open health" },
+        url: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
+      },
+      {
+        type: "button",
+        text: { type: "plain_text", text: "Open observability" },
+        url: "https://grafana.ghkdqhrbals.org/d/backend",
+      },
+    ],
+  });
 });
 
 test("recovery slack payload includes outage duration", () => {

@@ -635,19 +635,39 @@ function buildSlackPayload(env, state) {
   if (observabilityUrl) {
     fields.push({ type: "mrkdwn", text: `*Observability*\n${observabilityUrl}` });
   }
+  const actionElements = [
+    slackButton("Open health", env.HEALTHCHECK_URL),
+    slackButton("Open observability", observabilityUrl),
+  ].filter(Boolean);
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: title },
+    },
+    {
+      type: "section",
+      fields,
+    },
+  ];
+  if (actionElements.length > 0) {
+    blocks.push({
+      type: "actions",
+      elements: actionElements,
+    });
+  }
 
   return {
     text: `${emoji} ${title}`,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: title },
-      },
-      {
-        type: "section",
-        fields,
-      },
-    ],
+    blocks,
+  };
+}
+
+function slackButton(text, url) {
+  if (!isHttpsUrl(url)) return null;
+  return {
+    type: "button",
+    text: { type: "plain_text", text },
+    url: url.trim(),
   };
 }
 
