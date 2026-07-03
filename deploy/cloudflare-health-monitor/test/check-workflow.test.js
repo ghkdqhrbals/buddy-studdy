@@ -199,6 +199,27 @@ jobs:
   assert.match(errors, /must not call health monitor manual check endpoints/);
 });
 
+test("health monitor workflow rejects optional manual check token secret sync", () => {
+  const workflow = `
+name: Deploy Health Monitor Worker
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    env:
+      HEALTH_MONITOR_SLACK_WEBHOOK_URL: \${{ secrets.HEALTH_MONITOR_SLACK_WEBHOOK_URL }}
+      HEALTH_MONITOR_MANUAL_CHECK_TOKEN: \${{ secrets.HEALTH_MONITOR_MANUAL_CHECK_TOKEN }}
+    steps:
+      - name: Sync Worker secrets
+        if: env.HEALTH_MONITOR_MANUAL_CHECK_TOKEN != ''
+        run: |
+          printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
+          printf '%s' "$HEALTH_MONITOR_MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
+`;
+
+  assert.match(validateWorkflowText(workflow).join("\n"), /must be required, not optional/);
+});
+
 test("all GitHub Actions workflows reject health monitor manual check scripts", () => {
   const workflow = `
 name: Health Manual Check

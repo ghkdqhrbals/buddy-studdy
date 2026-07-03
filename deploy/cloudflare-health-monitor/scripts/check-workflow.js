@@ -92,7 +92,10 @@ export function validateWorkflowText(text) {
   if (!/wrangler\s+secret\s+put\s+MANUAL_CHECK_TOKEN/.test(text)) {
     errors.push("Health monitor workflow must include Worker manual check token sync.");
   }
-  if (/if:\s*env\.HEALTH_MONITOR_SLACK_WEBHOOK_URL\s*!=\s*''/m.test(text) || /if:\s*env\.MANUAL_CHECK_TOKEN\s*!=\s*''/m.test(text)) {
+  if (
+    /if:\s*env\.HEALTH_MONITOR_SLACK_WEBHOOK_URL\s*!=\s*''/m.test(text) ||
+    /if:\s*env\.(?:HEALTH_MONITOR_)?MANUAL_CHECK_TOKEN\s*!=\s*''/m.test(text)
+  ) {
     errors.push("Slack alert secrets must be required, not optional, for health monitor deployment.");
   }
   const configureKvIndex = text.indexOf("npm run configure:kv");
