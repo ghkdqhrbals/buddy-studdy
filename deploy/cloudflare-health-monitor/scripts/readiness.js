@@ -21,7 +21,7 @@ function readRemoteWorkflowNames() {
       .map((line) => line.trim().split(/\t+/)[0])
       .filter(Boolean);
   } catch (error) {
-    return null;
+    return { error: commandErrorMessage(error) };
   }
 }
 
@@ -54,9 +54,11 @@ function printSection(title, items) {
   }
 }
 
+const remoteWorkflowNames = readRemoteWorkflowNames();
 const report = buildDeploymentReadinessReport({
   localWorkflowExists: fs.existsSync(workflowPath),
-  remoteWorkflowNames: readRemoteWorkflowNames(),
+  remoteWorkflowNames: Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames : null,
+  remoteWorkflowError: remoteWorkflowNames && !Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames.error : null,
   requiredGitHubSecrets: readRequiredGitHubSecretStates(),
   hasCloudflareApiToken: Boolean(process.env.CLOUDFLARE_API_TOKEN),
 });
@@ -70,3 +72,14 @@ if (jsonOutput) {
 }
 
 process.exit(report.ready ? 0 : 1);
+
+function commandErrorMessage(error) {
+  const stderr = Buffer.isBuffer(error?.stderr) ? error.stderr.toString("utf8") : error?.stderr;
+  const stdout = Buffer.isBuffer(error?.stdout) ? error.stdout.toString("utf8") : error?.stdout;
+  return String(stderr || stdout || error?.message || "unknown error")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" ");
+}

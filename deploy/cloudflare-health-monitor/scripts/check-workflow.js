@@ -128,6 +128,7 @@ export function validateWorkflowText(text) {
 export function buildDeploymentReadinessReport({
   localWorkflowExists,
   remoteWorkflowNames = [],
+  remoteWorkflowError = null,
   hasGitHubSlackSecret,
   requiredGitHubSecrets,
   hasCloudflareApiToken,
@@ -147,7 +148,7 @@ export function buildDeploymentReadinessReport({
     nextActions.push("restore .github/workflows/health-monitor.yml before configuring Slack alerts");
   }
   if (localWorkflowExists && remoteWorkflowStateUnknown) {
-    blockers.push("Could not verify Deploy Health Monitor Worker on the remote default branch.");
+    blockers.push(`Could not verify Deploy Health Monitor Worker on the remote default branch${formatReason(remoteWorkflowError)}.`);
     nextActions.push(githubCliAuthAction);
   } else if (localWorkflowExists && !remoteWorkflowExists) {
     blockers.push(
@@ -179,6 +180,11 @@ export function buildDeploymentReadinessReport({
     blockers,
     nextActions: [...new Set(nextActions)],
   };
+}
+
+function formatReason(reason) {
+  const text = typeof reason === "string" ? reason.trim() : "";
+  return text ? `: ${text}` : "";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

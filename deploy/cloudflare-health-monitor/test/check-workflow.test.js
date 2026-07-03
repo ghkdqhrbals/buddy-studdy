@@ -836,13 +836,14 @@ test("health monitor deployment readiness reports unknown remote workflow state 
   const report = buildDeploymentReadinessReport({
     localWorkflowExists: true,
     remoteWorkflowNames: null,
+    remoteWorkflowError: "token expired",
     requiredGitHubSecrets: Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, true])),
     hasCloudflareApiToken: false,
   });
 
   assert.equal(report.ready, false);
   assert.deepEqual(report.blockers, [
-    "Could not verify Deploy Health Monitor Worker on the remote default branch.",
+    "Could not verify Deploy Health Monitor Worker on the remote default branch: token expired.",
   ]);
   assert.match(report.nextActions.join("\n"), /then rerun readiness/);
   assert.match(report.nextActions.join("\n"), /gh auth status/);
