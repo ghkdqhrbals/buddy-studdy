@@ -40,6 +40,13 @@ test("health monitor config rejects lightweight health endpoints", () => {
   assert.match(validateConfig(config).join("\n"), /readiness endpoint/);
 });
 
+test("health monitor config requires exact readiness path", () => {
+  const config = validConfig();
+  config.vars.HEALTHCHECK_URL = "https://api.ghkdqhrbals.org/foo/api/v1/health/readiness";
+
+  assert.match(validateConfig(config).join("\n"), /readiness endpoint/);
+});
+
 test("health monitor config rejects dev health url for production", () => {
   const config = validConfig();
   config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/api/v1/health/readiness";

@@ -40,9 +40,9 @@ export function validateConfig(config) {
     );
   }
 
-  if (!config.vars?.HEALTHCHECK_URL?.startsWith("https://")) {
+  if (!isHttpsUrl(config.vars?.HEALTHCHECK_URL)) {
     errors.push("HEALTHCHECK_URL must be an HTTPS URL.");
-  } else if (!config.vars.HEALTHCHECK_URL.endsWith("/api/v1/health/readiness")) {
+  } else if (!isSchedulerReadinessUrl(config.vars.HEALTHCHECK_URL)) {
     errors.push("HEALTHCHECK_URL must point to the backend readiness endpoint `/api/v1/health/readiness`.");
   } else if (environmentName(config) === "production" && healthcheckHost(config.vars.HEALTHCHECK_URL) !== "api.ghkdqhrbals.org") {
     errors.push("Production HEALTHCHECK_URL must point to `api.ghkdqhrbals.org`.");
@@ -100,6 +100,22 @@ function hasPublicEntrypoint(config) {
     return true;
   }
   return Array.isArray(config.routes) && config.routes.length > 0;
+}
+
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isSchedulerReadinessUrl(value) {
+  try {
+    return new URL(value).pathname === "/api/v1/health/readiness";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function healthcheckHost(value) {
