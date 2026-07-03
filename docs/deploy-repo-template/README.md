@@ -111,7 +111,10 @@ GitHub Actions must not call backend `/health` or readiness endpoints, must not 
 
 Backend scheduler failure alerts are separate from server-down alerts. Set the
 deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
-messages for failed managed scheduler jobs. The Cloudflare Worker uses
+messages for failed managed scheduler jobs. Set the deploy repository variable
+`MONITORING_ADMIN_BASE_URL` when the admin frontend origin differs from
+`https://api.ghkdqhrbals.org/admin`; scheduler alerts use it to link directly
+to the matching run list. The Cloudflare Worker uses
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
 checker.
 

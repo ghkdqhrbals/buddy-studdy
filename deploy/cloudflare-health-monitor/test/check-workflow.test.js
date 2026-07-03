@@ -233,6 +233,13 @@ test("deploy repo backend template wires scheduler Slack webhook into backend en
   assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
 });
 
+test("deploy repo backend template wires scheduler admin alert links into backend env", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+
+  assert.match(template, /MONITORING_ADMIN_BASE_URL:\s*\$\{\{\s*vars\.MONITORING_ADMIN_BASE_URL\s*\|\|\s*'https:\/\/api\.ghkdqhrbals\.org\/admin'\s*\}\}/);
+  assert.match(template, /MONITORING_ADMIN_BASE_URL=\$\{MONITORING_ADMIN_BASE_URL\}/);
+});
+
 test("deploy repo backend template fails fast when scheduler Slack webhook is missing", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 

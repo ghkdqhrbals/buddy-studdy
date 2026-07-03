@@ -56,6 +56,7 @@ jobs:
           APNS_ENV: ${{ secrets.APNS_ENV }}
           REDIS_STREAM_COORDINATOR_PASSWORD: ${{ secrets.REDIS_STREAM_COORDINATOR_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MONITORING_ADMIN_BASE_URL: ${{ vars.MONITORING_ADMIN_BASE_URL || 'https://api.ghkdqhrbals.org/admin' }}
         run: |
           set -euo pipefail
 
@@ -116,6 +117,7 @@ jobs:
           AWS_REGION=ap-northeast-2
           REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD}
           SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          MONITORING_ADMIN_BASE_URL=${MONITORING_ADMIN_BASE_URL}
           ENV
           chmod 600 .env
 
