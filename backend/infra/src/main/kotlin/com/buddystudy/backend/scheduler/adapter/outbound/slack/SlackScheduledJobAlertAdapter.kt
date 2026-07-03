@@ -44,6 +44,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
 
     private fun payload(run: ScheduledJobRun): Map<String, Any> {
         val title = ":rotating_light: ${properties.monitoring.serviceName} scheduled job failed"
+        val runUrl = adminRunUrl(run)
         val lines = listOf(
             "*Environment*: ${properties.monitoring.environmentName}",
             "*Job*: ${run.jobName}",
@@ -55,27 +56,43 @@ class SlackScheduledJobAlertAdapter internal constructor(
             "*Started*: ${DateTimeFormatter.ISO_INSTANT.format(run.startedAt)}",
             "*Finished*: ${run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"}",
             "*Duration*: ${run.durationMs ?: 0}ms",
-            "*Run URL*: ${adminRunUrl(run) ?: "not configured"}",
+            "*Run URL*: ${runUrl ?: "not configured"}",
             "*Error*: ${run.errorMessage?.take(600) ?: "Unknown error"}",
         )
-        return mapOf(
-            "text" to "$title - ${run.jobName}",
-            "blocks" to listOf(
-                mapOf(
-                    "type" to "header",
-                    "text" to mapOf(
-                        "type" to "plain_text",
-                        "text" to "${properties.monitoring.serviceName} job failed",
-                    ),
-                ),
-                mapOf(
-                    "type" to "section",
-                    "text" to mapOf(
-                        "type" to "mrkdwn",
-                        "text" to lines.joinToString("\n"),
-                    ),
+        val blocks = mutableListOf<Map<String, Any>>(
+            mapOf(
+                "type" to "header",
+                "text" to mapOf(
+                    "type" to "plain_text",
+                    "text" to "${properties.monitoring.serviceName} job failed",
                 ),
             ),
+            mapOf(
+                "type" to "section",
+                "text" to mapOf(
+                    "type" to "mrkdwn",
+                    "text" to lines.joinToString("\n"),
+                ),
+            ),
+        )
+        if (runUrl != null) {
+            blocks += mapOf(
+                "type" to "actions",
+                "elements" to listOf(
+                    mapOf(
+                        "type" to "button",
+                        "text" to mapOf(
+                            "type" to "plain_text",
+                            "text" to "Open scheduler run",
+                        ),
+                        "url" to runUrl,
+                    ),
+                ),
+            )
+        }
+        return mapOf(
+            "text" to "$title - ${run.jobName}",
+            "blocks" to blocks,
         )
     }
 
