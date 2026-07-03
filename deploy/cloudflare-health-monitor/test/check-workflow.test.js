@@ -565,3 +565,10 @@ test("health monitor workflow summary documents status without manual health che
   assert.match(workflow, /GET \\`\/\\`/);
   assert.doesNotMatch(workflow, /POST \\`\/check\\`/);
 });
+
+test("health monitor docs keep manual checks out of GitHub Actions", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /Do not run this from GitHub Actions/);
+  assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
+});

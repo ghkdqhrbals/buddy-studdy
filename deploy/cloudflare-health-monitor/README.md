@@ -9,8 +9,8 @@ runtime monitoring.
 ## Behavior
 
 - Runs every minute with a Cloudflare Cron Trigger.
-- Exposes the Worker on the workers.dev host so `/` and `/check` can be used
-  for manual status and smoke checks after deployment.
+- Exposes the Worker on the workers.dev host so operators can inspect `GET /`
+  and, when needed, manually trigger `POST /check`.
 - Checks `HEALTHCHECK_URL`.
 - Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
   scheduler freshness cannot be bypassed by accidentally using lightweight
@@ -61,7 +61,7 @@ Set Slack secret:
 npx wrangler secret put SLACK_WEBHOOK_URL
 ```
 
-Set a manual check token for authenticated smoke tests:
+Set a manual check token for authenticated operator checks:
 
 ```sh
 npx wrangler secret put MANUAL_CHECK_TOKEN
@@ -103,9 +103,10 @@ The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
 It does not call the deployed Worker for health checks. Runtime checks are
 owned by Cloudflare Cron.
 
-## Manual Smoke Check
+## Manual Operator Check
 
-After deployment, trigger one immediate check without waiting for the cron:
+After deployment, an operator can trigger one immediate check without waiting
+for the cron:
 
 ```sh
 HEALTH_MONITOR_URL=https://<worker-host> \
@@ -115,8 +116,11 @@ npm run smoke
 
 `POST /check` uses the same state transition and Slack alert path as the cron.
 If `MANUAL_CHECK_TOKEN` is not configured, the endpoint returns `401`.
-If the backend is intentionally down during the smoke test, set
+If the backend is intentionally down during the manual check, set
 `ALLOW_DOWN=true` to verify the Worker path without failing the command.
+
+Do not run this from GitHub Actions. GitHub Actions deploys the Worker only;
+runtime health checks and Slack alerts are owned by Cloudflare Cron.
 
 ## Configuration
 
