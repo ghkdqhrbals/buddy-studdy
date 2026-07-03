@@ -75,13 +75,14 @@ class ScheduledJobRunPersistenceAdapter(
     }
 
     override fun findRuns(jobName: String?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
-        val whereSql = if (jobName != null) "\nwhere job_name = :jobName" else ""
+        val normalizedJobName = jobName?.trim()?.takeIf { it.isNotEmpty() }
+        val whereSql = if (normalizedJobName != null) "\nwhere job_name = :jobName" else ""
         val params = MapSqlParameterSource()
             .addValue("limit", limit)
             .addValue("offset", offset)
             .apply {
-                if (jobName != null) {
-                    addValue("jobName", jobName)
+                if (normalizedJobName != null) {
+                    addValue("jobName", normalizedJobName)
                 }
             }
         val total = jdbc.queryForObject(

@@ -89,6 +89,32 @@ class ScheduledJobRunPersistenceAdapterTest {
     }
 
     @Test
+    fun `blank job name filter returns all runs`() {
+        val first = adapter.finish(
+            adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "rows=9",
+            null,
+            17,
+        )
+        val second = adapter.finish(
+            adapter.start("user-stats-refresh", JobTriggerType.MANUAL, null, "admin").id,
+            JobRunStatus.FAILED,
+            null,
+            "boom",
+            32,
+        )
+
+        val blankPage = adapter.findRuns("", 10, 0)
+        val spacedPage = adapter.findRuns("   ", 10, 0)
+
+        assertThat(blankPage.runs).containsExactly(second, first)
+        assertThat(blankPage.totalCount).isEqualTo(2)
+        assertThat(spacedPage.runs).containsExactly(second, first)
+        assertThat(spacedPage.totalCount).isEqualTo(2)
+    }
+
+    @Test
     fun `finds runs with offset pagination`() {
         val first = adapter.finish(
             adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system").id,
