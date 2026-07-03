@@ -19,6 +19,7 @@ const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.d
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
 const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
 const githubCliAuthAction = "verify GitHub CLI auth with `gh auth status`; if invalid, run `gh auth login -h github.com`, then rerun readiness";
+const wranglerAuthAction = "run `npx wrangler login`, then rerun readiness to obtain Cloudflare account and KV setup values";
 export const requiredHealthMonitorGitHubSecrets = [
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
@@ -143,6 +144,7 @@ export function buildDeploymentReadinessReport({
   hasGitHubSlackSecret,
   requiredGitHubSecrets,
   hasCloudflareApiToken,
+  hasWranglerAuth = null,
 }) {
   const blockers = [];
   const nextActions = [];
@@ -194,6 +196,9 @@ export function buildDeploymentReadinessReport({
         nextActions.push(cloudflareSetupAction);
       }
     }
+  }
+  if (hasWranglerAuth === false && secretNames.some((name) => cloudflareSetupSecrets.has(name) && secretStates[name] === false)) {
+    nextActions.push(wranglerAuthAction);
   }
   if (localWorkflowExists && localWorkflowErrors.length === 0 && localWorkerConfigErrors.length === 0 && remoteWorkflowExists && hasAllRequiredSecrets) {
     nextActions.push("dispatch Deploy Health Monitor Worker to sync Cloudflare Worker secrets");

@@ -46,6 +46,19 @@ function readRequiredGitHubSecretStates() {
   }
 }
 
+function readWranglerAuthState() {
+  try {
+    const output = execFileSync("npx", ["wrangler", "whoami"], {
+      cwd: path.join(root, "deploy", "cloudflare-health-monitor"),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return !/not authenticated|please run [`']?wrangler login/i.test(output);
+  } catch {
+    return false;
+  }
+}
+
 function printSection(title, items) {
   if (items.length === 0) {
     return;
@@ -57,6 +70,10 @@ function printSection(title, items) {
 }
 
 const remoteWorkflowNames = readRemoteWorkflowNames();
+const requiredGitHubSecrets = readRequiredGitHubSecretStates();
+const hasMissingCloudflareSetupSecret = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "HEALTH_MONITOR_KV_NAMESPACE_ID"].some(
+  (name) => requiredGitHubSecrets[name] === false,
+);
 const localWorkflowErrors = fs.existsSync(workflowPath)
   ? validateWorkflowText(fs.readFileSync(workflowPath, "utf8"))
   : [];
@@ -69,8 +86,9 @@ const report = buildDeploymentReadinessReport({
   localWorkerConfigErrors,
   remoteWorkflowNames: Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames : null,
   remoteWorkflowError: remoteWorkflowNames && !Array.isArray(remoteWorkflowNames) ? remoteWorkflowNames.error : null,
-  requiredGitHubSecrets: readRequiredGitHubSecretStates(),
+  requiredGitHubSecrets,
   hasCloudflareApiToken: Boolean(process.env.CLOUDFLARE_API_TOKEN),
+  hasWranglerAuth: hasMissingCloudflareSetupSecret ? readWranglerAuthState() : null,
 });
 
 if (jsonOutput) {

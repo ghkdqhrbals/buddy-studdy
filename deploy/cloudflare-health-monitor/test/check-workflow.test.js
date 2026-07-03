@@ -981,6 +981,26 @@ test("health monitor deployment readiness checks every workflow secret", () => {
   assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness points to wrangler login when Cloudflare setup is missing and unauthenticated", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    requiredGitHubSecrets: {
+      CLOUDFLARE_API_TOKEN: false,
+      CLOUDFLARE_ACCOUNT_ID: false,
+      HEALTH_MONITOR_KV_NAMESPACE_ID: false,
+      HEALTH_MONITOR_SLACK_WEBHOOK_URL: true,
+      HEALTH_MONITOR_MANUAL_CHECK_TOKEN: true,
+    },
+    hasCloudflareApiToken: false,
+    hasWranglerAuth: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.match(report.nextActions.join("\n"), /run `npx wrangler login`/);
+  assert.match(report.nextActions.join("\n"), /then rerun readiness/);
+});
+
 test("health monitor deployment readiness deduplicates repeated next actions", () => {
   const report = buildDeploymentReadinessReport({
     localWorkflowExists: true,
@@ -1074,6 +1094,55 @@ exit 1
     "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
   ]);
   assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
+});
+
+test("health monitor readiness command reports wrangler login when whoami prints unauthenticated with exit zero", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "health-monitor-readiness-"));
+  const ghStub = path.join(tempDir, "gh");
+  const npxStub = path.join(tempDir, "npx");
+  fs.writeFileSync(
+    ghStub,
+    `#!/bin/sh
+if [ "$1" = "workflow" ]; then
+  printf 'Deploy Health Monitor Worker\\tactive\\t1\\n'
+  exit 0
+fi
+if [ "$1" = "secret" ]; then
+  printf 'HEALTH_MONITOR_SLACK_WEBHOOK_URL\\t2026-07-03\\n'
+  printf 'HEALTH_MONITOR_MANUAL_CHECK_TOKEN\\t2026-07-03\\n'
+  exit 0
+fi
+exit 1
+`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    npxStub,
+    `#!/bin/sh
+if [ "$1" = "wrangler" ] && [ "$2" = "whoami" ]; then
+  printf 'You are not authenticated. Please run \`wrangler login\`.\\n'
+  exit 0
+fi
+exit 1
+`,
+    { mode: 0o755 },
+  );
+
+  let output = "";
+  try {
+    execFileSync("node", ["scripts/readiness.js", "--json"], {
+      cwd: path.join(repoRoot, "deploy", "cloudflare-health-monitor"),
+      env: { ...process.env, PATH: `${tempDir}${path.delimiter}${process.env.PATH}` },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    output = error.stdout;
+  }
+
+  const report = JSON.parse(output);
+  assert.equal(report.ready, false);
+  assert.match(report.nextActions.join("\n"), /run `npx wrangler login`/);
 });
 
 test("health monitor docs include post deploy verification without Actions checks", () => {
