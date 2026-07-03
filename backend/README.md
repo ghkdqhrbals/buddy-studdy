@@ -144,6 +144,10 @@ delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
 not hold scheduler failure handling indefinitely. In the `prod` profile,
 `SLACK_WEBHOOK_URL` is required when `buddystudy.scheduler.enabled=true`; the
 application fails fast instead of silently disabling scheduler failure alerts.
+Production startup also verifies that every registered `ManagedJob` is listed
+in `MONITORING_SCHEDULER_MONITORED_JOBS`. When adding a new scheduled job,
+add its job name to that variable and the Kubernetes backend config in the same
+change, or production startup will fail before the job can run unmonitored.
 
 Kubernetes readiness probes should use `/api/v1/health/dependencies`.
 Dependency readiness checks database and Redis only, so a stale scheduler sends
