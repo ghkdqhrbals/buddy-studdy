@@ -4,7 +4,7 @@ metadata:
   name: buddystudy-backend-config
 data:
   APP_PORT: "8080"
-  SPRING_PROFILES_ACTIVE: "prod"
+  SPRING_PROFILES_ACTIVE: "dev"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
   FLYWAY_ENABLED: "false"
   SPRING_FLYWAY_ENABLED: "false"
@@ -30,7 +30,7 @@ data:
   VIEW_STREAM_PREFIX: "view-v1"
   BUDDYSTUDY_TRANSLATION_BASE_URL: "http://buddystudy-libretranslate:5000"
   GOOGLE_IOS_CLIENT_ID: "328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com"
-  MONITORING_ENVIRONMENT_NAME: "production"
+  MONITORING_ENVIRONMENT_NAME: "development"
   MONITORING_SERVICE_NAME: "BuddyStudy backend"
   MONITORING_ADMIN_BASE_URL: "https://api.ghkdqhrbals.org/admin"
   MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: "300"

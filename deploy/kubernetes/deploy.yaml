@@ -22,7 +22,7 @@ data:
   MONITORING_COORDINATOR_BASE_URL: http://buddystudy-redis-stream-coordinator:8080
   MONITORING_COORDINATOR_READINESS_ENABLED: "true"
   MONITORING_COORDINATOR_TIMEOUT_MS: "3000"
-  MONITORING_ENVIRONMENT_NAME: production
+  MONITORING_ENVIRONMENT_NAME: development
   MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: "300"
   MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"
@@ -43,7 +43,7 @@ data:
   SPRING_DATASOURCE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
   SPRING_DATASOURCE_USERNAME: buddystudy
   SPRING_FLYWAY_ENABLED: "false"
-  SPRING_PROFILES_ACTIVE: prod
+  SPRING_PROFILES_ACTIVE: dev
   VIEW_STREAM_PREFIX: view-v1
 kind: ConfigMap
 metadata:
