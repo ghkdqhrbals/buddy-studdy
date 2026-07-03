@@ -21,6 +21,8 @@ const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
 const githubCliAuthAction = "verify GitHub CLI auth with `gh auth status`; if invalid, run `gh auth login -h github.com`, then rerun readiness";
 const wranglerAuthAction =
   "run `npx wrangler login`, then `npm run bootstrap:cloudflare` to create KV and print GitHub secret commands";
+const cloudflareApiTokenAction =
+  "create a Cloudflare API token at https://dash.cloudflare.com/profile/api-tokens with Workers Scripts:Edit and Workers KV Storage:Edit for the target account, then run `gh secret set CLOUDFLARE_API_TOKEN --repo ghkdqhrbals/buddy-studdy`";
 export const requiredHealthMonitorGitHubSecrets = [
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
@@ -193,6 +195,9 @@ export function buildDeploymentReadinessReport({
     } else if (!state) {
       blockers.push(`${name} is missing from GitHub Actions secrets.`);
       nextActions.push(`set ${name} in the buddy-studdy repository secrets`);
+      if (name === "CLOUDFLARE_API_TOKEN") {
+        nextActions.push(cloudflareApiTokenAction);
+      }
       if (cloudflareSetupSecrets.has(name)) {
         nextActions.push(cloudflareSetupAction);
       }

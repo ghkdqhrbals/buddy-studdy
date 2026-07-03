@@ -177,10 +177,13 @@ Required GitHub Actions secrets for that deployment workflow:
 
 How to obtain the remaining Cloudflare values:
 
-- `CLOUDFLARE_API_TOKEN`: create a Cloudflare dashboard API token for this
-  account with Worker deployment and KV access. The token must allow updating
-  Workers Scripts and Workers KV Storage for the account that owns
-  `buddystudy-health-monitor`.
+- `CLOUDFLARE_API_TOKEN`: create a Cloudflare dashboard API token at
+  `https://dash.cloudflare.com/profile/api-tokens` for this account with
+  Worker deployment and KV access. The token must allow `Workers Scripts:Edit`
+  and `Workers KV Storage:Edit` for the account that owns
+  `buddystudy-health-monitor`. Cloudflare only shows the token secret once, so
+  paste it directly into `gh secret set CLOUDFLARE_API_TOKEN --repo
+  ghkdqhrbals/buddy-studdy`.
 - `CLOUDFLARE_ACCOUNT_ID`: after `wrangler login`, run `npx wrangler whoami`
   and use the account id shown for the target Cloudflare account.
 - `HEALTH_MONITOR_KV_NAMESPACE_ID`: after `wrangler login`, run
