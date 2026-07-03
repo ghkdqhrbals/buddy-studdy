@@ -1140,6 +1140,29 @@ spec:
             fi
           }
 
+          delete_legacy_stream_named_group() {
+            stream_prefix="$1"
+            legacy_group="$stream_prefix"
+            status="$(
+              curl -sS -o /tmp/coord-response.json -w "%{http_code}" \
+                -H "Authorization: Bearer ${token}" \
+                -H "Content-Type: application/json" \
+                -X DELETE "${COORDINATOR_BASE_URL}/coord/v1/streams/${stream_prefix}/groups/${legacy_group}" \
+                -d "{\"requestedBy\":\"buddystudy-k8s-bootstrap\",\"reason\":\"remove legacy stream-named group; use bs-backend only\",\"force\":true}"
+            )"
+            if [ "$status" = "200" ] || [ "$status" = "404" ]; then
+              echo "legacy stream group ${stream_prefix}/${legacy_group} cleared (${status})"
+            else
+              cat /tmp/coord-response.json
+              exit 1
+            fi
+          }
+
+          delete_legacy_stream_named_group "push-v1"
+          delete_legacy_stream_named_group "view-v1"
+          delete_legacy_stream_named_group "notification-v1"
+          delete_legacy_stream_named_group "create-question-v1"
+
           create_stream_group "push-v1" 8
           create_stream_group "view-v1" 8
           create_stream_group "notification-v1" 4
