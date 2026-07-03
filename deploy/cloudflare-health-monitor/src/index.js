@@ -16,7 +16,7 @@ export default {
         );
       }
       const state = rootVisibleState(stateResult.state, env);
-      return json({ ok: state?.status === "up", state }, { status: rootStatusCode(state) });
+      return json({ ok: state?.status === "up", monitor: monitorMetadata(env), state }, { status: rootStatusCode(state) });
     }
     if (request.method === "POST" && url.pathname === "/check") {
       if (!isAuthorizedManualCheck(request, env)) {
@@ -34,7 +34,7 @@ export default {
         );
       }
       const state = result.state;
-      return json({ ok: state.status === "up", state });
+      return json({ ok: state.status === "up", monitor: monitorMetadata(env), state });
     }
     return json({ ok: false, error: "Not found." }, { status: 404 });
   },
@@ -57,6 +57,15 @@ async function readStateSafely(env) {
     );
     return { ok: false, state: null, error: message };
   }
+}
+
+function monitorMetadata(env) {
+  return {
+    service: env.SERVICE_NAME || "BuddyStudy backend",
+    environment: env.ENVIRONMENT_NAME || "production",
+    healthcheckUrl: env.HEALTHCHECK_URL,
+    observabilityUrl: nonBlankString(env.OBSERVABILITY_URL) ? env.OBSERVABILITY_URL.trim() : null,
+  };
 }
 
 async function runHealthCheckSafely(env, scheduledTime) {

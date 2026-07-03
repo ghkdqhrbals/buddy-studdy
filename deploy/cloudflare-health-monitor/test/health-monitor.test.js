@@ -895,6 +895,7 @@ test("root reports healthy stored backend state as ok", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/"),
     manualEnv({
+      OBSERVABILITY_URL: "https://grafana.ghkdqhrbals.org",
       existingState: {
         status: "up",
         checkedAt: new Date().toISOString(),
@@ -912,6 +913,12 @@ test("root reports healthy stored backend state as ok", async () => {
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(body.ok, true);
   assert.equal(body.state.status, "up");
+  assert.deepEqual(body.monitor, {
+    service: "BuddyStudy backend",
+    environment: "production",
+    healthcheckUrl: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
+    observabilityUrl: "https://grafana.ghkdqhrbals.org",
+  });
 });
 
 test("root returns service-unavailable when stored monitor state is stale", async () => {
