@@ -18,6 +18,7 @@ const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?
 const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
 const healthMonitorWorkflowName = "Deploy Health Monitor Worker";
+const githubCliAuthAction = "verify GitHub CLI auth with `gh auth status`; if invalid, run `gh auth login -h github.com`, then rerun readiness";
 export const requiredHealthMonitorGitHubSecrets = [
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
@@ -147,7 +148,7 @@ export function buildDeploymentReadinessReport({
   }
   if (localWorkflowExists && remoteWorkflowStateUnknown) {
     blockers.push("Could not verify Deploy Health Monitor Worker on the remote default branch.");
-    nextActions.push("rerun readiness with GitHub CLI authentication and network access");
+    nextActions.push(githubCliAuthAction);
   } else if (localWorkflowExists && !remoteWorkflowExists) {
     blockers.push(
       "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
@@ -161,7 +162,7 @@ export function buildDeploymentReadinessReport({
     const state = secretStates[name];
     if (state == null) {
       blockers.push(`Could not verify ${name} in GitHub Actions secrets.`);
-      nextActions.push("rerun readiness with GitHub CLI authentication and network access");
+      nextActions.push(githubCliAuthAction);
     } else if (!state) {
       blockers.push(`${name} is missing from GitHub Actions secrets.`);
       nextActions.push(`set ${name} in the study-mate repository secrets`);

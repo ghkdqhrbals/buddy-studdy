@@ -844,7 +844,9 @@ test("health monitor deployment readiness reports unknown remote workflow state 
   assert.deepEqual(report.blockers, [
     "Could not verify Deploy Health Monitor Worker on the remote default branch.",
   ]);
-  assert.match(report.nextActions.join("\n"), /rerun readiness with GitHub CLI authentication/);
+  assert.match(report.nextActions.join("\n"), /then rerun readiness/);
+  assert.match(report.nextActions.join("\n"), /gh auth status/);
+  assert.match(report.nextActions.join("\n"), /gh auth login -h github\.com/);
   assert.doesNotMatch(report.blockers.join("\n"), /not present on the remote default branch/);
 });
 
@@ -858,7 +860,9 @@ test("health monitor deployment readiness distinguishes unknown GitHub secret st
 
   assert.equal(report.ready, false);
   assert.deepEqual(report.blockers, ["Could not verify HEALTH_MONITOR_SLACK_WEBHOOK_URL in GitHub Actions secrets."]);
-  assert.match(report.nextActions.join("\n"), /rerun readiness with GitHub CLI authentication/);
+  assert.match(report.nextActions.join("\n"), /then rerun readiness/);
+  assert.match(report.nextActions.join("\n"), /gh auth status/);
+  assert.match(report.nextActions.join("\n"), /gh auth login -h github\.com/);
   assert.doesNotMatch(report.blockers.join("\n"), /is missing from GitHub Actions secrets/);
 });
 
@@ -900,7 +904,7 @@ test("health monitor deployment readiness deduplicates repeated next actions", (
     hasCloudflareApiToken: false,
   });
 
-  const repeatedAction = "rerun readiness with GitHub CLI authentication and network access";
+  const repeatedAction = "verify GitHub CLI auth with `gh auth status`; if invalid, run `gh auth login -h github.com`, then rerun readiness";
   assert.equal(
     report.nextActions.filter((action) => action === repeatedAction).length,
     1,
