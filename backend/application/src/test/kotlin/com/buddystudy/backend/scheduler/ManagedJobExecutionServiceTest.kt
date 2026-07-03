@@ -221,6 +221,40 @@ class ManagedJobExecutionServiceTest {
         assertThat(status.timeoutSeconds).isEqualTo(60)
     }
 
+    @Test
+    fun `find statuses uses last successful run for stale calculation`() {
+        val oldSuccess = ScheduledJobRun(
+            id = 21,
+            jobName = "question-schedule",
+            triggerType = JobTriggerType.SCHEDULED,
+            status = JobRunStatus.SUCCESS,
+            startedAt = Instant.now().minusSeconds(60 * 60),
+        )
+        val recentSkipped = ScheduledJobRun(
+            id = 22,
+            jobName = "question-schedule",
+            triggerType = JobTriggerType.SCHEDULED,
+            status = JobRunStatus.SKIPPED,
+            startedAt = Instant.now(),
+            errorMessage = "Job lock was not acquired.",
+        )
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = true,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            latestRun = recentSkipped,
+            lastSuccessfulRun = oldSuccess,
+        )
+
+        val response = service.findStatuses()
+
+        val status = response.jobs.single { it.jobName == "question-schedule" }
+        assertThat(status.latestRun).isEqualTo(recentSkipped)
+        assertThat(status.lastSuccessfulRun).isEqualTo(oldSuccess)
+        assertThat(status.stale).isTrue()
+    }
+
     private class FakeJob(
         override val name: String,
         private val block: () -> String,

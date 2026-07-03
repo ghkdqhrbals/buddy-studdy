@@ -145,6 +145,23 @@ class ScheduledJobRunPersistenceAdapter(
             MapSqlParameterSource("jobNames", snapshots.map { it.jobName }),
         ) { rs, _ -> rs.toRun() }.associateBy { it.jobName }
 
+        val lastSuccessfulRuns = jdbc.query(
+            """
+            select *
+            from (
+                select r.*,
+                       row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) as rn
+                from scheduled_job_runs r
+                where r.job_name in (:jobNames)
+                  and r.status = :successStatus
+            ) successful_runs
+            where rn = 1
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("jobNames", snapshots.map { it.jobName })
+                .addValue("successStatus", JobRunStatus.SUCCESS.name),
+        ) { rs, _ -> rs.toRun() }.associateBy { it.jobName }
+
         return snapshots.map {
             ScheduledJobSnapshot(
                 jobName = it.jobName,
@@ -153,6 +170,7 @@ class ScheduledJobRunPersistenceAdapter(
                 scheduleValue = it.scheduleValue,
                 timeoutSeconds = it.timeoutSeconds,
                 latestRun = latestRuns[it.jobName],
+                lastSuccessfulRun = lastSuccessfulRuns[it.jobName],
             )
         }
     }

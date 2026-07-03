@@ -186,9 +186,11 @@ class ScheduledJobRunPersistenceAdapterTest {
         assertThat(snapshots.first().timeoutSeconds).isEqualTo(90)
         assertThat(snapshots.first().latestRun).isEqualTo(latestRun)
         assertThat(snapshots.first().latestRun).isNotEqualTo(oldRun)
+        assertThat(snapshots.first().lastSuccessfulRun).isEqualTo(oldRun)
         assertThat(snapshots.last().enabled).isFalse()
         assertThat(snapshots.last().timeoutSeconds).isEqualTo(600)
         assertThat(snapshots.last().latestRun).isNull()
+        assertThat(snapshots.last().lastSuccessfulRun).isNull()
     }
 
     private fun h2(): DataSource =

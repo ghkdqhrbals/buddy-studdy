@@ -86,20 +86,22 @@ class ManagedJobExecutionService(
                     scheduleValue = "not seeded",
                     timeoutSeconds = 300,
                     latestRun = null,
+                    lastSuccessfulRun = null,
                 )
             }
         }
         val jobs = orderedSnapshots.map { snapshot ->
             val latestRun = snapshot.latestRun
+            val lastSuccessfulRun = snapshot.lastSuccessfulRun
             val stuck = snapshot.enabled &&
                 latestRun?.status == JobRunStatus.RUNNING &&
                 Duration.between(latestRun.startedAt, now).seconds > snapshot.timeoutSeconds.coerceAtLeast(1)
             val stale = snapshot.enabled &&
                 (
-                    latestRun == null ||
-                        latestRun.status == JobRunStatus.FAILED ||
+                    lastSuccessfulRun == null ||
+                        latestRun?.status == JobRunStatus.FAILED ||
                         stuck ||
-                        Duration.between(latestRun.startedAt, now) > threshold
+                        Duration.between(lastSuccessfulRun.startedAt, now) > threshold
                     )
             ScheduledJobStatus(
                 jobName = snapshot.jobName,
@@ -107,6 +109,7 @@ class ManagedJobExecutionService(
                 scheduleType = snapshot.scheduleType,
                 scheduleValue = snapshot.scheduleValue,
                 latestRun = latestRun,
+                lastSuccessfulRun = lastSuccessfulRun,
                 stale = stale,
                 staleThresholdMinutes = thresholdMinutes,
                 timeoutSeconds = snapshot.timeoutSeconds.coerceAtLeast(1),

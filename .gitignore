@@ -14,5 +14,6 @@ __pycache__/
 .idea/
 backend/.gradle/
 backend/.idea/
+backend/.kotlin/
 backend/.env
 .superpowers/
