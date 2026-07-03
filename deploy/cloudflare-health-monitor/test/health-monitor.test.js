@@ -760,6 +760,44 @@ test("scheduled check persists monitor error state when state write is available
   assert.match(storedState.error, /kv read failed/);
 });
 
+test("scheduled monitor error alert respects repeat interval", async () => {
+  const slackRequests = [];
+  const environment = manualEnv({
+    existingState: {
+      status: "monitor_error",
+      checkedAt: "2026-07-03T00:00:00.000Z",
+      lastUpAt: null,
+      lastDownAt: null,
+      lastAlertAt: "2026-07-03T00:00:00.000Z",
+      consecutiveFailures: 0,
+      httpStatus: null,
+      error: "kv read failed",
+      detail: null,
+      alertType: "monitor_error",
+      alertSent: true,
+      slackAlertError: null,
+    },
+    statePutError: new Error("kv write failed"),
+    onSlack: async (request) => {
+      slackRequests.push(await request.json());
+      return new Response("ok", { status: 200 });
+    },
+  });
+  const waitUntilPromises = [];
+  const ctx = { waitUntil: (promise) => waitUntilPromises.push(promise) };
+
+  const result = await withManualEnv(environment, async () => {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-07-03T00:30:00.000Z") }, environment, ctx);
+    return waitUntilPromises[0];
+  });
+
+  assert.equal(slackRequests.length, 0);
+  assert.equal(environment.stateWrites.length, 0);
+  assert.equal(result.state.status, "monitor_error");
+  assert.equal(result.state.alertSent, false);
+  assert.equal(result.state.lastAlertAt, "2026-07-03T00:00:00.000Z");
+});
+
 test("scheduled check persists configuration error state when kv is available", async () => {
   const environment = manualEnv();
   environment.SLACK_WEBHOOK_URL = "";

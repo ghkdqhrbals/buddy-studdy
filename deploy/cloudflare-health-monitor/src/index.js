@@ -74,25 +74,28 @@ async function runHealthCheckSafely(env, scheduledTime) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const checkedAt = new Date(scheduledTime || Date.now()).toISOString();
+    const previous = await readStateSafely(env);
+    const previousState = previous.ok ? previous.state : null;
+    const shouldAlert = Boolean(env.SLACK_WEBHOOK_URL) && shouldAlertMonitorError(previousState, env, checkedAt);
     let state = {
       status: "monitor_error",
       checkedAt,
       lastUpAt: null,
       lastDownAt: null,
-      lastAlertAt: null,
+      lastAlertAt: previousState?.lastAlertAt || null,
       consecutiveFailures: 0,
       httpStatus: null,
       error: message,
       detail: null,
       alertType: "monitor_error",
-      shouldAlert: false,
+      shouldAlert,
       alertSent: false,
       slackAlertError: null,
     };
-    if (env.SLACK_WEBHOOK_URL) {
+    if (shouldAlert) {
       try {
         await sendSlackAlert(env, { ...state, alertType: "monitor_error" });
-        state = { ...state, alertSent: true, slackAlertError: null };
+        state = { ...state, lastAlertAt: checkedAt, shouldAlert: false, alertSent: true, slackAlertError: null };
       } catch (slackError) {
         const slackAlertError = slackError instanceof Error ? slackError.message : String(slackError);
         state = { ...state, alertSent: false, slackAlertError };
