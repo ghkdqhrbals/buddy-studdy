@@ -962,8 +962,8 @@ test("health monitor deployment readiness checks every workflow secret", () => {
     "CLOUDFLARE_ACCOUNT_ID is missing from GitHub Actions secrets.",
     "HEALTH_MONITOR_MANUAL_CHECK_TOKEN is missing from GitHub Actions secrets.",
   ]);
-  assert.match(report.nextActions.join("\n"), /set CLOUDFLARE_ACCOUNT_ID in the study-mate repository secrets/);
-  assert.match(report.nextActions.join("\n"), /set HEALTH_MONITOR_MANUAL_CHECK_TOKEN in the study-mate repository secrets/);
+  assert.match(report.nextActions.join("\n"), /set CLOUDFLARE_ACCOUNT_ID in the buddy-studdy repository secrets/);
+  assert.match(report.nextActions.join("\n"), /set HEALTH_MONITOR_MANUAL_CHECK_TOKEN in the buddy-studdy repository secrets/);
   assert.match(report.nextActions.join("\n"), /read deploy\/cloudflare-health-monitor\/README\.md for Cloudflare API token, account id, and KV namespace setup/);
   assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
@@ -1004,7 +1004,7 @@ test("health monitor docs include GitHub secret setup commands for readiness blo
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
   for (const name of requiredHealthMonitorGitHubSecrets) {
-    assert.match(readme, new RegExp(`gh secret set ${name} --repo ghkdqhrbals/study-mate`));
+    assert.match(readme, new RegExp(`gh secret set ${name} --repo ghkdqhrbals/buddy-studdy`));
   }
 });
 

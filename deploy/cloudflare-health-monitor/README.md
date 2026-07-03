@@ -132,11 +132,11 @@ How to obtain the remaining Cloudflare values:
 Set or rotate them with GitHub CLI:
 
 ```sh
-gh secret set CLOUDFLARE_API_TOKEN --repo ghkdqhrbals/study-mate
-gh secret set CLOUDFLARE_ACCOUNT_ID --repo ghkdqhrbals/study-mate
-gh secret set HEALTH_MONITOR_KV_NAMESPACE_ID --repo ghkdqhrbals/study-mate
-gh secret set HEALTH_MONITOR_SLACK_WEBHOOK_URL --repo ghkdqhrbals/study-mate
-gh secret set HEALTH_MONITOR_MANUAL_CHECK_TOKEN --repo ghkdqhrbals/study-mate
+gh secret set CLOUDFLARE_API_TOKEN --repo ghkdqhrbals/buddy-studdy
+gh secret set CLOUDFLARE_ACCOUNT_ID --repo ghkdqhrbals/buddy-studdy
+gh secret set HEALTH_MONITOR_KV_NAMESPACE_ID --repo ghkdqhrbals/buddy-studdy
+gh secret set HEALTH_MONITOR_SLACK_WEBHOOK_URL --repo ghkdqhrbals/buddy-studdy
+gh secret set HEALTH_MONITOR_MANUAL_CHECK_TOKEN --repo ghkdqhrbals/buddy-studdy
 ```
 
 The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and

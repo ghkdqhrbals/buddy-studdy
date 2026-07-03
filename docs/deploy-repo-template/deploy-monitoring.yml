@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 15
     env:
       MONITOR_DOMAIN: monitor.ghkdqhrbals.org
-      DASHBOARD_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/study-mate/main/docs/observability
+      DASHBOARD_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/docs/observability
 
     steps:
       - name: Deploy monitoring stack

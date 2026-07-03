@@ -8,7 +8,7 @@ import { validateConfig } from "./check-config.js";
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
 const workerConfigPath = path.join(root, "deploy", "cloudflare-health-monitor", "wrangler.jsonc");
-const repo = process.env.HEALTH_MONITOR_REPO || "ghkdqhrbals/study-mate";
+const repo = process.env.HEALTH_MONITOR_REPO || "ghkdqhrbals/buddy-studdy";
 const jsonOutput = process.argv.includes("--json");
 
 function readRemoteWorkflowNames() {

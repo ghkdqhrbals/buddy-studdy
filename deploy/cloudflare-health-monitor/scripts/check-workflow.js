@@ -189,7 +189,7 @@ export function buildDeploymentReadinessReport({
       nextActions.push(githubCliAuthAction);
     } else if (!state) {
       blockers.push(`${name} is missing from GitHub Actions secrets.`);
-      nextActions.push(`set ${name} in the study-mate repository secrets`);
+      nextActions.push(`set ${name} in the buddy-studdy repository secrets`);
       if (cloudflareSetupSecrets.has(name)) {
         nextActions.push(cloudflareSetupAction);
       }
