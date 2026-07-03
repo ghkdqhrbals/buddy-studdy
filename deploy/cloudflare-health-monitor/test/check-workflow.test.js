@@ -316,6 +316,24 @@ jobs:
   assert.match(errors, /must not directly call backend health endpoints/);
 });
 
+test("workflow scan rejects bare backend health urls in wait commands", () => {
+  const workflow = `
+name: Backend Deploy
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Wait for backend readiness
+        run: npx wait-on https://api.lowfidev.cloud/api/v1/health/readiness
+`;
+
+  const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
+
+  assert.match(errors, /deploy-backend\.yml/);
+  assert.match(errors, /must not directly call backend health endpoints/);
+});
+
 test("workflow scan rejects multiline direct health monitor manual checks", () => {
   const workflow = `
 name: Health Smoke
