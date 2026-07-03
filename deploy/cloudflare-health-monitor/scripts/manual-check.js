@@ -8,10 +8,10 @@ if (!monitorUrl || !token) {
   console.error(
     [
       "Usage:",
-      "  HEALTH_MONITOR_URL=https://<worker-host> MANUAL_CHECK_TOKEN=<token> npm run smoke",
-      "  npm run smoke -- https://<worker-host> <token>",
+      "  HEALTH_MONITOR_URL=https://<worker-host> MANUAL_CHECK_TOKEN=<token> npm run manual:check",
+      "  npm run manual:check -- https://<worker-host> <token>",
       "",
-      "Set ALLOW_DOWN=true to treat a backend-down monitor result as a successful smoke test.",
+      "Set ALLOW_DOWN=true to treat a backend-down monitor result as a successful manual check.",
     ].join("\n"),
   );
   process.exit(1);
@@ -29,12 +29,12 @@ const body = await readJson(response);
 console.log(JSON.stringify({ httpStatus: response.status, body }, null, 2));
 
 if (!response.ok) {
-  console.error(`Health monitor smoke check failed with HTTP ${response.status}.`);
+  console.error(`Health monitor manual check failed with HTTP ${response.status}.`);
   process.exit(1);
 }
 
 if (!body || typeof body !== "object" || !body.state) {
-  console.error("Health monitor smoke check response did not include state.");
+  console.error("Health monitor manual check response did not include state.");
   process.exit(1);
 }
 
@@ -43,7 +43,7 @@ if (body.ok === false && !allowDown) {
   process.exit(2);
 }
 
-console.log(`Health monitor smoke check passed. Backend status: ${body.state.status}.`);
+console.log(`Health monitor manual check passed. Backend status: ${body.state.status}.`);
 
 function normalizeMonitorUrl(value) {
   const trimmed = value?.trim().replace(/\/+$/, "");

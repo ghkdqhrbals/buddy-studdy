@@ -111,7 +111,7 @@ for the cron:
 ```sh
 HEALTH_MONITOR_URL=https://<worker-host> \
 MANUAL_CHECK_TOKEN=<MANUAL_CHECK_TOKEN> \
-npm run smoke
+npm run manual:check
 ```
 
 `POST /check` uses the same state transition and Slack alert path as the cron.

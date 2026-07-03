@@ -7,7 +7,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check": "node scripts/check-config.js && node scripts/check-workflow.js && wrangler deploy --dry-run",
-    "smoke": "node scripts/smoke-check.js",
+    "manual:check": "node scripts/manual-check.js",
     "test": "node --test"
   },
   "devDependencies": {
