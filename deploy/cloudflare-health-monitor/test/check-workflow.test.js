@@ -218,6 +218,14 @@ test("deploy repo backend template does not run backend health probes in Actions
   assert.deepEqual(validateNoActionsRuntimeHealthChecks(template, "deploy-backend.yml"), []);
 });
 
+test("deploy repo docs prohibit Actions runtime and container health checks", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/README.md"), "utf8");
+
+  assert.match(readme, /must not call backend `\/health` or readiness endpoints/i);
+  assert.match(readme, /must not inspect Docker `Health\.Status`/i);
+  assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
+});
+
 test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 

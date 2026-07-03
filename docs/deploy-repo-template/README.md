@@ -98,7 +98,8 @@ The deploy process uses a blue/green rolling pattern:
 1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
 2. GitHub Actions validates only deploy mechanics: the new container process
    does not immediately exit, and Nginx configuration is valid. It must not
-   call backend health or readiness endpoints.
+   call backend health or readiness endpoints, inspect Docker `Health.Status`,
+   or call the Health Monitor Worker `/check` endpoint.
 3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
 4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
 
@@ -106,10 +107,7 @@ Only one scheduler leader is active during overlap windows. PostgreSQL advisory 
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-GitHub Actions must not call backend `/health` or readiness endpoints. Runtime
-server-down alerts are handled by the Cloudflare Worker in
-`deploy/cloudflare-health-monitor`, which checks the public readiness endpoint
-from Cloudflare Cron and sends Slack alerts.
+GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by the Cloudflare Worker in `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint from Cloudflare Cron and sends Slack alerts.
 
 Backend scheduler failure alerts are separate from server-down alerts. Set the
 deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
