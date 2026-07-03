@@ -189,7 +189,10 @@ npm run manual:check
 ```
 
 `POST /check` uses the same state transition and Slack alert path as the cron.
-If `MANUAL_CHECK_TOKEN` is not configured, the endpoint returns `401`.
+It returns `200` only when the checked state is `up` or `degraded`, and returns
+`503` for `down`, `stale`, `config_error`, or `monitor_error` states so operator
+tools can fail fast from the HTTP status alone. If `MANUAL_CHECK_TOKEN` is not
+configured, the endpoint returns `401`.
 If the backend is intentionally down during the manual check, set
 `ALLOW_DOWN=true` to verify the Worker path without failing the command.
 

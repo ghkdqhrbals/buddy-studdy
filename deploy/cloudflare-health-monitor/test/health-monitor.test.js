@@ -488,7 +488,7 @@ test("manual check writes state and sends slack alert when threshold is reached"
   );
   const body = await response.json();
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.equal(body.ok, false);
   assert.equal(body.state.status, "down");
   assert.equal(environment.stateWrites.length, 1);
@@ -530,7 +530,7 @@ test("manual check sends slack alert when backend fetch fails twice", async () =
       environment,
     );
 
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 503);
   });
 
   const storedState = JSON.parse(environment.stateWrites.at(-1).value);
@@ -567,7 +567,7 @@ test("manual check keeps alert retryable when Slack delivery fails", async () =>
   const body = await response.json();
   const storedState = JSON.parse(environment.stateWrites[0].value);
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.equal(body.state.status, "down");
   assert.equal(storedState.status, "down");
   assert.equal(storedState.shouldAlert, true);
@@ -608,7 +608,7 @@ test("manual check keeps alert retryable when Slack delivery times out", async (
   );
   const storedState = JSON.parse(environment.stateWrites[0].value);
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.equal(storedState.status, "down");
   assert.equal(storedState.shouldAlert, true);
   assert.equal(storedState.alertSent, false);

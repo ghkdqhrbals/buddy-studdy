@@ -34,7 +34,10 @@ export default {
         );
       }
       const state = result.state;
-      return json({ ok: state.status === "up", monitor: monitorMetadata(env), state });
+      return json(
+        { ok: state.status === "up", monitor: monitorMetadata(env), state },
+        { status: visibleStatusCode(state) },
+      );
     }
     return json({ ok: false, error: "Not found." }, { status: 404 });
   },
@@ -426,6 +429,10 @@ function json(body, init = {}) {
 }
 
 function rootStatusCode(state) {
+  return visibleStatusCode(state);
+}
+
+function visibleStatusCode(state) {
   if (!state) return 503;
   if (state.status === "up" || state.status === "degraded") return 200;
   return 503;
