@@ -24,6 +24,12 @@ class MonitoringConfigurationGuard(
         if (properties.monitoring.slackTimeoutMs !in 1_000..25_000) {
             error("MONITORING_SLACK_TIMEOUT_MS must be between 1000 and 25000 in prod.")
         }
+        if (properties.monitoring.schedulerStaleThresholdMinutes !in 1..60) {
+            error("MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES must be between 1 and 60 in prod.")
+        }
+        if (properties.monitoring.schedulerStartupGraceMinutes !in 0..60) {
+            error("MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES must be between 0 and 60 in prod.")
+        }
         if (properties.monitoring.schedulerMonitoredJobs.none { it.isNotBlank() }) {
             error("At least one scheduler job must be monitored in prod when scheduler is enabled.")
         }

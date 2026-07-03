@@ -146,11 +146,13 @@ not hold scheduler failure handling indefinitely. In the `prod` profile,
 application fails fast instead of silently disabling scheduler failure alerts.
 Production startup also verifies that every registered `ManagedJob` is listed
 in `MONITORING_SCHEDULER_MONITORED_JOBS` and that the list does not contain
-unknown job names. `MONITORING_SLACK_TIMEOUT_MS` must also stay within the
-supported range so webhook delivery does not silently clamp a bad production
-setting. When adding a new scheduled job, add its job name to that variable and
-the Kubernetes backend config in the same change, or production startup will
-fail before the job can run unmonitored.
+unknown job names. `MONITORING_SLACK_TIMEOUT_MS` must stay within `1000..25000`,
+`MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES` within `1..60`, and
+`MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES` within `0..60` so alert delivery
+and scheduler freshness checks cannot be delayed by a bad production setting.
+When adding a new scheduled job, add its job name to that variable and the
+Kubernetes backend config in the same change, or production startup will fail
+before the job can run unmonitored.
 
 Kubernetes readiness probes should use `/api/v1/health/dependencies`.
 Dependency readiness checks database and Redis only, so a stale scheduler sends

@@ -66,8 +66,9 @@ secrets would overwrite live cluster credentials. Create or patch
 Production backend pods fail fast when `SLACK_WEBHOOK_URL` is empty and the
 scheduler is enabled. This prevents scheduler failure alerts from being
 silently disabled. They also fail fast when monitored scheduler job names do
-not match registered backend jobs or when the scheduler Slack timeout is
-outside the supported range.
+not match registered backend jobs or when scheduler monitoring timeouts,
+stale thresholds, or startup grace windows are outside the supported production
+ranges.
 
 ## Redis Stream Coordinator
 

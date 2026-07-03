@@ -158,6 +158,40 @@ class MonitoringConfigurationGuardTest {
             }
     }
 
+    @Test
+    fun `prod scheduler fails fast when scheduler stale threshold is outside supported bounds`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-stale-threshold-minutes=120",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES must be between 1 and 60 in prod.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when scheduler startup grace is outside supported bounds`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-startup-grace-minutes=120",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES must be between 0 and 60 in prod.",
+                )
+            }
+    }
+
     private fun fakeJob(jobName: String): ManagedJob =
         object : ManagedJob {
             override val name: String = jobName
