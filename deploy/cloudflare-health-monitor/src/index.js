@@ -215,7 +215,7 @@ function shouldAlertMonitorError(previous, env, checkedAt) {
   const checkedAtMs = Date.parse(checkedAt);
   const lastAlertAtMs = Date.parse(previous.lastAlertAt);
   if (!Number.isFinite(checkedAtMs) || !Number.isFinite(lastAlertAtMs)) return true;
-  const repeatSeconds = Number.parseInt(env.ALERT_REPEAT_SECONDS || "3600", 10);
+  const repeatSeconds = boundedInteger(env.ALERT_REPEAT_SECONDS, 3600, 300, 86_400);
   return checkedAtMs - lastAlertAtMs >= repeatSeconds * 1000;
 }
 
@@ -391,9 +391,7 @@ function rootVisibleState(state, env, nowMs = Date.now()) {
 }
 
 function statusStaleAfterSeconds(env) {
-  const raw = Number.parseInt(env?.STATUS_STALE_AFTER_SECONDS || "180", 10);
-  if (!Number.isFinite(raw)) return 180;
-  return Math.min(Math.max(raw, 60), 3600);
+  return boundedInteger(env?.STATUS_STALE_AFTER_SECONDS, 180, 60, 3600);
 }
 
 function isAuthorizedManualCheck(request, env) {
@@ -419,8 +417,8 @@ function nonBlankString(value) {
 }
 
 function nextState(previous, result, env, checkedAt) {
-  const failureThreshold = Number.parseInt(env.FAILURE_THRESHOLD || "2", 10);
-  const repeatSeconds = Number.parseInt(env.ALERT_REPEAT_SECONDS || "3600", 10);
+  const failureThreshold = boundedInteger(env.FAILURE_THRESHOLD, 2, 1, 2);
+  const repeatSeconds = boundedInteger(env.ALERT_REPEAT_SECONDS, 3600, 300, 86_400);
   const previousStatus = previous?.status || "unknown";
 
   if (result.healthy) {
@@ -462,6 +460,12 @@ function nextState(previous, result, env, checkedAt) {
     alertType: shouldAlert ? (firstDownAlert ? "down" : "still_down") : null,
     shouldAlert,
   };
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
 }
 
 async function readState(env) {

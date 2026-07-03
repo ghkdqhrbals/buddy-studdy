@@ -21,6 +21,8 @@ runtime monitoring.
   connection is treated as a failure instead of delaying the monitor.
 - Bounds each Slack webhook request with `SLACK_TIMEOUT_MS`, so a slow Slack
   endpoint does not hold the monitor run indefinitely.
+- Falls back to safe runtime defaults if numeric alert vars are malformed, so a
+  bad var cannot disable outage alerts.
 - Includes readiness failure details in Slack when the backend returns a JSON
   body with component checks, for example stale scheduler jobs or Redis
   failures.

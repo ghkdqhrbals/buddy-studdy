@@ -42,6 +42,26 @@ test("second consecutive failure marks down and alerts slack", () => {
   assert.equal(state.lastAlertAt, null);
 });
 
+test("invalid failure threshold falls back so backend down still alerts", () => {
+  const previous = {
+    status: "degraded",
+    consecutiveFailures: 1,
+    lastAlertAt: null,
+    lastUpAt: "2026-07-02T23:55:00.000Z",
+    lastDownAt: null,
+  };
+  const state = internals.nextState(
+    previous,
+    { healthy: false, httpStatus: null, error: "fetch failed", detail: null },
+    { ...env, FAILURE_THRESHOLD: "not-a-number" },
+    "2026-07-03T00:05:00.000Z",
+  );
+
+  assert.equal(state.status, "down");
+  assert.equal(state.shouldAlert, true);
+  assert.equal(state.alertType, "down");
+});
+
 test("down service repeats alert only after repeat interval", () => {
   const previous = {
     status: "down",
@@ -57,6 +77,27 @@ test("down service repeats alert only after repeat interval", () => {
   assert.equal(tooEarly.shouldAlert, false);
   assert.equal(repeatDue.shouldAlert, true);
   assert.equal(repeatDue.alertType, "still_down");
+});
+
+test("invalid repeat interval falls back so still-down alerts remain retryable", () => {
+  const previous = {
+    status: "down",
+    consecutiveFailures: 3,
+    lastAlertAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: "2026-07-02T23:55:00.000Z",
+    lastDownAt: "2026-07-03T00:05:00.000Z",
+  };
+
+  const state = internals.nextState(
+    previous,
+    { healthy: false, httpStatus: 503, error: "HTTP 503", detail: null },
+    { ...env, ALERT_REPEAT_SECONDS: "not-a-number" },
+    "2026-07-03T01:06:00.000Z",
+  );
+
+  assert.equal(state.status, "down");
+  assert.equal(state.shouldAlert, true);
+  assert.equal(state.alertType, "still_down");
 });
 
 test("down service preserves original down time across repeated failures", () => {
