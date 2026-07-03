@@ -129,6 +129,29 @@ class AdminSchedulerStatusIntegrationTest {
     }
 
     @Test
+    fun `admin can page scheduler run history through HTTP`() {
+        val token = loginAdmin()
+
+        val response = get("/api/v1/admin/jobs/runs?jobName=%20%20%20&limit=1&offset=0", token)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        val body = response.json()
+        assertThat(body["runs"]).hasSize(1)
+        assertThat(body["totalCount"].asLong()).isEqualTo(2)
+        assertThat(body["limit"].asInt()).isEqualTo(1)
+        assertThat(body["offset"].asInt()).isEqualTo(0)
+        assertThat(body["runs"][0]["jobName"].asText()).isIn("question-schedule", "user-stats-refresh")
+    }
+
+    @Test
+    fun `scheduler run history requires admin token`() {
+        val response = get("/api/v1/admin/jobs/runs", bearerToken = null)
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
     fun `admin can see monitored scheduler jobs missing from seed table`() {
         jdbc.update("delete from scheduled_job_runs where job_name = 'user-stats-refresh'")
         jdbc.update("delete from scheduled_jobs where job_name = 'user-stats-refresh'")

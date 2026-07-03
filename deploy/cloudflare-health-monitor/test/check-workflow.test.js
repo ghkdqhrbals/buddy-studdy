@@ -231,20 +231,12 @@ test("repository workflow files do not run backend health probes in Actions", ()
   assert.deepEqual(errors, []);
 });
 
-test("image build workflows run static health-check policy scanner", () => {
+test("image build workflows do not run health-check scanners or probes", () => {
   const workflowDir = path.join(repoRoot, ".github", "workflows");
   for (const workflowName of ["backend-image.yml", "admin-frontend-image.yml"]) {
     const workflow = fs.readFileSync(path.join(workflowDir, workflowName), "utf8");
-    assert.match(
-      workflow,
-      /actions\/setup-node@v4[\s\S]*node-version:\s*"22"[\s\S]*node\s+deploy\/cloudflare-health-monitor\/scripts\/check-workflow\.js/,
-      `${workflowName} must set up Node before scanning workflow files`,
-    );
-    assert.match(
-      workflow,
-      /node\s+deploy\/cloudflare-health-monitor\/scripts\/check-workflow\.js/,
-      `${workflowName} must scan workflow files before publishing images`,
-    );
+    assert.doesNotMatch(workflow, /check-workflow\.js/, `${workflowName} must not run health-check policy scanners`);
+    assert.deepEqual(validateNoActionsRuntimeHealthChecks(workflow, workflowName), []);
   }
 });
 
