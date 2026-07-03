@@ -661,6 +661,14 @@ test("health monitor docs keep manual checks out of GitHub Actions", () => {
   assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
 });
 
+test("health monitor docs describe readiness response contract and stale status config", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /non-JSON/i);
+  assert.match(readme, /ok:true/);
+  assert.match(readme, /STATUS_STALE_AFTER_SECONDS/);
+});
+
 test("backend API docs do not describe admin scheduler as deployment smoke health check", () => {
   const apiDoc = fs.readFileSync(path.join(repoRoot, "backend/API.md"), "utf8");
 

@@ -19,6 +19,9 @@ runtime monitoring.
   silently watch an insecure or development endpoint.
 - Treats a JSON readiness body with `ok:false` as unhealthy even if an
   upstream layer incorrectly returns HTTP 200.
+- Treats HTTP 200 non-JSON readiness responses, empty bodies, and JSON bodies
+  without `ok:true` as unhealthy, so an Nginx or routing mistake cannot look
+  like a healthy backend.
 - Stores state in Workers KV to avoid repeated Slack spam.
 - Sends Slack when:
   - the failure threshold is reached,
@@ -131,6 +134,7 @@ Default vars in `wrangler.jsonc`:
 - `ENVIRONMENT_NAME`: `production`
 - `FAILURE_THRESHOLD`: `2`
 - `ALERT_REPEAT_SECONDS`: `3600` (`300` to `86400`)
+- `STATUS_STALE_AFTER_SECONDS`: `180` (`60` to `3600`)
 - `HEALTHCHECK_TIMEOUT_MS`: `8000` (`1000` to `25000`)
 - `SLACK_TIMEOUT_MS`: `5000` (`1000` to `15000`)
 
