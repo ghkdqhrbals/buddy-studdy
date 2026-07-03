@@ -7,6 +7,7 @@ import { buildDeploymentReadinessReport } from "./check-workflow.js";
 const root = path.resolve(import.meta.dirname, "..", "..", "..");
 const workflowPath = path.join(root, ".github", "workflows", "health-monitor.yml");
 const repo = process.env.HEALTH_MONITOR_REPO || "ghkdqhrbals/study-mate";
+const jsonOutput = process.argv.includes("--json");
 
 function readRemoteWorkflowNames() {
   try {
@@ -54,8 +55,12 @@ const report = buildDeploymentReadinessReport({
   hasCloudflareApiToken: Boolean(process.env.CLOUDFLARE_API_TOKEN),
 });
 
-console.log(report.ready ? "Health monitor deployment readiness: ready" : "Health monitor deployment readiness: blocked");
-printSection("Blockers:", report.blockers);
-printSection("Next actions:", report.nextActions);
+if (jsonOutput) {
+  console.log(JSON.stringify(report, null, 2));
+} else {
+  console.log(report.ready ? "Health monitor deployment readiness: ready" : "Health monitor deployment readiness: blocked");
+  printSection("Blockers:", report.blockers);
+  printSection("Next actions:", report.nextActions);
+}
 
 process.exit(report.ready ? 0 : 1);

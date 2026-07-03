@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -823,6 +825,45 @@ test("health monitor package exposes a deployment readiness command", () => {
   assert.equal(packageJson.scripts.readiness, "node scripts/readiness.js");
   assert.match(readme, /npm run readiness/);
   assert.match(readme, /prints blockers before relying on Slack outage alerts/);
+});
+
+test("health monitor readiness command supports json output", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "health-monitor-readiness-"));
+  const ghStub = path.join(tempDir, "gh");
+  fs.writeFileSync(
+    ghStub,
+    `#!/bin/sh
+if [ "$1" = "workflow" ]; then
+  printf 'Build Backend Image\\tactive\\t1\\n'
+  exit 0
+fi
+if [ "$1" = "secret" ]; then
+  printf 'HEALTH_MONITOR_SLACK_WEBHOOK_URL\\t2026-07-03\\n'
+  exit 0
+fi
+exit 1
+`,
+    { mode: 0o755 },
+  );
+
+  let output = "";
+  try {
+    execFileSync("node", ["scripts/readiness.js", "--json"], {
+      cwd: path.join(repoRoot, "deploy", "cloudflare-health-monitor"),
+      env: { ...process.env, PATH: `${tempDir}${path.delimiter}${process.env.PATH}` },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    output = error.stdout;
+  }
+
+  const report = JSON.parse(output);
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
 test("health monitor docs include post deploy verification without Actions checks", () => {
