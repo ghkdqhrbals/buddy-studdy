@@ -62,7 +62,10 @@ secrets would overwrite live cluster credentials. Create or patch
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
 - `SLACK_WEBHOOK_URL` for production scheduler failure alerts
-- `MONITORING_ADMIN_BASE_URL` as an HTTPS admin UI URL for scheduler Slack alert links
+
+`config/backend-config.yaml` contains non-secret monitoring values such as
+`MONITORING_ADMIN_BASE_URL`, which must be an HTTPS admin UI URL for scheduler
+Slack alert links.
 
 Production backend pods fail fast when `SLACK_WEBHOOK_URL` is empty or
 `MONITORING_ADMIN_BASE_URL` is not an HTTPS URL while the scheduler is enabled.

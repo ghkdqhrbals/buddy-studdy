@@ -533,6 +533,16 @@ test("kubernetes production apply path does not include placeholder backend secr
   assert.match(combinedManifest, /name:\s*buddystudy-backend-secret/);
 });
 
+test("kubernetes docs separate scheduler Slack secrets from admin alert config", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/README.md"), "utf8");
+  const secretSection = readme.slice(readme.indexOf("Required keys include:"), readme.indexOf("`config/backend-config.yaml`"));
+
+  assert.match(secretSection, /`SLACK_WEBHOOK_URL` for production scheduler failure alerts/);
+  assert.doesNotMatch(secretSection, /MONITORING_ADMIN_BASE_URL/);
+  assert.match(readme, /`config\/backend-config\.yaml` contains non-secret monitoring values/);
+  assert.match(readme, /`MONITORING_ADMIN_BASE_URL`, which must be an HTTPS admin UI URL/);
+});
+
 test("health monitor workflow rejects deploying before syncing Worker secrets", () => {
   const workflow = `
 name: Deploy Health Monitor Worker
