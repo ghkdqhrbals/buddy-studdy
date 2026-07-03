@@ -709,6 +709,16 @@ test("health monitor docs keep manual checks out of GitHub Actions", () => {
   assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
 });
 
+test("health monitor docs include post deploy verification without Actions checks", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /## Post-deploy Verification/);
+  assert.match(readme, /GET https:\/\/<worker-host>\/`/);
+  assert.match(readme, /npm run manual:check/);
+  assert.match(readme, /ALLOW_DOWN=true/);
+  assert.match(readme, /checkedAt` has advanced/);
+});
+
 test("health monitor docs describe readiness response contract and stale status config", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 

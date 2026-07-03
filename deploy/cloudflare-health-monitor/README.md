@@ -111,6 +111,30 @@ The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
 It does not call the deployed Worker for health checks. Runtime checks are
 owned by Cloudflare Cron.
 
+## Post-deploy Verification
+
+After deploying, verify the monitor without using GitHub Actions as a runtime
+health checker:
+
+1. Open `GET https://<worker-host>/` and confirm it returns JSON with
+   `ok:true` or a clear stored monitor state. Missing configuration such as
+   `SLACK_WEBHOOK_URL`, `HEALTHCHECK_URL`, or `HEALTH_MONITOR_STATE` must be
+   fixed before relying on alerts.
+2. Run one explicit operator check:
+
+   ```sh
+   HEALTH_MONITOR_URL=https://<worker-host> \
+   MANUAL_CHECK_TOKEN=<MANUAL_CHECK_TOKEN> \
+   npm run manual:check
+   ```
+
+3. If the backend is intentionally down while validating the alert path, run
+   the same command with `ALLOW_DOWN=true`. The command should still reach the
+   Worker and print the monitor state, while Slack delivery follows the same
+   transition path as the Cron Trigger.
+4. Wait for the Cloudflare Cron Trigger to run at least once, then open
+   `GET https://<worker-host>/` again and confirm `checkedAt` has advanced.
+
 ## Manual Operator Check
 
 After deployment, an operator can trigger one immediate check without waiting
