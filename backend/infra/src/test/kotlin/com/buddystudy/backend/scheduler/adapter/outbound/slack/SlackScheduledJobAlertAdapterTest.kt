@@ -170,6 +170,45 @@ class SlackScheduledJobAlertAdapterTest {
         server.verify()
     }
 
+    @Test
+    fun `notifyFailed preserves error label when payload values are long`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+                environmentName = "prod-" + "x".repeat(1_000),
+                serviceName = "BuddyStudy " + "x".repeat(1_000),
+                adminBaseUrl = "https://admin.ghkdqhrbals.org/" + "path/".repeat(400),
+            ),
+        )
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build())
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andExpect { request ->
+                val payload = objectMapper.readValue(
+                    (request as MockClientHttpRequest).bodyAsString,
+                    object : TypeReference<Map<String, Any>>() {},
+                )
+                val blocks = payload["blocks"] as List<Map<String, Any>>
+                val sectionText = ((blocks[1]["text"] as Map<String, Any>)["text"] as String)
+
+                assertThat(sectionText).contains("*Error*:")
+                assertThat(sectionText).contains("boom-")
+            }
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+
+        adapter.notifyFailed(
+            failedRun(
+                jobName = "question-scheduler-" + "x".repeat(1_000),
+                createdBy = "admin-" + "x".repeat(1_000),
+                errorMessage = "boom-" + "x".repeat(5_000),
+            ),
+        )
+
+        server.verify()
+    }
+
     private fun failedRun(
         jobName: String = "question-scheduler",
         createdBy: String = "admin",

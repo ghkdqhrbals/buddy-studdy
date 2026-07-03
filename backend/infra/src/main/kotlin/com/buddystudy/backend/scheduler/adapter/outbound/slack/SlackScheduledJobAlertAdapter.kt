@@ -46,18 +46,18 @@ class SlackScheduledJobAlertAdapter internal constructor(
         val title = ":rotating_light: ${properties.monitoring.serviceName} scheduled job failed"
         val runUrl = adminRunUrl(run)
         val lines = listOf(
-            "*Environment*: ${properties.monitoring.environmentName}",
-            "*Job*: ${run.jobName}",
-            "*Run*: ${run.id}",
-            "*Created by*: ${run.createdBy}",
-            "*Retry of run*: ${run.retryOfRunId ?: "none"}",
-            "*Trigger*: ${run.triggerType}",
-            "*Status*: ${run.status}",
-            "*Started*: ${DateTimeFormatter.ISO_INSTANT.format(run.startedAt)}",
-            "*Finished*: ${run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"}",
-            "*Duration*: ${run.durationMs ?: 0}ms",
-            "*Run URL*: ${runUrl ?: "not configured"}",
-            "*Error*: ${run.errorMessage ?: "Unknown error"}",
+            slackLine("Environment", properties.monitoring.environmentName),
+            slackLine("Job", run.jobName),
+            slackLine("Run", run.id),
+            slackLine("Created by", run.createdBy),
+            slackLine("Retry of run", run.retryOfRunId ?: "none"),
+            slackLine("Trigger", run.triggerType),
+            slackLine("Status", run.status),
+            slackLine("Started", DateTimeFormatter.ISO_INSTANT.format(run.startedAt)),
+            slackLine("Finished", run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"),
+            slackLine("Duration", "${run.durationMs ?: 0}ms"),
+            slackLine("Run URL", runUrl ?: "not configured"),
+            slackLine("Error", run.errorMessage ?: "Unknown error"),
         )
         val sectionText = truncateSlackText(lines.joinToString("\n"), SECTION_TEXT_LIMIT)
         val blocks = mutableListOf<Map<String, Any>>(
@@ -110,6 +110,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
     private companion object {
         private const val HEADER_TEXT_LIMIT = 150
         private const val SECTION_TEXT_LIMIT = 3_000
+        private const val LINE_VALUE_LIMIT = 220
         private const val FALLBACK_TEXT_LIMIT = 4_000
         private const val BUTTON_URL_LIMIT = 3_000
 
@@ -131,5 +132,8 @@ class SlackScheduledJobAlertAdapter internal constructor(
             if (maxLength <= 3) return value.take(maxLength)
             return value.take(maxLength - 3) + "..."
         }
+
+        fun slackLine(label: String, value: Any?): String =
+            "*$label*: ${truncateSlackText(value?.toString() ?: "unknown", LINE_VALUE_LIMIT)}"
     }
 }
