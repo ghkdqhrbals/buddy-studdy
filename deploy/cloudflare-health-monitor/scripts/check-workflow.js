@@ -11,6 +11,7 @@ const backendHealthProbePattern = /(?:https?:\/\/[^\s"'\\]+)?(?:\/api\/v1\/healt
 const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wget|http)\b[^\n]*\/api\/health\b/;
 const dockerHealthInspectPattern = /docker\s+inspect\b[^\n]*(?:\.State\.Health|Health\.Status)\b/;
 const dockerHealthFilterPattern = /docker\s+(?:compose\s+)?ps\b[^\n]*(?:--filter\s+health=|health=|\.Health|Health\.Status)\b/;
+const dockerStatusHealthPattern = /docker\s+(?:compose\s+)?ps\b[^\n]*\.Status\b[^\n]*(?:healthy|unhealthy)\b/;
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
 const healthMonitorManualCheckPattern = /(?:buddystudy-health-monitor|workers\.dev)[^\n]*\/check\b/;
 const healthMonitorManualCheckScriptPattern = /npm\s+run\s+manual:check\b|manual-check\.js/;
@@ -29,7 +30,12 @@ export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow"
   if (runtimeHealthProbePattern.test(scanText)) {
     errors.push(`${fileName}: GitHub Actions workflows must not run runtime health probes.`);
   }
-  if (localRuntimeHealthProbePattern.test(scanText) || dockerHealthInspectPattern.test(scanText) || dockerHealthFilterPattern.test(scanText)) {
+  if (
+    localRuntimeHealthProbePattern.test(scanText) ||
+    dockerHealthInspectPattern.test(scanText) ||
+    dockerHealthFilterPattern.test(scanText) ||
+    dockerStatusHealthPattern.test(scanText)
+  ) {
     errors.push(`${fileName}: GitHub Actions workflows must not run container health probes.`);
   }
   if (/npm\s+run\s+smoke/.test(scanText) || /smoke-check\.js/.test(scanText)) {

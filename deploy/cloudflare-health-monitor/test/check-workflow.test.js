@@ -313,6 +313,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects docker ps status health checks in Actions", () => {
+  const workflow = `
+name: Deploy Backend
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check unhealthy status
+        run: docker ps --format '{{.Names}} {{.Status}}' | grep unhealthy
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
+});
+
 test("workflow scan rejects coordinator runtime health probes in Actions", () => {
   const workflow = `
 name: Deploy Coordinator
