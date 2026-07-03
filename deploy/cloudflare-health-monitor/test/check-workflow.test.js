@@ -964,6 +964,7 @@ test("health monitor deployment readiness checks every workflow secret", () => {
   ]);
   assert.match(report.nextActions.join("\n"), /set CLOUDFLARE_ACCOUNT_ID in the study-mate repository secrets/);
   assert.match(report.nextActions.join("\n"), /set HEALTH_MONITOR_MANUAL_CHECK_TOKEN in the study-mate repository secrets/);
+  assert.match(report.nextActions.join("\n"), /read deploy\/cloudflare-health-monitor\/README\.md for Cloudflare API token, account id, and KV namespace setup/);
   assert.doesNotMatch(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 

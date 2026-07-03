@@ -26,6 +26,13 @@ export const requiredHealthMonitorGitHubSecrets = [
   "HEALTH_MONITOR_SLACK_WEBHOOK_URL",
   "HEALTH_MONITOR_MANUAL_CHECK_TOKEN",
 ];
+const cloudflareSetupSecrets = new Set([
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "HEALTH_MONITOR_KV_NAMESPACE_ID",
+]);
+const cloudflareSetupAction =
+  "read deploy/cloudflare-health-monitor/README.md for Cloudflare API token, account id, and KV namespace setup";
 
 function normalizeShellContinuations(text) {
   return text.replace(/\\\r?\n\s*/g, " ");
@@ -183,6 +190,9 @@ export function buildDeploymentReadinessReport({
     } else if (!state) {
       blockers.push(`${name} is missing from GitHub Actions secrets.`);
       nextActions.push(`set ${name} in the study-mate repository secrets`);
+      if (cloudflareSetupSecrets.has(name)) {
+        nextActions.push(cloudflareSetupAction);
+      }
     }
   }
   if (localWorkflowExists && localWorkflowErrors.length === 0 && localWorkerConfigErrors.length === 0 && remoteWorkflowExists && hasAllRequiredSecrets) {
