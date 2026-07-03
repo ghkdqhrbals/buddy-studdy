@@ -800,6 +800,31 @@ test("health monitor deployment readiness reports remote workflow absence as Sla
   assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness distinguishes unknown GitHub secret state from missing secret", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: ["Deploy Health Monitor Worker"],
+    hasGitHubSlackSecret: null,
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, ["Could not verify HEALTH_MONITOR_SLACK_WEBHOOK_URL in GitHub Actions secrets."]);
+  assert.match(report.nextActions.join("\n"), /rerun readiness with GitHub CLI authentication/);
+  assert.doesNotMatch(report.blockers.join("\n"), /is missing from GitHub Actions secrets/);
+});
+
+test("health monitor package exposes a deployment readiness command", () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "deploy", "cloudflare-health-monitor", "package.json"), "utf8"),
+  );
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.equal(packageJson.scripts.readiness, "node scripts/readiness.js");
+  assert.match(readme, /npm run readiness/);
+  assert.match(readme, /prints blockers before relying on Slack outage alerts/);
+});
+
 test("health monitor docs include post deploy verification without Actions checks", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 

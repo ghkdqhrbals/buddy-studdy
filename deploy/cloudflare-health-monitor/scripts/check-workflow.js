@@ -140,7 +140,10 @@ export function buildDeploymentReadinessReport({
       nextActions.push("dispatch Deploy Health Monitor Worker after the workflow is available on the remote default branch");
     }
   }
-  if (!hasGitHubSlackSecret) {
+  if (hasGitHubSlackSecret == null) {
+    blockers.push("Could not verify HEALTH_MONITOR_SLACK_WEBHOOK_URL in GitHub Actions secrets.");
+    nextActions.push("rerun readiness with GitHub CLI authentication and network access");
+  } else if (!hasGitHubSlackSecret) {
     blockers.push("HEALTH_MONITOR_SLACK_WEBHOOK_URL is missing from GitHub Actions secrets.");
     nextActions.push("set HEALTH_MONITOR_SLACK_WEBHOOK_URL in the study-mate repository secrets");
   }
