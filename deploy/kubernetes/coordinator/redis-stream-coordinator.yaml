@@ -147,25 +147,26 @@ spec:
                 sed -n 's/.*"accessToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
               )"
 
-              create_stream() {
+              create_stream_group() {
                 stream_prefix="$1"
                 shard_count="$2"
+                consumer_group="bs-backend"
                 status="$(
                   curl -sS -o /tmp/coord-response.json -w "%{http_code}" \
                     -H "Authorization: Bearer ${token}" \
                     -H "Content-Type: application/json" \
-                    -X POST "${COORDINATOR_BASE_URL}/coord/v1/streams/${stream_prefix}" \
-                    -d "{\"initialShardCount\":${shard_count},\"requestedBy\":\"buddystudy-k8s-bootstrap\",\"reason\":\"bootstrap ${stream_prefix}\"}"
+                    -X POST "${COORDINATOR_BASE_URL}/coord/v1/streams/${stream_prefix}/groups/${consumer_group}" \
+                    -d "{\"initialShardCount\":${shard_count},\"requestedBy\":\"buddystudy-k8s-bootstrap\",\"reason\":\"bootstrap ${stream_prefix}/${consumer_group}\"}"
                 )"
                 if [ "$status" = "201" ] || [ "$status" = "409" ]; then
-                  echo "stream ${stream_prefix} ready (${status})"
+                  echo "stream group ${stream_prefix}/${consumer_group} ready (${status})"
                 else
                   cat /tmp/coord-response.json
                   exit 1
                 fi
               }
 
-              create_stream "push-v1" 8
-              create_stream "view-v1" 8
-              create_stream "notification-v1" 4
-              create_stream "create-question-v1" 2
+              create_stream_group "push-v1" 8
+              create_stream_group "view-v1" 8
+              create_stream_group "notification-v1" 4
+              create_stream_group "create-question-v1" 2
