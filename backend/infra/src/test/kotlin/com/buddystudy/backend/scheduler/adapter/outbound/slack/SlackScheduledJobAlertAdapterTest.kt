@@ -41,6 +41,8 @@ class SlackScheduledJobAlertAdapterTest {
             .andExpect(content().string(containsString("BuddyStudy test job failed")))
             .andExpect(content().string(containsString("question-scheduler")))
             .andExpect(content().string(containsString("*Status*: FAILED")))
+            .andExpect(content().string(containsString("*Created by*: admin")))
+            .andExpect(content().string(containsString("*Retry of run*: 3")))
             .andExpect(content().string(containsString("*Finished*: 2026-07-02T00:00:02Z")))
             .andExpect(content().string(containsString("boom")))
             .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
@@ -107,5 +109,7 @@ class SlackScheduledJobAlertAdapterTest {
             finishedAt = Instant.parse("2026-07-02T00:00:02Z"),
             durationMs = 2000,
             errorMessage = "boom",
+            retryOfRunId = 3,
+            createdBy = "admin",
         )
 }

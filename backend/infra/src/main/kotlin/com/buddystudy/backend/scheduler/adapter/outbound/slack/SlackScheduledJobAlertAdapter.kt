@@ -46,6 +46,8 @@ class SlackScheduledJobAlertAdapter internal constructor(
             "*Environment*: ${properties.monitoring.environmentName}",
             "*Job*: ${run.jobName}",
             "*Run*: ${run.id}",
+            "*Created by*: ${run.createdBy}",
+            "*Retry of run*: ${run.retryOfRunId ?: "none"}",
             "*Trigger*: ${run.triggerType}",
             "*Status*: ${run.status}",
             "*Started*: ${DateTimeFormatter.ISO_INSTANT.format(run.startedAt)}",
