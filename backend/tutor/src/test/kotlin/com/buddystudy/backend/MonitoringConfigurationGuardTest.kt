@@ -2,9 +2,11 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.config.MonitoringConfigurationGuard
 import com.buddystudy.backend.config.PropertiesConfig
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
+import java.util.function.Supplier
 
 class MonitoringConfigurationGuardTest {
     private val contextRunner = ApplicationContextRunner()
@@ -101,4 +103,29 @@ class MonitoringConfigurationGuardTest {
                 )
             }
     }
+
+    @Test
+    fun `prod scheduler fails fast when a managed job is not monitored`() {
+        contextRunner
+            .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
+            .withBean("adminCorrectionJob", ManagedJob::class.java, Supplier { fakeJob("admin-analytics-correction") })
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "Prod scheduler monitoring is missing managed jobs: admin-analytics-correction.",
+                )
+            }
+    }
+
+    private fun fakeJob(jobName: String): ManagedJob =
+        object : ManagedJob {
+            override val name: String = jobName
+            override fun run(): String = "ok"
+        }
 }

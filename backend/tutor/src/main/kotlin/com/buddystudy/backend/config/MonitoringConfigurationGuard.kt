@@ -1,5 +1,6 @@
 package com.buddystudy.backend.config
 
+import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.core.env.Environment
 import org.springframework.stereotype.Component
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Component
 class MonitoringConfigurationGuard(
     private val properties: BuddyStudyProperties,
     private val environment: Environment,
+    private val managedJobs: List<ManagedJob>,
 ) : InitializingBean {
     override fun afterPropertiesSet() {
         if (!isProdProfile() || !properties.scheduler.enabled) {
@@ -21,6 +23,18 @@ class MonitoringConfigurationGuard(
         }
         if (properties.monitoring.schedulerMonitoredJobs.none { it.isNotBlank() }) {
             error("At least one scheduler job must be monitored in prod when scheduler is enabled.")
+        }
+        val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val missingManagedJobs = managedJobs
+            .map { it.name.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .filterNot { it in monitoredJobs }
+        if (missingManagedJobs.isNotEmpty()) {
+            error("Prod scheduler monitoring is missing managed jobs: ${missingManagedJobs.joinToString(", ")}.")
         }
     }
 
