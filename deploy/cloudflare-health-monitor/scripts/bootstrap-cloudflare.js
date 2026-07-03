@@ -63,6 +63,47 @@ export function buildDispatchCommand({ repository = repo } = {}) {
   return ["workflow", "run", "health-monitor.yml", "--repo", repository];
 }
 
+export function buildRunListCommand({ repository = repo } = {}) {
+  return [
+    "run",
+    "list",
+    "--workflow",
+    "health-monitor.yml",
+    "--repo",
+    repository,
+    "--json",
+    "databaseId,status,conclusion,createdAt",
+    "--limit",
+    "10",
+  ];
+}
+
+export function parseLatestRunId(output, { createdAfter } = {}) {
+  try {
+    const runs = JSON.parse(output);
+    const minCreatedAt = createdAfter ? Date.parse(createdAfter) : null;
+    const run = Array.isArray(runs)
+      ? runs.find((candidate) => {
+          if (!Number.isInteger(candidate?.databaseId)) {
+            return false;
+          }
+          if (!minCreatedAt) {
+            return true;
+          }
+          const createdAt = Date.parse(candidate?.createdAt);
+          return Number.isFinite(createdAt) && createdAt >= minCreatedAt;
+        })
+      : null;
+    return Number.isInteger(run?.databaseId) ? run.databaseId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildRunWatchCommand(runId, { repository = repo } = {}) {
+  return ["run", "watch", String(runId), "--repo", repository, "--exit-status"];
+}
+
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
@@ -78,13 +119,40 @@ function commandErrorMessage(error) {
     .join(" ");
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function findDispatchedRunId({ root, createdAfter, attempts = 10, delayMs = 2000 }) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const runsOutput = execFileSync("gh", buildRunListCommand(), {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    const runId = parseLatestRunId(runsOutput, { createdAfter });
+    if (runId) {
+      return runId;
+    }
+    if (attempt < attempts) {
+      sleep(delayMs);
+    }
+  }
+  return null;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
   const configPath = path.join(root, "wrangler.jsonc");
   const shouldSetGitHubSecrets = process.argv.includes("--set-github-secrets");
   const shouldDispatchWorkflow = process.argv.includes("--dispatch-workflow");
+  const shouldWatchWorkflow = process.argv.includes("--watch-workflow");
   if (shouldDispatchWorkflow && !shouldSetGitHubSecrets) {
     console.error("`--dispatch-workflow` requires `--set-github-secrets` so the generated KV namespace id is available to the deploy workflow.");
+    process.exit(1);
+  }
+  if (shouldWatchWorkflow && !shouldDispatchWorkflow) {
+    console.error("`--watch-workflow` requires `--dispatch-workflow` so there is a deployment run to watch.");
     process.exit(1);
   }
 
@@ -158,11 +226,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (shouldDispatchWorkflow) {
     console.log("");
     console.log("Dispatching Deploy Health Monitor Worker workflow...");
+    const dispatchedAfter = new Date(Date.now() - 5000).toISOString();
     execFileSync("gh", buildDispatchCommand(), {
       cwd: root,
       stdio: ["ignore", "inherit", "inherit"],
     });
+    if (shouldWatchWorkflow) {
+      const runId = findDispatchedRunId({ root, createdAfter: dispatchedAfter });
+      if (!runId) {
+        console.error("Could not find the dispatched Deploy Health Monitor Worker run.");
+        process.exit(1);
+      }
+      console.log(`Watching Deploy Health Monitor Worker run ${runId}...`);
+      execFileSync("gh", buildRunWatchCommand(runId), {
+        cwd: root,
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+    }
   }
   console.log("");
-  console.log(shouldDispatchWorkflow ? "Then watch the GitHub Actions run until deployment completes." : "Then run `npm run readiness -- --json`.");
+  console.log(shouldWatchWorkflow ? "Deployment workflow completed. Then run `npm run readiness -- --json`." : shouldDispatchWorkflow ? "Then watch the GitHub Actions run until deployment completes." : "Then run `npm run readiness -- --json`.");
 }

@@ -4,7 +4,10 @@ import { test } from "node:test";
 import {
   buildSecretCommands,
   buildDispatchCommand,
+  buildRunListCommand,
+  buildRunWatchCommand,
   buildSecretPlan,
+  parseLatestRunId,
   parseKvNamespaceId,
   parseWranglerAccountId,
 } from "../scripts/bootstrap-cloudflare.js";
@@ -25,6 +28,56 @@ test("buildDispatchCommand targets deploy-only health monitor workflow", () => {
     "health-monitor.yml",
     "--repo",
     "owner/repo",
+  ]);
+});
+
+test("buildRunListCommand reads latest deploy-only health monitor workflow run", () => {
+  assert.deepEqual(buildRunListCommand({ repository: "owner/repo" }), [
+    "run",
+    "list",
+    "--workflow",
+    "health-monitor.yml",
+    "--repo",
+    "owner/repo",
+    "--json",
+    "databaseId,status,conclusion,createdAt",
+    "--limit",
+    "10",
+  ]);
+});
+
+test("parseLatestRunId reads first workflow run id", () => {
+  assert.equal(parseLatestRunId(JSON.stringify([{ databaseId: 1234, status: "queued" }])), 1234);
+});
+
+test("parseLatestRunId can ignore workflow runs created before dispatch", () => {
+  const runs = [
+    { databaseId: 1233, status: "completed", createdAt: "2026-07-03T00:00:00Z" },
+    { databaseId: 1234, status: "queued", createdAt: "2026-07-03T00:00:10Z" },
+  ];
+
+  assert.equal(parseLatestRunId(JSON.stringify(runs), { createdAfter: "2026-07-03T00:00:05Z" }), 1234);
+});
+
+test("parseLatestRunId returns null when every run predates dispatch", () => {
+  const runs = [{ databaseId: 1233, status: "completed", createdAt: "2026-07-03T00:00:00Z" }];
+
+  assert.equal(parseLatestRunId(JSON.stringify(runs), { createdAfter: "2026-07-03T00:00:05Z" }), null);
+});
+
+test("parseLatestRunId returns null for invalid run output", () => {
+  assert.equal(parseLatestRunId("not-json"), null);
+  assert.equal(parseLatestRunId("[]"), null);
+});
+
+test("buildRunWatchCommand waits for workflow completion with exit status", () => {
+  assert.deepEqual(buildRunWatchCommand(1234, { repository: "owner/repo" }), [
+    "run",
+    "watch",
+    "1234",
+    "--repo",
+    "owner/repo",
+    "--exit-status",
   ]);
 });
 
@@ -91,4 +144,14 @@ test("bootstrap rejects workflow dispatch without writing GitHub secrets", () =>
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /requires `--set-github-secrets`/);
+});
+
+test("bootstrap rejects workflow watch without dispatching workflow", () => {
+  const result = spawnSync("node", ["scripts/bootstrap-cloudflare.js", "--watch-workflow"], {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires `--dispatch-workflow`/);
 });

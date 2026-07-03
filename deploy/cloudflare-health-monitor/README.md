@@ -147,6 +147,16 @@ CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secret
 This only dispatches **Deploy Health Monitor Worker**. It does not run runtime
 health checks from GitHub Actions.
 
+To wait for the dispatched deployment result in the same terminal, add
+`--watch-workflow`:
+
+```sh
+CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secrets --dispatch-workflow --watch-workflow
+```
+
+This watches the deploy workflow status only. Runtime server-down checks still
+run from Cloudflare Cron after deployment.
+
 Required GitHub Actions secrets for that deployment workflow:
 
 - `CLOUDFLARE_API_TOKEN`
