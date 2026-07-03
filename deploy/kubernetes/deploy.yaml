@@ -19,7 +19,7 @@ data:
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
-  MONITORING_COORDINATOR_BASE_URL: "http://buddystudy-redis-stream-coordinator:8080"
+  MONITORING_COORDINATOR_BASE_URL: http://buddystudy-redis-stream-coordinator:8080
   MONITORING_COORDINATOR_READINESS_ENABLED: "true"
   MONITORING_COORDINATOR_TIMEOUT_MS: "3000"
   MONITORING_ENVIRONMENT_NAME: production
@@ -33,13 +33,13 @@ data:
   REACTION_STREAM_COORDINATOR_BASE_URL: http://buddystudy-redis-stream-coordinator:8080
   REACTION_STREAM_COORDINATOR_USERNAME: admin
   REACTION_STREAM_ENABLED: "true"
-  REDIS_HOST: buddystudy-redis
+  REDIS_HOST: buddystudy-redis-0-0.buddystudy-redis-headless
   REDIS_PORT: "6379"
   REDIS_SSL: "false"
   SCHEDULER_BATCH_SIZE: "50"
   SCHEDULER_ENABLED: "true"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
-  SPRING_DATA_REDIS_CLUSTER_NODES: buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379
+  SPRING_DATA_REDIS_CLUSTER_NODES: buddystudy-redis-0-0.buddystudy-redis-headless:6379,buddystudy-redis-1-0.buddystudy-redis-headless:6380,buddystudy-redis-2-0.buddystudy-redis-headless:6381
   SPRING_DATASOURCE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
   SPRING_DATASOURCE_USERNAME: buddystudy
   SPRING_FLYWAY_ENABLED: "false"
@@ -144,53 +144,28 @@ metadata:
   labels:
     app.kubernetes.io/name: buddystudy-redis
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-redis
-  namespace: buddystudy
-spec:
-  ports:
-  - name: redis
-    port: 6379
-    targetPort: redis
-  selector:
-    app.kubernetes.io/name: buddystudy-redis
-    app.kubernetes.io/part-of: buddystudy
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app.kubernetes.io/name: buddystudy-redis-proxy
-    app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-redis-external
-  namespace: buddystudy
-spec:
-  ports:
-  - name: redis
-    nodePort: 30379
-    port: 6379
-    targetPort: redis
-  selector:
-    app.kubernetes.io/name: buddystudy-redis-proxy
-    app.kubernetes.io/part-of: buddystudy
-  type: NodePort
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app.kubernetes.io/name: buddystudy-redis
-    app.kubernetes.io/part-of: buddystudy
   name: buddystudy-redis-headless
   namespace: buddystudy
 spec:
   clusterIP: None
   ports:
-  - name: redis
+  - name: redis-0
     port: 6379
     targetPort: redis
-  - name: cluster-bus
+  - name: redis-1
+    port: 6380
+    targetPort: redis
+  - name: redis-2
+    port: 6381
+    targetPort: redis
+  - name: cluster-bus-0
     port: 16379
+    targetPort: cluster-bus
+  - name: cluster-bus-1
+    port: 16380
+    targetPort: cluster-bus
+  - name: cluster-bus-2
+    port: 16381
     targetPort: cluster-bus
   publishNotReadyAddresses: true
   selector:
@@ -336,6 +311,66 @@ spec:
       app.kubernetes.io/name: buddystudy-postgres
   storageClassName: buddystudy-local
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "0"
+    app.kubernetes.io/part-of: buddystudy
+  name: data-buddystudy-redis-0
+  namespace: buddystudy
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis
+  storageClassName: buddystudy-local
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "1"
+    app.kubernetes.io/part-of: buddystudy
+  name: data-buddystudy-redis-1
+  namespace: buddystudy
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis
+  storageClassName: buddystudy-local
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "2"
+    app.kubernetes.io/part-of: buddystudy
+  name: data-buddystudy-redis-2
+  namespace: buddystudy
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis
+  storageClassName: buddystudy-local
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -428,7 +463,7 @@ spec:
         readinessProbe:
           failureThreshold: 12
           httpGet:
-            path: /api/v1/health/dependencies
+            path: /health
             port: http
           initialDelaySeconds: 15
           periodSeconds: 10
@@ -444,7 +479,7 @@ spec:
         - sh
         - -c
         - |
-          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
             sleep 2
           done
         env:
@@ -456,6 +491,16 @@ spec:
         image: redis:7-alpine
         imagePullPolicy: IfNotPresent
         name: wait-for-redis-cluster
+      - command:
+        - sh
+        - -c
+        - |
+          until curl -fsS http://buddystudy-redis-stream-coordinator:8080/actuator/health >/dev/null; do
+            sleep 2
+          done
+        image: curlimages/curl:8.11.0
+        imagePullPolicy: IfNotPresent
+        name: wait-for-redis-stream-coordinator
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -509,83 +554,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app.kubernetes.io/name: buddystudy-redis-proxy
-    app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-redis-proxy
-  namespace: buddystudy
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: buddystudy-redis-proxy
-      app.kubernetes.io/part-of: buddystudy
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: buddystudy-redis-proxy
-        app.kubernetes.io/part-of: buddystudy
-    spec:
-      containers:
-      - command:
-        - sh
-        - -c
-        - |
-          exec redis-cluster-proxy \
-            --port 6379 \
-            --bind 0.0.0.0 \
-            --threads 2 \
-            --auth "$REDIS_PASSWORD" \
-            buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: REDIS_PASSWORD
-              name: buddystudy-backend-secret
-        image: ableuler/redis-cluster-proxy:latest
-        imagePullPolicy: IfNotPresent
-        livenessProbe:
-          initialDelaySeconds: 30
-          periodSeconds: 20
-          tcpSocket:
-            port: redis
-        name: redis-cluster-proxy
-        ports:
-        - containerPort: 6379
-          name: redis
-        readinessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          tcpSocket:
-            port: redis
-        resources:
-          limits:
-            memory: 256Mi
-          requests:
-            cpu: 50m
-            memory: 64Mi
-      initContainers:
-      - command:
-        - sh
-        - -c
-        - |
-          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
-            sleep 2
-          done
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: REDIS_PASSWORD
-              name: buddystudy-backend-secret
-        image: redis:7-alpine
-        imagePullPolicy: IfNotPresent
-        name: wait-for-redis-cluster
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
     app.kubernetes.io/name: buddystudy-redis-stream-coordinator
     app.kubernetes.io/part-of: buddystudy
   name: buddystudy-redis-stream-coordinator
@@ -613,7 +581,7 @@ spec:
         - name: COORDINATOR_STREAMS_PROVISIONING_ENABLED
           value: "true"
         - name: SPRING_DATA_REDIS_CLUSTER_NODES
-          value: buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379
+          value: buddystudy-redis-0-0.buddystudy-redis-headless:6379,buddystudy-redis-1-0.buddystudy-redis-headless:6380,buddystudy-redis-2-0.buddystudy-redis-headless:6381
         - name: SPRING_DATA_REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -629,11 +597,11 @@ spec:
             secretKeyRef:
               key: AUTH_JWT_SECRET
               name: buddystudy-backend-secret
-        image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:latest
+        image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-multiarch.2
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
-            path: /coord/v1/monitoring/health
+            path: /actuator/health
             port: http
           initialDelaySeconds: 45
           periodSeconds: 20
@@ -645,7 +613,7 @@ spec:
         readinessProbe:
           failureThreshold: 12
           httpGet:
-            path: /coord/v1/monitoring/health
+            path: /actuator/health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -663,7 +631,7 @@ spec:
         - sh
         - -c
         - |
-          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+          until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
             sleep 2
           done
         env:
@@ -752,20 +720,23 @@ kind: StatefulSet
 metadata:
   labels:
     app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "0"
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-redis
+  name: buddystudy-redis-0
   namespace: buddystudy
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: buddystudy-redis
+      app.kubernetes.io/ordinal: "0"
       app.kubernetes.io/part-of: buddystudy
   serviceName: buddystudy-redis-headless
   template:
     metadata:
       labels:
         app.kubernetes.io/name: buddystudy-redis
+        app.kubernetes.io/ordinal: "0"
         app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
@@ -784,7 +755,7 @@ spec:
             --cluster-enabled yes \
             --cluster-config-file nodes.conf \
             --cluster-node-timeout 5000 \
-            --cluster-announce-hostname "$(hostname).buddystudy-redis-headless.buddystudy.svc.cluster.local" \
+            --cluster-announce-hostname buddystudy-redis-0-0.buddystudy-redis-headless.buddystudy.svc.cluster.local \
             --cluster-preferred-endpoint-type hostname \
             --cluster-announce-port 6379 \
             --cluster-announce-bus-port 16379
@@ -801,41 +772,200 @@ spec:
             command:
             - sh
             - -c
-            - redis-cli -a "$REDIS_PASSWORD" ping | grep PONG
+            - redis-cli -a "$REDIS_PASSWORD" -p 6379 ping | grep PONG
           initialDelaySeconds: 30
           periodSeconds: 20
         name: redis
         ports:
         - containerPort: 6379
+          hostPort: 6379
           name: redis
         - containerPort: 16379
+          hostPort: 16379
           name: cluster-bus
         readinessProbe:
           exec:
             command:
             - sh
             - -c
-            - redis-cli -a "$REDIS_PASSWORD" ping | grep PONG
+            - redis-cli -a "$REDIS_PASSWORD" -p 6379 ping | grep PONG
           initialDelaySeconds: 5
           periodSeconds: 10
         volumeMounts:
         - mountPath: /data
           name: data
-  volumeClaimTemplates:
-  - metadata:
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-buddystudy-redis-0
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "1"
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-1
+  namespace: buddystudy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis
+      app.kubernetes.io/ordinal: "1"
+      app.kubernetes.io/part-of: buddystudy
+  serviceName: buddystudy-redis-headless
+  template:
+    metadata:
       labels:
+        app.kubernetes.io/name: buddystudy-redis
+        app.kubernetes.io/ordinal: "1"
         app.kubernetes.io/part-of: buddystudy
-      name: data
     spec:
-      accessModes:
-      - ReadWriteOnce
-      resources:
-        requests:
-          storage: 5Gi
-      selector:
-        matchLabels:
-          app.kubernetes.io/name: buddystudy-redis
-      storageClassName: buddystudy-local
+      containers:
+      - command:
+        - sh
+        - -c
+        - |
+          exec redis-server \
+            --port 6380 \
+            --bind 0.0.0.0 \
+            --protected-mode no \
+            --appendonly yes \
+            --dir /data \
+            --requirepass "$REDIS_PASSWORD" \
+            --masterauth "$REDIS_PASSWORD" \
+            --cluster-enabled yes \
+            --cluster-config-file nodes.conf \
+            --cluster-node-timeout 5000 \
+            --cluster-announce-hostname buddystudy-redis-1-0.buddystudy-redis-headless.buddystudy.svc.cluster.local \
+            --cluster-preferred-endpoint-type hostname \
+            --cluster-announce-port 6380 \
+            --cluster-announce-bus-port 16380
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: REDIS_PASSWORD
+              name: buddystudy-backend-secret
+        image: redis:7-alpine
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -a "$REDIS_PASSWORD" -p 6380 ping | grep PONG
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        name: redis
+        ports:
+        - containerPort: 6380
+          hostPort: 6380
+          name: redis
+        - containerPort: 16380
+          hostPort: 16380
+          name: cluster-bus
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -a "$REDIS_PASSWORD" -p 6380 ping | grep PONG
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - mountPath: /data
+          name: data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-buddystudy-redis-1
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app.kubernetes.io/name: buddystudy-redis
+    app.kubernetes.io/ordinal: "2"
+    app.kubernetes.io/part-of: buddystudy
+  name: buddystudy-redis-2
+  namespace: buddystudy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-redis
+      app.kubernetes.io/ordinal: "2"
+      app.kubernetes.io/part-of: buddystudy
+  serviceName: buddystudy-redis-headless
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buddystudy-redis
+        app.kubernetes.io/ordinal: "2"
+        app.kubernetes.io/part-of: buddystudy
+    spec:
+      containers:
+      - command:
+        - sh
+        - -c
+        - |
+          exec redis-server \
+            --port 6381 \
+            --bind 0.0.0.0 \
+            --protected-mode no \
+            --appendonly yes \
+            --dir /data \
+            --requirepass "$REDIS_PASSWORD" \
+            --masterauth "$REDIS_PASSWORD" \
+            --cluster-enabled yes \
+            --cluster-config-file nodes.conf \
+            --cluster-node-timeout 5000 \
+            --cluster-announce-hostname buddystudy-redis-2-0.buddystudy-redis-headless.buddystudy.svc.cluster.local \
+            --cluster-preferred-endpoint-type hostname \
+            --cluster-announce-port 6381 \
+            --cluster-announce-bus-port 16381
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: REDIS_PASSWORD
+              name: buddystudy-backend-secret
+        image: redis:7-alpine
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -a "$REDIS_PASSWORD" -p 6381 ping | grep PONG
+          initialDelaySeconds: 30
+          periodSeconds: 20
+        name: redis
+        ports:
+        - containerPort: 6381
+          hostPort: 6381
+          name: redis
+        - containerPort: 16381
+          hostPort: 16381
+          name: cluster-bus
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli -a "$REDIS_PASSWORD" -p 6381 ping | grep PONG
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - mountPath: /data
+          name: data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-buddystudy-redis-2
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -918,19 +1048,33 @@ spec:
         - |
           set -eu
           nodes="
-          buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
-          buddystudy-redis-1.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
-          buddystudy-redis-2.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+          buddystudy-redis-0-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6379
+          buddystudy-redis-1-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6380
+          buddystudy-redis-2-0.buddystudy-redis-headless.buddystudy.svc.cluster.local:6381
           "
           for node in $nodes; do
             until redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" ping | grep -q PONG; do
               sleep 2
             done
           done
-          if redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless.buddystudy.svc.cluster.local cluster info | grep -q "cluster_state:ok"; then
+          if redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless.buddystudy.svc.cluster.local -p 6379 cluster info | grep -q "cluster_state:ok"; then
             echo "Redis cluster already initialized"
             exit 0
           fi
+
+          for node in $nodes; do
+            dbsize="$(redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" dbsize)"
+            if [ "$dbsize" != "0" ]; then
+              echo "Redis cluster is not healthy and ${node} is not empty; refusing destructive reset"
+              redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" cluster info || true
+              exit 1
+            fi
+          done
+
+          for node in $nodes; do
+            redis-cli -a "$REDIS_PASSWORD" -h "${node%:*}" -p "${node#*:}" cluster reset hard || true
+          done
+
           yes yes | redis-cli -a "$REDIS_PASSWORD" --cluster create $nodes --cluster-replicas 0
         env:
         - name: REDIS_PASSWORD
@@ -966,7 +1110,7 @@ spec:
         - |
           set -eu
 
-          until curl -fsS "${COORDINATOR_BASE_URL}/coord/v1/monitoring/health" >/dev/null; do
+          until curl -fsS "${COORDINATOR_BASE_URL}/actuator/health" >/dev/null; do
             sleep 2
           done
 

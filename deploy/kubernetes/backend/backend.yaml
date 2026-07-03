@@ -49,7 +49,17 @@ spec:
             - sh
             - -c
             - |
-              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+                sleep 2
+              done
+        - name: wait-for-redis-stream-coordinator
+          image: curlimages/curl:8.11.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until curl -fsS http://buddystudy-redis-stream-coordinator:8080/actuator/health >/dev/null; do
                 sleep 2
               done
       containers:
@@ -66,7 +76,7 @@ spec:
               containerPort: 8080
           readinessProbe:
             httpGet:
-              path: /api/v1/health/dependencies
+              path: /health
               port: http
             initialDelaySeconds: 15
             periodSeconds: 10

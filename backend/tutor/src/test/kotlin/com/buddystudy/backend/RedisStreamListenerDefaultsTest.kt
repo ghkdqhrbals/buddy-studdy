@@ -16,6 +16,7 @@ class RedisStreamListenerDefaultsTest {
 
         assertThat(listeners.map { it.groupId }).allSatisfy {
             assertThat(it).contains("bs-backend")
+                .doesNotContain("bs-backend-2")
         }
     }
 

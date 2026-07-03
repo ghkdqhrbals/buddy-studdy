@@ -138,7 +138,11 @@ network path and can conflict with Kubernetes services after restarts.
 
 - Backend API: `localhost:30080`
 - PostgreSQL: `localhost:30432`
-- Redis Cluster proxy: `localhost:30379`
+- Redis Cluster nodes:
+  - `localhost:6379`
+  - `localhost:6380`
+  - `localhost:6381`
+  - cluster bus: `localhost:16379`, `localhost:16380`, `localhost:16381`
 
 Cloudflare should be used in two different modes:
 
@@ -151,17 +155,22 @@ compatibility TCP hostnames:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
-- `redis.lowfidev.cloud` -> `tcp://localhost:30379`
+- Redis is exposed through node `hostPort` values, not a proxy service.
 
 For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` or
 use Tailscale, then connect to:
 
 - PostgreSQL: `<macbook-air-lan-ip-or-tailscale-ip>:30432`
-- Redis Cluster proxy: `<macbook-air-lan-ip-or-tailscale-ip>:30379`
+- Redis Cluster nodes:
+  - `<macbook-air-lan-ip-or-tailscale-ip>:6379`
+  - `<macbook-air-lan-ip-or-tailscale-ip>:6380`
+  - `<macbook-air-lan-ip-or-tailscale-ip>:6381`
 
-The Redis tunnel points at `buddystudy-redis-external`, a single Redis Cluster
-proxy endpoint. Do not point the tunnel directly at Redis Cluster nodes; direct
-node exposure can return internal cluster addresses in redirects.
+The `buddystudy-redis-proxy` deployment is intentionally removed because it
+introduced a second routing layer and could fail when cluster metadata changed.
+Inside Kubernetes, Redis Cluster announces pod DNS names because Docker Desktop
+pods cannot hairpin back into the Mac hostPort/Tailscale IP. The hostPorts are
+kept for host-side diagnostics and direct node reachability.
 
 Cloudflare Tunnel TCP hostnames require clients to connect through
 `cloudflared access tcp` unless Cloudflare Spectrum is configured separately.

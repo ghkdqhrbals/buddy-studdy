@@ -20,7 +20,7 @@ class QuestionStatsStreamListener(
     @StreamListener(
         id = "buddystudy-question-view-listener",
         streamPrefix = "\${VIEW_STREAM_PREFIX:view-v1}",
-        groupId = "bs-backend-2",
+        groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-backend}}",
         concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
         autoStartup = "true",
         pollBatchSize = "\${VIEW_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",

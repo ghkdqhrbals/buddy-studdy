@@ -45,12 +45,12 @@ spec:
             - sh
             - -c
             - |
-              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
                 sleep 2
               done
       containers:
         - name: coordinator
-          image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:latest
+          image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-multiarch.2
           imagePullPolicy: Always
           env:
             - name: SERVER_PORT
@@ -62,7 +62,7 @@ spec:
             - name: COORDINATOR_STREAMS_PROVISIONING_ENABLED
               value: "true"
             - name: SPRING_DATA_REDIS_CLUSTER_NODES
-              value: "buddystudy-redis-0.buddystudy-redis-headless:6379,buddystudy-redis-1.buddystudy-redis-headless:6379,buddystudy-redis-2.buddystudy-redis-headless:6379"
+              value: "buddystudy-redis-0-0.buddystudy-redis-headless:6379,buddystudy-redis-1-0.buddystudy-redis-headless:6380,buddystudy-redis-2-0.buddystudy-redis-headless:6381"
             - name: SPRING_DATA_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -83,7 +83,7 @@ spec:
               containerPort: 8080
           readinessProbe:
             httpGet:
-              path: /coord/v1/monitoring/health
+              path: /actuator/health
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -91,7 +91,7 @@ spec:
             failureThreshold: 12
           livenessProbe:
             httpGet:
-              path: /coord/v1/monitoring/health
+              path: /actuator/health
               port: http
             initialDelaySeconds: 45
             periodSeconds: 20
@@ -136,7 +136,7 @@ spec:
             - |
               set -eu
 
-              until curl -fsS "${COORDINATOR_BASE_URL}/coord/v1/monitoring/health" >/dev/null; do
+              until curl -fsS "${COORDINATOR_BASE_URL}/actuator/health" >/dev/null; do
                 sleep 2
               done
 
