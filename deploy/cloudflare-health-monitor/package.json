@@ -10,6 +10,7 @@
     "check": "node scripts/check-config.js && node scripts/check-workflow.js && wrangler deploy --dry-run",
     "manual:check": "node scripts/manual-check.js",
     "readiness": "node scripts/readiness.js",
+    "worker:status": "node scripts/worker-status.js",
     "test": "node --test"
   },
   "devDependencies": {

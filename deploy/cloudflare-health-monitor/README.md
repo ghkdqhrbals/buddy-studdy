@@ -98,6 +98,16 @@ Validate config and Cloudflare Worker bundle before deploying:
 npm run check
 ```
 
+Check whether the Cloudflare Worker has actually been deployed and has the
+required Worker secrets:
+
+```sh
+npm run worker:status
+```
+
+This is a post-deploy operator check. It does not call the backend health
+endpoint and does not replace Cloudflare Cron runtime monitoring.
+
 Deploy:
 
 ```sh
@@ -211,7 +221,13 @@ health checker:
    `ok:true` or a clear stored monitor state. Missing configuration such as
    `SLACK_WEBHOOK_URL`, `HEALTHCHECK_URL`, or `HEALTH_MONITOR_STATE` must be
    fixed before relying on alerts.
-2. Run one explicit operator check:
+2. Confirm the Worker deployment and secret sync state:
+
+   ```sh
+   npm run worker:status
+   ```
+
+3. Run one explicit operator check:
 
    ```sh
    HEALTH_MONITOR_URL=https://<worker-host> \
