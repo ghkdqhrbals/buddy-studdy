@@ -6,10 +6,14 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.redis.connection.RedisConnection
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.io.PrintWriter
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.SQLException
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.logging.Logger
 import javax.sql.DataSource
 
@@ -48,6 +52,29 @@ class HealthControllerTest {
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
         assertThat(response.body).hasFieldOrPropertyWithValue("ok", false)
+    }
+
+    @Test
+    fun `readiness returns service unavailable when scheduler is stale`() {
+        val controller = HealthController(
+            ReadinessChecker(
+                dataSource = schedulerDataSource(lastStartedAt = Instant.now().minusSeconds(3_600)),
+                redisConnectionFactory = redisFactory("PONG"),
+                properties = BuddyStudyProperties(
+                    monitoring = BuddyStudyProperties.Monitoring(
+                        schedulerStaleThresholdMinutes = 15,
+                        schedulerMonitoredJobs = listOf("question-schedule"),
+                    ),
+                ),
+            ),
+        )
+
+        val response = controller.readiness()
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        assertThat(response.body).hasFieldOrPropertyWithValue("ok", false)
+        assertThat(response.body.toString()).contains("scheduler")
+        assertThat(response.body.toString()).contains("Stale scheduler jobs")
     }
 
     @Test
@@ -166,4 +193,47 @@ class HealthControllerTest {
             java.lang.Void.TYPE -> null
             else -> null
         }
+
+    private fun schedulerDataSource(lastStartedAt: Instant): DataSource {
+        val dataSource = DriverManagerDataSource(
+            "jdbc:h2:mem:health-controller-${System.nanoTime()};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+            "sa",
+            "",
+        )
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute(
+            """
+            create table scheduled_jobs (
+                job_name varchar(120) primary key,
+                enabled boolean not null default true,
+                schedule_type varchar(40) not null,
+                schedule_value varchar(120) not null,
+                timeout_seconds integer not null default 300
+            )
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            create table scheduled_job_runs (
+                id bigserial primary key,
+                job_name varchar(120) not null,
+                trigger_type varchar(40) not null,
+                status varchar(40) not null,
+                started_at timestamp not null,
+                error_message varchar(500),
+                created_by varchar(120) not null
+            )
+            """.trimIndent(),
+        )
+        jdbc.update(
+            "insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value) values (?, true, 'FIXED_DELAY', '30s')",
+            "question-schedule",
+        )
+        jdbc.update(
+            "insert into scheduled_job_runs (job_name, trigger_type, status, started_at, created_by) values (?, 'SCHEDULED', 'SUCCESS', ?, 'system')",
+            "question-schedule",
+            Timestamp.from(lastStartedAt),
+        )
+        return dataSource
+    }
 }
