@@ -597,7 +597,7 @@ spec:
             secretKeyRef:
               key: AUTH_JWT_SECRET
               name: buddystudy-backend-secret
-        image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-multiarch.2
+        image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-compatible.1
         imagePullPolicy: Always
         livenessProbe:
           httpGet:

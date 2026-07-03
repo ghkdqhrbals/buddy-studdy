@@ -50,7 +50,7 @@ spec:
               done
       containers:
         - name: coordinator
-          image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-multiarch.2
+          image: ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator-server:0.3.0-compatible.1
           imagePullPolicy: Always
           env:
             - name: SERVER_PORT

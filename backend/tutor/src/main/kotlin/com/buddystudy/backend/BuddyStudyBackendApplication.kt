@@ -141,7 +141,16 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
     )
 
     private val redisStreamJacksonTypes = listOf(
+        "com.redisstream.consumer.AssignmentView",
+        "com.redisstream.consumer.CoordinatorShard",
+        "com.redisstream.consumer.HeartbeatRequest",
+        "com.redisstream.consumer.HeartbeatResponse",
+        "com.redisstream.consumer.HeartbeatStatus",
         "com.redisstream.consumer.ProducerRoutingResponse",
         "com.redisstream.consumer.ProducerRoutingShard",
+        "com.redisstream.consumer.RedisStreamXNackMode",
+        "com.redisstream.consumer.RevokingShardReport",
+        "com.redisstream.consumer.RuntimeConsumerCapacity",
+        "com.redisstream.consumer.ShardConsumptionProgress",
     )
 }
