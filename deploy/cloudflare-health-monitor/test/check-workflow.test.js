@@ -229,6 +229,29 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
   assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
 });
 
+test("deploy repo monitoring template remains PLG only", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-monitoring.yml"), "utf8");
+
+  assert.match(template, /docker pull grafana\/loki:/);
+  assert.match(template, /docker pull grafana\/promtail:/);
+  assert.match(template, /docker pull grafana\/grafana:/);
+  assert.match(template, /docker rm -f[\s\S]*rsc-prometheus[\s\S]*redis-exporter-6379[\s\S]*redis-exporter-6381/);
+  assert.doesNotMatch(template, /docker run[\s\S]*prom\/prometheus/);
+  assert.doesNotMatch(template, /docker run[\s\S]*redis_exporter/);
+  assert.doesNotMatch(template, /prometheus\.yml/);
+});
+
+test("deploy repo monitoring template persists Loki and Grafana state", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-monitoring.yml"), "utf8");
+
+  assert.match(template, /docker volume create rsc-loki-data/);
+  assert.match(template, /docker volume create rsc-grafana-data/);
+  assert.match(template, /-v rsc-loki-data:\/loki/);
+  assert.match(template, /-v rsc-grafana-data:\/var\/lib\/grafana/);
+  assert.match(template, /retention_period:\s*168h/);
+  assert.match(template, /retention_enabled:\s*true/);
+});
+
 test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 
