@@ -62,14 +62,15 @@ secrets would overwrite live cluster credentials. Create or patch
 - SMTP values when email login is required
 - Redis Stream Coordinator credentials when streams are enabled
 - `SLACK_WEBHOOK_URL` for production scheduler failure alerts
-- `MONITORING_ADMIN_BASE_URL` when scheduler Slack alerts should link to the admin UI
+- `MONITORING_ADMIN_BASE_URL` as an HTTPS admin UI URL for scheduler Slack alert links
 
-Production backend pods fail fast when `SLACK_WEBHOOK_URL` is empty and the
-scheduler is enabled. This prevents scheduler failure alerts from being
-silently disabled. They also fail fast when monitored scheduler job names do
-not match registered backend jobs or when scheduler monitoring timeouts,
-stale thresholds, or startup grace windows are outside the supported production
-ranges.
+Production backend pods fail fast when `SLACK_WEBHOOK_URL` is empty or
+`MONITORING_ADMIN_BASE_URL` is not an HTTPS URL while the scheduler is enabled.
+This prevents scheduler failure alerts from being silently disabled or shipped
+without useful admin links. They also fail fast when monitored scheduler job
+names do not match registered backend jobs or when scheduler monitoring
+timeouts, stale thresholds, or startup grace windows are outside the supported
+production ranges.
 
 ## Redis Stream Coordinator
 

@@ -64,9 +64,44 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
             )
             .run { context ->
                 assertThat(context).hasNotFailed()
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when admin run url is missing`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_ADMIN_BASE_URL must be an HTTPS URL in prod.",
+                )
+            }
+    }
+
+    @Test
+    fun `prod scheduler fails fast when admin run url is not https`() {
+        contextRunner
+            .withPropertyValues(
+                "spring.profiles.active=prod",
+                "buddystudy.scheduler.enabled=true",
+                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=http://api.ghkdqhrbals.org/admin",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseMessage(
+                    "MONITORING_ADMIN_BASE_URL must be an HTTPS URL in prod.",
+                )
             }
     }
 
@@ -77,6 +112,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-readiness-enabled=false",
             )
             .run { context ->
@@ -94,6 +130,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=",
             )
             .run { context ->
@@ -113,6 +150,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule",
             )
             .run { context ->
@@ -131,6 +169,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule,question-schedul",
             )
             .run { context ->
@@ -148,6 +187,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.slack-timeout-ms=999999",
             )
             .run { context ->
@@ -165,6 +205,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-stale-threshold-minutes=120",
             )
             .run { context ->
@@ -182,6 +223,7 @@ class MonitoringConfigurationGuardTest {
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
                 "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
+                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-startup-grace-minutes=120",
             )
             .run { context ->

@@ -18,7 +18,7 @@ data:
   FLYWAY_LOCATIONS: filesystem:/app/db/migration
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
-  MONITORING_ADMIN_BASE_URL: ""
+  MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
   MONITORING_ENVIRONMENT_NAME: production
   MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"

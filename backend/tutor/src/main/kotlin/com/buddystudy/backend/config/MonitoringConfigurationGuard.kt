@@ -4,6 +4,7 @@ import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.core.env.Environment
 import org.springframework.stereotype.Component
+import java.net.URI
 
 @Component
 class MonitoringConfigurationGuard(
@@ -17,6 +18,9 @@ class MonitoringConfigurationGuard(
         }
         if (properties.monitoring.slackWebhookUrl.isBlank()) {
             error("SLACK_WEBHOOK_URL is required when prod scheduler monitoring is enabled.")
+        }
+        if (!isHttpsUrl(properties.monitoring.adminBaseUrl)) {
+            error("MONITORING_ADMIN_BASE_URL must be an HTTPS URL in prod.")
         }
         if (!properties.monitoring.schedulerReadinessEnabled) {
             error("Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.")
@@ -65,4 +69,10 @@ class MonitoringConfigurationGuard(
             normalized.equals("prod", ignoreCase = true) ||
                 normalized.equals("production", ignoreCase = true)
         }
+
+    private fun isHttpsUrl(value: String): Boolean =
+        runCatching {
+            val uri = URI(value.trim())
+            uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
+        }.getOrDefault(false)
 }
