@@ -53,7 +53,7 @@ Create KV:
 
 ```sh
 cd deploy/cloudflare-health-monitor
-npm install
+npm ci
 npx wrangler kv namespace create HEALTH_MONITOR_STATE
 ```
 
