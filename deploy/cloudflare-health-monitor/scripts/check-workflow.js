@@ -10,6 +10,7 @@ const deployTemplateDir = path.join(root, "docs", "deploy-repo-template");
 const backendHealthProbePattern = /(?:https?:\/\/[^\s"'\\]+)?(?:\/api\/v1\/health(?:\/readiness)?|(?<!\/api)\/health(?:\/readiness)?)\b/;
 const localRuntimeHealthProbePattern = /docker\s+(?:exec|run)\b[^\n]*(?:curl|wget|http)\b[^\n]*\/api\/health\b/;
 const dockerHealthInspectPattern = /docker\s+inspect\b[^\n]*(?:\.State\.Health|Health\.Status)\b/;
+const dockerComposeWaitPattern = /docker\s+compose\b[^\n]*(?:\bup\b[^\n]*\s--wait\b|\bwait\b)/;
 const dockerHealthFilterPattern = /docker\s+(?:compose\s+)?ps\b[^\n]*(?:--filter\s+health=|health=|\.Health|Health\.Status)\b/;
 const dockerStatusHealthPattern = /docker\s+(?:compose\s+)?ps\b[^\n]*\.Status\b[^\n]*(?:healthy|unhealthy)\b/;
 const runtimeHealthProbePattern = /(?:curl|wget|http)\b[^\n]*(?:\/api\/health|(?<!\/api)\/health)\b/;
@@ -33,6 +34,7 @@ export function validateNoActionsRuntimeHealthChecks(text, fileName = "workflow"
   if (
     localRuntimeHealthProbePattern.test(scanText) ||
     dockerHealthInspectPattern.test(scanText) ||
+    dockerComposeWaitPattern.test(scanText) ||
     dockerHealthFilterPattern.test(scanText) ||
     dockerStatusHealthPattern.test(scanText)
   ) {

@@ -335,6 +335,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects docker compose wait health checks in Actions", () => {
+  const workflow = `
+name: Deploy Backend
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Wait for backend health
+        run: docker compose up -d --wait backend
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n"), /must not run container health probes/);
+});
+
 test("workflow scan rejects coordinator runtime health probes in Actions", () => {
   const workflow = `
 name: Deploy Coordinator
