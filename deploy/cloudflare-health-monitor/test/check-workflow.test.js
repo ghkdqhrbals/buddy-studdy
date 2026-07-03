@@ -6,6 +6,29 @@ import { fileURLToPath } from "node:url";
 import { validateNoActionsRuntimeHealthChecks, validateWorkflowText } from "../scripts/check-workflow.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const kotlinSourceRoot = path.join(repoRoot, "backend", "infra", "src", "main", "kotlin", "com", "buddystudy", "backend");
+
+function kotlinFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return kotlinFiles(entryPath);
+    }
+    return entry.isFile() && entry.name.endsWith(".kt") ? [entryPath] : [];
+  });
+}
+
+function managedJobNames() {
+  return kotlinFiles(kotlinSourceRoot)
+    .flatMap((file) => {
+      const source = fs.readFileSync(file, "utf8");
+      if (!/:\s*ManagedJob\b/.test(source)) {
+        return [];
+      }
+      return [...source.matchAll(/override\s+val\s+name\s*:\s*String\s*(?:=\s*|get\(\)\s*=\s*)"([^"]+)"/g)].map((match) => match[1]);
+    })
+    .sort();
+}
 
 test("health monitor workflow is deploy-only and not a runtime health checker", () => {
   const workflow = `
@@ -309,17 +332,14 @@ test("kubernetes backend probes use dependency readiness while external monitor 
 });
 
 test("kubernetes backend config monitors every managed scheduler job", () => {
+  const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
-  const requiredJobs = [
-    "question-schedule",
-    "question-push-outbox-dispatch",
-    "user-stats-refresh",
-    "admin-analytics-recent",
-    "admin-analytics-correction",
-  ];
+  const requiredJobs = managedJobNames();
 
+  assert.ok(requiredJobs.length > 0, "expected at least one ManagedJob implementation");
   for (const jobName of requiredJobs) {
+    assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`));
     assert.match(backendConfig, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(combinedManifest, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
   }
