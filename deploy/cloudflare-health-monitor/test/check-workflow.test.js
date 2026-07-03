@@ -590,6 +590,25 @@ test("kubernetes backend config monitors every managed scheduler job", () => {
   }
 });
 
+test("backend scheduler readiness defaults and seed migrations cover every managed scheduler job", () => {
+  const appProperties = fs.readFileSync(
+    path.join(repoRoot, "backend/application/src/main/kotlin/com/buddystudy/backend/config/AppProperties.kt"),
+    "utf8",
+  );
+  const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
+  const migrations = fs
+    .readdirSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration"))
+    .filter((entry) => entry.endsWith(".sql"))
+    .map((entry) => fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration", entry), "utf8"))
+    .join("\n");
+
+  for (const jobName of managedJobNames()) {
+    assert.match(appProperties, new RegExp(`"${jobName}"`), `AppProperties default must monitor ${jobName}`);
+    assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`), `application.yml default must monitor ${jobName}`);
+    assert.match(migrations, new RegExp(`'${jobName}'`), `Flyway scheduler seed must include ${jobName}`);
+  }
+});
+
 test("kubernetes production apply path does not include placeholder backend secret", () => {
   const kustomization = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/kustomization.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
