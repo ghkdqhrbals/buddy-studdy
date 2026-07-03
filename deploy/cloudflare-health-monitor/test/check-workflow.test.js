@@ -888,7 +888,8 @@ test("health monitor workflow validates every required GitHub secret by reposito
 test("health monitor workflow summary documents status without manual health checks", () => {
   const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
 
-  assert.match(workflow, /workers\.dev/);
+  assert.match(workflow, /Cron-only/);
+  assert.match(workflow, /Public entrypoint: disabled/);
   assert.doesNotMatch(workflow, /GET \\`\/\\`/);
   assert.doesNotMatch(workflow, /POST \\`\/check\\`/);
 });
@@ -1221,10 +1222,11 @@ test("health monitor docs include post deploy verification without Actions check
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
   assert.match(readme, /## Post-deploy Verification/);
-  assert.match(readme, /GET https:\/\/<worker-host>\/`/);
+  assert.match(readme, /Confirm Cloudflare Cron is enabled/);
+  assert.match(readme, /health_monitor_checked/);
   assert.match(readme, /npm run manual:check/);
   assert.match(readme, /ALLOW_DOWN=true/);
-  assert.match(readme, /checkedAt` has advanced/);
+  assert.match(readme, /If a public route is intentionally added later/);
 });
 
 test("health monitor docs describe manual check HTTP status contract", () => {

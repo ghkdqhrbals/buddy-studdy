@@ -2,15 +2,19 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "buddystudy-health-monitor",
   "main": "src/index.js",
-  "workers_dev": true,
+  "workers_dev": false,
   "compatibility_date": "2026-07-03",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   },
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": [
+      "* * * * *"
+    ]
   },
   "vars": {
     "HEALTHCHECK_URL": "https://api.ghkdqhrbals.org/api/v1/health/readiness",

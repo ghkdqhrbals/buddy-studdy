@@ -38,6 +38,18 @@ export function parseKvNamespaceId(output) {
   return null;
 }
 
+export function parseExistingKvNamespaceId(output, title = "HEALTH_MONITOR_STATE") {
+  try {
+    const namespaces = JSON.parse(output);
+    const namespace = Array.isArray(namespaces)
+      ? namespaces.find((candidate) => candidate?.title === title || candidate?.binding === title)
+      : null;
+    return typeof namespace?.id === "string" && namespace.id.trim() ? namespace.id : null;
+  } catch {
+    return null;
+  }
+}
+
 export function buildSecretCommands({ accountId, namespaceId, repository = repo }) {
   return [
     `gh secret set CLOUDFLARE_ACCOUNT_ID --repo ${repository} --body ${shellQuote(accountId)}`,
@@ -141,6 +153,28 @@ function findDispatchedRunId({ root, createdAfter, attempts = 10, delayMs = 2000
   return null;
 }
 
+function createOrFindKvNamespace(root) {
+  try {
+    const output = execFileSync("npx", ["wrangler", "kv", "namespace", "create", "HEALTH_MONITOR_STATE"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return parseKvNamespaceId(output);
+  } catch (error) {
+    const message = commandErrorMessage(error);
+    if (!/already exists/i.test(message)) {
+      throw error;
+    }
+    const output = execFileSync("npx", ["wrangler", "kv", "namespace", "list"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return parseExistingKvNamespaceId(output);
+  }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
   const configPath = path.join(root, "wrangler.jsonc");
@@ -175,19 +209,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
 
-  let kvOutput;
+  let namespaceId;
   try {
-    kvOutput = execFileSync("npx", ["wrangler", "kv", "namespace", "create", "HEALTH_MONITOR_STATE"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    namespaceId = createOrFindKvNamespace(root);
   } catch (error) {
-    console.error(`Could not create HEALTH_MONITOR_STATE KV namespace: ${commandErrorMessage(error)}`);
+    console.error(`Could not create or find HEALTH_MONITOR_STATE KV namespace: ${commandErrorMessage(error)}`);
     process.exit(1);
   }
 
-  const namespaceId = parseKvNamespaceId(kvOutput);
   if (!namespaceId) {
     console.error("Could not parse HEALTH_MONITOR_STATE namespace id from Wrangler output.");
     process.exit(1);

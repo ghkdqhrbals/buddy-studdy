@@ -10,8 +10,8 @@ runtime monitoring.
 
 - Runs every minute with exactly one Cloudflare Cron Trigger, preventing
   duplicate checks and duplicate Slack alerts.
-- Exposes the Worker on the workers.dev host so operators can inspect `GET /`
-  and, when needed, manually trigger `POST /check`.
+- Runs as a Cron-only Worker by default. `workers_dev` is disabled so the
+  monitor does not require a public workers.dev subdomain.
 - Checks `HEALTHCHECK_URL`.
 - Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
   scheduler freshness cannot be bypassed by accidentally using lightweight
@@ -43,9 +43,8 @@ runtime monitoring.
   open Grafana/Loki from the alert.
 - Slack alerts include action buttons for the readiness endpoint and, when
   configured, observability.
-- `GET /` validates required runtime configuration and returns missing bindings
-  such as `HEALTH_MONITOR_STATE` or `SLACK_WEBHOOK_URL` before a silent monitor
-  failure can happen.
+- The HTTP handlers remain available for future route-based operator checks,
+  but production alerting does not depend on a public Worker URL.
 
 ## Setup
 
@@ -220,17 +219,16 @@ then dispatch it.
 After deploying, verify the monitor without using GitHub Actions as a runtime
 health checker:
 
-1. Open `GET https://<worker-host>/` and confirm it returns JSON with
-   `ok:true` or a clear stored monitor state. Missing configuration such as
-   `SLACK_WEBHOOK_URL`, `HEALTHCHECK_URL`, or `HEALTH_MONITOR_STATE` must be
-   fixed before relying on alerts.
-2. Confirm the Worker deployment and secret sync state:
+1. Confirm the Worker deployment and secret sync state:
 
    ```sh
    npm run worker:status
    ```
 
-3. Run one explicit operator check:
+2. Confirm Cloudflare Cron is enabled in the Cloudflare dashboard for
+   `buddystudy-health-monitor`.
+3. If a public route is intentionally added later, run one explicit operator
+   check:
 
    ```sh
    HEALTH_MONITOR_URL=https://<worker-host> \
@@ -238,17 +236,18 @@ health checker:
    npm run manual:check
    ```
 
-3. If the backend is intentionally down while validating the alert path, run
+4. If the backend is intentionally down while validating the alert path, run
    the same command with `ALLOW_DOWN=true`. The command should still reach the
    Worker and print the monitor state, while Slack delivery follows the same
    transition path as the Cron Trigger.
-4. Wait for the Cloudflare Cron Trigger to run at least once, then open
-   `GET https://<worker-host>/` again and confirm `checkedAt` has advanced.
+5. Use Cloudflare Worker observability logs to confirm `health_monitor_checked`
+   events are being written after the Cron Trigger runs.
 
 ## Manual Operator Check
 
-After deployment, an operator can trigger one immediate check without waiting
-for the cron:
+The default production configuration is Cron-only and has no public
+`workers.dev` URL. If a route or custom domain is intentionally added later, an
+operator can trigger one immediate check without waiting for the cron:
 
 ```sh
 HEALTH_MONITOR_URL=https://<worker-host> \

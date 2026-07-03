@@ -114,11 +114,19 @@ test("health monitor config keeps Slack timeout limit aligned with runtime clamp
   assert.match(validateConfig(config).join("\n"), /SLACK_TIMEOUT_MS must be between 1000 and 15000/);
 });
 
-test("health monitor config requires a public worker entrypoint", () => {
+test("health monitor config allows cron-only worker without a public entrypoint", () => {
   const config = validConfig();
   config.workers_dev = false;
 
-  assert.match(validateConfig(config).join("\n"), /workers_dev or routes/);
+  assert.deepEqual(validateConfig(config), []);
+});
+
+test("health monitor config requires an execution entrypoint", () => {
+  const config = validConfig();
+  config.workers_dev = false;
+  config.triggers.crons = [];
+
+  assert.match(validateConfig(config).join("\n"), /workers_dev, routes, or a Cron Trigger/);
 });
 
 test("health monitor config requires Cloudflare observability logs", () => {

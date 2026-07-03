@@ -16,8 +16,8 @@ export function validateConfig(config, options = {}) {
   if (config.main !== "src/index.js") {
     errors.push("Worker main must be src/index.js.");
   }
-  if (!hasPublicEntrypoint(config)) {
-    errors.push("Health monitor Worker must expose workers_dev or routes for manual status checks.");
+  if (!hasPublicEntrypoint(config) && !hasCronTrigger(config)) {
+    errors.push("Health monitor Worker must expose workers_dev, routes, or a Cron Trigger.");
   }
   if (config.observability?.enabled !== true) {
     errors.push("Health monitor Worker observability must be enabled so Cron checks and Slack alert failures are logged.");
@@ -104,6 +104,10 @@ function hasPublicEntrypoint(config) {
     return true;
   }
   return Array.isArray(config.routes) && config.routes.length > 0;
+}
+
+function hasCronTrigger(config) {
+  return Array.isArray(config.triggers?.crons) && config.triggers.crons.length > 0;
 }
 
 function isHttpsUrl(value) {

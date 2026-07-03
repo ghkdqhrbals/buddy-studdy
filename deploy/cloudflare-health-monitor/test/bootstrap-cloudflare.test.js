@@ -8,6 +8,7 @@ import {
   buildRunWatchCommand,
   buildSecretPlan,
   parseLatestRunId,
+  parseExistingKvNamespaceId,
   parseKvNamespaceId,
   parseWranglerAccountId,
 } from "../scripts/bootstrap-cloudflare.js";
@@ -105,6 +106,20 @@ id = "abcdef0123456789abcdef0123456789"
 `;
 
   assert.equal(parseKvNamespaceId(output), "abcdef0123456789abcdef0123456789");
+});
+
+test("parseExistingKvNamespaceId reads matching namespace from list output", () => {
+  const output = JSON.stringify([
+    { id: "other-id", title: "OTHER" },
+    { id: "health-id", title: "HEALTH_MONITOR_STATE" },
+  ]);
+
+  assert.equal(parseExistingKvNamespaceId(output), "health-id");
+});
+
+test("parseExistingKvNamespaceId returns null when list output has no match", () => {
+  assert.equal(parseExistingKvNamespaceId(JSON.stringify([{ id: "other-id", title: "OTHER" }])), null);
+  assert.equal(parseExistingKvNamespaceId("not-json"), null);
 });
 
 test("buildSecretCommands prints repository-scoped commands", () => {
