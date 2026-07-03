@@ -152,6 +152,30 @@ class AdminSchedulerStatusIntegrationTest {
     }
 
     @Test
+    fun `admin metrics require admin token`() {
+        val response = get("/api/v1/admin/analytics/metrics?startDate=2026-01-01&endDate=2026-01-02", bearerToken = null)
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `admin analytics refresh requires admin token`() {
+        val response = post("/api/v1/admin/analytics/refresh?startDate=2026-01-01&endDate=2026-01-02", "", bearerToken = null)
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
+    fun `scheduler retry requires admin token`() {
+        val response = post("/api/v1/admin/jobs/question-schedule/retry", "", bearerToken = null)
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
     fun `admin can see monitored scheduler jobs missing from seed table`() {
         jdbc.update("delete from scheduled_job_runs where job_name = 'user-stats-refresh'")
         jdbc.update("delete from scheduled_jobs where job_name = 'user-stats-refresh'")
