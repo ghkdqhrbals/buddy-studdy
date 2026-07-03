@@ -123,6 +123,20 @@ cannot create `CLOUDFLARE_API_TOKEN`; create that token in the Cloudflare
 dashboard, then paste it when prompted by the printed `gh secret set
 CLOUDFLARE_API_TOKEN ...` command.
 
+If GitHub CLI is authenticated and you want the helper to write the non-secret
+Cloudflare values directly to GitHub Actions secrets, run:
+
+```sh
+npm run bootstrap:cloudflare -- --set-github-secrets
+```
+
+To set the API token without pasting it into the terminal prompt, provide it as
+an environment variable for that run:
+
+```sh
+CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secrets
+```
+
 Required GitHub Actions secrets for that deployment workflow:
 
 - `CLOUDFLARE_API_TOKEN`

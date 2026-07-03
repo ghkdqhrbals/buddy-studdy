@@ -46,6 +46,19 @@ export function buildSecretCommands({ accountId, namespaceId, repository = repo 
   ];
 }
 
+export function buildSecretPlan({ accountId, namespaceId, hasCloudflareApiToken, repository = repo }) {
+  return [
+    { name: "CLOUDFLARE_ACCOUNT_ID", value: accountId, requiredValue: true, repository },
+    { name: "HEALTH_MONITOR_KV_NAMESPACE_ID", value: namespaceId, requiredValue: true, repository },
+    {
+      name: "CLOUDFLARE_API_TOKEN",
+      value: hasCloudflareApiToken ? process.env.CLOUDFLARE_API_TOKEN : null,
+      requiredValue: false,
+      repository,
+    },
+  ];
+}
+
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
@@ -64,6 +77,7 @@ function commandErrorMessage(error) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
   const configPath = path.join(root, "wrangler.jsonc");
+  const shouldSetGitHubSecrets = process.argv.includes("--set-github-secrets");
 
   let whoamiOutput;
   try {
@@ -113,6 +127,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log("Run these GitHub secret commands:");
   for (const command of buildSecretCommands({ accountId, namespaceId })) {
     console.log(command);
+  }
+  if (shouldSetGitHubSecrets) {
+    console.log("");
+    console.log(`Setting GitHub secrets in ${repo}...`);
+    for (const secret of buildSecretPlan({
+      accountId,
+      namespaceId,
+      hasCloudflareApiToken: Boolean(process.env.CLOUDFLARE_API_TOKEN),
+    })) {
+      if (secret.requiredValue || secret.value) {
+        execFileSync("gh", ["secret", "set", secret.name, "--repo", secret.repository, "--body", secret.value], {
+          cwd: root,
+          stdio: ["ignore", "inherit", "inherit"],
+        });
+      } else {
+        console.log(`Skipped ${secret.name}; set CLOUDFLARE_API_TOKEN env or run: gh secret set CLOUDFLARE_API_TOKEN --repo ${secret.repository}`);
+      }
+    }
   }
   console.log("");
   console.log("Then run `npm run readiness -- --json`.");

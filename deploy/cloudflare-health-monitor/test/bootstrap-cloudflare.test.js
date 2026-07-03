@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildSecretCommands, parseKvNamespaceId, parseWranglerAccountId } from "../scripts/bootstrap-cloudflare.js";
+import {
+  buildSecretCommands,
+  buildSecretPlan,
+  parseKvNamespaceId,
+  parseWranglerAccountId,
+} from "../scripts/bootstrap-cloudflare.js";
 
 test("parseWranglerAccountId reads table output", () => {
   const output = `
@@ -48,5 +53,20 @@ test("buildSecretCommands prints repository-scoped commands", () => {
     "gh secret set CLOUDFLARE_ACCOUNT_ID --repo owner/repo --body 'account-id'",
     "gh secret set HEALTH_MONITOR_KV_NAMESPACE_ID --repo owner/repo --body 'namespace-id'",
     "gh secret set CLOUDFLARE_API_TOKEN --repo owner/repo",
+  ]);
+});
+
+test("buildSecretPlan includes non-secret values and skips absent api token value", () => {
+  const plan = buildSecretPlan({
+    accountId: "account-id",
+    namespaceId: "namespace-id",
+    hasCloudflareApiToken: false,
+    repository: "owner/repo",
+  });
+
+  assert.deepEqual(plan, [
+    { name: "CLOUDFLARE_ACCOUNT_ID", value: "account-id", requiredValue: true, repository: "owner/repo" },
+    { name: "HEALTH_MONITOR_KV_NAMESPACE_ID", value: "namespace-id", requiredValue: true, repository: "owner/repo" },
+    { name: "CLOUDFLARE_API_TOKEN", value: null, requiredValue: false, repository: "owner/repo" },
   ]);
 });
