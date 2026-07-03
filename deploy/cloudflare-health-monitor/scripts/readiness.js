@@ -21,7 +21,7 @@ function readRemoteWorkflowNames() {
       .map((line) => line.trim().split(/\t+/)[0])
       .filter(Boolean);
   } catch (error) {
-    return [];
+    return null;
   }
 }
 

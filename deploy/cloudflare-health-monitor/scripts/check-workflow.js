@@ -133,7 +133,8 @@ export function buildDeploymentReadinessReport({
 }) {
   const blockers = [];
   const nextActions = [];
-  const remoteWorkflowExists = remoteWorkflowNames.includes(healthMonitorWorkflowName);
+  const remoteWorkflowStateUnknown = remoteWorkflowNames == null;
+  const remoteWorkflowExists = !remoteWorkflowStateUnknown && remoteWorkflowNames.includes(healthMonitorWorkflowName);
   const secretStates = requiredGitHubSecrets ?? {
     HEALTH_MONITOR_SLACK_WEBHOOK_URL: hasGitHubSlackSecret,
   };
@@ -144,7 +145,10 @@ export function buildDeploymentReadinessReport({
     blockers.push("Local .github/workflows/health-monitor.yml is missing.");
     nextActions.push("restore .github/workflows/health-monitor.yml before configuring Slack alerts");
   }
-  if (localWorkflowExists && !remoteWorkflowExists) {
+  if (localWorkflowExists && remoteWorkflowStateUnknown) {
+    blockers.push("Could not verify Deploy Health Monitor Worker on the remote default branch.");
+    nextActions.push("rerun readiness with GitHub CLI authentication and network access");
+  } else if (localWorkflowExists && !remoteWorkflowExists) {
     blockers.push(
       "Deploy Health Monitor Worker is not present on the remote default branch, so Worker secrets cannot be synced from GitHub Actions.",
     );

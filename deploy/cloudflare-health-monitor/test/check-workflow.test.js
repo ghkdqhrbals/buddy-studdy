@@ -832,6 +832,22 @@ test("health monitor deployment readiness reports remote workflow absence as Sla
   assert.match(report.nextActions.join("\n"), /dispatch Deploy Health Monitor Worker/);
 });
 
+test("health monitor deployment readiness reports unknown remote workflow state separately", () => {
+  const report = buildDeploymentReadinessReport({
+    localWorkflowExists: true,
+    remoteWorkflowNames: null,
+    requiredGitHubSecrets: Object.fromEntries(requiredHealthMonitorGitHubSecrets.map((name) => [name, true])),
+    hasCloudflareApiToken: false,
+  });
+
+  assert.equal(report.ready, false);
+  assert.deepEqual(report.blockers, [
+    "Could not verify Deploy Health Monitor Worker on the remote default branch.",
+  ]);
+  assert.match(report.nextActions.join("\n"), /rerun readiness with GitHub CLI authentication/);
+  assert.doesNotMatch(report.blockers.join("\n"), /not present on the remote default branch/);
+});
+
 test("health monitor deployment readiness distinguishes unknown GitHub secret state from missing secret", () => {
   const report = buildDeploymentReadinessReport({
     localWorkflowExists: true,
