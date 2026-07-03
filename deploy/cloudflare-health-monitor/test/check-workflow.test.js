@@ -692,6 +692,9 @@ test("health monitor docs describe readiness response contract and stale status 
   assert.match(readme, /non-JSON/i);
   assert.match(readme, /ok:true/);
   assert.match(readme, /STATUS_STALE_AFTER_SECONDS/);
+  assert.match(readme, /Worker Cron itself stops running/i);
+  assert.match(readme, /reports the stored state as `stale`/i);
+  assert.match(readme, /Cloudflare Worker\s+observability/i);
 });
 
 test("backend API docs do not describe admin scheduler as deployment smoke health check", () => {

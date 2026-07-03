@@ -148,4 +148,10 @@ Default vars in `wrangler.jsonc`:
 With the required single 1-minute cron and threshold `2`, a real outage usually alerts
 after about 1-2 minutes while still filtering out a single transient failure.
 
+If the Worker Cron itself stops running, the Worker cannot send a new Slack
+alert because the monitor execution path is no longer being invoked. In that
+case `GET /` reports the stored state as `stale` after
+`STATUS_STALE_AFTER_SECONDS`; use that status page and Cloudflare Worker
+observability to diagnose monitor execution issues.
+
 Use Cloudflare Worker vars/secrets for environment-specific overrides.
