@@ -78,5 +78,5 @@ jobs:
             echo "- Worker secrets: synced from GitHub Actions secrets."
             echo "- GitHub Actions health checks: disabled."
             echo "- Public entrypoint: workers.dev URL printed by \`wrangler deploy\`."
-            echo "- Manual status: GET \`/\`."
+            echo "- Runtime monitoring and Slack alerts are owned by Cloudflare Cron."
           } >> "${GITHUB_STEP_SUMMARY}"

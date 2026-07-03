@@ -685,7 +685,7 @@ test("health monitor workflow summary documents status without manual health che
   const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
 
   assert.match(workflow, /workers\.dev/);
-  assert.match(workflow, /GET \\`\/\\`/);
+  assert.doesNotMatch(workflow, /GET \\`\/\\`/);
   assert.doesNotMatch(workflow, /POST \\`\/check\\`/);
 });
 
