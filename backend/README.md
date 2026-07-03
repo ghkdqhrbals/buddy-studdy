@@ -127,7 +127,7 @@ Spring Boot Actuator serves lightweight health checks at `/health` and
 GitHub Actions is only for build, deploy dispatch, and deploy-result watching.
 External uptime monitoring should use the Cloudflare Worker in
 `deploy/cloudflare-health-monitor`, which checks `/api/v1/health/readiness`
-and sends Slack alerts. Readiness checks required backend dependencies and
+and sends Slack alerts. The readiness endpoint checks required backend dependencies and
 core scheduler freshness, and returns `503` when the backend process is alive
 but not ready to serve traffic. The readiness response includes `checkedAt`,
 `service`, `environment`, and component-level `checks` so Slack alerts can

@@ -713,3 +713,15 @@ test("backend API docs do not describe admin scheduler as deployment smoke healt
   assert.doesNotMatch(apiDoc, /deployment smoke tests/i);
   assert.match(apiDoc, /must not be called from GitHub Actions health checks/i);
 });
+
+test("backend README documents external uptime and scheduler alert boundaries", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "backend/README.md"), "utf8");
+
+  assert.match(readme, /Runtime uptime monitoring must not run from GitHub Actions/i);
+  assert.match(readme, /GitHub Actions is only for build, deploy dispatch, and deploy-result watching/i);
+  assert.match(readme, /Cloudflare Worker in\s+`deploy\/cloudflare-health-monitor`/i);
+  assert.match(readme, /checks `\/api\/v1\/health\/readiness`\s+and sends Slack alerts/i);
+  assert.match(readme, /The readiness endpoint checks required backend dependencies and\s+core scheduler freshness/i);
+  assert.match(readme, /Kubernetes readiness probes should use `\/api\/v1\/health\/dependencies`/i);
+  assert.match(readme, /`SLACK_WEBHOOK_URL` and a valid HTTPS\s+`MONITORING_ADMIN_BASE_URL` are required/i);
+});
