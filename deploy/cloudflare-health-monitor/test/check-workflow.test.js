@@ -1007,6 +1007,18 @@ test("health monitor docs include GitHub secret setup commands for readiness blo
   }
 });
 
+test("health monitor docs explain how to obtain remaining Cloudflare readiness secrets", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /wrangler login/);
+  assert.match(readme, /wrangler whoami/);
+  assert.match(readme, /Cloudflare dashboard/i);
+  assert.match(readme, /Workers Scripts/i);
+  assert.match(readme, /Workers KV Storage/i);
+  assert.match(readme, /wrangler kv namespace create HEALTH_MONITOR_STATE/);
+  assert.match(readme, /HEALTH_MONITOR_KV_NAMESPACE_ID/);
+});
+
 test("health monitor readiness command supports json output", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "health-monitor-readiness-"));
   const ghStub = path.join(tempDir, "gh");

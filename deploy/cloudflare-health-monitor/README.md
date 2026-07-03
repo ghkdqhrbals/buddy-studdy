@@ -116,6 +116,19 @@ Required GitHub Actions secrets for that deployment workflow:
 - `HEALTH_MONITOR_SLACK_WEBHOOK_URL`
 - `HEALTH_MONITOR_MANUAL_CHECK_TOKEN`
 
+How to obtain the remaining Cloudflare values:
+
+- `CLOUDFLARE_API_TOKEN`: create a Cloudflare dashboard API token for this
+  account with Worker deployment and KV access. The token must allow updating
+  Workers Scripts and Workers KV Storage for the account that owns
+  `buddystudy-health-monitor`.
+- `CLOUDFLARE_ACCOUNT_ID`: after `wrangler login`, run `npx wrangler whoami`
+  and use the account id shown for the target Cloudflare account.
+- `HEALTH_MONITOR_KV_NAMESPACE_ID`: after `wrangler login`, run
+  `npx wrangler kv namespace create HEALTH_MONITOR_STATE` and use the returned
+  namespace id. The same id is also written into `wrangler.jsonc` with
+  `npm run configure:kv -- <namespace_id>`.
+
 Set or rotate them with GitHub CLI:
 
 ```sh
