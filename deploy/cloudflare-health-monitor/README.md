@@ -11,7 +11,10 @@ runtime monitoring.
 - Runs every minute with exactly one Cloudflare Cron Trigger, preventing
   duplicate checks and duplicate Slack alerts.
 - Runs as a Cron-only Worker by default. `workers_dev` is disabled so the
-  monitor does not require a public workers.dev subdomain.
+  monitor does not expose a public workers.dev route.
+- Cloudflare still requires the account-level workers.dev subdomain to be
+  initialized once before Cron schedules can be registered. This does not make
+  the monitor public when `workers_dev` is false.
 - Checks `HEALTHCHECK_URL`.
 - Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
   scheduler freshness cannot be bypassed by accidentally using lightweight
