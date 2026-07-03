@@ -1,36 +1,46 @@
 package com.buddystudy.backend.community.adapter.inbound.stream
 
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
-import com.redisstream.consumer.ConsumedRedisStreamMessage
-import com.redisstream.consumer.RedisStreamXNackMode
-import com.redisstream.consumer.StreamConfiguration
-import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.Instant
 
-@StreamConfiguration
+@Component
+@ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class QuestionStatsStreamListener(
+    private val properties: BuddyStudyProperties,
+    private val consumer: RedisStreamConsumer,
     private val handler: QuestionStatsStreamEventHandler,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val group = "bs-backend-view"
+    private val consumerName = "view-${java.net.InetAddress.getLocalHost().hostName}"
+    private val eventType = "CONTENT_VIEWED"
 
-    @StreamListener(
-        id = "buddystudy-question-view-listener",
-        streamPrefix = "\${VIEW_STREAM_PREFIX:view-v1}",
-        groupId = "\${VIEW_CONSUMER_GROUP_NAME:\${VIEW_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${VIEW_CONSUMER_MEMBER_CONCURRENCY:\${VIEW_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
-        autoStartup = "true",
-        pollBatchSize = "\${VIEW_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
-        pollTimeoutMs = "\${VIEW_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
-    )
-    fun onQuestionViewed(message: ConsumedRedisStreamMessage) {
+    @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
+    fun pollQuestionViews() {
+        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
+            onQuestionViewed(it)
+        }
+    }
+
+    fun onQuestionViewed(message: RedisStreamMessage) {
+        if (message.fields["eventType"] != eventType) {
+            consumer.acknowledge(message, group)
+            return
+        }
         consume("buddystudy-question-view-listener", message) { handler.processViewEvent(message.fields) }
     }
 
-    private fun consume(listenerId: String, message: ConsumedRedisStreamMessage, block: () -> Unit) {
+    private fun consume(listenerId: String, message: RedisStreamMessage, block: () -> Unit) {
         logger.info("Consuming $listenerId")
         try {
             logger.debug(
@@ -45,7 +55,7 @@ class QuestionStatsStreamListener(
                 message.fields.keys,
             )
             block()
-            message.ack()
+            consumer.acknowledge(message, group)
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={}",
                 listenerId,
@@ -68,7 +78,6 @@ class QuestionStatsStreamListener(
                 message.fields["userId"],
                 error.message,
             )
-            message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
         }
     }
 }

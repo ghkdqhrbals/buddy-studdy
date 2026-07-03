@@ -1,13 +1,10 @@
 package com.buddystudy.backend.study.adapter.outbound.stream
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
-import com.redisstream.producer.RedisStreamPublishOptions
-import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
@@ -15,16 +12,9 @@ import java.time.Instant
 @Component
 class RedisStreamPushPublisher(
     private val properties: BuddyStudyProperties,
-    @Qualifier("pushStreamPublisher") pushPublisherProvider: ObjectProvider<RedisStreamPublisher>,
+    private val pushPublisher: RedisStreamPublishOperations,
 ) : QuestionPushPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val pushPublisher: RedisStreamPublisher? = pushPublisherProvider.ifAvailable
-
-    init {
-        if (properties.streams.enabled) {
-            requireNotNull(pushPublisher) { "pushStreamPublisher bean is required when buddystudy.streams.enabled=true" }
-        }
-    }
 
     override fun publishPush(request: QuestionPushRequest): Boolean {
         if (!properties.streams.enabled) {
@@ -36,9 +26,6 @@ class RedisStreamPushPublisher(
                 request.userId,
             )
             return false
-        }
-        val publisher = pushPublisher ?: run {
-            error("pushStreamPublisher bean is required when buddystudy.streams.enabled=true")
         }
         val event = QuestionPushRequestedEvent(
             recordId = request.recordId,
@@ -62,8 +49,8 @@ class RedisStreamPushPublisher(
         val publishStartedAt = Instant.now()
         val publishAgeMs = Duration.between(request.createdAt, publishStartedAt).toMillis()
         logger.info(
-            "redis_stream_publish_started prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishStartedAt={} publishAgeMs={} fieldKeys={}",
-            properties.streams.pushPrefix,
+            "redis_stream_publish_started streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishStartedAt={} publishAgeMs={} fieldKeys={}",
+            properties.streams.key,
             fields["eventId"],
             fields["eventType"],
             event.recordId,
@@ -76,11 +63,7 @@ class RedisStreamPushPublisher(
             fields.keys,
         )
         return try {
-            val published = publisher.publish(
-                null,
-                fields,
-                RedisStreamPublishOptions(properties.streams.maxLen, true),
-            )
+            val published = pushPublisher.publish(properties.streams.key, fields)
             val publishedAt = Instant.now()
             logger.info(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushCreatedAt={} publishedAt={} publishAgeMs={}",
@@ -98,8 +81,8 @@ class RedisStreamPushPublisher(
             true
         } catch (error: Exception) {
             logger.warn(
-                "redis_stream_publish_failed prefix={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
-                properties.streams.pushPrefix,
+                "redis_stream_publish_failed streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
+                properties.streams.key,
                 fields["eventId"],
                 fields["eventType"],
                 event.recordId,

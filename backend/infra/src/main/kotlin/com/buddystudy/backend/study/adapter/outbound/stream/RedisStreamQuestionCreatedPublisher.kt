@@ -1,28 +1,18 @@
 package com.buddystudy.backend.study.adapter.outbound.stream
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.study.application.port.outbound.QuestionCreatedPublishPort
-import com.redisstream.producer.RedisStreamPublishOptions
-import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import java.time.Instant
 
 @Component
 class RedisStreamQuestionCreatedPublisher(
     private val properties: BuddyStudyProperties,
-    @Qualifier("questionCreatedStreamPublisher") publisherProvider: ObjectProvider<RedisStreamPublisher>,
+    private val publisher: RedisStreamPublishOperations,
 ) : QuestionCreatedPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val publisher: RedisStreamPublisher? = publisherProvider.ifAvailable
-
-    init {
-        if (properties.streams.enabled) {
-            requireNotNull(publisher) { "questionCreatedStreamPublisher bean is required when buddystudy.streams.enabled=true" }
-        }
-    }
 
     override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
         if (!properties.streams.enabled) {
@@ -32,11 +22,7 @@ class RedisStreamQuestionCreatedPublisher(
         val event = QuestionCreatedEvent(questionId = questionId, language = language, createdAt = createdAt)
         val fields = event.toRedisStreamFields()
         return try {
-            val published = requireNotNull(publisher).publish(
-                null,
-                fields,
-                RedisStreamPublishOptions(properties.streams.maxLen, true),
-            )
+            val published = publisher.publish(properties.streams.key, fields)
             logger.info(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} questionId={}",
                 published.streamKey,
@@ -48,8 +34,8 @@ class RedisStreamQuestionCreatedPublisher(
             true
         } catch (error: Exception) {
             logger.warn(
-                "redis_stream_publish_failed prefix={} eventId={} eventType={} questionId={} error={}",
-                properties.streams.createQuestionPrefix,
+                "redis_stream_publish_failed streamKey={} eventId={} eventType={} questionId={} error={}",
+                properties.streams.key,
                 event.eventId,
                 event.eventType,
                 questionId,

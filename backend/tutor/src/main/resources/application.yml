@@ -84,8 +84,7 @@ buddystudy:
     bundle-id: ${notificatoin.push.apns.bundle-id:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
-    push-prefix: ${PUSH_STREAM_PREFIX:push-v1}
-    view-prefix: ${VIEW_STREAM_PREFIX:view-v1}
+    key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
     view-queue-capacity: ${VIEW_EVENT_QUEUE_CAPACITY:20000}
     view-publisher-concurrency: ${VIEW_EVENT_PUBLISHER_CONCURRENCY:4}
@@ -107,9 +106,6 @@ buddystudy:
     slack-timeout-ms: ${MONITORING_SLACK_TIMEOUT_MS:5000}
     scheduler-failure-alert-repeat-seconds: ${MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS:300}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
-    coordinator-readiness-enabled: ${MONITORING_COORDINATOR_READINESS_ENABLED:false}
-    coordinator-base-url: ${MONITORING_COORDINATOR_BASE_URL:${REACTION_STREAM_COORDINATOR_BASE_URL:}}
-    coordinator-timeout-ms: ${MONITORING_COORDINATOR_TIMEOUT_MS:3000}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
     scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction}
@@ -123,8 +119,3 @@ buddystudy:
       password: ${ADMIN_ANALYTICS_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
       driver-class-name: ${ADMIN_ANALYTICS_DATABASE_DRIVER:}
       database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:buddystudy_aggregation}
-
-redis-stream-coordinator:
-  coordinator-base-url: ${REACTION_STREAM_COORDINATOR_BASE_URL:https://coordinator.ghkdqhrbals.org}
-  username: ${REACTION_STREAM_COORDINATOR_USERNAME:admin}
-  password: ${REACTION_STREAM_COORDINATOR_PASSWORD:${REDIS_STREAM_COORDINATOR_PASSWORD:}}

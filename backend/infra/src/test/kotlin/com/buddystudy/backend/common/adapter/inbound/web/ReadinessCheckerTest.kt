@@ -79,48 +79,6 @@ class ReadinessCheckerTest {
     }
 
     @Test
-    fun `readiness fails when redis stream coordinator is unavailable`() {
-        val checker = ReadinessChecker(
-            h2DataSource(),
-            redisFactory("PONG"),
-            BuddyStudyProperties(
-                monitoring = BuddyStudyProperties.Monitoring(
-                    coordinatorReadinessEnabled = true,
-                    coordinatorBaseUrl = "http://coordinator.test",
-                ),
-            ),
-            coordinatorHealthClient = CoordinatorHealthClient { _, _ -> throw IllegalStateException("coordinator down") },
-        )
-
-        val response = checker.check()
-
-        assertThat(response.ok).isFalse()
-        assertThat(response.checks["redisStreamCoordinator"]?.ok).isFalse()
-        assertThat(response.checks["redisStreamCoordinator"]?.message).contains("coordinator down")
-    }
-
-    @Test
-    fun `dependency readiness excludes redis stream coordinator for Kubernetes probes`() {
-        val checker = ReadinessChecker(
-            h2DataSource(),
-            redisFactory("PONG"),
-            BuddyStudyProperties(
-                monitoring = BuddyStudyProperties.Monitoring(
-                    coordinatorReadinessEnabled = true,
-                    coordinatorBaseUrl = "http://coordinator.test",
-                ),
-            ),
-            coordinatorHealthClient = CoordinatorHealthClient { _, _ -> throw IllegalStateException("coordinator down") },
-        )
-
-        val response = checker.check(includeScheduler = false)
-
-        assertThat(response.ok).isTrue()
-        assertThat(response.checks).containsKeys("database", "redis")
-        assertThat(response.checks).doesNotContainKey("redisStreamCoordinator")
-    }
-
-    @Test
     fun `readiness fails when monitored scheduler jobs are stale`() {
         val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
         val checker = ReadinessChecker(

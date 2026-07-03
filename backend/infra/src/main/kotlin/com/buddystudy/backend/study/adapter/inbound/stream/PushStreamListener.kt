@@ -1,5 +1,8 @@
 package com.buddystudy.backend.study.adapter.inbound.stream
 
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
@@ -13,46 +16,53 @@ import com.buddystudy.backend.study.application.port.outbound.PushQuestionMessag
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import com.redisstream.consumer.ConsumedRedisStreamMessage
-import com.redisstream.consumer.RedisStreamXNackMode
-import com.redisstream.consumer.StreamConfiguration
-import com.redisstream.consumer.StreamListener
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
 
-@StreamConfiguration
+@Component
+@ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class PushStreamListener(
+    private val properties: BuddyStudyProperties,
+    private val consumer: RedisStreamConsumer,
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val group = "bs-backend-push"
+    private val consumerName = "push-${java.net.InetAddress.getLocalHost().hostName}"
+    private val eventType = "QUESTION_PUSH_REQUESTED"
 
     @PostConstruct
     fun logInitialized() {
         logger.info(
-            "push_stream_listener_initialized listener={} streamPrefix={} groupId={} concurrency={} autoStartup={}",
+            "push_stream_listener_initialized listener={} streamKey={} groupId={} concurrency={} autoStartup={}",
             "buddystudy-push-listener",
-            "\${PUSH_STREAM_PREFIX:push-v1}",
-            "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
-            "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
-            "\${buddystudy.streams.enabled:true}",
+            properties.streams.key,
+            group,
+            1,
+            true,
         )
     }
 
-    @StreamListener(
-        id = "buddystudy-push-listener",
-        streamPrefix = "\${PUSH_STREAM_PREFIX:push-v1}",
-        groupId = "\${PUSH_CONSUMER_GROUP_NAME:\${PUSH_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${PUSH_CONSUMER_MEMBER_CONCURRENCY:\${PUSH_CONSUMER_RUNTIME_MAX_CONCURRENCY:8}}",
-        autoStartup = "\${buddystudy.streams.enabled:true}",
-        pollBatchSize = "\${PUSH_CONSUMER_REDIS_POLL_BATCH_SIZE:50}",
-        pollTimeoutMs = "\${PUSH_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
-    )
-    fun onPushRequested(message: ConsumedRedisStreamMessage) {
+    @Scheduled(fixedDelayString = "\${PUSH_CONSUMER_POLL_DELAY_MS:1000}")
+    fun pollPushRequests() {
+        consumer.poll(properties.streams.key, group, consumerName, 50, Duration.ofMillis(3000)) {
+            onPushRequested(it)
+        }
+    }
+
+    fun onPushRequested(message: RedisStreamMessage) {
         try {
+            if (message.fields["eventType"] != eventType) {
+                consumer.acknowledge(message, group)
+                return
+            }
             logger.info("listen!!!!")
             logger.info(
                 " listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} fieldKeys={}",
@@ -79,7 +89,7 @@ class PushStreamListener(
                     deviceId,
                     userId,
                 )
-                message.ack()
+                consumer.acknowledge(message, group)
                 return
             }
             val device = deviceId?.let { devices.findByDeviceId(it) }
@@ -91,7 +101,7 @@ class PushStreamListener(
             pushNotifications.sendQuestion(pushMessage)
             val consumedAt = Instant.now()
             val pushAgeMs = pushMessage.createdAt?.let { Duration.between(it, consumedAt).toMillis() }
-            message.ack()
+            consumer.acknowledge(message, group)
             logger.info(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} consumedAt={} pushAgeMs={}",
                 "buddystudy-push-listener",
@@ -120,7 +130,6 @@ class PushStreamListener(
                 message.fields["userId"],
                 error.message,
             )
-            message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
         }
     }
 

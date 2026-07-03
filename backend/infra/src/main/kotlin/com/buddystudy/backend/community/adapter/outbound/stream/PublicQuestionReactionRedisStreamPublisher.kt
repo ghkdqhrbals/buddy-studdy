@@ -1,51 +1,37 @@
 package com.buddystudy.backend.community.adapter.outbound.stream
 
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.utils.toStringMapWithoutNull
-import com.redisstream.producer.RedisStreamPublishOptions
-import com.redisstream.producer.RedisStreamPublisher
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.ObjectProvider
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 
 @Component
 class PublicQuestionReactionRedisStreamPublisher(
     private val properties: BuddyStudyProperties,
-    @Qualifier("viewStreamPublisher") viewPublisherProvider: ObjectProvider<RedisStreamPublisher>,
+    private val viewPublisher: RedisStreamPublishOperations,
 ) : PublicQuestionReactionPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val viewPublisher: RedisStreamPublisher? = viewPublisherProvider.ifAvailable
-
-    init {
-        if (properties.streams.enabled) {
-            requireNotNull(viewPublisher) { "viewStreamPublisher bean is required when buddystudy.streams.enabled=true" }
-        }
-    }
 
     override fun publishViewed(questionId: Long, userId: Long?): Boolean {
         if (!properties.streams.enabled) {
-            logPublishSkipped("streams_disabled", properties.streams.viewPrefix, "CONTENT_VIEWED", questionId, userId)
+            logPublishSkipped("streams_disabled", properties.streams.key, "CONTENT_VIEWED", questionId, userId)
             return false
         }
-        val publisher = viewPublisher ?: run {
-            error("viewStreamPublisher bean is required when buddystudy.streams.enabled=true")
-        }
         val fields = PublicQuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
-        return publish(publisher, properties.streams.viewPrefix, questionId, fields)
+        return publish(properties.streams.key, questionId, fields)
     }
 
     private fun publish(
-        publisher: RedisStreamPublisher,
-        prefix: String,
+        streamKey: String,
         questionId: Long,
         fields: Map<String, String>,
     ): Boolean =
         try {
             logger.debug(
-                "redis_stream_publish_started prefix={} eventId={} eventType={} partitionKey={} questionId={} userId={} fieldKeys={}",
-                prefix,
+                "redis_stream_publish_started streamKey={} eventId={} eventType={} partitionKey={} questionId={} userId={} fieldKeys={}",
+                streamKey,
                 fields["eventId"],
                 fields["eventType"],
                 questionId,
@@ -53,11 +39,7 @@ class PublicQuestionReactionRedisStreamPublisher(
                 fields["userId"],
                 fields.keys,
             )
-            val published = publisher.publish(
-                questionId.toString(),
-                fields,
-                RedisStreamPublishOptions(properties.streams.maxLen, true),
-            )
+            val published = viewPublisher.publish(streamKey, fields)
             logger.debug(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} questionId={} userId={}",
                 published.streamKey,
@@ -71,8 +53,8 @@ class PublicQuestionReactionRedisStreamPublisher(
             true
         } catch (error: Exception) {
             logger.warn(
-                "redis_stream_publish_failed prefix={} eventId={} eventType={} partitionKey={} questionId={} userId={} error={}",
-                prefix,
+                "redis_stream_publish_failed streamKey={} eventId={} eventType={} partitionKey={} questionId={} userId={} error={}",
+                streamKey,
                 fields["eventId"],
                 fields["eventType"],
                 questionId,
@@ -83,11 +65,11 @@ class PublicQuestionReactionRedisStreamPublisher(
             false
         }
 
-    private fun logPublishSkipped(reason: String, prefix: String, eventType: String, questionId: Long, userId: Long?) {
+    private fun logPublishSkipped(reason: String, streamKey: String, eventType: String, questionId: Long, userId: Long?) {
         logger.debug(
-            "redis_stream_publish_skipped reason={} prefix={} eventType={} questionId={} userId={}",
+            "redis_stream_publish_skipped reason={} streamKey={} eventType={} questionId={} userId={}",
             reason,
-            prefix,
+            streamKey,
             eventType,
             questionId,
             userId,

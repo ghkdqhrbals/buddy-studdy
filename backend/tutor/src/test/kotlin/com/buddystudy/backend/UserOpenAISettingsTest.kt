@@ -29,7 +29,6 @@ import org.springframework.test.context.TestPropertySource
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
 class UserOpenAISettingsTest {

@@ -78,8 +78,8 @@ class AdminAnalyticsController(
 }
 
 data class AdminLoginRequest(
-    @field:NotBlank val username: String,
-    @field:NotBlank val password: String,
+    @field:NotBlank var username: String = "",
+    @field:NotBlank var password: String = "",
 )
 
 interface AdminAnalyticsWebPort {

@@ -36,7 +36,7 @@ spec:
         app.kubernetes.io/name: buddystudy-backend
     spec:
       initContainers:
-        - name: wait-for-redis-cluster
+        - name: wait-for-redis
           image: redis:7-alpine
           imagePullPolicy: IfNotPresent
           env:
@@ -49,17 +49,7 @@ spec:
             - sh
             - -c
             - |
-              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis-0-0.buddystudy-redis-headless -p 6379 cluster info | grep -q "cluster_state:ok"; do
-                sleep 2
-              done
-        - name: wait-for-redis-stream-coordinator
-          image: curlimages/curl:8.11.0
-          imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - |
-              until curl -fsS http://buddystudy-redis-stream-coordinator:8080/actuator/health >/dev/null; do
+              until redis-cli -a "$REDIS_PASSWORD" -h buddystudy-redis -p 6379 ping | grep -q PONG; do
                 sleep 2
               done
       containers:

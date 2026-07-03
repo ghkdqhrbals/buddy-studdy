@@ -26,7 +26,6 @@ import java.net.http.HttpResponse
         "springdoc.swagger-ui.enabled=true",
         "springdoc.swagger-ui.path=/docs",
         "springdoc.swagger-ui.url=/v3/api-docs",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
 class OpenApiDocumentationTest {

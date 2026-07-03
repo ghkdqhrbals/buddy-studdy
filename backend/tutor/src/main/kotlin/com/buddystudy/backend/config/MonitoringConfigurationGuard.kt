@@ -25,12 +25,6 @@ class MonitoringConfigurationGuard(
         if (!properties.monitoring.schedulerReadinessEnabled) {
             error("Scheduler readiness monitoring must be enabled in prod when scheduler is enabled.")
         }
-        if (!properties.monitoring.coordinatorReadinessEnabled) {
-            error("Redis Stream Coordinator readiness monitoring must be enabled in prod when scheduler is enabled.")
-        }
-        if (!isHttpUrl(properties.monitoring.coordinatorBaseUrl)) {
-            error("MONITORING_COORDINATOR_BASE_URL must be an HTTP or HTTPS URL in prod.")
-        }
         if (properties.monitoring.slackTimeoutMs !in 1_000..25_000) {
             error("MONITORING_SLACK_TIMEOUT_MS must be between 1000 and 25000 in prod.")
         }
@@ -82,11 +76,4 @@ class MonitoringConfigurationGuard(
             uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
         }.getOrDefault(false)
 
-    private fun isHttpUrl(value: String): Boolean =
-        runCatching {
-            val uri = URI(value.trim())
-            val scheme = uri.scheme.orEmpty()
-            (scheme.equals("http", ignoreCase = true) || scheme.equals("https", ignoreCase = true)) &&
-                !uri.host.isNullOrBlank()
-        }.getOrDefault(false)
 }

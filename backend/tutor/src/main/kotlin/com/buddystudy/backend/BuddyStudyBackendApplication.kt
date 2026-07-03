@@ -33,15 +33,6 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         hibernateEventListenerArrays.forEach { listenerArray ->
             hints.reflection().registerType(TypeReference.of(listenerArray))
         }
-        redisStreamJacksonTypes.forEach { type ->
-            hints.reflection().registerType(
-                TypeReference.of(type),
-                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
-                MemberCategory.DECLARED_FIELDS,
-                MemberCategory.INVOKE_PUBLIC_METHODS,
-                MemberCategory.INVOKE_DECLARED_METHODS,
-            )
-        }
         kotlinCollectionJacksonTypes.forEach { type ->
             hints.reflection().registerType(
                 TypeReference.of(type),
@@ -147,20 +138,6 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "org.hibernate.event.spi.PreUpsertEventListener[]",
         "org.hibernate.event.spi.RefreshEventListener[]",
         "org.hibernate.event.spi.ReplicateEventListener[]",
-    )
-
-    private val redisStreamJacksonTypes = listOf(
-        "com.redisstream.consumer.AssignmentView",
-        "com.redisstream.consumer.CoordinatorShard",
-        "com.redisstream.consumer.HeartbeatRequest",
-        "com.redisstream.consumer.HeartbeatResponse",
-        "com.redisstream.consumer.HeartbeatStatus",
-        "com.redisstream.consumer.ProducerRoutingResponse",
-        "com.redisstream.consumer.ProducerRoutingShard",
-        "com.redisstream.consumer.RedisStreamXNackMode",
-        "com.redisstream.consumer.RevokingShardReport",
-        "com.redisstream.consumer.RuntimeConsumerCapacity",
-        "com.redisstream.consumer.ShardConsumptionProgress",
     )
 
     private val kotlinCollectionJacksonTypes = listOf(

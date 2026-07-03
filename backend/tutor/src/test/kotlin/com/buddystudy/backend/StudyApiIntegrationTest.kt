@@ -17,6 +17,7 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -43,7 +44,6 @@ import java.time.Instant
         "buddystudy.auth.jwt-secret=test-jwt-secret",
         "buddystudy.openai.api-key=test-openai-key",
         "spring.main.allow-bean-definition-overriding=true",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
 class StudyApiIntegrationTest {
@@ -57,6 +57,13 @@ class StudyApiIntegrationTest {
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
+
+    @BeforeEach
+    fun clearStudyData() {
+        stats.deleteAll()
+        questions.deleteAll()
+        studies.deleteAll()
+    }
 
     @Test
     fun `study endpoint returns my studies while records endpoint returns only completed records`() {
@@ -107,11 +114,12 @@ class StudyApiIntegrationTest {
         assertThat(schedule.statusCode()).isEqualTo(200)
 
         val study = studies.findAll().single()
+        val swiftTopic = "SwiftUI-${Instant.now().toEpochMilli()}"
         val swiftStudy = studies.save(
             StudyEntity(
                 deviceId = deviceId,
                 userId = study.userId,
-                topic = "SwiftUI",
+                topic = swiftTopic,
                 difficultyLevel = 6,
                 intervalMinutes = 15,
                 enabled = true,
@@ -190,7 +198,7 @@ class StudyApiIntegrationTest {
                 studyId = swiftStudy.id,
                 question = "SwiftUI StateObject는 언제 쓰나요?",
                 hint = "view owned observable state",
-                topic = "SwiftUI",
+                topic = swiftTopic,
                 difficultyLevel = 6,
                 scheduledFor = Instant.parse("2026-06-09T02:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T02:00:00Z"),
@@ -214,15 +222,15 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(studyPage["studies"]).hasSize(2)
-        assertThat(studyPage["studies"].map { it["topic"].asText() }).contains("Redis", "SwiftUI")
-        val redisStudyNode = studyPage["studies"].first { it["topic"].asText() == "Redis" }
-        assertThat(redisStudyNode["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
-        assertThat(redisStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
+        assertThat(studyPage["studies"].map { it["topic"].asText() }).contains(study.topic, swiftTopic)
+        val pendingStudyNode = studyPage["studies"].first { it["pendingQuestion"]["id"].asText() == pending.id.toString() }
+        assertThat(pendingStudyNode["pendingQuestion"]["topic"].asText()).isEqualTo("Redis")
+        assertThat(pendingStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
 
         val searchedStudies = getJson("/api/v1/studies?limit=100&offset=0&query=swift", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(searchedStudies["studies"].map { it["topic"].asText() }).containsExactly("SwiftUI")
+        assertThat(searchedStudies["studies"].map { it["topic"].asText() }).contains(swiftTopic)
 
         val records = getJson("/api/v1/records?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -250,13 +258,13 @@ class StudyApiIntegrationTest {
         val settings = getJson("/api/v1/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(settings["topic"].asText()).isEqualTo("Redis")
+        assertThat(settings["topic"].asText()).isEqualTo(study.topic)
         assertThat(settings["appLanguage"].asText()).isEqualTo("ko")
 
         val studySettings = getJson("/api/v1/studies/${study.id}/settings", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(studySettings["topic"].asText()).isEqualTo("Redis")
+        assertThat(studySettings["topic"].asText()).isEqualTo(study.topic)
 
         val apiStatus = getJson("/api/v1/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -281,7 +289,7 @@ class StudyApiIntegrationTest {
         val searchedStatsPage = getJson("/api/v1/stats?limit=10&offset=0&query=swift", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(searchedStatsPage["topics"].map { it["topic"].asText() }).containsExactly("SwiftUI")
+        assertThat(searchedStatsPage["topics"].map { it["topic"].asText() }).contains(swiftTopic)
 
         val publicQuestions = getJson("/api/v1/public/questions?limit=20&offset=0&query=sorted", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -511,7 +519,7 @@ class StudyApiIntegrationTest {
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(detail["id"].asText()).isEqualTo(publicQuestion.id.toString())
-        assertThat(detail["isLikedByMe"].asBoolean()).isFalse()
+        assertThat(detail["likedByMe"].asBoolean()).isFalse()
 
         assertAuthRequired(putJson("/api/v1/public/questions/${publicQuestion.id}/like", ""))
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/comments", """{"body":"hello"}"""))

@@ -32,7 +32,6 @@ import java.time.Instant
         "buddystudy.admin.password=admin",
         "buddystudy.monitoring.scheduler-stale-threshold-minutes=15",
         "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule,user-stats-refresh",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ],
 )
 class AdminSchedulerStatusIntegrationTest {

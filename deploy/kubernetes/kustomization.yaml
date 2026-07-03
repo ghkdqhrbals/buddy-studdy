@@ -8,7 +8,6 @@ resources:
   - config/backend-config.yaml
   - postgres/postgres.yaml
   - redis/redis.yaml
-  - coordinator/redis-stream-coordinator.yaml
   - libretranslate/libretranslate.yaml
   - backend/backend.yaml
   - admin-frontend/admin-frontend.yaml

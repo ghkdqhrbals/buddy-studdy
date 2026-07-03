@@ -1,99 +1,60 @@
 package com.buddystudy.backend
 
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.redisstream.consumer.ProducerRoutingShard
-import com.redisstream.producer.ProducerRoute
-import com.redisstream.producer.PublishedRedisStreamMessage
-import com.redisstream.producer.RedisStreamPublishOptions
-import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.ObjectProvider
-import java.util.stream.Stream
 
 class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
     fun `publish view returns false when streams are disabled`() {
-        val service = service(enabled = false, viewPublisher = RecordingPublisher())
+        val publisher = RecordingPublisher()
+        val service = service(enabled = false, publisher = publisher)
 
         assertThat(service.publishViewed(1, 2)).isFalse()
-    }
-
-    @Test
-    fun `enabled streams require view publisher bean`() {
-        assertThatThrownBy { service(enabled = true) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("viewStreamPublisher bean is required")
+        assertThat(publisher.requests).isEmpty()
     }
 
     @Test
     fun `view event publishes typed field map`() {
-        val viewPublisher = RecordingPublisher()
-        val service = service(enabled = true, viewPublisher = viewPublisher)
+        val publisher = RecordingPublisher()
+        val service = service(enabled = true, publisher = publisher)
 
         assertThat(service.publishViewed(20, null)).isTrue()
 
-        val viewRequest = viewPublisher.requests.single()
-        assertThat(viewRequest.key).isEqualTo("20")
-        assertThat(viewRequest.fields).containsEntry("eventType", "CONTENT_VIEWED")
-        assertThat(viewRequest.fields).containsEntry("questionId", "20")
-        assertThat(viewRequest.fields).doesNotContainKey("userId")
+        val request = publisher.requests.single()
+        assertThat(request.streamKey).isEqualTo("buddystudy-events-v1")
+        assertThat(request.fields).containsEntry("eventType", "CONTENT_VIEWED")
+        assertThat(request.fields).containsEntry("questionId", "20")
+        assertThat(request.fields).doesNotContainKey("userId")
     }
 
     @Test
     fun `publish view returns false when publisher throws`() {
-        val service = service(enabled = true, viewPublisher = RecordingPublisher(fail = true))
+        val service = service(enabled = true, publisher = RecordingPublisher(fail = true))
 
         assertThat(service.publishViewed(1, 2)).isFalse()
     }
 
-    private fun service(
-        enabled: Boolean,
-        viewPublisher: RedisStreamPublisher? = null,
-    ): PublicQuestionReactionRedisStreamPublisher {
+    private fun service(enabled: Boolean, publisher: RedisStreamPublishOperations): PublicQuestionReactionRedisStreamPublisher {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = enabled
+            streams.key = "buddystudy-events-v1"
         }
-        return PublicQuestionReactionRedisStreamPublisher(
-            properties,
-            provider(viewPublisher),
-        )
+        return PublicQuestionReactionRedisStreamPublisher(properties, publisher)
     }
 
-    private fun provider(publisher: RedisStreamPublisher?): ObjectProvider<RedisStreamPublisher> =
-        object : ObjectProvider<RedisStreamPublisher> {
-            override fun getObject(): RedisStreamPublisher =
-                publisher ?: throw NoSuchElementException("No publisher")
+    private data class PublishRequest(val streamKey: String, val fields: Map<String, String>)
 
-            override fun getIfAvailable(): RedisStreamPublisher? = publisher
-            override fun iterator(): MutableIterator<RedisStreamPublisher> = listOfNotNull(publisher).toMutableList().iterator()
-            override fun stream(): Stream<RedisStreamPublisher> = listOfNotNull(publisher).stream()
-        }
-
-    private data class PublishRequest(
-        val key: String?,
-        val fields: Map<String, String>,
-        val options: RedisStreamPublishOptions,
-    )
-
-    private class RecordingPublisher(private val fail: Boolean = false) : RedisStreamPublisher {
+    private class RecordingPublisher(private val fail: Boolean = false) : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override fun publish(
-            partitionKey: String?,
-            fields: Map<String, String>,
-            options: RedisStreamPublishOptions,
-        ): PublishedRedisStreamMessage {
+        override fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
             if (fail) throw IllegalStateException("publish failed")
-            requests += PublishRequest(partitionKey, fields, options)
-            val streamKey = "stream-$partitionKey"
-            return PublishedRedisStreamMessage(
-                streamKey,
-                "record-1",
-                ProducerRoute(streamKey, ProducerRoutingShard(0, streamKey, 0), 1),
-            )
+            requests += PublishRequest(streamKey, fields)
+            return RedisStreamPublishedMessage(streamKey, "record-1")
         }
     }
 }

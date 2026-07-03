@@ -13,8 +13,7 @@ or hang its local API server when used as a long-running server runtime.
 - `config/`: non-secret environment configuration.
 - `secrets/`: placeholder Kubernetes secrets. These are not applied by kustomize.
 - `postgres/`: PostgreSQL StatefulSet, service, hostPath PV/PVC, and init script.
-- `redis/`: Redis Cluster StatefulSet, services, hostPath PV/PVCs, and cluster init Job.
-- `coordinator/`: Redis Stream Coordinator Deployment, service, and stream bootstrap Job.
+- `redis/`: single-node Redis StatefulSet, service, and hostPath PV/PVC.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
 - `backend/`: BuddyStudy backend Deployment and service.
 - `admin-frontend/`: admin web frontend Deployment and service.
@@ -60,7 +59,6 @@ secrets would overwrite live cluster credentials. Create or patch
 - `OPENAI_API_KEY`
 - APNs values when push delivery is required
 - SMTP values when email login is required
-- Redis Stream Coordinator credentials when streams are enabled
 - `SLACK_WEBHOOK_URL` for production scheduler failure alerts
 
 `config/backend-config.yaml` contains non-secret monitoring values such as
@@ -74,24 +72,6 @@ without useful admin links. They also fail fast when monitored scheduler job
 names do not match registered backend jobs or when scheduler monitoring
 timeouts, stale thresholds, or startup grace windows are outside the supported
 production ranges.
-
-## Redis Stream Coordinator
-
-The backend talks to the in-cluster coordinator service:
-
-```text
-http://buddystudy-redis-stream-coordinator:8080
-```
-
-The coordinator bootstrap Job creates the required stream prefixes:
-
-- `push-v1`
-- `view-v1`
-- `notification-v1`
-- `create-question-v1`
-
-The bootstrap Job has a completion TTL so repeated manifest applies do not keep
-an old immutable Job spec around indefinitely.
 
 ## Health Probes and Alerts
 
@@ -122,10 +102,7 @@ operational cause without taking healthy API pods out of service.
 The Mac Kubernetes target stores state on the host:
 
 - PostgreSQL: `/Users/gyuminhwangbo/data/buddystudy/db/postgres`
-- Redis Cluster:
-  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-0`
-  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-1`
-  - `/Users/gyuminhwangbo/data/buddystudy/redis/redis-2`
+- Redis: `/Users/gyuminhwangbo/data/buddystudy/redis/standalone`
 
 The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
 these host directories.
@@ -138,11 +115,7 @@ network path and can conflict with Kubernetes services after restarts.
 
 - Backend API: `localhost:30080`
 - PostgreSQL: `localhost:30432`
-- Redis Cluster nodes:
-  - `localhost:6379`
-  - `localhost:6380`
-  - `localhost:6381`
-  - cluster bus: `localhost:16379`, `localhost:16380`, `localhost:16381`
+- Redis: `localhost:6379`
 
 Cloudflare should be used in two different modes:
 
@@ -155,22 +128,18 @@ compatibility TCP hostnames:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
-- Redis is exposed through node `hostPort` values, not a proxy service.
+- Redis is exposed through a node `hostPort`, not a proxy service.
 
 For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` or
 use Tailscale, then connect to:
 
 - PostgreSQL: `<macbook-air-lan-ip-or-tailscale-ip>:30432`
-- Redis Cluster nodes:
-  - `<macbook-air-lan-ip-or-tailscale-ip>:6379`
-  - `<macbook-air-lan-ip-or-tailscale-ip>:6380`
-  - `<macbook-air-lan-ip-or-tailscale-ip>:6381`
+- Redis: `<macbook-air-lan-ip-or-tailscale-ip>:6379`
 
 The `buddystudy-redis-proxy` deployment is intentionally removed because it
-introduced a second routing layer and could fail when cluster metadata changed.
-Inside Kubernetes, Redis Cluster announces pod DNS names because Docker Desktop
-pods cannot hairpin back into the Mac hostPort/Tailscale IP. The hostPorts are
-kept for host-side diagnostics and direct node reachability.
+introduced a second routing layer and could fail when Redis metadata changed.
+The backend uses Spring Data Redis Streams directly, so the Redis Stream
+Coordinator is not part of this deployment.
 
 Cloudflare Tunnel TCP hostnames require clients to connect through
 `cloudflared access tcp` unless Cloudflare Spectrum is configured separately.

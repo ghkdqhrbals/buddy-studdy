@@ -43,10 +43,7 @@ data class BuddyStudyProperties(
     )
     data class Streams(
         var enabled: Boolean = true,
-        var pushPrefix: String = "push-v1",
-        var viewPrefix: String = "view-v1",
-        var notificationPrefix: String = "notification-v1",
-        var createQuestionPrefix: String = "create-question-v1",
+        var key: String = "buddystudy-events-v1",
         var maxLen: Long = 100_000,
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,
@@ -66,9 +63,6 @@ data class BuddyStudyProperties(
         var slackTimeoutMs: Long = 5_000,
         var schedulerFailureAlertRepeatSeconds: Long = 300,
         var schedulerReadinessEnabled: Boolean = true,
-        var coordinatorReadinessEnabled: Boolean = false,
-        var coordinatorBaseUrl: String = "",
-        var coordinatorTimeoutMs: Long = 3_000,
         var schedulerStaleThresholdMinutes: Long = 15,
         var schedulerStartupGraceMinutes: Long = 15,
         var schedulerMonitoredJobs: List<String> = listOf(

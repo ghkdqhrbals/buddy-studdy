@@ -2,21 +2,16 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.community.adapter.inbound.stream.QuestionStatsStreamEventHandler
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
-import com.redisstream.consumer.ProducerRoutingShard
-import com.redisstream.producer.ProducerRoute
-import com.redisstream.producer.PublishedRedisStreamMessage
-import com.redisstream.producer.RedisStreamPublishOptions
-import com.redisstream.producer.RedisStreamPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.TestPropertySource
-import java.util.stream.Stream
 
 @SpringBootTest
 @TestPropertySource(
@@ -29,7 +24,6 @@ import java.util.stream.Stream
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
 class QuestionStatsStreamListenerTest {
@@ -93,46 +87,25 @@ class QuestionStatsStreamListenerTest {
     }
 
     private fun reactionPublisher(
-        viewPublisher: RedisStreamPublisher,
+        viewPublisher: RedisStreamPublishOperations,
     ): PublicQuestionReactionRedisStreamPublisher {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = true
         }
-        return PublicQuestionReactionRedisStreamPublisher(
-            properties,
-            provider(viewPublisher),
-        )
+        return PublicQuestionReactionRedisStreamPublisher(properties, viewPublisher)
     }
 
-    private fun provider(publisher: RedisStreamPublisher): ObjectProvider<RedisStreamPublisher> =
-        object : ObjectProvider<RedisStreamPublisher> {
-            override fun getObject(): RedisStreamPublisher = publisher
-            override fun getIfAvailable(): RedisStreamPublisher = publisher
-            override fun iterator(): MutableIterator<RedisStreamPublisher> = mutableListOf(publisher).iterator()
-            override fun stream(): Stream<RedisStreamPublisher> = Stream.of(publisher)
-        }
-
     private data class PublishRequest(
-        val key: String?,
+        val streamKey: String,
         val fields: Map<String, String>,
-        val options: RedisStreamPublishOptions,
     )
 
-    private class RecordingPublisher : RedisStreamPublisher {
+    private class RecordingPublisher : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override fun publish(
-            partitionKey: String?,
-            fields: Map<String, String>,
-            options: RedisStreamPublishOptions,
-        ): PublishedRedisStreamMessage {
-            requests += PublishRequest(partitionKey, fields, options)
-            val streamKey = "stream-$partitionKey"
-            return PublishedRedisStreamMessage(
-                streamKey,
-                "record-1",
-                ProducerRoute(streamKey, ProducerRoutingShard(0, streamKey, 0), 1),
-            )
+        override fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
+            requests += PublishRequest(streamKey, fields)
+            return RedisStreamPublishedMessage(streamKey, "record-1")
         }
     }
 }

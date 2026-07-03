@@ -22,7 +22,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Uses Spring Data JPA ORM with repository/service transaction boundaries.
 - Runs Flyway by default in the `dev` profile and keeps Hibernate DDL auto-update disabled.
 - Generates due questions with OpenAI.
-- Publishes scheduled push jobs through redis-stream-coordinator and consumes them with `@StreamListener`.
+- Publishes scheduled push jobs through Redis Streams and consumes them with the backend's lightweight polling consumers.
 - Sends APNs remote notifications to iPhone from the stream consumer.
 - Runs in Docker with PostgreSQL stored on a mounted volume.
 
@@ -45,9 +45,9 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by the stream starter and email verification sessions.
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
-- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystudy/dev` for the `dev` profile and `buddystudy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_STREAM_COORDINATOR_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
+- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystudy/dev` for the `dev` profile and `buddystudy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.datasource.url`, `spring.datasource.username`, and `spring.datasource.password`. If one of these styles is used for the datasource URL, keep the matching username and password in the same style or provide them as environment variables.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.

@@ -26,7 +26,6 @@ import org.testcontainers.junit.jupiter.Testcontainers
         "buddystudy.analytics.datasource.database-name=",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
-        "spring.autoconfigure.exclude=com.redisstream.RedisStreamCoordinatorAutoConfiguration,com.redisstream.producer.ProducerRoutingAutoConfiguration,com.redisstream.consumer.CoordinatorConsumerAutoConfiguration",
     ]
 )
 class FlywaySchemaIntegrationTest {

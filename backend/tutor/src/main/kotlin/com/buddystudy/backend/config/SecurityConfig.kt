@@ -9,6 +9,8 @@ import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -37,6 +39,12 @@ class SecurityConfig {
     @Bean
     @ConditionalOnMissingBean(ObjectMapper::class)
     fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
+
+    @Bean
+    fun kotlinJacksonModule(): KotlinModule = KotlinModule.Builder().build()
+
+    @Bean
+    fun javaTimeJacksonModule(): JavaTimeModule = JavaTimeModule()
 
     @Bean
     fun userDetailsService(): UserDetailsService = UserDetailsService {

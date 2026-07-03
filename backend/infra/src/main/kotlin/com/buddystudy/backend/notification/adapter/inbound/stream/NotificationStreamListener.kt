@@ -2,6 +2,9 @@ package com.buddystudy.backend.notification.adapter.inbound.stream
 
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
@@ -10,16 +13,18 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublis
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import com.redisstream.consumer.ConsumedRedisStreamMessage
-import com.redisstream.consumer.RedisStreamXNackMode
-import com.redisstream.consumer.StreamConfiguration
-import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
 
-@StreamConfiguration
+@Component
+@ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class NotificationStreamListener(
+    private val properties: BuddyStudyProperties,
+    private val consumer: RedisStreamConsumer,
     private val processor: ProcessNotificationEventUseCase,
     private val notifications: NotificationPersistencePort,
     private val devices: DevicePort,
@@ -28,18 +33,23 @@ class NotificationStreamListener(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
+    private val group = "bs-backend-notification"
+    private val consumerName = "notification-${java.net.InetAddress.getLocalHost().hostName}"
+    private val eventType = "NOTIFICATION_REQUESTED"
 
-    @StreamListener(
-        id = "buddystudy-notification-listener",
-        streamPrefix = "\${NOTIFICATION_STREAM_PREFIX:notification-v1}",
-        groupId = "\${NOTIFICATION_CONSUMER_GROUP_NAME:\${NOTIFICATION_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${NOTIFICATION_CONSUMER_MEMBER_CONCURRENCY:\${NOTIFICATION_CONSUMER_RUNTIME_MAX_CONCURRENCY:4}}",
-        autoStartup = "\${buddystudy.streams.enabled:true}",
-        pollBatchSize = "\${NOTIFICATION_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
-        pollTimeoutMs = "\${NOTIFICATION_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
-    )
-    fun onNotificationRequested(message: ConsumedRedisStreamMessage) {
+    @Scheduled(fixedDelayString = "\${NOTIFICATION_CONSUMER_POLL_DELAY_MS:1000}")
+    fun pollNotificationRequests() {
+        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
+            onNotificationRequested(it)
+        }
+    }
+
+    fun onNotificationRequested(message: RedisStreamMessage) {
         try {
+            if (message.fields["eventType"] != eventType) {
+                consumer.acknowledge(message, group)
+                return
+            }
             logger.debug(
                 "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} fieldKeys={}",
                 "buddystudy-notification-listener",
@@ -72,14 +82,14 @@ class NotificationStreamListener(
                     command.userId,
                 )
             }
-            message.ack()
+            consumer.acknowledge(message, group)
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} notificationId={}",
                 "buddystudy-notification-listener",
                 message.streamKey,
                 message.recordId,
                 command.eventId,
-                "NOTIFICATION_REQUESTED",
+                eventType,
                 command.userId,
                 notificationId,
             )
@@ -94,7 +104,6 @@ class NotificationStreamListener(
                 message.fields["userId"],
                 error.message,
             )
-            message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
         }
     }
 

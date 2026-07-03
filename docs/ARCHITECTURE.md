@@ -51,7 +51,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Calls OpenAI for API-key validation, question generation, and answer grading.
   - Stores generated questions in PostgreSQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
-  - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through redis-stream-coordinator.
+  - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through direct Redis Streams.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
 
 - `Views`
@@ -98,7 +98,7 @@ User answer
 
 - iPhone registers for remote notifications through `UIApplication`.
 - iPhone app timers only run while the app process is active. For locked/background delivery, the app opportunistically pre-generates at most one pending question notification when entering background and schedules it for the configured interval. If a question notification is already pending, it does not create another. `BGAppRefresh` is also requested at the next due date, but iOS does not guarantee exact wake-up timing.
-- The Spring Boot Kotlin backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, publishes push jobs through redis-stream-coordinator, and sends APNs alerts from an `@StreamListener` consumer.
+- The Spring Boot Kotlin backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, publishes push jobs through Redis Streams, and sends APNs alerts from the backend stream consumer.
 - Scheduled delivery requires an APNs token. If a backend device exists without a token, the scheduler defers the due item instead of generating an undeliverable push.
 
 ## Community Identity

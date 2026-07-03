@@ -1,32 +1,43 @@
 package com.buddystudy.backend.community.adapter.inbound.stream
 
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import com.redisstream.consumer.ConsumedRedisStreamMessage
-import com.redisstream.consumer.RedisStreamXNackMode
-import com.redisstream.consumer.StreamConfiguration
-import com.redisstream.consumer.StreamListener
 import org.slf4j.LoggerFactory
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Component
+import java.time.Duration
 import java.time.Instant
 
-@StreamConfiguration
+@Component
+@ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class QuestionSearchStreamListener(
+    private val properties: BuddyStudyProperties,
+    private val consumer: RedisStreamConsumer,
     private val questionSearch: QuestionSearchSyncManager,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val group = "bs-backend-question-search"
+    private val consumerName = "question-search-${java.net.InetAddress.getLocalHost().hostName}"
+    private val eventType = "QUESTION_CREATED"
 
-    @StreamListener(
-        id = "buddystudy-question-search-listener",
-        streamPrefix = "\${CREATE_QUESTION_STREAM_PREFIX:create-question-v1}",
-        groupId = "\${CREATE_QUESTION_CONSUMER_GROUP_NAME:\${CREATE_QUESTION_CONSUMER_GROUP:bs-backend}}",
-        concurrency = "\${CREATE_QUESTION_CONSUMER_MEMBER_CONCURRENCY:\${CREATE_QUESTION_CONSUMER_RUNTIME_MAX_CONCURRENCY:2}}",
-        autoStartup = "\${buddystudy.streams.enabled:true}",
-        pollBatchSize = "\${CREATE_QUESTION_CONSUMER_REDIS_POLL_BATCH_SIZE:100}",
-        pollTimeoutMs = "\${CREATE_QUESTION_CONSUMER_REDIS_POLL_TIMEOUT_MS:3000}",
-    )
-    fun onQuestionCreated(message: ConsumedRedisStreamMessage) {
+    @Scheduled(fixedDelayString = "\${CREATE_QUESTION_CONSUMER_POLL_DELAY_MS:1000}")
+    fun pollCreatedQuestions() {
+        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
+            onQuestionCreated(it)
+        }
+    }
+
+    fun onQuestionCreated(message: RedisStreamMessage) {
         try {
+            if (message.fields["eventType"] != eventType) {
+                consumer.acknowledge(message, group)
+                return
+            }
 
             logger.info("question created consuming {}", message)
             val payload = QuestionCreatedPayloadParser.toPayload(message.fields)
@@ -41,7 +52,7 @@ class QuestionSearchStreamListener(
                 payload.language,
             )
             questionSearch.indexCreatedQuestion(payload.questionId)
-            message.ack()
+            consumer.acknowledge(message, group)
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={}",
                 "buddystudy-question-search-listener",
@@ -62,7 +73,6 @@ class QuestionSearchStreamListener(
                 message.fields["questionId"],
                 error.message,
             )
-            message.nack(RedisStreamXNackMode.SILENT, 30_000, false)
         }
     }
 }
