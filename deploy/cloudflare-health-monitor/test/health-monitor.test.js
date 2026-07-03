@@ -167,7 +167,7 @@ test("slack payload contains environment, status, url, time, failures, error, an
   const fields = sectionBlocks.flatMap((block) => block.fields).map((field) => field.text).join("\n");
 
   assert.equal(payload.text, ":rotating_light: BuddyStudy backend is down");
-  assert.ok(sectionBlocks.every((block) => block.fields.length <= 10), "Slack section fields must not exceed Block Kit limit");
+  assertSlackSectionFieldLimit(payload);
   assert.match(fields, /production/);
   assert.match(fields, /down/);
   assert.match(fields, /https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
@@ -210,11 +210,32 @@ test("recovery slack payload includes outage duration", () => {
     detail: null,
     alertType: "recovered",
   });
-  const fields = payload.blocks[1].fields.map((field) => field.text).join("\n");
+  const fields = payload.blocks.filter((block) => block.type === "section").flatMap((block) => block.fields).map((field) => field.text).join("\n");
 
   assert.equal(payload.text, ":white_check_mark: BuddyStudy backend recovered");
+  assertSlackSectionFieldLimit(payload);
   assert.match(fields, /Duration/);
   assert.match(fields, /1h 5m/);
+});
+
+test("monitor error slack payload stays within Block Kit section limits", () => {
+  const payload = internals.buildSlackPayload({ ...env, OBSERVABILITY_URL: "https://grafana.ghkdqhrbals.org/d/backend" }, {
+    status: "monitor_error",
+    httpStatus: null,
+    checkedAt: "2026-07-03T00:05:00.000Z",
+    lastUpAt: null,
+    lastDownAt: null,
+    consecutiveFailures: 0,
+    error: "kv unavailable",
+    detail: null,
+    alertType: "monitor_error",
+  });
+  const fields = payload.blocks.filter((block) => block.type === "section").flatMap((block) => block.fields).map((field) => field.text).join("\n");
+
+  assert.equal(payload.text, ":warning: BuddyStudy backend health monitor error");
+  assertSlackSectionFieldLimit(payload);
+  assert.match(fields, /kv unavailable/);
+  assert.match(fields, /Observability/);
 });
 
 test("summarizes failed readiness checks from JSON body", () => {
@@ -1100,6 +1121,12 @@ function manualEnv({
     healthResponse,
     onSlack,
   };
+}
+
+function assertSlackSectionFieldLimit(payload) {
+  const sectionBlocks = payload.blocks.filter((block) => block.type === "section");
+  assert.ok(sectionBlocks.length > 0, "Slack payload must include section blocks");
+  assert.ok(sectionBlocks.every((block) => block.fields.length <= 10), "Slack section fields must not exceed Block Kit limit");
 }
 
 const originalFetch = globalThis.fetch;
