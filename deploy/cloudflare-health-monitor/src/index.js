@@ -15,7 +15,7 @@ export default {
           { status: 500 },
         );
       }
-      const state = stateResult.state;
+      const state = rootVisibleState(stateResult.state, env);
       return json({ ok: state?.status === "up", state }, { status: rootStatusCode(state) });
     }
     if (request.method === "POST" && url.pathname === "/check") {
@@ -371,6 +371,29 @@ function rootStatusCode(state) {
   if (!state) return 503;
   if (state.status === "up" || state.status === "degraded") return 200;
   return 503;
+}
+
+function rootVisibleState(state, env, nowMs = Date.now()) {
+  if (!state?.checkedAt) return state;
+  if (state.status !== "up" && state.status !== "degraded") return state;
+  const checkedAtMs = Date.parse(state.checkedAt);
+  if (!Number.isFinite(checkedAtMs)) return state;
+  const staleAfterSeconds = statusStaleAfterSeconds(env);
+  const staleForSeconds = Math.floor((nowMs - checkedAtMs) / 1000);
+  if (staleForSeconds <= staleAfterSeconds) return state;
+  return {
+    ...state,
+    status: "stale",
+    storedStatus: state.status,
+    staleForSeconds,
+    staleAfterSeconds,
+  };
+}
+
+function statusStaleAfterSeconds(env) {
+  const raw = Number.parseInt(env?.STATUS_STALE_AFTER_SECONDS || "180", 10);
+  if (!Number.isFinite(raw)) return 180;
+  return Math.min(Math.max(raw, 60), 3600);
 }
 
 function isAuthorizedManualCheck(request, env) {

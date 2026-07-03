@@ -759,8 +759,8 @@ test("root reports healthy stored backend state as ok", async () => {
     manualEnv({
       existingState: {
         status: "up",
-        checkedAt: "2026-07-03T00:05:00.000Z",
-        lastUpAt: "2026-07-03T00:05:00.000Z",
+        checkedAt: new Date().toISOString(),
+        lastUpAt: new Date().toISOString(),
         lastDownAt: null,
         consecutiveFailures: 0,
         httpStatus: 200,
@@ -776,14 +776,39 @@ test("root reports healthy stored backend state as ok", async () => {
   assert.equal(body.state.status, "up");
 });
 
+test("root returns service-unavailable when stored monitor state is stale", async () => {
+  const response = await worker.fetch(
+    new Request("https://monitor.example.com/"),
+    manualEnv({
+      existingState: {
+        status: "up",
+        checkedAt: "2026-07-03T00:00:00.000Z",
+        lastUpAt: "2026-07-03T00:00:00.000Z",
+        lastDownAt: null,
+        consecutiveFailures: 0,
+        httpStatus: 200,
+        error: null,
+      },
+      STATUS_STALE_AFTER_SECONDS: "60",
+    }),
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.state.status, "stale");
+  assert.equal(body.state.storedStatus, "up");
+  assert.equal(body.state.staleForSeconds > 60, true);
+});
+
 test("root reports degraded stored backend state without failing the status page", async () => {
   const response = await worker.fetch(
     new Request("https://monitor.example.com/"),
     manualEnv({
       existingState: {
         status: "degraded",
-        checkedAt: "2026-07-03T00:05:00.000Z",
-        lastUpAt: "2026-07-02T23:55:00.000Z",
+        checkedAt: new Date().toISOString(),
+        lastUpAt: new Date().toISOString(),
         lastDownAt: null,
         consecutiveFailures: 1,
         httpStatus: 502,

@@ -63,6 +63,11 @@ export function validateConfig(config) {
   } else if (!boundedInt(config.vars.ALERT_REPEAT_SECONDS, 300, 86_400)) {
     errors.push("ALERT_REPEAT_SECONDS must be between 300 and 86400.");
   }
+  if (!positiveInt(config.vars?.STATUS_STALE_AFTER_SECONDS)) {
+    errors.push("STATUS_STALE_AFTER_SECONDS must be a positive integer.");
+  } else if (!boundedInt(config.vars.STATUS_STALE_AFTER_SECONDS, 60, 3_600)) {
+    errors.push("STATUS_STALE_AFTER_SECONDS must be between 60 and 3600.");
+  }
   if (!positiveInt(config.vars?.HEALTHCHECK_TIMEOUT_MS)) {
     errors.push("HEALTHCHECK_TIMEOUT_MS must be a positive integer.");
   } else if (!boundedInt(config.vars.HEALTHCHECK_TIMEOUT_MS, 1_000, 25_000)) {

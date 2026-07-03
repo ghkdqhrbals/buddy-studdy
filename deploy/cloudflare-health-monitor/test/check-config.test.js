@@ -15,6 +15,7 @@ test("health monitor config rejects missing runtime essentials", () => {
   delete config.vars.ENVIRONMENT_NAME;
   config.vars.FAILURE_THRESHOLD = "0";
   config.vars.ALERT_REPEAT_SECONDS = "bad";
+  config.vars.STATUS_STALE_AFTER_SECONDS = "bad";
   config.vars.HEALTHCHECK_TIMEOUT_MS = "";
   config.vars.SLACK_TIMEOUT_MS = "bad";
 
@@ -27,6 +28,7 @@ test("health monitor config rejects missing runtime essentials", () => {
   assert.match(errors, /ENVIRONMENT_NAME/);
   assert.match(errors, /FAILURE_THRESHOLD/);
   assert.match(errors, /ALERT_REPEAT_SECONDS/);
+  assert.match(errors, /STATUS_STALE_AFTER_SECONDS/);
   assert.match(errors, /HEALTHCHECK_TIMEOUT_MS/);
   assert.match(errors, /SLACK_TIMEOUT_MS/);
 });
@@ -61,6 +63,16 @@ test("health monitor config rejects repeat intervals that are too noisy or too d
   const tooDelayed = validConfig();
   tooDelayed.vars.ALERT_REPEAT_SECONDS = "172800";
   assert.match(validateConfig(tooDelayed).join("\n"), /ALERT_REPEAT_SECONDS must be between 300 and 86400/);
+});
+
+test("health monitor config rejects stale status thresholds that are too short or too long", () => {
+  const tooShort = validConfig();
+  tooShort.vars.STATUS_STALE_AFTER_SECONDS = "30";
+  assert.match(validateConfig(tooShort).join("\n"), /STATUS_STALE_AFTER_SECONDS must be between 60 and 3600/);
+
+  const tooLong = validConfig();
+  tooLong.vars.STATUS_STALE_AFTER_SECONDS = "7200";
+  assert.match(validateConfig(tooLong).join("\n"), /STATUS_STALE_AFTER_SECONDS must be between 60 and 3600/);
 });
 
 test("health monitor config rejects timeout values that are too slow for Worker cron", () => {
@@ -118,6 +130,7 @@ function validConfig() {
       ENVIRONMENT_NAME: "production",
       FAILURE_THRESHOLD: "2",
       ALERT_REPEAT_SECONDS: "3600",
+      STATUS_STALE_AFTER_SECONDS: "180",
       HEALTHCHECK_TIMEOUT_MS: "8000",
       SLACK_TIMEOUT_MS: "5000",
     },
