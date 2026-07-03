@@ -1169,6 +1169,14 @@ test("health monitor docs include post deploy verification without Actions check
   assert.match(readme, /checkedAt` has advanced/);
 });
 
+test("health monitor docs describe manual check HTTP status contract", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  assert.match(readme, /`POST \/check` uses the same state transition and Slack alert path as the cron/);
+  assert.match(readme, /returns `200` only when the checked state is `up` or `degraded`/);
+  assert.match(readme, /returns\s+`503`\s+for `down`, `stale`, `config_error`, or `monitor_error`/);
+});
+
 test("health monitor docs describe readiness response contract and stale status config", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
