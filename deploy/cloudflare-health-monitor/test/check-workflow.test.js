@@ -255,6 +255,21 @@ jobs:
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
 });
 
+test("workflow scan rejects coordinator runtime health probes in Actions", () => {
+  const workflow = `
+name: Deploy Coordinator
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    steps:
+      - name: Check coordinator
+        run: curl -fsS http://coordinator.ghkdqhrbals.org/coord/v1/monitoring/health
+`;
+
+  assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-coordinator.yml").join("\n"), /must not run runtime health probes/);
+});
+
 test("workflow scan rejects local runtime health probes even when they are not backend readiness urls", () => {
   const workflow = `
 name: Deploy Monitoring
