@@ -163,9 +163,11 @@ test("slack payload contains environment, status, url, time, failures, error, an
     detail: "scheduler: Stale scheduler jobs: question-schedule",
     alertType: "down",
   });
-  const fields = payload.blocks[1].fields.map((field) => field.text).join("\n");
+  const sectionBlocks = payload.blocks.filter((block) => block.type === "section");
+  const fields = sectionBlocks.flatMap((block) => block.fields).map((field) => field.text).join("\n");
 
   assert.equal(payload.text, ":rotating_light: BuddyStudy backend is down");
+  assert.ok(sectionBlocks.every((block) => block.fields.length <= 10), "Slack section fields must not exceed Block Kit limit");
   assert.match(fields, /production/);
   assert.match(fields, /down/);
   assert.match(fields, /https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
@@ -180,7 +182,7 @@ test("slack payload contains environment, status, url, time, failures, error, an
   assert.match(fields, /Duration/);
   assert.match(fields, /Observability/);
   assert.match(fields, /https:\/\/grafana\.ghkdqhrbals\.org\/d\/backend/);
-  assert.deepEqual(payload.blocks[2], {
+  assert.deepEqual(payload.blocks.at(-1), {
     type: "actions",
     elements: [
       {

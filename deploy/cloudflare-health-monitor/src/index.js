@@ -644,10 +644,10 @@ function buildSlackPayload(env, state) {
       type: "header",
       text: { type: "plain_text", text: title },
     },
-    {
+    ...chunkFields(fields, 10).map((chunk) => ({
       type: "section",
-      fields,
-    },
+      fields: chunk,
+    })),
   ];
   if (actionElements.length > 0) {
     blocks.push({
@@ -669,6 +669,14 @@ function slackButton(text, url) {
     text: { type: "plain_text", text },
     url: url.trim(),
   };
+}
+
+function chunkFields(fields, size) {
+  const chunks = [];
+  for (let index = 0; index < fields.length; index += size) {
+    chunks.push(fields.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function formatElapsed(startIso, endIso) {
