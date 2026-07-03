@@ -57,25 +57,26 @@ class SlackScheduledJobAlertAdapter internal constructor(
             "*Finished*: ${run.finishedAt?.let { DateTimeFormatter.ISO_INSTANT.format(it) } ?: "unknown"}",
             "*Duration*: ${run.durationMs ?: 0}ms",
             "*Run URL*: ${runUrl ?: "not configured"}",
-            "*Error*: ${run.errorMessage?.take(600) ?: "Unknown error"}",
+            "*Error*: ${run.errorMessage ?: "Unknown error"}",
         )
+        val sectionText = truncateSlackText(lines.joinToString("\n"), SECTION_TEXT_LIMIT)
         val blocks = mutableListOf<Map<String, Any>>(
             mapOf(
                 "type" to "header",
                 "text" to mapOf(
                     "type" to "plain_text",
-                    "text" to "${properties.monitoring.serviceName} job failed",
+                    "text" to truncateSlackText("${properties.monitoring.serviceName} job failed", HEADER_TEXT_LIMIT),
                 ),
             ),
             mapOf(
                 "type" to "section",
                 "text" to mapOf(
                     "type" to "mrkdwn",
-                    "text" to lines.joinToString("\n"),
+                    "text" to sectionText,
                 ),
             ),
         )
-        if (runUrl != null) {
+        if (runUrl != null && runUrl.length <= BUTTON_URL_LIMIT) {
             blocks += mapOf(
                 "type" to "actions",
                 "elements" to listOf(
@@ -91,7 +92,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
             )
         }
         return mapOf(
-            "text" to "$title - ${run.jobName}",
+            "text" to truncateSlackText("$title - ${run.jobName}", FALLBACK_TEXT_LIMIT),
             "blocks" to blocks,
         )
     }
@@ -107,6 +108,11 @@ class SlackScheduledJobAlertAdapter internal constructor(
     }
 
     private companion object {
+        private const val HEADER_TEXT_LIMIT = 150
+        private const val SECTION_TEXT_LIMIT = 3_000
+        private const val FALLBACK_TEXT_LIMIT = 4_000
+        private const val BUTTON_URL_LIMIT = 3_000
+
         fun slackTimeout(properties: BuddyStudyProperties): Duration =
             Duration.ofMillis(properties.monitoring.slackTimeoutMs.coerceIn(1_000, 25_000))
 
@@ -118,6 +124,12 @@ class SlackScheduledJobAlertAdapter internal constructor(
             return JdkClientHttpRequestFactory(client).apply {
                 setReadTimeout(timeout)
             }
+        }
+
+        fun truncateSlackText(value: String, maxLength: Int): String {
+            if (value.length <= maxLength) return value
+            if (maxLength <= 3) return value.take(maxLength)
+            return value.take(maxLength - 3) + "..."
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.buddystudy.backend.scheduler.adapter.outbound.slack
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
@@ -7,6 +9,7 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.containsString
+import org.springframework.mock.http.client.MockClientHttpRequest
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
@@ -22,6 +25,8 @@ import java.time.Duration
 import java.time.Instant
 
 class SlackScheduledJobAlertAdapterTest {
+    private val objectMapper = jacksonObjectMapper()
+
     @Test
     fun `notifyFailed posts scheduler failure to Slack webhook`() {
         val properties = BuddyStudyProperties(
@@ -104,17 +109,61 @@ class SlackScheduledJobAlertAdapterTest {
         assertThat(high.slackTimeout()).isEqualTo(Duration.ofMillis(25_000))
     }
 
-    private fun failedRun(): ScheduledJobRun =
+    @Test
+    fun `notifyFailed bounds Slack block text lengths`() {
+        val properties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                slackWebhookUrl = "https://hooks.slack.test/scheduler",
+                environmentName = "prod-" + "x".repeat(1_000),
+                serviceName = "BuddyStudy " + "x".repeat(1_000),
+                adminBaseUrl = "https://admin.ghkdqhrbals.org/" + "path/".repeat(400),
+            ),
+        )
+        val builder = RestClient.builder()
+        val server = MockRestServiceServer.bindTo(builder).build()
+        val adapter = SlackScheduledJobAlertAdapter(properties, builder.build())
+
+        server.expect(requestTo("https://hooks.slack.test/scheduler"))
+            .andExpect { request ->
+                val payload = objectMapper.readValue(
+                    (request as MockClientHttpRequest).bodyAsString,
+                    object : TypeReference<Map<String, Any>>() {},
+                )
+                val blocks = payload["blocks"] as List<Map<String, Any>>
+                val headerText = ((blocks[0]["text"] as Map<String, Any>)["text"] as String)
+                val sectionText = ((blocks[1]["text"] as Map<String, Any>)["text"] as String)
+
+                assertThat(headerText).hasSizeLessThanOrEqualTo(150)
+                assertThat(sectionText).hasSizeLessThanOrEqualTo(3_000)
+            }
+            .andRespond(withSuccess("ok", MediaType.TEXT_PLAIN))
+
+        adapter.notifyFailed(
+            failedRun(
+                jobName = "question-scheduler-" + "x".repeat(1_000),
+                createdBy = "admin-" + "x".repeat(1_000),
+                errorMessage = "boom-" + "x".repeat(5_000),
+            ),
+        )
+
+        server.verify()
+    }
+
+    private fun failedRun(
+        jobName: String = "question-scheduler",
+        createdBy: String = "admin",
+        errorMessage: String = "boom",
+    ): ScheduledJobRun =
         ScheduledJobRun(
             id = 12,
-            jobName = "question-scheduler",
+            jobName = jobName,
             triggerType = JobTriggerType.SCHEDULED,
             status = JobRunStatus.FAILED,
             startedAt = Instant.parse("2026-07-02T00:00:00Z"),
             finishedAt = Instant.parse("2026-07-02T00:00:02Z"),
             durationMs = 2000,
-            errorMessage = "boom",
+            errorMessage = errorMessage,
             retryOfRunId = 3,
-            createdBy = "admin",
+            createdBy = createdBy,
         )
 }
