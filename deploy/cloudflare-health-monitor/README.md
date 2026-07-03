@@ -116,6 +116,16 @@ Required GitHub Actions secrets for that deployment workflow:
 - `HEALTH_MONITOR_SLACK_WEBHOOK_URL`
 - `HEALTH_MONITOR_MANUAL_CHECK_TOKEN`
 
+Set or rotate them with GitHub CLI:
+
+```sh
+gh secret set CLOUDFLARE_API_TOKEN --repo ghkdqhrbals/study-mate
+gh secret set CLOUDFLARE_ACCOUNT_ID --repo ghkdqhrbals/study-mate
+gh secret set HEALTH_MONITOR_KV_NAMESPACE_ID --repo ghkdqhrbals/study-mate
+gh secret set HEALTH_MONITOR_SLACK_WEBHOOK_URL --repo ghkdqhrbals/study-mate
+gh secret set HEALTH_MONITOR_MANUAL_CHECK_TOKEN --repo ghkdqhrbals/study-mate
+```
+
 The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
 `HEALTH_MONITOR_MANUAL_CHECK_TOKEN` into Cloudflare Worker secrets as
 `SLACK_WEBHOOK_URL` and `MANUAL_CHECK_TOKEN`.

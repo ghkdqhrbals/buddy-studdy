@@ -862,6 +862,14 @@ test("health monitor package exposes a deployment readiness command", () => {
   assert.match(readme, /prints blockers before relying on Slack outage alerts/);
 });
 
+test("health monitor docs include GitHub secret setup commands for readiness blockers", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
+
+  for (const name of requiredHealthMonitorGitHubSecrets) {
+    assert.match(readme, new RegExp(`gh secret set ${name} --repo ghkdqhrbals/study-mate`));
+  }
+});
+
 test("health monitor readiness command supports json output", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "health-monitor-readiness-"));
   const ghStub = path.join(tempDir, "gh");
