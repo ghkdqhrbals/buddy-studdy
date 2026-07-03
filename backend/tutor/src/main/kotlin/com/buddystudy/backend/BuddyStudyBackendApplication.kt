@@ -42,6 +42,15 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
                 MemberCategory.INVOKE_DECLARED_METHODS,
             )
         }
+        kotlinCollectionJacksonTypes.forEach { type ->
+            hints.reflection().registerType(
+                TypeReference.of(type),
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.INVOKE_DECLARED_METHODS,
+            )
+        }
         hints.resources().registerPattern("org/hibernate/**/*.i18n.properties")
         hints.resources().registerPattern("db/migration/*.sql")
     }
@@ -152,5 +161,11 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "com.redisstream.consumer.RevokingShardReport",
         "com.redisstream.consumer.RuntimeConsumerCapacity",
         "com.redisstream.consumer.ShardConsumptionProgress",
+    )
+
+    private val kotlinCollectionJacksonTypes = listOf(
+        "kotlin.collections.EmptyList",
+        "kotlin.collections.EmptyMap",
+        "kotlin.collections.EmptySet",
     )
 }

@@ -20,6 +20,9 @@ class RedisStreamRuntimeHintsTest {
             TypeReference.of("com.redisstream.consumer.CoordinatorShard"),
             TypeReference.of("com.redisstream.consumer.RevokingShardReport"),
             TypeReference.of("com.redisstream.consumer.ShardConsumptionProgress"),
+            TypeReference.of("kotlin.collections.EmptyList"),
+            TypeReference.of("kotlin.collections.EmptyMap"),
+            TypeReference.of("kotlin.collections.EmptySet"),
         )
     }
 }
