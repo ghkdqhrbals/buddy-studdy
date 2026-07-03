@@ -120,6 +120,14 @@ defaults to `300`. The Cloudflare Worker uses
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
 checker.
 
+The Docker backend template also passes the internal Redis Stream Coordinator
+URL to the backend as `REACTION_STREAM_COORDINATOR_BASE_URL` and enables
+coordinator readiness with `MONITORING_COORDINATOR_READINESS_ENABLED=true`.
+By default both backend traffic and readiness use `http://rsc-coordinator:8080`;
+override `REACTION_STREAM_COORDINATOR_BASE_URL` or
+`MONITORING_COORDINATOR_BASE_URL` only when the coordinator runs under a
+different internal name.
+
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 
 ## Backup restore (deploy host)

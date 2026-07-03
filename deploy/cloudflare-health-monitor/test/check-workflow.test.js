@@ -278,6 +278,15 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
   assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
 });
 
+test("deploy repo docs explain coordinator readiness wiring", () => {
+  const readme = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/README.md"), "utf8");
+
+  assert.match(readme, /internal Redis Stream Coordinator/i);
+  assert.match(readme, /`REACTION_STREAM_COORDINATOR_BASE_URL`/);
+  assert.match(readme, /`MONITORING_COORDINATOR_READINESS_ENABLED=true`/);
+  assert.match(readme, /`http:\/\/rsc-coordinator:8080`/);
+});
+
 test("deploy repo monitoring template remains PLG only", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-monitoring.yml"), "utf8");
 
@@ -650,6 +659,7 @@ test("kubernetes backend config enables coordinator readiness for external monit
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+  const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 
   assert.match(applicationConfig, /coordinator-readiness-enabled:\s*\$\{MONITORING_COORDINATOR_READINESS_ENABLED:false\}/);
   for (const text of [backendConfig, combinedManifest]) {
@@ -657,6 +667,14 @@ test("kubernetes backend config enables coordinator readiness for external monit
     assert.match(text, /MONITORING_COORDINATOR_BASE_URL:\s*"http:\/\/buddystudy-redis-stream-coordinator:8080"/);
     assert.match(text, /MONITORING_COORDINATOR_TIMEOUT_MS:\s*"3000"/);
   }
+  assert.match(deployTemplate, /REACTION_STREAM_COORDINATOR_BASE_URL:\s*\$\{\{\s*vars\.REACTION_STREAM_COORDINATOR_BASE_URL\s*\|\|\s*'http:\/\/rsc-coordinator:8080'\s*\}\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_READINESS_ENABLED:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_READINESS_ENABLED\s*\|\|\s*'true'\s*\}\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_BASE_URL:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_BASE_URL\s*\|\|\s*'http:\/\/rsc-coordinator:8080'\s*\}\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_TIMEOUT_MS:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_TIMEOUT_MS\s*\|\|\s*'3000'\s*\}\}/);
+  assert.match(deployTemplate, /REACTION_STREAM_COORDINATOR_BASE_URL=\$\{REACTION_STREAM_COORDINATOR_BASE_URL\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_READINESS_ENABLED=\$\{MONITORING_COORDINATOR_READINESS_ENABLED\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_BASE_URL=\$\{MONITORING_COORDINATOR_BASE_URL\}/);
+  assert.match(deployTemplate, /MONITORING_COORDINATOR_TIMEOUT_MS=\$\{MONITORING_COORDINATOR_TIMEOUT_MS\}/);
 });
 
 test("backend scheduler readiness defaults and seed migrations cover every managed scheduler job", () => {
