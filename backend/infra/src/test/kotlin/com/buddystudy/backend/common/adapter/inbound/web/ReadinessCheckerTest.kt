@@ -122,6 +122,47 @@ class ReadinessCheckerTest {
     }
 
     @Test
+    fun `readiness does not fail new scheduler jobs during startup grace`() {
+        val dataSource = h2DataSource(lastStartedAt = null, seedJobs = true)
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerStartupGraceMinutes = 10,
+                    schedulerStaleThresholdMinutes = 1,
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.checks["scheduler"]?.ok).isTrue()
+    }
+
+    @Test
+    fun `readiness omits scheduler check when scheduler readiness is disabled`() {
+        val dataSource = h2DataSource(lastStartedAt = Instant.now().minusSeconds(60 * 60), seedJobs = true)
+        val checker = ReadinessChecker(
+            dataSource,
+            redisFactory("PONG"),
+            BuddyStudyProperties(
+                monitoring = BuddyStudyProperties.Monitoring(
+                    schedulerReadinessEnabled = false,
+                    schedulerStaleThresholdMinutes = 1,
+                ),
+            ),
+        )
+
+        val response = checker.check()
+
+        assertThat(response.ok).isTrue()
+        assertThat(response.checks).containsKeys("database", "redis")
+        assertThat(response.checks).doesNotContainKey("scheduler")
+    }
+
+    @Test
     fun `readiness fails when monitored scheduler job seed is missing`() {
         val dataSource = h2DataSource(lastStartedAt = null, seedJobs = false)
         val checker = ReadinessChecker(dataSource, redisFactory("PONG"), BuddyStudyProperties())
