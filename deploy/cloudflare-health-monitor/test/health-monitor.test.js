@@ -428,13 +428,13 @@ test("checkHealth times out slow health responses", async () => {
 test("healthcheck timeout is bounded to Cloudflare-safe limits", () => {
   assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "1" }), 1000);
   assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "999999" }), 25000);
-  assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "bad" }), 8000);
+  assert.equal(internals.healthcheckTimeoutMs({ HEALTHCHECK_TIMEOUT_MS: "bad" }), 3000);
 });
 
 test("slack timeout is bounded to Cloudflare-safe limits", () => {
   assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "1" }), 1000);
   assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "999999" }), 15000);
-  assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "bad" }), 5000);
+  assert.equal(internals.slackTimeoutMs({ SLACK_TIMEOUT_MS: "bad" }), 3000);
 });
 
 test("manual check requires configured bearer token", async () => {

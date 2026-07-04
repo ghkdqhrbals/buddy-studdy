@@ -311,8 +311,8 @@ async function successfulReadinessResult(response) {
 }
 
 function healthcheckTimeoutMs(env) {
-  const raw = Number.parseInt(env?.HEALTHCHECK_TIMEOUT_MS || "8000", 10);
-  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 25000) : 8000;
+  const raw = Number.parseInt(env?.HEALTHCHECK_TIMEOUT_MS || "3000", 10);
+  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 25000) : 3000;
 }
 
 function isAbortError(error) {
@@ -624,8 +624,8 @@ async function sendSlackAlert(env, state) {
 }
 
 function slackTimeoutMs(env) {
-  const raw = Number.parseInt(env?.SLACK_TIMEOUT_MS || "5000", 10);
-  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 15000) : 5000;
+  const raw = Number.parseInt(env?.SLACK_TIMEOUT_MS || "3000", 10);
+  return Number.isFinite(raw) ? Math.min(Math.max(raw, 1000), 15000) : 3000;
 }
 
 function buildSlackPayload(env, state) {

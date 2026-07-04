@@ -279,8 +279,8 @@ Default vars in `wrangler.jsonc`:
 - `FAILURE_THRESHOLD`: `2`
 - `ALERT_REPEAT_SECONDS`: `3600` (`300` to `86400`)
 - `STATUS_STALE_AFTER_SECONDS`: `180` (`60` to `3600`)
-- `HEALTHCHECK_TIMEOUT_MS`: `8000` (`1000` to `25000`)
-- `SLACK_TIMEOUT_MS`: `5000` (`1000` to `15000`)
+- `HEALTHCHECK_TIMEOUT_MS`: `3000` (`1000` to `25000`)
+- `SLACK_TIMEOUT_MS`: `3000` (`1000` to `15000`)
 - `OBSERVABILITY_URL`: optional HTTPS Grafana/Loki entrypoint linked from
   Slack alerts
 

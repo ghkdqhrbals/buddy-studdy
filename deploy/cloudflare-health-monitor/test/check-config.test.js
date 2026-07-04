@@ -168,8 +168,8 @@ function validConfig() {
       FAILURE_THRESHOLD: "2",
       ALERT_REPEAT_SECONDS: "3600",
       STATUS_STALE_AFTER_SECONDS: "180",
-      HEALTHCHECK_TIMEOUT_MS: "8000",
-      SLACK_TIMEOUT_MS: "5000",
+      HEALTHCHECK_TIMEOUT_MS: "3000",
+      SLACK_TIMEOUT_MS: "3000",
     },
     kv_namespaces: [{ binding: "HEALTH_MONITOR_STATE", id: "kv-id" }],
   };
