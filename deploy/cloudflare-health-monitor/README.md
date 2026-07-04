@@ -8,8 +8,8 @@ runtime monitoring.
 
 ## Behavior
 
-- Runs every minute with exactly one Cloudflare Cron Trigger, preventing
-  duplicate checks and duplicate Slack alerts.
+- Runs every five minutes with exactly one Cloudflare Cron Trigger, preventing
+  duplicate checks and keeping Workers KV writes under the free daily limit.
 - Runs as a Cron-only Worker by default. `workers_dev` is disabled so the
   monitor does not expose a public workers.dev route.
 - Cloudflare still requires the account-level workers.dev subdomain to be
@@ -284,8 +284,8 @@ Default vars in `wrangler.jsonc`:
 - `OBSERVABILITY_URL`: optional HTTPS Grafana/Loki entrypoint linked from
   Slack alerts
 
-With the required single 1-minute cron and threshold `2`, a real outage usually alerts
-after about 1-2 minutes while still filtering out a single transient failure.
+With the required single 5-minute cron and threshold `2`, a real outage usually alerts
+after about 5-10 minutes while still filtering out a single transient failure.
 
 If the Worker Cron itself stops running, the Worker cannot send a new Slack
 alert because the monitor execution path is no longer being invoked. In that
