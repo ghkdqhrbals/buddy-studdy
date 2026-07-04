@@ -18,6 +18,25 @@ interface QuestionSearchJpaRepository : JpaRepository<QuestionSearchEntity, Ques
     @Query("delete from QuestionSearchEntity q where q.questionId = :questionId")
     fun deleteSearchRow(@Param("questionId") questionId: Long): Long
 
+    @Modifying
+    @Query(
+        value = """
+            delete from question_search qs
+            where exists (
+                select 1
+                from questions q
+                where q.id = qs.question_id
+                  and q.study_id = :studyId
+                  and q.user_id = :userId
+            )
+        """,
+        nativeQuery = true,
+    )
+    fun deleteSearchRowsByStudyId(
+        @Param("studyId") studyId: Long,
+        @Param("userId") userId: Long,
+    ): Long
+
     @Query(
         value = """
             select qs.question_id
@@ -164,6 +183,9 @@ class QuestionSearchRepository(
 
     @Transactional
     override fun deleteByQuestionId(questionId: Long): Long = jpa.deleteSearchRow(questionId)
+
+    @Transactional
+    override fun deleteByStudyId(studyId: Long, userId: Long): Long = jpa.deleteSearchRowsByStudyId(studyId, userId)
 
     override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult {
         val safeLimit = limit.coerceIn(1, 100)

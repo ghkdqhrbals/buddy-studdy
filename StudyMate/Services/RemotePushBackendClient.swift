@@ -203,6 +203,11 @@ protocol RemotePushBackendClientProtocol {
         settings: StudySettings
     ) async throws -> BackendStudyRoom
 
+    func deleteStudy(
+        registration: RemotePushRegistration,
+        studyID: Int
+    ) async throws
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
@@ -562,6 +567,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
         let data = try await perform(request)
         return try decoder.decode(BackendStudyRoom.self, from: data)
+    }
+
+    func deleteStudy(
+        registration: RemotePushRegistration,
+        studyID: Int
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "studies", String(studyID))
+        )
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
     }
 
     func fetchRecords(

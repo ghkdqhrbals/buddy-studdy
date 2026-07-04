@@ -62,14 +62,18 @@ internal class ApiExchangeLogFormatter(
             "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding, response.contentType) else "",
         )
 
-    private fun headers(request: HttpServletRequest): Map<String, String> =
+    private fun headers(request: HttpServletRequest): Map<String, Any?> =
         request.headerNames.asSequence().associateWith { name ->
-            if (isSensitiveHeader(name)) "[REDACTED]" else request.getHeaders(name).asSequence().joinToString(",")
+            if (isSensitiveHeader(name)) {
+                "[REDACTED]"
+            } else {
+                headerValue(request.getHeaders(name).asSequence().toList())
+            }
         }
 
-    private fun responseHeaders(response: HttpServletResponse): Map<String, String> =
+    private fun responseHeaders(response: HttpServletResponse): Map<String, Any?> =
         response.headerNames.associateWith { name ->
-            if (isSensitiveHeader(name)) "[REDACTED]" else response.getHeaders(name).joinToString(",")
+            if (isSensitiveHeader(name)) "[REDACTED]" else headerValue(response.getHeaders(name).toList())
         }
 
     private fun isSensitiveHeader(name: String): Boolean =
@@ -96,6 +100,20 @@ internal class ApiExchangeLogFormatter(
             (trimmed.startsWith("[") && trimmed.endsWith("]"))
         if (!jsonContentType && !jsonLikeBody) return body
         return runCatching { objectMapper.readTree(body) }.getOrElse { body }
+    }
+
+    private fun headerValue(values: List<String>): Any? {
+        if (values.isEmpty()) return ""
+        if (values.size > 1) return values.map { parseJsonLikeString(it) }
+        return parseJsonLikeString(values.single())
+    }
+
+    private fun parseJsonLikeString(value: String): Any? {
+        val trimmed = value.trim()
+        val jsonLike = (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        if (!jsonLike) return value
+        return runCatching { objectMapper.readTree(trimmed) }.getOrElse { value }
     }
 
     private fun charsetFor(encoding: String?, contentType: String?): Charset {
@@ -127,32 +145,7 @@ internal class ApiExchangeLogFormatter(
         }
 
     private fun buildJson(vararg fields: Pair<String, Any?>): String =
-        fields.joinToString(prefix = "{", postfix = "}") { (key, value) ->
-            "\"${escape(key)}\":${jsonValue(value)}"
-        }
-
-    private fun jsonValue(value: Any?): String =
-        when (value) {
-            null -> "null"
-            is Number, is Boolean -> value.toString()
-            is JsonNode -> value.toString()
-            is Map<*, *> -> value.entries.joinToString(prefix = "{", postfix = "}") { entry ->
-                "\"${escape(entry.key.toString())}\":${jsonValue(entry.value)}"
-            }
-            else -> "\"${escape(value.toString())}\""
-        }
-
-    private fun escape(value: String): String =
-        value.flatMap {
-            when (it) {
-                '\\' -> listOf('\\', '\\')
-                '"' -> listOf('\\', '"')
-                '\n' -> listOf('\\', 'n')
-                '\r' -> listOf('\\', 'r')
-                '\t' -> listOf('\\', 't')
-                else -> listOf(it)
-            }
-        }.joinToString("")
+        objectMapper.writeValueAsString(linkedMapOf(*fields))
 
     private companion object {
         private const val MAX_BODY_CHARS = 2_000

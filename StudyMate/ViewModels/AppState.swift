@@ -3445,12 +3445,17 @@ final class AppState: ObservableObject {
 
     func deleteStudyCategories(at offsets: IndexSet) {
         let displayCategories = studyCategoriesForDisplay
+        let categoriesToDelete = offsets.compactMap { index in
+            displayCategories.indices.contains(index) ? displayCategories[index] : nil
+        }
         let idsToDelete = Set(offsets.compactMap { index in
             displayCategories.indices.contains(index) ? displayCategories[index].id : nil
         })
         guard !idsToDelete.isEmpty else {
             return
         }
+        let studyIDsToDelete = Set(categoriesToDelete.compactMap { backendStudyIDIfLoaded(for: $0) })
+        let topicKeysToDelete = Set(categoriesToDelete.map { Self.normalizedCategoryText(for: $0.title) })
 
         let currentSelectedID = settings.selectedStudyCategoryID
         let didDeleteActiveCategory = currentSelectedID.map { idsToDelete.contains($0) } ?? false
@@ -3484,7 +3489,18 @@ final class AppState: ObservableObject {
             selectedStudyCategoryID: nextSelectedID
         )
 
-        persistSettings(nextSettings, apiKey: apiKey)
+        persistSettings(nextSettings, apiKey: apiKey, syncBackendSchedule: false)
+        if !topicKeysToDelete.isEmpty {
+            let remainingRecords = studyRecords.filter { record in
+                !topicKeysToDelete.contains(Self.normalizedCategoryText(for: record.topic))
+            }
+            settingsStore.replaceStudyRecords(remainingRecords)
+            reloadStudyRecordsFromStore(refreshRooms: true)
+        }
+        studyIDsToDelete.forEach { studyRoomState.removeStudy(id: $0) }
+        Task { [weak self] in
+            await self?.deleteBackendStudiesIfPossible(studyIDsToDelete)
+        }
         if didDeleteActiveCategory {
             if let selectedCategory {
                 activateStudyContext(forTopic: selectedCategory.title)
@@ -3495,6 +3511,37 @@ final class AppState: ObservableObject {
                 settingsStore.saveQuestion(nil)
                 settingsStore.saveLastAnswer("")
                 settingsStore.saveGradingResult(nil)
+            }
+        }
+    }
+
+    private func backendStudyIDIfLoaded(for category: StudyCategory) -> Int? {
+        if let studyID = Int(category.id) {
+            return studyID
+        }
+
+        let topicKey = Self.normalizedCategoryText(for: category.title)
+        return backendStudyRooms.first {
+            Self.normalizedCategoryText(for: $0.topic) == topicKey
+        }?.id
+    }
+
+    private func deleteBackendStudiesIfPossible(_ studyIDs: Set<Int>) async {
+        guard !studyIDs.isEmpty else {
+            return
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "delete-study") else {
+            log(.warning, "백엔드 등록이 없어 학습 삭제 동기화를 건너뛰었습니다. studyIDs=\(studyIDs.sorted())")
+            return
+        }
+
+        for studyID in studyIDs.sorted() {
+            do {
+                try await remotePushBackendClient.deleteStudy(registration: registration, studyID: studyID)
+                log(.info, "백엔드 학습을 삭제했습니다. id=\(studyID)")
+            } catch {
+                log(.warning, "백엔드 학습 삭제 실패: id=\(studyID), error=\(error.localizedDescription)")
             }
         }
     }

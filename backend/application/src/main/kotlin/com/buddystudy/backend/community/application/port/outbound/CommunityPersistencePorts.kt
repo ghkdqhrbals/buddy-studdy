@@ -27,6 +27,7 @@ interface ReportPort {
 interface QuestionSearchPort {
     fun save(entity: QuestionSearchEntity): QuestionSearchEntity
     fun deleteByQuestionId(questionId: Long): Long
+    fun deleteByStudyId(studyId: Long, userId: Long): Long
     fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult
     fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
     fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?

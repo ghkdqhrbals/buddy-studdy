@@ -125,6 +125,21 @@ class RequestLoggingFilterTest {
     }
 
     @Test
+    fun `json-like header values are logged as nested json`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("GET", "/api/v1/records")
+        request.addHeader("Cf-Visitor", """{"scheme":"https"}""")
+        val response = MockHttpServletResponse()
+        val chain = FilterChain { _, servletResponse ->
+            servletResponse.writer.write("""{"ok":true}""")
+        }
+
+        filter.doFilter(request, response, chain)
+
+        assertThat(output.out).contains("\"Cf-Visitor\":{\"scheme\":\"https\"}")
+        assertThat(output.out).doesNotContain("\"Cf-Visitor\":\"{\\\"scheme\\\":\\\"https\\\"}\"")
+    }
+
+    @Test
     fun `large json response body is logged as truncated metadata`(output: CapturedOutput) {
         val request = MockHttpServletRequest("GET", "/api/v1/records")
         val response = MockHttpServletResponse()

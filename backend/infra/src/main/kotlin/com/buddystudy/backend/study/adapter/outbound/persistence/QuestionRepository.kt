@@ -273,6 +273,10 @@ interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort
     @Modifying
     @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")
     override fun softDelete(@Param("id") id: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
+
+    @Modifying
+    @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.studyId = :studyId and q.userId = :userId and q.deletedAt is null")
+    override fun softDeleteByStudyId(@Param("studyId") studyId: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
 }
 
 interface PendingCountRow {

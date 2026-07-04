@@ -10,6 +10,8 @@ import org.springframework.data.repository.query.Param
 import java.time.Instant
 
 interface StudyRepository : JpaRepository<StudyEntity, Long>, StudyPort {
+    override fun deleteByIdAndUserId(id: Long, userId: Long): Long
+
     override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?

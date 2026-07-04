@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
@@ -32,6 +33,7 @@ class StudySyncService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val questionSearch: QuestionSearchSyncManager,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
     override fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
@@ -95,6 +97,19 @@ class StudySyncService(
             saved.reschedule(now)
         }
         return saved.toStudyRoomResponse()
+    }
+
+    @Transactional
+    override fun deleteStudy(principal: Principal, studyId: Long) {
+        studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val now = Instant.now()
+        questionSearch.removeIndexedStudy(studyId, principal.userId)
+        questions.softDeleteByStudyId(studyId, principal.userId, now)
+        val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)
+        if (deleted == 0L) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        }
     }
 
     private fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {

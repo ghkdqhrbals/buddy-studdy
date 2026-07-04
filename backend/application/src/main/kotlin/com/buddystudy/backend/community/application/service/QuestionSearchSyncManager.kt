@@ -61,6 +61,10 @@ class QuestionSearchSyncManager(
         search.deleteByQuestionId(questionId)
     }
 
+    fun removeIndexedStudy(studyId: Long, userId: Long) {
+        search.deleteByStudyId(studyId, userId)
+    }
+
     fun findIndexedQuestion(questionId: Long, language: String): QuestionSearchEntity? =
         search.findByQuestionIdAndLanguage(questionId, language)
 

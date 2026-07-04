@@ -299,6 +299,8 @@ class QuestionSchedulerTest {
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         override fun save(entity: StudyEntity): StudyEntity = entity
+        override fun deleteByIdAndUserId(id: Long, userId: Long): Long =
+            if (rows.removeIf { it.id == id && it.userId == userId }) 1 else 0
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId }
@@ -461,6 +463,7 @@ class QuestionSchedulerTest {
         override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {

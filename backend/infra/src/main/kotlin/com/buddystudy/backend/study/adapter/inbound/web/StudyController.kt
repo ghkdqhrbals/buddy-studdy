@@ -73,6 +73,20 @@ class StudyController(
         authentication: Authentication,
     ): StudyRoomResponse = study.createStudy(body, authentication)
 
+    @Operation(summary = "Delete a study", description = "Deletes one study room owned by the authenticated user and removes its related questions from active records/search.")
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Study deleted."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Study not found or not owned by the user."),
+    )
+    @DeleteMapping("/studies/{studyId}")
+    @RequirePermission(Permissions.STUDY_DELETE)
+    fun deleteStudy(
+        @Parameter(description = "Study room id.", example = "42")
+        @PathVariable studyId: Long,
+        authentication: Authentication,
+    ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
+
     @Operation(
         summary = "List my graded records",
         description = "Returns the authenticated user's graded or completed study records. Ungraded active questions are intentionally managed from the study room and should not be shown as regular history.",

@@ -28,4 +28,5 @@ interface StudyWebPort {
     fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
     fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
     fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
+    fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
 }

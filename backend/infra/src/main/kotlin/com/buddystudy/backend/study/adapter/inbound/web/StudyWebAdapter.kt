@@ -76,5 +76,10 @@ class StudyWebAdapter(
             ),
         )
 
+    override fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit> {
+        studySyncUseCase.deleteStudy(authentication.principalOrThrow(), studyId)
+        return ResponseEntity.noContent().build()
+    }
+
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

@@ -75,6 +75,10 @@ struct StudyRoomStateStore {
         }
     }
 
+    mutating func removeStudy(id studyID: Int) {
+        rooms.removeAll { $0.id == studyID }
+    }
+
     mutating func applyAnsweredRecord(_ record: StudyRecord) {
         rooms = rooms.map { room in
             guard room.pendingQuestion?.id == record.id else {

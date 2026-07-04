@@ -11,6 +11,7 @@ import java.util.Optional
 
 interface StudyPort {
     fun save(entity: StudyEntity): StudyEntity
+    fun deleteByIdAndUserId(id: Long, userId: Long): Long
     fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
@@ -44,6 +45,7 @@ interface QuestionPort {
     fun findPublicAnsweredById(id: Long): QuestionEntity?
     fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     fun softDelete(id: Long, userId: Long, now: Instant): Int
+    fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int
 }
 
 interface QuestionStatsPort {

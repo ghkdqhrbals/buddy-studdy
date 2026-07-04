@@ -34,6 +34,7 @@ interface BrowseRecordsUseCase {
 interface StudySyncUseCase {
     fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
     fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
+    fun deleteStudy(principal: Principal, studyId: Long)
 }
 
 interface RunQuestionScheduleUseCase {
