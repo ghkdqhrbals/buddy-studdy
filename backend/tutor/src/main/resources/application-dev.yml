@@ -18,6 +18,11 @@ spring:
         enabled: true
         region: ap-northeast-2
 
+management:
+  health:
+    mail:
+      enabled: false
+
 springdoc:
   api-docs:
     enabled: ${ENABLE_OPENAPI_DOCS:true}
