@@ -268,44 +268,67 @@ select {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+.pager-shell {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0e141d;
 }
 
 .page-size-control {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px 0 10px;
+  border-right: 1px solid var(--border);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 680;
+  text-transform: uppercase;
 }
 
 .page-size-control select {
-  height: 30px;
-  min-width: 74px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0 8px;
-  background: #0e141d;
+  height: 24px;
+  min-width: 58px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: var(--surface-2);
   color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .pagination-controls {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  height: 100%;
+  gap: 0;
 }
 
 .pagination-controls button {
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  height: 100%;
+  min-width: 52px;
+  border: 0;
+  border-radius: 0;
   padding: 0 10px;
   color: var(--text);
-  background: var(--surface-2);
+  background: transparent;
   font-size: 12px;
   font-weight: 650;
+}
+
+.pagination-controls button:not(:disabled):hover {
+  background: var(--blue-soft);
+  color: #dbeafe;
 }
 
 .pagination-controls button:disabled {
@@ -315,7 +338,13 @@ select {
 }
 
 .pagination-controls span {
-  min-width: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 72px;
+  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -323,15 +352,27 @@ select {
 }
 
 .status-message {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: rgba(18, 24, 33, 0.72);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 680;
 }
 
 .status-message[data-tone="loading"] {
+  border-color: rgba(96, 165, 250, 0.38);
+  background: rgba(96, 165, 250, 0.1);
   color: var(--blue);
 }
 
 .status-message[data-tone="error"] {
+  border-color: rgba(251, 113, 133, 0.45);
+  background: rgba(251, 113, 133, 0.1);
   color: var(--red);
 }
 

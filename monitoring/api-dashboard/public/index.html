@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070603" />
+    <link rel="stylesheet" href="/styles.css?v=2026070604" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -102,18 +102,20 @@
             <p id="rangeLabel">Loading...</p>
           </div>
           <div class="panel-actions">
-            <label class="page-size-control">
-              Rows
-              <select id="pageSizeSelect">
-                <option value="50">50</option>
-                <option value="100" selected>100</option>
-                <option value="200">200</option>
-              </select>
-            </label>
-            <div class="pagination-controls" aria-label="Request pages">
-              <button id="prevPageButton" type="button" disabled>Previous</button>
-              <span id="pageInfo">Page 1</span>
-              <button id="nextPageButton" type="button" disabled>Next</button>
+            <div class="pager-shell">
+              <label class="page-size-control">
+                <span>Rows</span>
+                <select id="pageSizeSelect">
+                  <option value="50">50</option>
+                  <option value="100" selected>100</option>
+                  <option value="200">200</option>
+                </select>
+              </label>
+              <div class="pagination-controls" aria-label="Request pages">
+                <button id="prevPageButton" type="button" disabled>Prev</button>
+                <span id="pageInfo">Page 1</span>
+                <button id="nextPageButton" type="button" disabled>Next</button>
+              </div>
             </div>
             <div id="statusMessage" class="status-message">Ready</div>
           </div>
@@ -141,6 +143,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070603"></script>
+    <script type="module" src="/app.js?v=2026070604"></script>
   </body>
 </html>
