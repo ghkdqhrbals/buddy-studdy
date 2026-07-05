@@ -18,6 +18,7 @@ const state = {
   selectedRange: null,
   timeline: [],
   drag: null,
+  loadingRequests: false,
   pageSize: 100,
   pageIndex: 0,
   pageCursors: [null],
@@ -32,6 +33,8 @@ const els = {
   requestIdInput: document.querySelector("#requestIdInput"),
   refreshButton: document.querySelector("#refreshButton"),
   requestRows: document.querySelector("#requestRows"),
+  requestLoadingOverlay: document.querySelector("#requestLoadingOverlay"),
+  detailPanel: document.querySelector("#detailPanel"),
   statusMessage: document.querySelector("#statusMessage"),
   rangeLabel: document.querySelector("#rangeLabel"),
   totalCount: document.querySelector("#totalCount"),
@@ -99,43 +102,50 @@ async function loadRequests() {
 }
 
 async function loadRequestPage({ refreshTimeline = false } = {}) {
-  setStatus("Loading API requests...", "loading");
+  state.loadingRequests = true;
+  renderLoadingState();
+  setStatus("Loading", "loading");
   const range = timeRange();
-  const pageEndNs = state.pageCursors[state.pageIndex] ?? range.endNs;
-  const pageQuery = lokiQueryRange(DEFAULT_QUERY, {
-    ...range,
-    endNs: pageEndNs,
-    limit: state.pageSize + 1,
-  });
-  const [timelineValues, values] = await Promise.all([
-    refreshTimeline ? loadTimeline(range) : Promise.resolve(state.timeline),
-    pageQuery,
-  ]);
-  state.timeline = timelineValues;
-  const parsed = values
-    .map((value) => {
-      try {
-        return parseApiExchange(value);
-      } catch (error) {
-        console.warn("Failed to parse api_exchange", error, value);
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => Number(BigInt(b.nanoseconds) - BigInt(a.nanoseconds)));
-  state.hasNextPage = parsed.length > state.pageSize;
-  state.requests = parsed.slice(0, state.pageSize);
-  const oldest = state.requests[state.requests.length - 1];
-  if (oldest && state.hasNextPage) {
-    state.pageCursors[state.pageIndex + 1] = (BigInt(oldest.nanoseconds) - 1n).toString();
-  } else {
-    state.pageCursors.length = state.pageIndex + 1;
+  try {
+    const pageEndNs = state.pageCursors[state.pageIndex] ?? range.endNs;
+    const pageQuery = lokiQueryRange(DEFAULT_QUERY, {
+      ...range,
+      endNs: pageEndNs,
+      limit: state.pageSize + 1,
+    });
+    const [timelineValues, values] = await Promise.all([
+      refreshTimeline ? loadTimeline(range) : Promise.resolve(state.timeline),
+      pageQuery,
+    ]);
+    state.timeline = timelineValues;
+    const parsed = values
+      .map((value) => {
+        try {
+          return parseApiExchange(value);
+        } catch (error) {
+          console.warn("Failed to parse api_exchange", error, value);
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => Number(BigInt(b.nanoseconds) - BigInt(a.nanoseconds)));
+    state.hasNextPage = parsed.length > state.pageSize;
+    state.requests = parsed.slice(0, state.pageSize);
+    const oldest = state.requests[state.requests.length - 1];
+    if (oldest && state.hasNextPage) {
+      state.pageCursors[state.pageIndex + 1] = (BigInt(oldest.nanoseconds) - 1n).toString();
+    } else {
+      state.pageCursors.length = state.pageIndex + 1;
+    }
+    state.detailCache.clear();
+    state.expandedRequestId = "";
+    applyFilters();
+    render();
+    setStatus("Ready", "ready");
+  } finally {
+    state.loadingRequests = false;
+    renderLoadingState();
   }
-  state.detailCache.clear();
-  state.expandedRequestId = "";
-  applyFilters();
-  render();
-  setStatus("Ready", "ready");
 }
 
 function resetPagination() {
@@ -179,6 +189,8 @@ function render() {
   renderRangeLabel();
   renderTimeline();
   renderRows();
+  renderDetailPanel();
+  renderLoadingState();
 }
 
 function renderSummary() {
@@ -205,16 +217,22 @@ function renderRangeLabel() {
 
 function renderRows() {
   els.requestRows.innerHTML = "";
-  if (state.filtered.length === 0) {
+  if (state.filtered.length === 0 && !state.loadingRequests) {
     els.requestRows.append(els.emptyTemplate.content.cloneNode(true));
     return;
   }
   for (const request of state.filtered) {
     els.requestRows.append(renderRequestRow(request));
-    if (state.expandedRequestId === request.requestId) {
-      els.requestRows.append(renderDetailRow(request));
-    }
   }
+}
+
+function renderLoadingState() {
+  els.requestLoadingOverlay.hidden = !state.loadingRequests;
+  els.requestRows.classList.toggle("is-loading", state.loadingRequests);
+  els.refreshButton.disabled = state.loadingRequests;
+  els.prevPageButton.disabled = state.loadingRequests || state.pageIndex === 0;
+  els.nextPageButton.disabled = state.loadingRequests || !state.hasNextPage;
+  els.pageSizeSelect.disabled = state.loadingRequests;
 }
 
 function renderRequestRow(request) {
@@ -236,18 +254,34 @@ function renderRequestRow(request) {
   return row;
 }
 
-function renderDetailRow(request) {
-  const wrapper = document.createElement("section");
-  wrapper.className = "detail-row";
-  wrapper.setAttribute("aria-label", `Request details for ${request.requestId}`);
+function renderDetailPanel() {
+  if (!state.expandedRequestId) {
+    els.detailPanel.hidden = true;
+    els.detailPanel.innerHTML = "";
+    return;
+  }
+  const request = state.filtered.find((candidate) => candidate.requestId === state.expandedRequestId);
+  if (!request) {
+    els.detailPanel.hidden = true;
+    els.detailPanel.innerHTML = "";
+    return;
+  }
+
+  els.detailPanel.hidden = false;
+  els.detailPanel.setAttribute("aria-label", `Request details for ${request.requestId}`);
   const details = state.detailCache.get(request.requestId);
   if (!details) {
-    wrapper.innerHTML = `<div class="detail-loading">Loading connected logs...</div>`;
-    return wrapper;
+    els.detailPanel.innerHTML = `
+      <div class="detail-loading">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <strong>Loading connected logs</strong>
+      </div>
+    `;
+    return;
   }
 
   const error = details.errors[0];
-  wrapper.innerHTML = `
+  els.detailPanel.innerHTML = `
     <div class="detail-toolbar">
       <div>
         <strong>${escapeHtml(request.method)} ${escapeHtml(request.path)}</strong>
@@ -262,11 +296,10 @@ function renderDetailRow(request) {
     ${error ? stackPanel(error) : ""}
     ${relatedLogsPanel(details.logs)}
   `;
-  wrapper.querySelector("[data-copy]")?.addEventListener("click", (event) => {
+  els.detailPanel.querySelector("[data-copy]")?.addEventListener("click", (event) => {
     event.stopPropagation();
     navigator.clipboard?.writeText(request.requestId);
   });
-  return wrapper;
 }
 
 function jsonPanel(title, value) {
@@ -308,7 +341,7 @@ function relatedLogsPanel(logs) {
 
 async function toggleDetails(request) {
   state.expandedRequestId = state.expandedRequestId === request.requestId ? "" : request.requestId;
-  renderRows();
+  render();
   if (!state.expandedRequestId || state.detailCache.has(request.requestId) || state.loadingDetails.has(request.requestId)) {
     return;
   }
@@ -320,7 +353,7 @@ async function toggleDetails(request) {
     state.detailCache.set(request.requestId, { logs: [{ ...request, level: "ERROR", message: error.message }], errors: [] });
   } finally {
     state.loadingDetails.delete(request.requestId);
-    renderRows();
+    render();
   }
 }
 

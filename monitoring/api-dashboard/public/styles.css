@@ -396,11 +396,59 @@ select {
 }
 
 .request-table {
+  position: relative;
   width: 100%;
+  min-height: 84px;
 }
 
 .performance-table {
   width: 100%;
+}
+
+.request-rows.is-loading {
+  opacity: 0.48;
+  pointer-events: none;
+}
+
+.table-loading-overlay {
+  position: absolute;
+  inset: 38px 0 0;
+  display: grid;
+  place-items: center;
+  min-height: 88px;
+  background: linear-gradient(180deg, rgba(14, 20, 29, 0.82), rgba(14, 20, 29, 0.64));
+  backdrop-filter: blur(2px);
+  z-index: 2;
+}
+
+.table-loading-overlay[hidden] {
+  display: none;
+}
+
+.table-loading-overlay > div,
+.detail-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #dbeafe;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(96, 165, 250, 0.24);
+  border-top-color: var(--blue);
+  border-radius: 999px;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .request-row {
@@ -520,17 +568,14 @@ select {
   background: rgba(148, 163, 184, 0.12);
 }
 
-.detail-row {
+.detail-panel {
   padding: 16px;
-  border-bottom: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border-soft);
   background: #0e141d;
 }
 
 .detail-loading {
   height: 90px;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: 10px;
 }
