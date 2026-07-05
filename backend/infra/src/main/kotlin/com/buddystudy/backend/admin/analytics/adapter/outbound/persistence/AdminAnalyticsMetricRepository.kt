@@ -18,10 +18,6 @@ class AdminAnalyticsMetricPersistenceAdapter(
     @param:Qualifier("adminAnalyticsJdbcTemplate")
     private val jdbc: NamedParameterJdbcTemplate,
 ) : AdminAnalyticsMetricPort {
-    init {
-        ensureSchema()
-    }
-
     fun ensureSchema() {
         jdbc.jdbcTemplate.execute(
             """
@@ -43,6 +39,7 @@ class AdminAnalyticsMetricPersistenceAdapter(
     }
 
     override fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
+        ensureSchema()
         val now = Timestamp.from(Instant.now())
         points.forEach { point ->
             val params = MapSqlParameterSource()
@@ -103,6 +100,7 @@ class AdminAnalyticsMetricPersistenceAdapter(
     }
 
     override fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> {
+        ensureSchema()
         val params = MapSqlParameterSource()
             .addValue("startDate", Date.valueOf(startDate))
             .addValue("endDate", Date.valueOf(endDate))
