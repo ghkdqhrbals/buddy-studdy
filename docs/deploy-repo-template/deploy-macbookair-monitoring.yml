@@ -10,7 +10,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy PLG Receiver
-    runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
     timeout-minutes: 15
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
