@@ -1543,45 +1543,32 @@ final class AppState: ObservableObject {
         updateVisibleQuestion: Bool = true,
         preserveLocalSettings: Bool = true
     ) async -> Bool {
+        _ = preserveLocalSettings
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "state") else {
             return false
         }
 
         do {
-            let (recordsPage, studyPage) = try await performWithBackendIdentityRecovery(
+            let studyPage = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "state",
                 operation: { recoveredRegistration in
-                    let recordsPage = try await remotePushBackendClient.fetchRecords(
+                    try await remotePushBackendClient.fetchStudy(
                         registration: recoveredRegistration,
-                        limit: settings.sanitizedMaxHistoryCount,
-                        offset: 0,
-                        query: "",
-                        language: settings.appLanguage
-                    )
-                    let studyPage = try await remotePushBackendClient.fetchStudy(
-                        registration: recoveredRegistration,
-                        limit: 100,
+                        limit: 500,
                         offset: 0,
                         query: ""
                     )
-                    return (recordsPage, studyPage)
                 }
             )
             applyBackendStudyPage(studyPage)
-            let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
-            applyBackendRecordsPage(
-                recordsPage,
-                pendingRecords: pendingRecords,
-                updateVisibleQuestion: updateVisibleQuestion,
-                preserveLocalQuestionState: preserveLocalSettings
-            )
+            let pendingCount = studyPage.studies.compactMap(\.pendingQuestion).count
             statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 기록 데이터를 동기화했습니다. records=\(recordsPage.records.count), pending=\(pendingRecords.count)")
+            log(.info, "백엔드 학습 데이터를 동기화했습니다. studies=\(studyPage.studies.count), pending=\(pendingCount)")
             return true
         } catch {
-            log(.warning, "백엔드 기록 데이터 동기화 실패: \(error.localizedDescription)")
+            log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
             return false
         }
     }
