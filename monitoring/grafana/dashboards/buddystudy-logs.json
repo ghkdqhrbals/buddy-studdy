@@ -340,27 +340,7 @@
           "options": {
             "source": "Line",
             "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": false,
-            "keepTime": true
-          }
-        },
-        {
-          "id": "extractFields",
-          "options": {
-            "source": "line",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": false,
-            "keepTime": true
-          }
-        },
-        {
-          "id": "extractFields",
-          "options": {
-            "source": "NewField",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "regexp": "method=(?P<method>\\S+) path=(?P<path>\\S+) status=(?P<status>\\d+) durationMs=(?P<durationMs>[0-9.]+) errorCode=(?P<errorCode>.*?) reason=(?P<reason>.*?) clientIp=(?P<clientIp>\\S*) requestId=(?P<requestId>[0-9a-fA-F-]+)",
             "replace": false,
             "keepTime": true
           }
@@ -370,7 +350,6 @@
           "options": {
             "excludeByName": {
               "Line": true,
-              "line": true,
               "NewField": true,
               "labels": true,
               "labelTypes": true,
