@@ -54,6 +54,20 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    fun `device registration returns credentials and access token JSON`() {
+        val response = post(
+            "/api/v1/devices/register",
+            """{"apnsToken":"","platform":"ios","apnsEnvironment":"sandbox","language":"ko","timezone":"Asia/Seoul"}""",
+        )
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.body()).contains("\"deviceId\":\"dev-")
+        assertThat(response.body()).contains("\"clientSecret\":\"sec-")
+        assertThat(response.body()).contains("\"accessToken\":\"")
+        assertThat(response.body()).contains("\"accessTokenExpiresAt\":\"")
+    }
+
+    @Test
     fun `protected endpoints return unified auth error without access token`() {
         val response = get("/api/v1/profile")
 

@@ -42,6 +42,15 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
                 MemberCategory.INVOKE_DECLARED_METHODS,
             )
         }
+        jacksonResponseTypes.forEach { type ->
+            hints.reflection().registerType(
+                TypeReference.of(type),
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.INVOKE_DECLARED_METHODS,
+            )
+        }
         hints.resources().registerPattern("org/hibernate/**/*.i18n.properties")
         hints.resources().registerPattern("db/migration/*.sql")
     }
@@ -144,5 +153,16 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "kotlin.collections.EmptyList",
         "kotlin.collections.EmptyMap",
         "kotlin.collections.EmptySet",
+    )
+
+    private val jacksonResponseTypes = listOf(
+        "com.buddystudy.backend.auth.application.model.AccessTokenResponse",
+        "com.buddystudy.backend.auth.application.model.DeviceRegisterResponse",
+        "com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse",
+        "com.buddystudy.backend.auth.application.model.GoogleLoginResponse",
+        "com.buddystudy.backend.auth.application.model.LoggedInDeviceResponse",
+        "com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse",
+        "com.buddystudy.backend.profile.application.model.CommunityPageAccess",
+        "com.buddystudy.backend.profile.application.model.UserProfileResponse",
     )
 }
