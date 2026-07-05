@@ -115,6 +115,7 @@ class QuestionSearchSyncManagerTest {
         }
 
         override fun deleteByQuestionId(questionId: Long): Long = rows.removeAll { it.questionId == questionId }.let { if (it) 1 else 0 }
+        override fun deleteByStudyId(studyId: Long, userId: Long): Long = rows.removeAll { it.userId == userId }.let { if (it) 1 else 0 }
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }
@@ -156,5 +157,6 @@ class QuestionSearchSyncManagerTest {
         override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
     }
 }

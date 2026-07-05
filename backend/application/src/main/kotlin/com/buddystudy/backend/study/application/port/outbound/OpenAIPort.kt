@@ -22,6 +22,7 @@ interface OpenAIPort {
         val key: String,
         val name: String,
         val angles: List<QuestionCoverageAngle>,
+        val children: List<QuestionCoverageConcept> = emptyList(),
     )
 
     data class QuestionCoverageAngle(

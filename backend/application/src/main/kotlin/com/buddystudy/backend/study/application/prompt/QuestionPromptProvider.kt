@@ -18,6 +18,7 @@ data class QuestionDiversityGuide(
 data class QuestionCoverageGuide(
     val conceptName: String,
     val angleName: String,
+    val conceptPath: String = conceptName,
 )
 
 @Component
@@ -92,6 +93,7 @@ class QuestionPromptProvider {
         val tutorPrompt = customPrompt.ifBlank { "None" }
         val coverageText = coverage?.let {
             """
+                Focus concept path: ${it.conceptPath}
                 Focus concept: ${it.conceptName}
                 Question angle: ${it.angleName}
             """.trimIndent()

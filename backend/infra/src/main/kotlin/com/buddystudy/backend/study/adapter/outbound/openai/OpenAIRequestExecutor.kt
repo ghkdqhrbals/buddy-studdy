@@ -68,8 +68,9 @@ class OpenAIRequestExecutor(
         customPrompt: String,
     ): List<OpenAIPort.QuestionCoverageConcept> {
         val prompt = """
-            Split this study topic into 8 to 12 practical learning concepts.
-            For each concept, provide 3 to 5 question angles.
+            Split this study topic into a practical learning concept tree.
+            Concepts may contain recursive children with no fixed maximum depth.
+            Put 3 to 5 question angles on leaf concepts.
             Topic: ${topic.ifBlank { "general study" }}
             Level: ${level.coerceIn(1, 10)}/10
             Extra tutor prompt: ${customPrompt.ifBlank { "None" }}
@@ -80,6 +81,7 @@ class OpenAIRequestExecutor(
                 {
                   "key": "stable_snake_case",
                   "name": "Human readable concept",
+                  "children": [],
                   "angles": [
                     {"key": "stable_snake_case", "name": "Human readable angle"}
                   ]
@@ -91,22 +93,7 @@ class OpenAIRequestExecutor(
             Prompt(UserMessage(prompt), options(apiKey, model, json = true))
         )
         val text = response.result?.output?.text ?: "{}"
-        val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
-        val concepts = parsed["concepts"] as? List<*> ?: return emptyList()
-        return concepts.mapNotNull { raw ->
-            val concept = raw as? Map<*, *> ?: return@mapNotNull null
-            val key = concept["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val name = concept["name"]?.toString()?.takeIf { it.isNotBlank() } ?: key
-            val angles = (concept["angles"] as? List<*>)
-                ?.mapNotNull { rawAngle ->
-                    val angle = rawAngle as? Map<*, *> ?: return@mapNotNull null
-                    val angleKey = angle["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                    val angleName = angle["name"]?.toString()?.takeIf { it.isNotBlank() } ?: angleKey
-                    OpenAIPort.QuestionCoverageAngle(angleKey, angleName)
-                }
-                .orEmpty()
-            OpenAIPort.QuestionCoverageConcept(key, name, angles)
-        }
+        return parseQuestionCoverageConcepts(text)
     }
 
     fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
@@ -155,4 +142,30 @@ class OpenAIRequestExecutor(
         }
         return builder.build()
     }
+}
+
+private val coverageBlueprintMapper = jacksonObjectMapper()
+
+internal fun parseQuestionCoverageConcepts(text: String): List<OpenAIPort.QuestionCoverageConcept> {
+    val parsed: Map<String, Any?> = coverageBlueprintMapper.readValue(text.ifBlank { "{}" })
+    val concepts = parsed["concepts"] as? List<*> ?: return emptyList()
+    return concepts.mapNotNull(::parseQuestionCoverageConcept)
+}
+
+private fun parseQuestionCoverageConcept(raw: Any?): OpenAIPort.QuestionCoverageConcept? {
+    val concept = raw as? Map<*, *> ?: return null
+    val key = concept["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return null
+    val name = concept["name"]?.toString()?.takeIf { it.isNotBlank() } ?: key
+    val angles = (concept["angles"] as? List<*>)
+        ?.mapNotNull { rawAngle ->
+            val angle = rawAngle as? Map<*, *> ?: return@mapNotNull null
+            val angleKey = angle["key"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val angleName = angle["name"]?.toString()?.takeIf { it.isNotBlank() } ?: angleKey
+            OpenAIPort.QuestionCoverageAngle(angleKey, angleName)
+        }
+        .orEmpty()
+    val children = (concept["children"] as? List<*>)
+        ?.mapNotNull(::parseQuestionCoverageConcept)
+        .orEmpty()
+    return OpenAIPort.QuestionCoverageConcept(key, name, angles, children)
 }
