@@ -5,11 +5,15 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.http.MediaType
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
 
+@ExtendWith(OutputCaptureExtension::class)
 class ErrorHandlerTest {
     private val handler = ErrorHandler()
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
@@ -29,6 +33,21 @@ class ErrorHandlerTest {
         assertThat(json["error"]["message"].asText()).isEqualTo("Internal backend error.")
         assertThat(json["error"]["requestId"].asText()).isEqualTo("req-1")
         assertThat(json["error"]["reason"].asText()).isEqualTo("IllegalStateException: database unavailable")
+    }
+
+    @Test
+    fun `fallback internal server error logs exception stack trace`(output: CapturedOutput) {
+        val request = MockHttpServletRequest("POST", "/api/v1/devices/register").apply {
+            setAttribute("requestId", "req-stack")
+            addHeader("X-Forwarded-For", "203.0.113.10")
+        }
+
+        handler.fallback(IllegalStateException("jwt init failed"), request)
+
+        assertThat(output.all).contains("api_error requestId=req-stack")
+        assertThat(output.all).contains("clientIp=203.0.113.10")
+        assertThat(output.all).contains("path=/api/v1/devices/register")
+        assertThat(output.all).contains("java.lang.IllegalStateException: jwt init failed")
     }
 
     @Test

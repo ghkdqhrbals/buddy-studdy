@@ -69,11 +69,27 @@ class ErrorHandler {
         )
 
     @ExceptionHandler(Exception::class)
-    fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        json(
+    fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
+        val body = envelope(
+            ApiErrorCode.INTERNAL_SERVER_ERROR,
+            "Internal backend error.",
             HttpStatus.INTERNAL_SERVER_ERROR,
-            envelope(ApiErrorCode.INTERNAL_SERVER_ERROR, "Internal backend error.", HttpStatus.INTERNAL_SERVER_ERROR, request, error.toReason()),
+            request,
+            error.toReason(),
         )
+        log.error(
+            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
+            body.error.requestId,
+            ClientIpResolver.resolve(request),
+            request.method,
+            request.requestURI,
+            HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            ApiErrorCode.INTERNAL_SERVER_ERROR.name,
+            body.error.message,
+            error,
+        )
+        return json(HttpStatus.INTERNAL_SERVER_ERROR, body)
+    }
 
     private fun json(status: HttpStatus, body: ApiErrorEnvelope): ResponseEntity<ApiErrorEnvelope> =
         ResponseEntity.status(status)
