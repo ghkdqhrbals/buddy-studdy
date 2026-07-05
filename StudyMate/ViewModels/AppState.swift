@@ -2313,16 +2313,52 @@ final class AppState: ObservableObject {
             settingsStore.saveRemotePushRegistration(result.registration)
             isCommunitySignedIn = true
             settingsStore.saveIsCommunitySignedIn(true)
-            await refreshPageAccess(reason: "google-login")
-            await refreshBackendStudyIfPossible(
-                updateVisibleQuestion: true,
-                preserveLocalSettings: false
-            )
-            await loadCommunityQuestions(reset: true, userInitiated: true)
+            communityErrorMessage = nil
+            refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
         } catch {
             communityErrorMessage = communityErrorMessage(for: error)
             log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
         }
+    }
+
+    private func refreshCommunitySignInDataInBackground(
+        registration: RemotePushRegistration,
+        reason: String
+    ) {
+        Task { [weak self] in
+            await self?.refreshCommunitySignInData(registration: registration, reason: reason)
+        }
+    }
+
+    private func refreshCommunitySignInData(
+        registration: RemotePushRegistration,
+        reason: String
+    ) async {
+        do {
+            let state = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "page-access-\(reason)",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchAccess(registration: recoveredRegistration)
+                }
+            )
+            backendAccessState = state
+            isCommunitySignedIn = state.user.status != "ANONYMOUS"
+            settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+            reconcileVisiblePageAccessAfterRefresh()
+        } catch {
+            if Self.isUnauthorizedBackendError(error) {
+                clearStoredBackendAccessToken()
+                resetCommunitySignInState()
+            }
+            log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+        }
+
+        await refreshBackendStudyIfPossible(
+            updateVisibleQuestion: true,
+            preserveLocalSettings: false
+        )
+        await loadCommunityQuestions(reset: true, userInitiated: false)
     }
 
     func requestEmailVerificationCode(email: String) async -> Bool {
