@@ -22,7 +22,7 @@
     {
       "title": "API Performance",
       "type": "link",
-      "url": "/d/buddystudy-api-performance/buddystudy-api-performance?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}",
+      "url": "/d/buddystudy-api-performance/buddystudy-api-performance?orgId=1&from=${__from}&to=${__to}",
       "includeVars": false,
       "keepTime": true
     }
@@ -40,55 +40,14 @@
       {
         "current": {
           "selected": false,
-          "text": "{container=~\".+\"}",
-          "value": "{container=~\".+\"}"
-        },
-        "hide": 0,
-        "label": "Loki Stream Selector",
-        "name": "labelSelector",
-        "options": [],
-        "query": "{container=~\".+\"}",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "baseFilters": [],
-        "datasource": {
-          "type": "loki",
-          "uid": "buddystudy-loki"
-        },
-        "filters": [],
-        "hide": 0,
-        "label": "Label Filters",
-        "name": "labelFilters",
-        "skipUrlSync": false,
-        "type": "adhoc"
-      },
-      {
-        "current": {
-          "selected": false,
           "text": "__select_request_id__",
           "value": "__select_request_id__"
         },
-        "hide": 0,
+        "hide": 2,
         "label": "Selected API Request",
         "name": "requestId",
         "options": [],
         "query": "__select_request_id__",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "hide": 0,
-        "label": "LogQL Pipeline",
-        "name": "logqlSearch",
-        "options": [],
-        "query": "",
         "skipUrlSync": false,
         "type": "textbox"
       }
@@ -160,7 +119,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 170
+                "value": 180
               }
             ]
           },
@@ -179,7 +138,7 @@
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -193,14 +152,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 420
+                "value": 500
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -214,14 +173,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 85
+                "value": 90
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -242,7 +201,7 @@
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -256,14 +215,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 230
+                "value": 260
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -277,14 +236,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 760
+                "value": 900
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -298,14 +257,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 210
+                "value": 220
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -319,14 +278,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 330
+                "value": 360
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -338,7 +297,7 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 16
+        "h": 18
       },
       "id": 1,
       "options": {
@@ -368,8 +327,8 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
-          "maxLines": 500,
+          "expr": "{container=~\".+\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
+          "maxLines": 1000,
           "queryType": "range",
           "refId": "A"
         }
@@ -444,9 +403,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 18,
         "w": 12,
-        "h": 9
+        "h": 10
       },
       "id": 6,
       "options": {
@@ -474,7 +433,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
+          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
           "refId": "A"
         }
       ],
@@ -513,9 +472,9 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 18,
         "w": 12,
-        "h": 9
+        "h": 10
       },
       "id": 7,
       "options": {
@@ -543,7 +502,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
+          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
           "refId": "A"
         }
       ],
@@ -582,7 +541,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 28,
         "w": 24,
         "h": 8
       },
@@ -612,7 +571,7 @@
           "editorMode": "code",
           "maxLines": 3,
           "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\"",
+          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\"",
           "refId": "A"
         }
       ],
@@ -650,9 +609,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 36,
         "w": 24,
-        "h": 14
+        "h": 16
       },
       "id": 2,
       "options": {
@@ -678,7 +637,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" | line_format \"{{__line__}}\"",
+          "expr": "{container=~\".+\"} |= \"${requestId:raw}\"",
           "maxLines": 500,
           "queryType": "range",
           "refId": "A"

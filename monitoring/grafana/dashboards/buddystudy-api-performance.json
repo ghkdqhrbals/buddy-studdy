@@ -22,7 +22,7 @@
     {
       "title": "API Logs",
       "type": "link",
-      "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}",
+      "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}",
       "includeVars": false,
       "keepTime": true
     }
@@ -36,63 +36,7 @@
     "loki"
   ],
   "templating": {
-    "list": [
-      {
-        "current": {
-          "selected": false,
-          "text": "{container=~\".+\"}",
-          "value": "{container=~\".+\"}"
-        },
-        "hide": 0,
-        "label": "Loki Stream Selector",
-        "name": "labelSelector",
-        "options": [],
-        "query": "{container=~\".+\"}",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "baseFilters": [],
-        "datasource": {
-          "type": "loki",
-          "uid": "buddystudy-loki"
-        },
-        "filters": [],
-        "hide": 0,
-        "label": "Label Filters",
-        "name": "labelFilters",
-        "skipUrlSync": false,
-        "type": "adhoc"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "__select_request_id__",
-          "value": "__select_request_id__"
-        },
-        "hide": 0,
-        "label": "Selected API Request",
-        "name": "requestId",
-        "options": [],
-        "query": "__select_request_id__",
-        "skipUrlSync": false,
-        "type": "textbox"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "",
-          "value": ""
-        },
-        "hide": 0,
-        "label": "LogQL Pipeline",
-        "name": "logqlSearch",
-        "options": [],
-        "query": "",
-        "skipUrlSync": false,
-        "type": "textbox"
-      }
-    ]
+    "list": []
   },
   "time": {
     "from": "now-1h",
@@ -278,7 +222,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.50, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p50",
           "queryType": "range",
           "refId": "P50"
@@ -289,7 +233,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.90, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p90",
           "queryType": "range",
           "refId": "P90"
@@ -300,7 +244,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.95, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p95",
           "queryType": "range",
           "refId": "P95"
@@ -311,7 +255,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.99, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p99",
           "queryType": "range",
           "refId": "P99"
@@ -444,7 +388,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time(${labelSelector:raw} ${logqlSearch:raw} [$__interval]))",
+          "expr": "sum(count_over_time({container=~\".+\"} [$__interval]))",
           "legendFormat": "logs",
           "queryType": "range",
           "refId": "A"
