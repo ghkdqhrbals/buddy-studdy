@@ -7,7 +7,7 @@ import {
   percentile,
   safeJson,
   statusTone,
-} from "./logs.js";
+} from "./logs.js?v=2026070606";
 
 const state = {
   requests: [],
