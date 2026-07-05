@@ -3624,6 +3624,7 @@ final class AppState: ObservableObject {
             return
         }
 
+        var deletedStudyIDs = Set<Int>()
         for studyID in studyIDs.sorted() {
             do {
                 try await performWithBackendIdentityRecovery(
@@ -3633,10 +3634,22 @@ final class AppState: ObservableObject {
                         try await remotePushBackendClient.deleteStudy(registration: recoveredRegistration, studyID: studyID)
                     }
                 )
+                deletedStudyIDs.insert(studyID)
                 log(.info, "백엔드 학습을 삭제했습니다. id=\(studyID)")
             } catch {
                 log(.warning, "백엔드 학습 삭제 실패: id=\(studyID), error=\(error.localizedDescription)")
             }
+        }
+
+        guard !deletedStudyIDs.isEmpty else {
+            return
+        }
+
+        let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        if didRefresh {
+            locallyDeletedStudyIDs.subtract(deletedStudyIDs)
+            locallyDeletedStudyTopicKeys.subtract(topicKeys)
+            log(.info, "백엔드 학습 삭제 후 내 학습을 다시 동기화했습니다. deletedStudyIDs=\(deletedStudyIDs.sorted())")
         }
     }
 
