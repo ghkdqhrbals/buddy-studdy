@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070606" />
+    <link rel="stylesheet" href="/styles.css?v=2026070607" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -87,7 +87,10 @@
             <h2>Timeline</h2>
             <p id="timelineRangeLabel">Drag on the graph to select a time range.</p>
           </div>
-          <button id="resetTimelineButton" type="button" disabled>Reset range</button>
+          <div class="timeline-actions">
+            <span id="timelineCountLabel">Count - · Peak -</span>
+            <button id="resetTimelineButton" type="button" disabled>Reset range</button>
+          </div>
         </div>
         <div class="timeline-canvas-wrap">
           <canvas id="timelineCanvas" height="150"></canvas>
@@ -143,6 +146,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070606"></script>
+    <script type="module" src="/app.js?v=2026070607"></script>
   </body>
 </html>

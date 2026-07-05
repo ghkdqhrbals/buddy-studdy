@@ -7,7 +7,7 @@ import {
   percentile,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070606";
+} from "./logs.js?v=2026070607";
 
 const state = {
   requests: [],
@@ -42,6 +42,7 @@ const els = {
   timelineCanvas: document.querySelector("#timelineCanvas"),
   timelineSelection: document.querySelector("#timelineSelection"),
   timelineRangeLabel: document.querySelector("#timelineRangeLabel"),
+  timelineCountLabel: document.querySelector("#timelineCountLabel"),
   resetTimelineButton: document.querySelector("#resetTimelineButton"),
   pageSizeSelect: document.querySelector("#pageSizeSelect"),
   prevPageButton: document.querySelector("#prevPageButton"),
@@ -355,9 +356,14 @@ function renderTimeline() {
   const padding = { top: 18, right: 18, bottom: 30, left: 42 };
   const width = rect.width - padding.left - padding.right;
   const height = rect.height - padding.top - padding.bottom;
-  const points = state.timeline;
-  const max = Math.max(1, ...points.map((point) => point.count));
   const range = timeRange();
+  const points = state.timeline
+    .map((point) => ({ ...point, count: Number.isFinite(point.count) ? point.count : 0 }))
+    .filter((point) => point.ms >= range.startMs && point.ms <= range.endMs);
+  const visiblePoints = points.filter((point) => point.count > 0);
+  const total = visiblePoints.reduce((sum, point) => sum + point.count, 0);
+  const max = Math.max(1, ...visiblePoints.map((point) => point.count));
+  els.timelineCountLabel.textContent = `Count ${total} · Peak ${max}`;
 
   context.strokeStyle = "#263244";
   context.lineWidth = 1;
@@ -379,14 +385,25 @@ function renderTimeline() {
     context.fillText(String(value), padding.left - 10, y);
   }
 
-  if (points.length > 0) {
-    const barWidth = Math.max(2, width / points.length - 1);
-    for (const point of points) {
+  if (visiblePoints.length > 0) {
+    const barWidth = Math.min(18, Math.max(4, width / Math.max(1, points.length) - 1));
+    const plotStart = padding.left;
+    const plotEnd = padding.left + width;
+    for (const point of visiblePoints) {
       const x = padding.left + ((point.ms - range.startMs) / Math.max(1, range.endMs - range.startMs)) * width;
-      const barHeight = Math.max(1, (point.count / max) * height);
-      context.fillStyle = point.count > 0 ? "#60a5fa" : "#1d2735";
-      context.fillRect(x, padding.top + height - barHeight, barWidth, barHeight);
+      const safeX = Math.min(Math.max(x - barWidth / 2, plotStart), plotEnd - barWidth);
+      const barHeight = Math.max(4, (point.count / max) * height);
+      const gradient = context.createLinearGradient(0, padding.top, 0, padding.top + height);
+      gradient.addColorStop(0, "#93c5fd");
+      gradient.addColorStop(1, "#2563eb");
+      context.fillStyle = gradient;
+      context.fillRect(safeX, padding.top + height - barHeight, barWidth, barHeight);
     }
+  } else {
+    context.fillStyle = "#718096";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("No requests in this time range", padding.left + width / 2, padding.top + height / 2);
   }
 
   context.fillStyle = "#98a6b8";
