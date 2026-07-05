@@ -50,21 +50,24 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "requestId"
+              "options": "time"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 300
-              },
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
               {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open connected logs",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__value.raw}"
-                  }
-                ]
+                "id": "custom.width",
+                "value": 82
               }
             ]
           },
@@ -76,7 +79,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 360
+                "value": 330
               }
             ]
           },
@@ -88,7 +91,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 90
+                "value": 82
               }
             ]
           },
@@ -107,19 +110,89 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "method"
+              "options": "errorCode"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 90
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 520
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "clientIp"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "requestId"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "requestId"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 9,
+        "h": 14,
         "w": 24,
         "x": 0,
         "y": 0
@@ -127,7 +200,7 @@
       "id": 1,
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
+        "cellHeight": "md",
         "footer": {
           "show": false,
           "reducer": [
@@ -152,8 +225,8 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | line_format \"method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} requestId={{.requestId}}\"",
-          "maxLines": 300,
+          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\",\\\"clientIp\\\":\\\"(?P<clientIp>[^\\\"]*)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+).*?(?:\\\"code\\\":\\\"(?P<errorCode>[^\\\"]+)\\\")?.*?(?:\\\"reason\\\":\\\"(?P<reason>[^\\\"]+)\\\")?\" | line_format \"method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}\"",
+          "maxLines": 500,
           "queryType": "range",
           "refId": "A"
         }
@@ -165,7 +238,7 @@
           "options": {
             "source": "Line",
             "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
             "replace": true,
             "keepTime": true
           }
@@ -180,7 +253,10 @@
               "path": 2,
               "status": 3,
               "durationMs": 4,
-              "requestId": 5
+              "errorCode": 5,
+              "reason": 6,
+              "clientIp": 7,
+              "requestId": 8
             },
             "renameByName": {
               "Time": "time"
@@ -219,10 +295,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 13,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 14
       },
       "id": 2,
       "options": {
@@ -248,7 +324,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\"",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" | line_format \"{{__line__}}\"",
           "maxLines": 500,
           "queryType": "range",
           "refId": "A"
@@ -256,7 +332,8 @@
       ],
       "title": "Connected Logs",
       "transformations": [],
-      "type": "logs"
+      "type": "logs",
+      "description": "Shows logs connected to the selected API request id. Click the path or request id in API Requests."
     },
     {
       "datasource": {
@@ -320,7 +397,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 27
       },
       "id": 3,
       "options": {
@@ -386,7 +463,7 @@
         "h": 16,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 32
       },
       "id": 4,
       "options": {
@@ -466,7 +543,7 @@
           "value": "__select_request_id__"
         },
         "hide": 0,
-        "label": "Selected Request ID",
+        "label": "Selected API Request",
         "name": "requestId",
         "options": [],
         "query": "__select_request_id__",
@@ -519,5 +596,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 3
+  "version": 5
 }
