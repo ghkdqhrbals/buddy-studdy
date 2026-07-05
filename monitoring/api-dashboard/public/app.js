@@ -382,6 +382,35 @@ function renderTimeline() {
   }
 }
 
+function beginTimelineDrag(clientX) {
+  state.drag = { startX: clientX, currentX: clientX };
+  updateSelectionOverlay();
+}
+
+function moveTimelineDrag(clientX) {
+  if (!state.drag) return;
+  state.drag.currentX = clientX;
+  updateSelectionOverlay();
+}
+
+function endTimelineDrag(clientX) {
+  if (!state.drag) return;
+  state.drag.currentX = clientX;
+  const startMs = timelineXToMs(state.drag.startX);
+  const endMs = timelineXToMs(state.drag.currentX);
+  state.drag = null;
+  els.timelineSelection.hidden = true;
+  if (Math.abs(endMs - startMs) < 10_000) {
+    renderTimeline();
+    return;
+  }
+  state.selectedRange = {
+    startMs: Math.min(startMs, endMs),
+    endMs: Math.max(startMs, endMs),
+  };
+  loadRequests().catch((error) => setStatus(error.message, "error"));
+}
+
 function timelineXToMs(clientX) {
   const rect = els.timelineCanvas.getBoundingClientRect();
   const paddingLeft = 42;
@@ -477,30 +506,22 @@ function bindEvents() {
   });
   els.timelineCanvas.addEventListener("pointerdown", (event) => {
     els.timelineCanvas.setPointerCapture(event.pointerId);
-    state.drag = { startX: event.clientX, currentX: event.clientX };
-    updateSelectionOverlay();
+    beginTimelineDrag(event.clientX);
   });
   els.timelineCanvas.addEventListener("pointermove", (event) => {
-    if (!state.drag) return;
-    state.drag.currentX = event.clientX;
-    updateSelectionOverlay();
+    moveTimelineDrag(event.clientX);
   });
   els.timelineCanvas.addEventListener("pointerup", (event) => {
-    if (!state.drag) return;
-    state.drag.currentX = event.clientX;
-    const startMs = timelineXToMs(state.drag.startX);
-    const endMs = timelineXToMs(state.drag.currentX);
-    state.drag = null;
-    els.timelineSelection.hidden = true;
-    if (Math.abs(endMs - startMs) < 10_000) {
-      renderTimeline();
-      return;
-    }
-    state.selectedRange = {
-      startMs: Math.min(startMs, endMs),
-      endMs: Math.max(startMs, endMs),
-    };
-    loadRequests().catch((error) => setStatus(error.message, "error"));
+    endTimelineDrag(event.clientX);
+  });
+  els.timelineCanvas.addEventListener("mousedown", (event) => {
+    beginTimelineDrag(event.clientX);
+  });
+  window.addEventListener("mousemove", (event) => {
+    moveTimelineDrag(event.clientX);
+  });
+  window.addEventListener("mouseup", (event) => {
+    endTimelineDrag(event.clientX);
   });
   window.addEventListener("resize", () => renderTimeline());
 }
