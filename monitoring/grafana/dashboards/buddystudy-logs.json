@@ -338,10 +338,10 @@
         {
           "id": "extractFields",
           "options": {
-            "source": "NewField",
+            "source": "Line",
             "format": "regexp",
             "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": true,
+            "replace": false,
             "keepTime": true
           }
         },
@@ -349,8 +349,12 @@
           "id": "organize",
           "options": {
             "excludeByName": {
+              "Line": true,
               "NewField": true,
-              "labels": true
+              "labels": true,
+              "labelTypes": true,
+              "tsNs": true,
+              "id": true
             },
             "indexByName": {
               "Time": 0,
