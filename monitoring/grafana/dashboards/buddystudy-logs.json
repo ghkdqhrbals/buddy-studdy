@@ -28,6 +28,147 @@
       },
       "fieldConfig": {
         "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [
+            {
+              "title": "Open request context",
+              "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__field.labels.requestId}"
+            }
+          ],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": true,
+        "enableLogDetails": true,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": true,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | line_format \"{{.method}} {{.path}} status={{.status}} durationMs={{.durationMs}} requestId={{.requestId}}\"",
+          "maxLines": 200,
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "API Requests",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 2,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": true,
+        "enableLogDetails": true,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": true,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "${labelSelector:raw} |~ \"${requestId:raw}\"",
+          "maxLines": 300,
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Request Context Logs",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
           "color": {
             "mode": "palette-classic"
           },
@@ -83,9 +224,9 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 22
       },
-      "id": 1,
+      "id": 3,
       "options": {
         "legend": {
           "calcs": [],
@@ -131,6 +272,7 @@
               "viz": false
             }
           },
+          "links": [],
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -145,12 +287,12 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 18,
+        "h": 16,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 27
       },
-      "id": 2,
+      "id": 4,
       "options": {
         "dedupStrategy": "none",
         "enableInfiniteScrolling": true,
@@ -175,12 +317,12 @@
           "direction": "backward",
           "editorMode": "code",
           "expr": "${labelSelector:raw} ${logqlSearch:raw}",
-          "maxLines": 200,
+          "maxLines": 300,
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Logs",
+      "title": "All Logs",
       "transformations": [],
       "type": "logs"
     }
@@ -220,6 +362,20 @@
         "name": "labelFilters",
         "skipUrlSync": false,
         "type": "adhoc"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": ".+",
+          "value": ".+"
+        },
+        "hide": 0,
+        "label": "Request ID Regex",
+        "name": "requestId",
+        "options": [],
+        "query": ".+",
+        "skipUrlSync": false,
+        "type": "textbox"
       },
       {
         "current": {
@@ -267,5 +423,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 1
+  "version": 2
 }

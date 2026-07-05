@@ -1,6 +1,10 @@
 server:
   port: ${APP_PORT:8080}
 
+logging:
+  pattern:
+    level: "%5p [%X{requestId:-}]"
+
 spring:
   application:
     name: buddystudy-backend
