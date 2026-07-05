@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BuddyStudy API Logs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>API Logs</h1>
+          <p>BuddyStudy request traces, payloads, and related backend logs</p>
+        </div>
+        <nav class="nav-actions">
+          <a href="/" aria-current="page">API Logs</a>
+          <a href="/performance.html">API Performance</a>
+          <a href="/grafana/">Grafana</a>
+        </nav>
+      </header>
+
+      <section class="filters" aria-label="Log filters">
+        <label>
+          Time range
+          <select id="rangeSelect">
+            <option value="900000">Last 15 minutes</option>
+            <option value="3600000" selected>Last 1 hour</option>
+            <option value="21600000">Last 6 hours</option>
+            <option value="86400000">Last 24 hours</option>
+          </select>
+        </label>
+        <label>
+          Method
+          <select id="methodSelect">
+            <option value="">All</option>
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+          </select>
+        </label>
+        <label>
+          Status
+          <select id="statusSelect">
+            <option value="">All</option>
+            <option value="2">2xx</option>
+            <option value="3">3xx</option>
+            <option value="4">4xx</option>
+            <option value="5">5xx</option>
+          </select>
+        </label>
+        <label class="path-filter">
+          Path search
+          <input id="pathInput" type="search" placeholder="/api/v1/devices/register" autocomplete="off" />
+        </label>
+        <label class="path-filter">
+          Request ID
+          <input id="requestIdInput" type="search" placeholder="trace id" autocomplete="off" />
+        </label>
+        <button id="refreshButton" type="button">Refresh</button>
+      </section>
+
+      <section class="summary-grid" aria-label="API performance summary">
+        <article>
+          <span>Total</span>
+          <strong id="totalCount">-</strong>
+        </article>
+        <article>
+          <span>Errors</span>
+          <strong id="errorCount">-</strong>
+        </article>
+        <article>
+          <span>p95</span>
+          <strong id="p95Latency">-</strong>
+        </article>
+        <article>
+          <span>Slowest</span>
+          <strong id="slowestLatency">-</strong>
+        </article>
+      </section>
+
+      <main class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Requests</h2>
+            <p id="rangeLabel">Loading...</p>
+          </div>
+          <div id="statusMessage" class="status-message">Ready</div>
+        </div>
+
+        <div class="request-table" role="table" aria-label="API request logs">
+          <div class="request-row table-head" role="row">
+            <div role="columnheader">Time</div>
+            <div role="columnheader">Method</div>
+            <div role="columnheader">Path</div>
+            <div role="columnheader">Status</div>
+            <div role="columnheader">Duration</div>
+            <div role="columnheader">Client IP</div>
+            <div role="columnheader">Request ID</div>
+          </div>
+          <div id="requestRows" class="request-rows"></div>
+        </div>
+      </main>
+    </div>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <h3>No API requests</h3>
+        <p>Try widening the time range or clearing filters.</p>
+      </div>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

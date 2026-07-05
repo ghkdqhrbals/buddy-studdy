@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BuddyStudy API Performance</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>API Performance</h1>
+          <p>Latency percentiles grouped by API endpoint</p>
+        </div>
+        <nav class="nav-actions">
+          <a href="/">API Logs</a>
+          <a href="/performance.html" aria-current="page">API Performance</a>
+          <a href="/grafana/">Grafana</a>
+        </nav>
+      </header>
+
+      <section class="filters performance-filters" aria-label="Performance filters">
+        <label>
+          Time range
+          <select id="rangeSelect">
+            <option value="900000">Last 15 minutes</option>
+            <option value="3600000" selected>Last 1 hour</option>
+            <option value="21600000">Last 6 hours</option>
+            <option value="86400000">Last 24 hours</option>
+          </select>
+        </label>
+        <label>
+          Method
+          <select id="methodSelect">
+            <option value="">All</option>
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+          </select>
+        </label>
+        <label>
+          Path search
+          <input id="pathInput" type="search" placeholder="/api/v1/devices/register" autocomplete="off" />
+        </label>
+        <button id="refreshButton" type="button">Refresh</button>
+      </section>
+
+      <section class="summary-grid" aria-label="Performance summary">
+        <article>
+          <span>API Groups</span>
+          <strong id="apiGroupCount">-</strong>
+        </article>
+        <article>
+          <span>Total Requests</span>
+          <strong id="totalCount">-</strong>
+        </article>
+        <article>
+          <span>Error Rate</span>
+          <strong id="errorRate">-</strong>
+        </article>
+        <article>
+          <span>Worst p99</span>
+          <strong id="worstP99">-</strong>
+        </article>
+      </section>
+
+      <main class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>API Latency Percentiles</h2>
+            <p id="rangeLabel">Grouped by method and path</p>
+          </div>
+          <span id="statusMessage" data-tone="loading">Loading...</span>
+        </div>
+
+        <div class="performance-table" role="table" aria-label="API latency percentile table">
+          <div class="performance-row table-head" role="row">
+            <div role="columnheader">Method</div>
+            <div role="columnheader">Path</div>
+            <div role="columnheader">Count</div>
+            <div role="columnheader">Errors</div>
+            <div role="columnheader">p50</div>
+            <div role="columnheader">p90</div>
+            <div role="columnheader">p95</div>
+            <div role="columnheader">p99</div>
+            <div role="columnheader">Max</div>
+          </div>
+          <div id="performanceRows"></div>
+        </div>
+      </main>
+
+      <template id="emptyTemplate">
+        <div class="empty-state">No API requests found for this range.</div>
+      </template>
+    </div>
+
+    <script type="module" src="/performance.js"></script>
+  </body>
+</html>

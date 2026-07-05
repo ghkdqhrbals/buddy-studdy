@@ -8,9 +8,3 @@ datasources:
     url: http://buddystudy-loki:3100
     isDefault: true
     editable: true
-    jsonData:
-      derivedFields:
-        - name: requestId
-          matcherRegex: 'requestId[":= ]+"?([0-9a-fA-F-]{36})'
-          url: '/d/buddystudy-logs/buddystudy-logs?orgId=1&var-requestId=$${__value.raw}'
-          urlDisplayLabel: 'Open connected logs'

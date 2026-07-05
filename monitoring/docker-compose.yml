@@ -1,4 +1,18 @@
 services:
+  api-dashboard:
+    image: nginx:1.27-alpine
+    container_name: buddystudy-api-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./api-dashboard/public:/usr/share/nginx/html:ro
+      - ./api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - loki
+    networks:
+      - monitoring
+
   loki:
     image: grafana/loki:3.3.2
     container_name: buddystudy-loki
@@ -18,11 +32,13 @@ services:
     container_name: buddystudy-grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://grafana.lowfidev.cloud/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ${HOME}/buddystudy/monitoring/grafana/data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -34,4 +50,4 @@ services:
 
 networks:
   monitoring:
-    name: buddystudy-monitoring
+    name: buddystudy-monitoring-stack
