@@ -13,8 +13,8 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
     timeout-minutes: 15
     env:
-      MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/data/buddystudy/monitoring' }}
-      DASHBOARD_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/docs/observability
+      MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
+      MONITORING_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/monitoring
       GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3000' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
 
@@ -31,6 +31,7 @@ jobs:
           fi
 
           monitoring_root="$(eval echo "${MONITORING_ROOT}")"
+
           mkdir -p \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
@@ -40,88 +41,39 @@ jobs:
             "${monitoring_root}/loki/config" \
             "${monitoring_root}/gateway"
 
-          cat > "${monitoring_root}/grafana/provisioning/datasources/loki.yml" <<'YAML'
-          apiVersion: 1
-
-          datasources:
-            - name: BuddyStudy Loki
-              uid: buddystudy-loki
-              type: loki
-              access: proxy
-              url: http://buddystudy-loki:3100
-              isDefault: true
-              editable: true
-          YAML
-
-          cat > "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml" <<'YAML'
-          apiVersion: 1
-
-          providers:
-            - name: BuddyStudy
-              orgId: 1
-              folder: BuddyStudy
-              type: file
-              disableDeletion: false
-              updateIntervalSeconds: 30
-              allowUiUpdates: true
-              options:
-                path: /var/lib/grafana/dashboards
-          YAML
-
           curl -fsSL \
-            "${DASHBOARD_SOURCE_BASE}/grafana-loki-search-dashboard.json" \
-            -o "${monitoring_root}/grafana/dashboards/grafana-loki-search-dashboard.json"
+            "${MONITORING_SOURCE_BASE}/grafana/provisioning/datasources/loki.yml" \
+            -o "${monitoring_root}/grafana/provisioning/datasources/loki.yml"
           curl -fsSL \
-            "${DASHBOARD_SOURCE_BASE}/grafana-api-latency-dashboard.json" \
-            -o "${monitoring_root}/grafana/dashboards/grafana-api-latency-dashboard.json"
-
-          cat > "${monitoring_root}/loki/config/loki.yml" <<'YAML'
-          auth_enabled: false
-
-          server:
-            http_listen_port: 3100
-
-          common:
-            path_prefix: /loki
-            storage:
-              filesystem:
-                chunks_directory: /loki/chunks
-                rules_directory: /loki/rules
-            replication_factor: 1
-            ring:
-              kvstore:
-                store: inmemory
-
-          query_range:
-            results_cache:
-              cache:
-                embedded_cache:
-                  enabled: true
-                  max_size_mb: 100
-
-          schema_config:
-            configs:
-              - from: 2024-01-01
-                store: tsdb
-                object_store: filesystem
-                schema: v13
-                index:
-                  prefix: index_
-                  period: 24h
-
-          limits_config:
-            retention_period: 168h
-            allow_structured_metadata: false
-
-          compactor:
-            working_directory: /loki/compactor
-            retention_enabled: true
-            delete_request_store: filesystem
-          YAML
+            "${MONITORING_SOURCE_BASE}/grafana/provisioning/dashboards/dashboards.yml" \
+            -o "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
+          curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-logs.json" \
+            -o "${monitoring_root}/grafana/dashboards/buddystudy-logs.json"
+          curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
+            -o "${monitoring_root}/loki/config/loki.yml"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+
+          docker_config_backup=""
+          if [ -f "${HOME}/.docker/config.json" ] && grep -q '"credsStore"[[:space:]]*:' "${HOME}/.docker/config.json"; then
+            docker_config_backup="$(mktemp)"
+            cp "${HOME}/.docker/config.json" "${docker_config_backup}"
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path.home() / ".docker/config.json"
+          data = json.loads(path.read_text())
+          data.pop("credsStore", None)
+          path.write_text(json.dumps(data, indent=2))
+          PY
+          fi
           docker pull grafana/loki:3.3.2
-          docker pull grafana/grafana:11.4.0
+          docker pull grafana/grafana:12.3.0
+          if [ -n "${docker_config_backup}" ]; then
+            cp "${docker_config_backup}" "${HOME}/.docker/config.json"
+          fi
 
           docker rm -f buddystudy-loki buddystudy-grafana >/dev/null 2>&1 || true
 
@@ -143,11 +95,11 @@ jobs:
             -e GF_SECURITY_ADMIN_USER=admin \
             -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
             -e GF_USERS_ALLOW_SIGN_UP=false \
-            -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/grafana-loki-search-dashboard.json \
+            -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/buddystudy-logs.json \
             -v "${monitoring_root}/grafana/data:/var/lib/grafana" \
             -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
-            grafana/grafana:11.4.0
+            grafana/grafana:12.3.0
 
           echo "MacBook Air PLG receiver is running."
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}"
