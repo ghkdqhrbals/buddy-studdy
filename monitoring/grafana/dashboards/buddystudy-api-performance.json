@@ -110,7 +110,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "api"
+              "options": "method"
             },
             "properties": [
               {
@@ -119,7 +119,23 @@
               },
               {
                 "id": "custom.width",
-                "value": 430
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 560
               }
             ]
           },
@@ -222,7 +238,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.50, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p50",
           "queryType": "range",
           "refId": "P50"
@@ -233,7 +249,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.90, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p90",
           "queryType": "range",
           "refId": "P90"
@@ -244,7 +260,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.95, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p95",
           "queryType": "range",
           "refId": "P95"
@@ -255,7 +271,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.99, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p99",
           "queryType": "range",
           "refId": "P99"
@@ -281,11 +297,12 @@
               "__name__": true
             },
             "indexByName": {
-              "api": 0,
-              "P50": 1,
-              "P90": 2,
-              "P95": 3,
-              "P99": 4
+              "method": 0,
+              "path": 1,
+              "P50": 2,
+              "P90": 3,
+              "P95": 4,
+              "P99": 5
             },
             "renameByName": {
               "P50": "p50",
