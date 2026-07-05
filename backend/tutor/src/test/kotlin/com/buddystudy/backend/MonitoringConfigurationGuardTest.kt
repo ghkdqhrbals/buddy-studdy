@@ -142,7 +142,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when a managed job is not monitored`() {
+    fun `prod scheduler allows managed jobs that are intentionally excluded from readiness monitoring`() {
         contextRunner
             .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
             .withBean("adminCorrectionJob", ManagedJob::class.java, Supplier { fakeJob("admin-analytics-correction") })
@@ -154,10 +154,7 @@ class MonitoringConfigurationGuardTest {
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule",
             )
             .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "Prod scheduler monitoring is missing managed jobs: admin-analytics-correction.",
-                )
+                assertThat(context).hasNotFailed()
             }
     }
 

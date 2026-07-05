@@ -178,7 +178,6 @@ class ReadinessCheckerTest {
                 "question-push-outbox-dispatch",
                 "user-stats-refresh",
                 "admin-analytics-recent",
-                "admin-analytics-correction",
             ),
         )
     }

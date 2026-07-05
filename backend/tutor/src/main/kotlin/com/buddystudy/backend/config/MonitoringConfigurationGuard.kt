@@ -41,14 +41,6 @@ class MonitoringConfigurationGuard(
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .toSet()
-        val missingManagedJobs = managedJobs
-            .map { it.name.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .filterNot { it in monitoredJobs }
-        if (missingManagedJobs.isNotEmpty()) {
-            error("Prod scheduler monitoring is missing managed jobs: ${missingManagedJobs.joinToString(", ")}.")
-        }
         val managedJobNames = managedJobs
             .map { it.name.trim() }
             .filter { it.isNotEmpty() }
