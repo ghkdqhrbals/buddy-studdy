@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070608" />
+    <link rel="stylesheet" href="/styles.css?v=2026070609" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -21,15 +21,29 @@
       </header>
 
       <section class="filters" aria-label="Log filters">
-        <label>
-          Time range
-          <select id="rangeSelect">
-            <option value="900000">Last 15 minutes</option>
-            <option value="3600000" selected>Last 1 hour</option>
-            <option value="21600000">Last 6 hours</option>
-            <option value="86400000">Last 24 hours</option>
-          </select>
-        </label>
+        <div class="time-range-filter">
+          <label>
+            Time range
+            <select id="rangeSelect">
+              <option value="900000">Last 15 minutes</option>
+              <option value="3600000" selected>Last 1 hour</option>
+              <option value="21600000">Last 6 hours</option>
+              <option value="86400000">Last 24 hours</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <div id="customRangeFields" class="custom-range-fields" hidden>
+            <label>
+              From
+              <input id="customStartInput" type="datetime-local" step="1" />
+            </label>
+            <label>
+              To
+              <input id="customEndInput" type="datetime-local" step="1" />
+            </label>
+            <button id="applyCustomRangeButton" type="button">Apply</button>
+          </div>
+        </div>
         <label>
           Method
           <select id="methodSelect">
@@ -153,6 +167,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070608"></script>
+    <script type="module" src="/app.js?v=2026070609"></script>
   </body>
 </html>

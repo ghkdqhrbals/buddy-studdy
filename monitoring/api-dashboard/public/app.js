@@ -9,6 +9,8 @@ import {
   statusTone,
 } from "./logs.js?v=2026070607";
 
+const DEFAULT_RANGE_MS = 3_600_000;
+
 const state = {
   requests: [],
   filtered: [],
@@ -27,6 +29,10 @@ const state = {
 
 const els = {
   rangeSelect: document.querySelector("#rangeSelect"),
+  customRangeFields: document.querySelector("#customRangeFields"),
+  customStartInput: document.querySelector("#customStartInput"),
+  customEndInput: document.querySelector("#customEndInput"),
+  applyCustomRangeButton: document.querySelector("#applyCustomRangeButton"),
   methodSelect: document.querySelector("#methodSelect"),
   statusSelect: document.querySelector("#statusSelect"),
   pathInput: document.querySelector("#pathInput"),
@@ -73,7 +79,9 @@ function timeRange() {
     };
   }
   const endMs = nowMs();
-  const startMs = endMs - Number(els.rangeSelect.value);
+  const selectedDuration = Number(els.rangeSelect.value);
+  const durationMs = Number.isFinite(selectedDuration) ? selectedDuration : DEFAULT_RANGE_MS;
+  const startMs = endMs - durationMs;
   return { startMs, endMs, startNs: ns(startMs), endNs: ns(endMs) };
 }
 
@@ -209,6 +217,7 @@ function renderRangeLabel() {
   els.rangeLabel.textContent = `${count} visible requests, ${suffix}`;
   els.timelineRangeLabel.textContent = `${formatKstShort(range.startMs)} - ${formatKstShort(range.endMs)} · drag to zoom`;
   els.resetTimelineButton.disabled = !state.selectedRange;
+  syncCustomRangeControls(range);
   els.pageInfo.textContent = `Page ${state.pageIndex + 1}`;
   els.prevPageButton.disabled = state.pageIndex === 0;
   els.nextPageButton.disabled = !state.hasNextPage;
@@ -233,6 +242,9 @@ function renderLoadingState() {
   els.prevPageButton.disabled = state.loadingRequests || state.pageIndex === 0;
   els.nextPageButton.disabled = state.loadingRequests || !state.hasNextPage;
   els.pageSizeSelect.disabled = state.loadingRequests;
+  els.customStartInput.disabled = state.loadingRequests;
+  els.customEndInput.disabled = state.loadingRequests;
+  els.applyCustomRangeButton.disabled = state.loadingRequests;
 }
 
 function renderRequestRow(request) {
@@ -475,11 +487,25 @@ function endTimelineDrag(clientX) {
     renderTimeline();
     return;
   }
-  state.selectedRange = {
-    startMs: Math.min(startMs, endMs),
-    endMs: Math.max(startMs, endMs),
-  };
+  applyCustomRange(Math.min(startMs, endMs), Math.max(startMs, endMs), "graph");
+}
+
+function applyCustomRange(startMs, endMs, source) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    setStatus("Invalid time range", "error");
+    return;
+  }
+  state.selectedRange = { startMs, endMs };
+  els.rangeSelect.value = "custom";
+  syncCustomRangeControls(state.selectedRange, { force: true });
+  setStatus(source === "graph" ? "Time range selected" : "Custom time range applied", "ready");
   loadRequests().catch((error) => setStatus(error.message, "error"));
+}
+
+function resetToDefaultRange() {
+  state.selectedRange = null;
+  els.rangeSelect.value = String(DEFAULT_RANGE_MS);
+  syncCustomRangeControls(timeRange(), { force: true });
 }
 
 function timelineXToMs(clientX) {
@@ -534,6 +560,31 @@ function formatKstAxis(ms) {
   }).format(new Date(ms));
 }
 
+function formatDatetimeLocal(ms) {
+  const date = new Date(ms);
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 19);
+}
+
+function parseDatetimeLocal(value) {
+  if (!value) return NaN;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : NaN;
+}
+
+function syncCustomRangeControls(range, { force = false } = {}) {
+  const isCustom = els.rangeSelect.value === "custom" || Boolean(state.selectedRange);
+  els.customRangeFields.hidden = !isCustom;
+  if (isCustom) {
+    els.rangeSelect.value = "custom";
+    const isEditing = document.activeElement === els.customStartInput || document.activeElement === els.customEndInput;
+    if (force || !isEditing) {
+      els.customStartInput.value = formatDatetimeLocal(range.startMs);
+      els.customEndInput.value = formatDatetimeLocal(range.endMs);
+    }
+  }
+}
+
 function setStatus(message, tone) {
   els.statusMessage.textContent = message;
   els.statusMessage.dataset.tone = tone;
@@ -552,7 +603,14 @@ function bindEvents() {
   for (const element of [els.rangeSelect, els.methodSelect, els.statusSelect]) {
     element.addEventListener("change", () => {
       if (element === els.rangeSelect) {
-        state.selectedRange = null;
+        if (els.rangeSelect.value === "custom") {
+          const range = timeRange();
+          state.selectedRange = { startMs: range.startMs, endMs: range.endMs };
+          syncCustomRangeControls(state.selectedRange, { force: true });
+        } else {
+          state.selectedRange = null;
+          syncCustomRangeControls(timeRange(), { force: true });
+        }
         loadRequests().catch((error) => setStatus(error.message, "error"));
       } else {
         applyFilters();
@@ -584,9 +642,27 @@ function bindEvents() {
     loadRequests().catch((error) => setStatus(error.message, "error"));
   });
   els.resetTimelineButton.addEventListener("click", () => {
-    state.selectedRange = null;
+    resetToDefaultRange();
     loadRequests().catch((error) => setStatus(error.message, "error"));
   });
+  els.applyCustomRangeButton.addEventListener("click", () => {
+    applyCustomRange(
+      parseDatetimeLocal(els.customStartInput.value),
+      parseDatetimeLocal(els.customEndInput.value),
+      "manual"
+    );
+  });
+  for (const element of [els.customStartInput, els.customEndInput]) {
+    element.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      applyCustomRange(
+        parseDatetimeLocal(els.customStartInput.value),
+        parseDatetimeLocal(els.customEndInput.value),
+        "manual"
+      );
+    });
+  }
   els.timelineCanvas.addEventListener("pointerdown", (event) => {
     els.timelineCanvas.setPointerCapture(event.pointerId);
     beginTimelineDrag(event.clientX);

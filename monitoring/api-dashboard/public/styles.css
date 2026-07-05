@@ -97,7 +97,7 @@ select {
 
 .filters {
   display: grid;
-  grid-template-columns: 160px 120px 110px minmax(260px, 1fr) minmax(260px, 1fr) 96px;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1fr) 110px minmax(240px, 1fr) minmax(240px, 1fr) 96px;
   gap: 10px;
   align-items: end;
   padding: 14px;
@@ -109,6 +109,13 @@ select {
 
 .performance-filters {
   grid-template-columns: 160px 120px minmax(320px, 1fr) 120px;
+}
+
+.time-range-filter {
+  display: grid;
+  grid-column: span 2;
+  gap: 8px;
+  align-self: stretch;
 }
 
 .filters label {
@@ -131,6 +138,31 @@ select {
   color: var(--text);
   outline: none;
   font-size: 13px;
+}
+
+.custom-range-fields {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) 74px;
+  gap: 8px;
+  align-items: end;
+  width: 100%;
+}
+
+.custom-range-fields[hidden] {
+  display: none;
+}
+
+.custom-range-fields label {
+  min-width: 0;
+}
+
+.custom-range-fields button {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.custom-range-fields input {
+  font-size: 12px;
 }
 
 .filters select:focus,
