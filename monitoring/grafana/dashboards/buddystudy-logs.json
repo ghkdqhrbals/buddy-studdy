@@ -263,7 +263,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\",\\\"clientIp\\\":\\\"(?P<clientIp>[^\\\"]*)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+).*?(?:\\\"code\\\":\\\"(?P<errorCode>[^\\\"]+)\\\")?.*?(?:\\\"reason\\\":\\\"(?P<reason>[^\\\"]+)\\\")?\" | line_format \"method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}\"",
+          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
           "maxLines": 500,
           "queryType": "range",
           "refId": "A"
@@ -282,9 +282,23 @@
           }
         },
         {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": true,
+            "keepTime": true
+          }
+        },
+        {
           "id": "organize",
           "options": {
-            "excludeByName": {},
+            "excludeByName": {
+              "NewField": true,
+              "Line": true,
+              "labels": true
+            },
             "indexByName": {
               "Time": 0,
               "method": 1,
@@ -457,7 +471,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p50",
           "queryType": "range",
           "refId": "P50"
@@ -468,7 +482,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p90",
           "queryType": "range",
           "refId": "P90"
@@ -479,7 +493,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p95",
           "queryType": "range",
           "refId": "P95"
@@ -490,7 +504,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p99",
           "queryType": "range",
           "refId": "P99"
@@ -598,7 +612,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp \"\\\"request\\\":(?P<request>\\{.*\\}),\\\"response\\\":\" | line_format \"{{.request}}\"",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
           "refId": "A"
         }
       ],
@@ -667,7 +681,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp \"\\\"response\\\":(?P<response>\\{.*\\})\\}$\" | line_format \"{{.response}}\"",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
           "refId": "A"
         }
       ],
