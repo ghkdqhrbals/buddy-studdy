@@ -1578,7 +1578,7 @@ final class AppState: ObservableObject {
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
         let visibleStudies = studyPage.studies.filter { !isLocallyDeletedStudy($0) }
         studyRoomState.replace(with: visibleStudies)
-        guard !isEditingSettings, !visibleStudies.isEmpty else {
+        guard !isEditingSettings else {
             return
         }
 
