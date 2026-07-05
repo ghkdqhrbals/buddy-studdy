@@ -327,7 +327,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
+          "expr": "{container=~\".+\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `{{.method}} {{.path}} {{.status}} {{.durationMs}} {{.errorCode}} {{.reason}}`",
           "maxLines": 1000,
           "queryType": "range",
           "refId": "A"
@@ -336,13 +336,9 @@
       "title": "API Requests",
       "transformations": [
         {
-          "id": "extractFields",
+          "id": "labelsToFields",
           "options": {
-            "source": "Line",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": false,
-            "keepTime": true
+            "mode": "columns"
           }
         },
         {
@@ -354,7 +350,13 @@
               "labels": true,
               "labelTypes": true,
               "tsNs": true,
-              "id": true
+              "id": true,
+              "app": true,
+              "container": true,
+              "host": true,
+              "service_name": true,
+              "stream": true,
+              "__name__": true
             },
             "indexByName": {
               "Time": 0,
