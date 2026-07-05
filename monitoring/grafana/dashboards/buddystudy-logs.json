@@ -21,23 +21,10 @@
   "links": [
     {
       "title": "API Performance",
-      "type": "dashboards",
-      "tags": [
-        "buddystudy-performance"
-      ],
-      "includeVars": true,
-      "keepTime": true,
-      "asDropdown": false
-    },
-    {
-      "title": "Log Search",
-      "type": "dashboards",
-      "tags": [
-        "buddystudy-log-search"
-      ],
-      "includeVars": true,
-      "keepTime": true,
-      "asDropdown": false
+      "type": "link",
+      "url": "/d/buddystudy-api-performance/buddystudy-api-performance?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}",
+      "includeVars": false,
+      "keepTime": true
     }
   ],
   "refresh": "",
@@ -45,7 +32,7 @@
   "tags": [
     "buddystudy",
     "api",
-    "requests",
+    "logs",
     "loki"
   ],
   "templating": {
@@ -136,7 +123,7 @@
   },
   "timezone": "browser",
   "uid": "buddystudy-logs",
-  "title": "BuddyStudy API Requests",
+  "title": "BuddyStudy API Logs",
   "version": 1,
   "panels": [
     {
@@ -191,8 +178,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -212,8 +199,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -233,8 +220,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -254,8 +241,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -275,8 +262,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -296,8 +283,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -317,8 +304,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -338,8 +325,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open request detail",
-                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "title": "Show request, response, and trace logs",
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -351,7 +338,7 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 18
+        "h": 13
       },
       "id": 1,
       "options": {
@@ -400,21 +387,10 @@
           }
         },
         {
-          "id": "extractFields",
-          "options": {
-            "source": "Line",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": true,
-            "keepTime": true
-          }
-        },
-        {
           "id": "organize",
           "options": {
             "excludeByName": {
               "NewField": true,
-              "Line": true,
               "labels": true
             },
             "indexByName": {
@@ -436,6 +412,282 @@
       ],
       "type": "table",
       "description": "Sentry-style API request list. Click any value in a request row to open logs connected by requestId."
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Request JSON extracted from the selected api_exchange requestId.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "id": 6,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": false,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 1,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected Request",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Response JSON extracted from the selected api_exchange requestId.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "id": 7,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": false,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 1,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected Response",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Raw selected api_exchange line for fallback when request/response parsing is not enough.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 7
+      },
+      "id": 8,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 3,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected API Exchange Raw",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 13
+      },
+      "id": 2,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": true,
+        "enableLogDetails": true,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showControls": true,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": false,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" | line_format \"{{__line__}}\"",
+          "maxLines": 500,
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Connected Logs",
+      "transformations": [],
+      "type": "logs",
+      "description": "Shows logs connected to the selected API request id. Click the path or request id in API Requests."
     }
   ]
 }

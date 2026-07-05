@@ -20,28 +20,17 @@
   "graphTooltip": 1,
   "links": [
     {
-      "title": "API Requests",
+      "title": "API Logs",
       "type": "link",
-      "url": "/d/buddystudy-logs/buddystudy-api-requests?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}",
+      "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}",
       "includeVars": false,
       "keepTime": true
-    },
-    {
-      "title": "Log Search",
-      "type": "dashboards",
-      "tags": [
-        "buddystudy-log-search"
-      ],
-      "includeVars": true,
-      "keepTime": true,
-      "asDropdown": false
     }
   ],
   "refresh": "",
   "schemaVersion": 42,
   "tags": [
     "buddystudy",
-    "buddystudy-performance",
     "api",
     "performance",
     "loki"
