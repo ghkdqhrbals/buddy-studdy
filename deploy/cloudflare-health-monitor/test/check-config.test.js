@@ -8,7 +8,7 @@ test("health monitor config accepts required production shape", () => {
 
 test("health monitor config rejects missing runtime essentials", () => {
   const config = validConfig();
-  config.triggers.crons = ["*/5 * * * *"];
+  config.triggers.crons = ["* * * * *"];
   config.kv_namespaces[0].id = "replace-with-kv-namespace-id";
   config.vars.HEALTHCHECK_URL = "http://api.lowfidev.cloud/api/v1/health/readiness";
   config.vars.SERVICE_NAME = "";
@@ -21,7 +21,7 @@ test("health monitor config rejects missing runtime essentials", () => {
 
   const errors = validateConfig(config).join("\n");
 
-  assert.match(errors, /1-minute cron/);
+  assert.match(errors, /5-minute cron/);
   assert.match(errors, /KV namespace/);
   assert.match(errors, /HTTPS URL/);
   assert.match(errors, /SERVICE_NAME/);
@@ -37,7 +37,7 @@ test("health monitor config rejects duplicate cron triggers", () => {
   const config = validConfig();
   config.triggers.crons = ["* * * * *", "*/5 * * * *"];
 
-  assert.match(validateConfig(config).join("\n"), /exactly one 1-minute cron/);
+  assert.match(validateConfig(config).join("\n"), /exactly one 5-minute cron/);
 });
 
 test("health monitor config rejects lightweight health endpoints", () => {
@@ -160,7 +160,7 @@ function validConfig() {
       enabled: true,
       head_sampling_rate: 1,
     },
-    triggers: { crons: ["* * * * *"] },
+    triggers: { crons: ["*/5 * * * *"] },
     vars: {
       HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
       SERVICE_NAME: "BuddyStudy backend",
@@ -168,8 +168,8 @@ function validConfig() {
       FAILURE_THRESHOLD: "2",
       ALERT_REPEAT_SECONDS: "3600",
       STATUS_STALE_AFTER_SECONDS: "180",
-      HEALTHCHECK_TIMEOUT_MS: "8000",
-      SLACK_TIMEOUT_MS: "5000",
+      HEALTHCHECK_TIMEOUT_MS: "3000",
+      SLACK_TIMEOUT_MS: "3000",
     },
     kv_namespaces: [{ binding: "HEALTH_MONITOR_STATE", id: "kv-id" }],
   };

@@ -28,8 +28,8 @@ export function validateConfig(config, options = {}) {
   const crons = config.triggers?.crons;
   if (!Array.isArray(crons) || crons.length === 0) {
     errors.push("At least one Cloudflare Cron Trigger must be configured.");
-  } else if (crons.length !== 1 || crons[0] !== "* * * * *") {
-    errors.push("Health monitor must configure exactly one 1-minute cron `* * * * *` for fast outage alerts without duplicate checks.");
+  } else if (crons.length !== 1 || crons[0] !== "*/5 * * * *") {
+    errors.push("Health monitor must configure exactly one 5-minute cron `*/5 * * * *` to stay within Workers KV free write limits without duplicate checks.");
   }
 
   const namespace = config.kv_namespaces?.find((item) => item.binding === "HEALTH_MONITOR_STATE");
