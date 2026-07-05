@@ -726,6 +726,105 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletingBackendStudyCategorySendsDeleteRequest() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveHasCompletedOnboarding(true)
+        let backend = FakeRemotePushBackendClient()
+        store.saveRemotePushRegistration(backend.registration)
+        store.saveSettings(
+            StudySettings(
+                topic: "Redis",
+                difficulty: .level6,
+                customPrompt: "짧게",
+                intervalMinutes: 15,
+                studyCategories: [
+                    StudyCategory(id: "42", title: "Redis", difficulty: .level6),
+                    StudyCategory(id: "43", title: "Kafka", difficulty: .level7)
+                ],
+                selectedStudyCategoryID: "42"
+            )
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        appState.deleteStudyCategory(id: "42")
+
+        for _ in 0..<20 where backend.deletedStudyIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(backend.deletedStudyIDs, [42])
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Kafka"])
+        XCTAssertEqual(appState.settings.selectedStudyCategoryID, "43")
+    }
+
+    @MainActor
+    func testDeletingLocalStudyCategoryResolvesBackendIDByTopic() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveHasCompletedOnboarding(true)
+        let backend = FakeRemotePushBackendClient()
+        store.saveRemotePushRegistration(backend.registration)
+        let localCategory = StudyCategory(title: "Redis", difficulty: .level6)
+        store.saveSettings(
+            StudySettings(
+                topic: "Redis",
+                difficulty: .level6,
+                customPrompt: "짧게",
+                intervalMinutes: 15,
+                studyCategories: [localCategory],
+                selectedStudyCategoryID: localCategory.id
+            )
+        )
+        let now = Date()
+        backend.fetchedStudyPage = BackendStudyPage(
+            studies: [
+                BackendStudyRoom(
+                    id: 77,
+                    topic: "Redis",
+                    difficultyLevel: 6,
+                    intervalMinutes: 15,
+                    enabled: true,
+                    notificationSound: nil,
+                    customPrompt: "짧게",
+                    openAIModel: StudySettings.defaultOpenAIModel,
+                    maxHistoryCount: 100,
+                    nextDueAt: nil,
+                    lastSentAt: nil,
+                    lastError: nil,
+                    pendingQuestion: nil,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
+            totalCount: 1,
+            limit: 100,
+            offset: 0,
+            serverTime: now
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        appState.deleteStudyCategory(id: localCategory.id)
+
+        for _ in 0..<20 where backend.deletedStudyIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(backend.deletedStudyIDs, [77])
+        XCTAssertTrue(appState.settings.studyCategories.isEmpty)
+    }
+
+    @MainActor
     func testAppStateSavesEditedTopicAsActiveCategory() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3965,6 +4064,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var scheduledModels: [String] = []
     var callEvents: [String] = []
     var createdStudyTopics: [String] = []
+    var deletedStudyIDs: [Int] = []
+    var fetchedStudyPage = BackendStudyPage(studies: [], totalCount: 0, limit: 100, offset: 0, serverTime: Date())
     var createQuestionCallCount = 0
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
@@ -4105,7 +4206,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func deleteStudy(
         registration: RemotePushRegistration,
         studyID: Int
-    ) async throws {}
+    ) async throws {
+        deletedStudyIDs.append(studyID)
+        callEvents.append("deleteStudy:\(studyID)")
+    }
 
     func fetchStudy(
         registration: RemotePushRegistration,
@@ -4114,8 +4218,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         query: String
     ) async throws -> BackendStudyPage {
         BackendStudyPage(
-            studies: [],
-            totalCount: 0,
+            studies: fetchedStudyPage.studies,
+            totalCount: fetchedStudyPage.studies.count,
             limit: limit,
             offset: offset,
             serverTime: Date()
@@ -4126,7 +4230,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendRecordsPage {
         BackendRecordsPage(
             records: [],

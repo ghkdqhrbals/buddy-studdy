@@ -3560,7 +3560,10 @@ final class AppState: ObservableObject {
         }
         studyIDsToDelete.forEach { studyRoomState.removeStudy(id: $0) }
         Task { [weak self] in
-            await self?.deleteBackendStudiesIfPossible(studyIDsToDelete)
+            await self?.deleteBackendStudiesIfPossible(
+                knownStudyIDs: studyIDsToDelete,
+                topicKeys: topicKeysToDelete
+            )
         }
         if didDeleteActiveCategory {
             if let selectedCategory {
@@ -3587,13 +3590,35 @@ final class AppState: ObservableObject {
         }?.id
     }
 
-    private func deleteBackendStudiesIfPossible(_ studyIDs: Set<Int>) async {
-        guard !studyIDs.isEmpty else {
+    private func deleteBackendStudiesIfPossible(
+        knownStudyIDs: Set<Int>,
+        topicKeys: Set<String>
+    ) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "delete-study") else {
+            log(.warning, "백엔드 등록이 없어 학습 삭제 동기화를 건너뛰었습니다. studyIDs=\(knownStudyIDs.sorted()), topics=\(topicKeys.sorted())")
             return
         }
 
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "delete-study") else {
-            log(.warning, "백엔드 등록이 없어 학습 삭제 동기화를 건너뛰었습니다. studyIDs=\(studyIDs.sorted())")
+        var studyIDs = knownStudyIDs
+        if !topicKeys.isEmpty {
+            do {
+                let studyPage = try await remotePushBackendClient.fetchStudy(
+                    registration: registration,
+                    limit: 500,
+                    offset: 0,
+                    query: ""
+                )
+                let resolvedIDs = studyPage.studies
+                    .filter { topicKeys.contains(Self.normalizedCategoryText(for: $0.topic)) }
+                    .map(\.id)
+                studyIDs.formUnion(resolvedIDs)
+            } catch {
+                log(.warning, "백엔드 학습 삭제용 id 조회 실패: topics=\(topicKeys.sorted()), error=\(error.localizedDescription)")
+            }
+        }
+
+        guard !studyIDs.isEmpty else {
+            log(.warning, "삭제할 백엔드 학습 id를 찾지 못했습니다. topics=\(topicKeys.sorted())")
             return
         }
 
