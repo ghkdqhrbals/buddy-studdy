@@ -22,7 +22,7 @@
     {
       "title": "API Logs",
       "type": "link",
-      "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}",
+      "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}",
       "includeVars": false,
       "keepTime": true
     }

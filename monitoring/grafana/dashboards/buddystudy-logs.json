@@ -22,7 +22,7 @@
     {
       "title": "API Performance",
       "type": "link",
-      "url": "/d/buddystudy-api-performance/buddystudy-api-performance?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}",
+      "url": "/d/buddystudy-api-performance/buddystudy-api-performance?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}",
       "includeVars": false,
       "keepTime": true
     }
@@ -138,7 +138,7 @@
             "cellOptions": {
               "type": "auto"
             },
-            "inspect": false
+            "inspect": true
           },
           "mappings": [],
           "thresholds": {
@@ -160,7 +160,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 180
+                "value": 170
               }
             ]
           },
@@ -172,14 +172,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 82
+                "value": 90
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -193,14 +193,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 330
+                "value": 420
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -214,14 +214,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 82
+                "value": 85
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -235,14 +235,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 110
+                "value": 120
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -256,14 +256,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 190
+                "value": 230
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -277,14 +277,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 520
+                "value": 760
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -298,14 +298,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 160
+                "value": 210
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -319,14 +319,14 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 300
+                "value": 330
               },
               {
                 "id": "links",
                 "value": [
                   {
                     "title": "Show request, response, and trace logs",
-                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                    "url": "/d/buddystudy-logs/buddystudy-api-logs?orgId=1&from=${__from}&to=${__to}&${labelSelector:queryparam}&${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
               }
@@ -338,12 +338,12 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 13
+        "h": 16
       },
       "id": 1,
       "options": {
         "showHeader": true,
-        "cellHeight": "md",
+        "cellHeight": "lg",
         "footer": {
           "show": false,
           "reducer": [
@@ -444,9 +444,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 16,
         "w": 12,
-        "h": 8
+        "h": 9
       },
       "id": 6,
       "options": {
@@ -513,9 +513,9 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 13,
+        "y": 16,
         "w": 12,
-        "h": 8
+        "h": 9
       },
       "id": 7,
       "options": {
@@ -582,9 +582,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 25,
         "w": 24,
-        "h": 7
+        "h": 8
       },
       "id": 8,
       "options": {
@@ -650,9 +650,9 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 33,
         "w": 24,
-        "h": 13
+        "h": 14
       },
       "id": 2,
       "options": {
