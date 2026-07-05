@@ -340,9 +340,69 @@
           "options": {
             "source": "Line",
             "format": "regexp",
-            "regexp": "method=(?P<method>\\S+) path=(?P<path>\\S+) status=(?P<status>\\d+) durationMs=(?P<durationMs>[0-9.]+) errorCode=(?P<errorCode>.*?) reason=(?P<reason>.*?) clientIp=(?P<clientIp>\\S*) requestId=(?P<requestId>[0-9a-fA-F-]+)",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
             "replace": false,
-            "keepTime": true
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "NewField",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Value",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Value #A",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Message",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "message",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": false
           }
         },
         {
@@ -350,7 +410,12 @@
           "options": {
             "excludeByName": {
               "Line": true,
+              "line": true,
               "NewField": true,
+              "Value": true,
+              "Value #A": true,
+              "Message": true,
+              "message": true,
               "labels": true,
               "labelTypes": true,
               "tsNs": true,
