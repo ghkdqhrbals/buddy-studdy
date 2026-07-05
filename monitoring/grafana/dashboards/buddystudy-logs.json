@@ -73,7 +73,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -94,7 +94,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -115,7 +115,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -136,7 +136,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -157,7 +157,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -178,7 +178,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -199,7 +199,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -220,7 +220,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Open connected logs",
+                    "title": "Open request details",
                     "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
                   }
                 ]
@@ -274,7 +274,7 @@
         {
           "id": "extractFields",
           "options": {
-            "source": "Line",
+            "source": "NewField",
             "format": "regexp",
             "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
             "replace": true,
@@ -457,9 +457,9 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p50",
-          "queryType": "instant",
+          "queryType": "range",
           "refId": "P50"
         },
         {
@@ -468,9 +468,9 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p90",
-          "queryType": "instant",
+          "queryType": "range",
           "refId": "P90"
         },
         {
@@ -479,9 +479,9 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p95",
-          "queryType": "instant",
+          "queryType": "range",
           "refId": "P95"
         },
         {
@@ -490,9 +490,9 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
           "legendFormat": "p99",
-          "queryType": "instant",
+          "queryType": "range",
           "refId": "P99"
         }
       ],
@@ -542,7 +542,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
-      "description": "Selected API request object extracted from api_exchange by requestId.",
+      "description": "Request JSON extracted from the selected api_exchange requestId.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -611,7 +611,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
-      "description": "Selected API response object extracted from api_exchange by requestId.",
+      "description": "Response JSON extracted from the selected api_exchange requestId.",
       "fieldConfig": {
         "defaults": {
           "custom": {
