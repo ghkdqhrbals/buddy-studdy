@@ -18,985 +18,34 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": null,
-  "links": [],
-  "panels": [
+  "links": [
     {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "time"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 180
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "method"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 82
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "path"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 330
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "status"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 82
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "durationMs"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "errorCode"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 190
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "reason"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 520
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "clientIp"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 160
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "requestId"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 300
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "Open request details",
-                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 12,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "showHeader": true,
-        "cellHeight": "md",
-        "footer": {
-          "show": false,
-          "reducer": [
-            "sum"
-          ],
-          "countRows": false,
-          "fields": ""
-        },
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "time"
-          }
-        ]
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
-          "maxLines": 500,
-          "queryType": "range",
-          "refId": "A"
-        }
+      "title": "API Performance",
+      "type": "dashboards",
+      "tags": [
+        "buddystudy-performance"
       ],
-      "title": "API Requests",
-      "transformations": [
-        {
-          "id": "extractFields",
-          "options": {
-            "source": "NewField",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": true,
-            "keepTime": true
-          }
-        },
-        {
-          "id": "extractFields",
-          "options": {
-            "source": "Line",
-            "format": "regexp",
-            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
-            "replace": true,
-            "keepTime": true
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "NewField": true,
-              "Line": true,
-              "labels": true
-            },
-            "indexByName": {
-              "Time": 0,
-              "method": 1,
-              "path": 2,
-              "status": 3,
-              "durationMs": 4,
-              "errorCode": 5,
-              "reason": 6,
-              "clientIp": 7,
-              "requestId": 8
-            },
-            "renameByName": {
-              "Time": "time"
-            }
-          }
-        }
-      ],
-      "type": "table",
-      "description": "Sentry-style API request list. Click any value in a request row to open logs connected by requestId."
+      "includeVars": true,
+      "keepTime": true,
+      "asDropdown": false
     },
     {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "description": "API latency percentiles computed from api_exchange durationMs over the selected dashboard time range. Grouped by METHOD + path.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 500
-              },
-              {
-                "color": "red",
-                "value": 1000
-              }
-            ]
-          },
-          "unit": "ms",
-          "decimals": 2
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "api"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "string"
-              },
-              {
-                "id": "custom.width",
-                "value": 430
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p50"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "p50"
-              },
-              {
-                "id": "custom.width",
-                "value": 100
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p90"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "p90"
-              },
-              {
-                "id": "custom.width",
-                "value": 100
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p95"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "p95"
-              },
-              {
-                "id": "custom.width",
-                "value": 100
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p99"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "p99"
-              },
-              {
-                "id": "custom.width",
-                "value": 100
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 12
-      },
-      "id": 5,
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "footer": {
-          "show": false,
-          "reducer": [
-            "sum"
-          ],
-          "countRows": false,
-          "fields": ""
-        },
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "p99"
-          }
-        ]
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
-          "legendFormat": "p50",
-          "queryType": "range",
-          "refId": "P50"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
-          "legendFormat": "p90",
-          "queryType": "range",
-          "refId": "P90"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
-          "legendFormat": "p95",
-          "queryType": "range",
-          "refId": "P95"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
-          "legendFormat": "p99",
-          "queryType": "range",
-          "refId": "P99"
-        }
+      "title": "Log Search",
+      "type": "dashboards",
+      "tags": [
+        "buddystudy-log-search"
       ],
-      "title": "API Latency Percentiles",
-      "transformations": [
-        {
-          "id": "labelsToFields",
-          "options": {
-            "mode": "columns"
-          }
-        },
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true
-            },
-            "indexByName": {
-              "api": 0,
-              "P50": 1,
-              "P90": 2,
-              "P95": 3,
-              "P99": 4
-            },
-            "renameByName": {
-              "P50": "p50",
-              "P90": "p90",
-              "P95": "p95",
-              "P99": "p99",
-              "Value #P50": "p50",
-              "Value #P90": "p90",
-              "Value #P95": "p95",
-              "Value #P99": "p99"
-            }
-          }
-        }
-      ],
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "description": "Request JSON extracted from the selected api_exchange requestId.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 19
-      },
-      "id": 6,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": false,
-        "enableLogDetails": false,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
-        "showCommonLabels": false,
-        "showControls": false,
-        "showLabels": false,
-        "showTime": false,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": true,
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "maxLines": 1,
-          "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
-          "refId": "A"
-        }
-      ],
-      "title": "Selected Request",
-      "transformations": [],
-      "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "description": "Response JSON extracted from the selected api_exchange requestId.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
-      },
-      "id": 7,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": false,
-        "enableLogDetails": false,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
-        "showCommonLabels": false,
-        "showControls": false,
-        "showLabels": false,
-        "showTime": false,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": true,
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "maxLines": 1,
-          "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
-          "refId": "A"
-        }
-      ],
-      "title": "Selected Response",
-      "transformations": [],
-      "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "description": "Raw selected api_exchange line for fallback when request/response parsing is not enough.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 27
-      },
-      "id": 8,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": false,
-        "enableLogDetails": false,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
-        "showCommonLabels": false,
-        "showControls": false,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": true,
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "maxLines": 3,
-          "queryType": "range",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\"",
-          "refId": "A"
-        }
-      ],
-      "title": "Selected API Exchange Raw",
-      "transformations": [],
-      "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 12,
-        "w": 24,
-        "x": 0,
-        "y": 35
-      },
-      "id": 2,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": true,
-        "enableLogDetails": true,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showControls": true,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": false,
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" | line_format \"{{__line__}}\"",
-          "maxLines": 500,
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "Connected Logs",
-      "transformations": [],
-      "type": "logs",
-      "description": "Shows logs connected to the selected API request id. Click the path or request id in API Requests."
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "logs",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.95,
-            "drawStyle": "bars",
-            "fillOpacity": 85,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 24,
-        "x": 0,
-        "y": 47
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "hidden",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "editorMode": "code",
-          "expr": "sum(count_over_time(${labelSelector:raw} ${logqlSearch:raw} [$__interval]))",
-          "legendFormat": "logs",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "Log Count Timeline",
-      "transformations": [],
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 16,
-        "w": 24,
-        "x": 0,
-        "y": 52
-      },
-      "id": 4,
-      "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": true,
-        "enableLogDetails": true,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": false,
-        "showCommonLabels": false,
-        "showControls": true,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": true,
-        "wrapLogMessage": true
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "buddystudy-loki"
-          },
-          "direction": "backward",
-          "editorMode": "code",
-          "expr": "${labelSelector:raw} ${logqlSearch:raw}",
-          "maxLines": 300,
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "All Logs",
-      "transformations": [],
-      "type": "logs"
+      "includeVars": true,
+      "keepTime": true,
+      "asDropdown": false
     }
   ],
   "refresh": "",
   "schemaVersion": 42,
   "tags": [
     "buddystudy",
-    "logs",
+    "api",
+    "requests",
     "loki"
   ],
   "templating": {
@@ -1086,7 +135,307 @@
     ]
   },
   "timezone": "browser",
-  "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 8
+  "title": "BuddyStudy API Requests",
+  "version": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 82
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 330
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 82
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "durationMs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errorCode"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 520
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "clientIp"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "requestId"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open request detail",
+                    "url": "/d/buddystudy-request-detail/buddystudy-request-detail?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 18
+      },
+      "id": 1,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "time"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
+          "maxLines": 500,
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "API Requests",
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "NewField",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": true,
+            "keepTime": true
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": true,
+            "keepTime": true
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "NewField": true,
+              "Line": true,
+              "labels": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "method": 1,
+              "path": 2,
+              "status": 3,
+              "durationMs": 4,
+              "errorCode": 5,
+              "reason": 6,
+              "clientIp": 7,
+              "requestId": 8
+            },
+            "renameByName": {
+              "Time": "time"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "description": "Sentry-style API request list. Click any value in a request row to open logs connected by requestId."
+    }
+  ]
 }
