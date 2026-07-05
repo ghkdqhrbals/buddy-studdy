@@ -14,7 +14,7 @@ set -euo pipefail
 GITHUB_OWNER="__GITHUB_OWNER__"
 GITHUB_REPO="__GITHUB_REPO__"
 GITHUB_PAT="__GITHUB_PAT__"
-RUNNER_NAME="${RUNNER_NAME:-buddystudy-ec2-$(curl -fsS http://169.254.169.254/latest/meta-data/instance-id || hostname)}"
+RUNNER_NAME="${RUNNER_NAME:-buddystudy-ec2-$(hostname)}"
 RUNNER_LABELS="${RUNNER_LABELS:-ec2,rsc-deploy,buddystudy,linux,arm64}"
 RUNNER_VERSION="${RUNNER_VERSION:-2.327.1}"
 RUNNER_USER="${RUNNER_USER:-actions-runner}"
@@ -28,10 +28,10 @@ fi
 install_packages() {
   if command -v dnf >/dev/null 2>&1; then
     dnf update -y
-    dnf install -y docker git jq tar gzip shadow-utils awscli
+    dnf install -y docker git jq tar gzip shadow-utils awscli libicu lttng-ust krb5-libs zlib openssl-libs
   elif command -v yum >/dev/null 2>&1; then
     yum update -y
-    yum install -y docker git jq tar gzip shadow-utils awscli
+    yum install -y docker git jq tar gzip shadow-utils awscli libicu lttng-ust krb5-libs zlib openssl-libs
   elif command -v apt-get >/dev/null 2>&1; then
     apt-get update
     apt-get install -y docker.io git jq tar gzip curl awscli
