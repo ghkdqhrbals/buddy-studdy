@@ -83,7 +83,7 @@
   "timezone": "browser",
   "uid": "buddystudy-logs",
   "title": "BuddyStudy API Logs",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "datasource": {
