@@ -1,0 +1,154 @@
+name: Deploy BuddyStudy Monitoring on MacBook Air
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-macbookair-monitoring
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy PLG Receiver
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
+    timeout-minutes: 15
+    env:
+      MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/data/buddystudy/monitoring' }}
+      DASHBOARD_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/docs/observability
+      GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3000' }}
+      LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
+
+    steps:
+      - name: Deploy Loki and Grafana
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GRAFANA_ADMIN_PASSWORD}" ]; then
+            echo "Missing GitHub Actions secret: GRAFANA_ADMIN_PASSWORD" >&2
+            exit 1
+          fi
+
+          monitoring_root="$(eval echo "${MONITORING_ROOT}")"
+          mkdir -p \
+            "${monitoring_root}/grafana/provisioning/datasources" \
+            "${monitoring_root}/grafana/provisioning/dashboards" \
+            "${monitoring_root}/grafana/dashboards" \
+            "${monitoring_root}/grafana/data" \
+            "${monitoring_root}/loki/data" \
+            "${monitoring_root}/loki/config" \
+            "${monitoring_root}/gateway"
+
+          cat > "${monitoring_root}/grafana/provisioning/datasources/loki.yml" <<'YAML'
+          apiVersion: 1
+
+          datasources:
+            - name: BuddyStudy Loki
+              uid: buddystudy-loki
+              type: loki
+              access: proxy
+              url: http://buddystudy-loki:3100
+              isDefault: true
+              editable: true
+          YAML
+
+          cat > "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml" <<'YAML'
+          apiVersion: 1
+
+          providers:
+            - name: BuddyStudy
+              orgId: 1
+              folder: BuddyStudy
+              type: file
+              disableDeletion: false
+              updateIntervalSeconds: 30
+              allowUiUpdates: true
+              options:
+                path: /var/lib/grafana/dashboards
+          YAML
+
+          curl -fsSL \
+            "${DASHBOARD_SOURCE_BASE}/grafana-loki-search-dashboard.json" \
+            -o "${monitoring_root}/grafana/dashboards/grafana-loki-search-dashboard.json"
+          curl -fsSL \
+            "${DASHBOARD_SOURCE_BASE}/grafana-api-latency-dashboard.json" \
+            -o "${monitoring_root}/grafana/dashboards/grafana-api-latency-dashboard.json"
+
+          cat > "${monitoring_root}/loki/config/loki.yml" <<'YAML'
+          auth_enabled: false
+
+          server:
+            http_listen_port: 3100
+
+          common:
+            path_prefix: /loki
+            storage:
+              filesystem:
+                chunks_directory: /loki/chunks
+                rules_directory: /loki/rules
+            replication_factor: 1
+            ring:
+              kvstore:
+                store: inmemory
+
+          query_range:
+            results_cache:
+              cache:
+                embedded_cache:
+                  enabled: true
+                  max_size_mb: 100
+
+          schema_config:
+            configs:
+              - from: 2024-01-01
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+
+          limits_config:
+            retention_period: 168h
+            allow_structured_metadata: false
+
+          compactor:
+            working_directory: /loki/compactor
+            retention_enabled: true
+            delete_request_store: filesystem
+          YAML
+
+          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+          docker pull grafana/loki:3.3.2
+          docker pull grafana/grafana:11.4.0
+
+          docker rm -f buddystudy-loki buddystudy-grafana >/dev/null 2>&1 || true
+
+          docker run -d \
+            --name buddystudy-loki \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            -p "${LOKI_PORT}:3100" \
+            -v "${monitoring_root}/loki/data:/loki" \
+            -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
+            grafana/loki:3.3.2 \
+            -config.file=/etc/loki/local-config.yaml
+
+          docker run -d \
+            --name buddystudy-grafana \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            -p "${GRAFANA_PORT}:3000" \
+            -e GF_SECURITY_ADMIN_USER=admin \
+            -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
+            -e GF_USERS_ALLOW_SIGN_UP=false \
+            -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/grafana-loki-search-dashboard.json \
+            -v "${monitoring_root}/grafana/data:/var/lib/grafana" \
+            -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
+            -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
+            grafana/grafana:11.4.0
+
+          echo "MacBook Air PLG receiver is running."
+          echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}"
+          echo "Loki push: http://127.0.0.1:${LOKI_PORT}/loki/api/v1/push"

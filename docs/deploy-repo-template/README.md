@@ -23,9 +23,21 @@ Backend deploy:
 - `OPENAPI_ACCESS_TOKEN` (optional, only if docs API endpoint is enabled)
 - `GOOGLE_IOS_CLIENT_ID`
 
-Monitoring deploy:
+EC2 log forwarding to MacBook Air Loki:
+
+- `REMOTE_LOKI_BASIC_AUTH_USER` (optional, only if the Loki endpoint is protected with basic auth)
+- `REMOTE_LOKI_BASIC_AUTH_PASSWORD` (optional, only if the Loki endpoint is protected with basic auth)
+
+MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
+
+Repository variables:
+
+- `REMOTE_LOKI_PUSH_URL`: remote Loki push endpoint consumed by the EC2 promtail sender, for example `http://100.79.59.22:3100/loki/api/v1/push` over Tailscale or `https://loki.lowfidev.cloud/loki/api/v1/push` when protected by a tunnel.
+- `MACBOOKAIR_MONITORING_ROOT`: persistent host path for MacBook Air PLG data, defaults to `$HOME/data/buddystudy/monitoring`.
+- `GRAFANA_PORT`: MacBook Air Grafana host port, defaults to `3000`.
+- `LOKI_PORT`: MacBook Air Loki host port, defaults to `3100`.
 
 ## Runtime Layout
 
@@ -36,6 +48,7 @@ Monitoring deploy:
 - `buddystudy-db`: private PostgreSQL container on Docker network port `5432`.
 - `buddystudy-postgres-data`: persistent Docker volume for PostgreSQL data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
+- `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
 - `backups/`: local host directory (`/opt/buddystudy-backend/backups`) where `pg_dump` files are written before each deploy.
 - `buddystudy-postgres-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
@@ -43,21 +56,66 @@ Monitoring deploy:
 - If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStudy backend logs.
 - Other paths return 404 at Nginx.
 
+## EC2 Runner Bootstrap
+
+Use `ec2-user-data-self-hosted-runner.sh` as the EC2 launch template user data.
+Replace these placeholders before launching the instance:
+
+```text
+__GITHUB_OWNER__
+__GITHUB_REPO__
+__GITHUB_PAT__
+```
+
+The script installs Docker and a GitHub Actions self-hosted runner under
+`/opt/actions-runner`, then registers this systemd unit:
+
+```text
+buddystudy-github-runner.service
+```
+
+The service starts automatically on every EC2 reboot. The EC2 runner is
+deploy-only. It must pull GHCR images and run containers, but must not build
+backend code or Docker images.
+
+The backend workflow expects the EC2 runner to match:
+
+```yaml
+runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+```
+
+Use an ARM instance such as `t4g.medium` when backend, Postgres, Redis,
+coordinator, nginx, and promtail share the host.
+
 ## Monitoring Deploy
 
-Monitoring is deployed separately from backend image rollout. Copy
-`deploy-monitoring.yml` into the deploy repository's `.github/workflows/`
-directory and run **Deploy BuddyStudy Monitoring** manually.
+Monitoring is deployed separately from backend image rollout and runs on the
+MacBook Air, not on EC2. Copy `deploy-macbookair-monitoring.yml` into the
+deploy repository's `.github/workflows/` directory and run
+**Deploy BuddyStudy Monitoring on MacBook Air** manually.
 
-Monitoring is PLG only: Promtail, Loki, and Grafana. Prometheus and Redis
-exporter containers are explicitly removed by the workflow so they do not
-consume memory or disk I/O on the small EC2 host.
+The MacBook Air runner must have labels:
 
-The workflow creates or replaces:
+```yaml
+runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
+```
 
-- `rsc-loki`: Loki with persistent `rsc-loki-data` volume.
-- `rsc-promtail`: Promtail scraping Docker container logs.
-- `rsc-grafana`: Grafana with persistent `rsc-grafana-data` volume.
+The MacBook Air workflow creates or replaces:
+
+- `buddystudy-loki`: Loki with persistent host data under
+  `$HOME/data/buddystudy/monitoring/loki/data` by default.
+- `buddystudy-grafana`: Grafana with persistent host data under
+  `$HOME/data/buddystudy/monitoring/grafana/data` by default.
+
+EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
+`REMOTE_LOKI_PUSH_URL` is configured.
+
+Prometheus and Redis exporter containers are not part of this production
+monitoring profile.
+
+The legacy EC2-local monitoring workflow `deploy-monitoring.yml` is kept only
+as a fallback template. Prefer `deploy-macbookair-monitoring.yml` for the
+current cost-saving EC2 layout.
 
 Grafana dashboard provisioning is file-based, so dashboards are restored on
 container recreation:
@@ -65,9 +123,16 @@ container recreation:
 - `BuddyStudy Log Search`
 - `BuddyStudy API Performance`
 
-The workflow downloads dashboard JSON from this repository's
+The MacBook Air workflow downloads dashboard JSON from this repository's
 `docs/observability/` directory and mounts them into Grafana provisioning. This
 keeps Grafana UI state from being the source of truth for log dashboards.
+
+Recommended flow:
+
+1. Run **Deploy BuddyStudy Monitoring on MacBook Air**.
+2. Confirm MacBook Air Loki is reachable from EC2.
+3. Set `REMOTE_LOKI_PUSH_URL` in the deploy repository variables.
+4. Run **Deploy BuddyStudy Backend**. This starts or refreshes EC2 promtail.
 
 ## Manual Deploy
 

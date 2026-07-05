@@ -69,6 +69,9 @@ jobs:
           MONITORING_COORDINATOR_READINESS_ENABLED: ${{ vars.MONITORING_COORDINATOR_READINESS_ENABLED || 'true' }}
           MONITORING_COORDINATOR_BASE_URL: ${{ vars.MONITORING_COORDINATOR_BASE_URL || 'http://rsc-coordinator:8080' }}
           MONITORING_COORDINATOR_TIMEOUT_MS: ${{ vars.MONITORING_COORDINATOR_TIMEOUT_MS || '3000' }}
+          REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
+          REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
+          REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
         run: |
           set -euo pipefail
 
@@ -158,6 +161,7 @@ jobs:
           docker pull nginx:1.27-alpine
           docker pull postgres:16-alpine
           docker pull certbot/certbot:v2.11.0
+          docker pull grafana/promtail:3.3.2
 
           wait_for_container_running() {
             local container_name="$1"
@@ -183,6 +187,60 @@ jobs:
           docker volume create buddystudy-postgres-data >/dev/null
 
           docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
+
+          mkdir -p promtail
+          if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
+            cat > promtail/promtail.yml <<PROMTAIL
+          server:
+            http_listen_port: 9080
+            grpc_listen_port: 0
+
+          positions:
+            filename: /tmp/positions.yaml
+
+          clients:
+            - url: ${REMOTE_LOKI_PUSH_URL}
+          PROMTAIL
+            if [ -n "${REMOTE_LOKI_BASIC_AUTH_USER}" ] && [ -n "${REMOTE_LOKI_BASIC_AUTH_PASSWORD}" ]; then
+              cat >> promtail/promtail.yml <<PROMTAIL
+              basic_auth:
+                username: ${REMOTE_LOKI_BASIC_AUTH_USER}
+                password: ${REMOTE_LOKI_BASIC_AUTH_PASSWORD}
+          PROMTAIL
+            fi
+            cat >> promtail/promtail.yml <<'PROMTAIL'
+
+          scrape_configs:
+            - job_name: docker
+              docker_sd_configs:
+                - host: unix:///var/run/docker.sock
+                  refresh_interval: 15s
+              relabel_configs:
+                - source_labels: ['__meta_docker_container_name']
+                  regex: '/(.*)'
+                  target_label: container
+                - source_labels: ['__meta_docker_container_log_stream']
+                  target_label: stream
+                - source_labels: ['__meta_docker_container_name']
+                  regex: '/(buddystudy-.*|rsc-.*)'
+                  action: keep
+              pipeline_stages:
+                - static_labels:
+                    host: ec2
+                    app: buddystudy
+          PROMTAIL
+
+            docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-promtail \
+              --restart unless-stopped \
+              -v /var/run/docker.sock:/var/run/docker.sock:ro \
+              -v "$PWD/promtail/promtail.yml:/etc/promtail/config.yml:ro" \
+              grafana/promtail:3.3.2 \
+              -config.file=/etc/promtail/config.yml
+          else
+            docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
+          fi
 
           docker rm -f rsc-coordinator >/dev/null 2>&1 || true
           docker run -d \
@@ -331,50 +389,6 @@ jobs:
             COORDINATOR_SSL_CERTIFICATE_KEY="/etc/nginx/certs/coordinator.key"
           fi
 
-          MONITOR_DOMAIN="monitor.ghkdqhrbals.org"
-          MONITOR_SERVER_BLOCK=""
-          if test -s "letsencrypt/live/${MONITOR_DOMAIN}/fullchain.pem" \
-            && test -s "letsencrypt/live/${MONITOR_DOMAIN}/privkey.pem"; then
-            MONITOR_SERVER_BLOCK="$(cat <<MONITOR_NGINX
-
-            server {
-              listen 443 ssl;
-              http2 on;
-              server_name ${MONITOR_DOMAIN};
-
-              ssl_certificate /etc/letsencrypt/live/${MONITOR_DOMAIN}/fullchain.pem;
-              ssl_certificate_key /etc/letsencrypt/live/${MONITOR_DOMAIN}/privkey.pem;
-
-              add_header Strict-Transport-Security "max-age=0" always;
-
-              client_max_body_size 1m;
-
-              location /coord/ {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-
-              location / {
-                set \$rsc_grafana http://rsc-grafana:3000;
-                proxy_pass \$rsc_grafana;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-                proxy_set_header Upgrade \$http_upgrade;
-                proxy_set_header Connection \$connection_upgrade;
-              }
-            }
-          MONITOR_NGINX
-          )"
-          fi
-
           COORDINATOR_DOMAIN="coordinator.ghkdqhrbals.org"
           COORDINATOR_SERVER_BLOCK=""
           if test -s "letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem" \
@@ -493,7 +507,6 @@ jobs:
                 return 404;
               }
             }
-          ${MONITOR_SERVER_BLOCK}
           ${COORDINATOR_SERVER_BLOCK}
           }
           NGINX
@@ -539,3 +552,52 @@ jobs:
             docker rm "${OLD_SLOT}" >/dev/null 2>&1 || true
           fi
           docker image prune -f
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Backend Deployment"
+            echo ""
+            echo "- Target: \`ec2\`"
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Coordinator image: \`${COORDINATOR_IMAGE_REF}\`"
+            echo "- Result: \`${{ job.status }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DEPLOY_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL is empty; skip deploy notification."
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/buddystudy-deploy-slack.json
+          import os
+          import json
+          status = os.environ["DEPLOY_STATUS"]
+          image = os.environ["IMAGE_REF"]
+          run_url = os.environ["RUN_URL"]
+          payload = {
+              "text": f"BuddyStudy backend deploy {status}",
+              "blocks": [
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*BuddyStudy backend deploy*\\nStatus: `{status}`\\nTarget: `ec2`\\nImage: `{image}`\\nRun: {run_url}"
+                      },
+                  }
+              ],
+          }
+          print(json.dumps(payload))
+          PY
+          curl -fsS -X POST \
+            -H "Content-Type: application/json" \
+            --data @/tmp/buddystudy-deploy-slack.json \
+            "${SLACK_WEBHOOK_URL}"
