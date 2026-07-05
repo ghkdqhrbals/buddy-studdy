@@ -1,5 +1,6 @@
 import {
   durationLabel,
+  lokiMetricTimestampToMs,
   parseApiError,
   parseApiExchange,
   parseRelatedLog,
@@ -153,7 +154,7 @@ async function loadTimeline(range) {
   });
   return values.map(([nanoseconds, value]) => ({
     nanoseconds,
-    ms: Number(BigInt(nanoseconds) / 1_000_000n),
+    ms: lokiMetricTimestampToMs(nanoseconds),
     count: Number(value),
   }));
 }

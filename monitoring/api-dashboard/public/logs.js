@@ -20,6 +20,10 @@ export function formatKstFromNs(nanoseconds) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}.${String(date.getMilliseconds()).padStart(3, "0")}`;
 }
 
+export function lokiMetricTimestampToMs(timestamp) {
+  return Math.round(Number(timestamp) * 1000);
+}
+
 export function durationLabel(value) {
   const duration = Number(value);
   if (!Number.isFinite(duration)) return "-";

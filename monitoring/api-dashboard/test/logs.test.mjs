@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   durationLabel,
   formatKstFromNs,
+  lokiMetricTimestampToMs,
   parseApiError,
   parseApiExchange,
   percentile,
@@ -10,6 +11,11 @@ import {
 
 test("formatKstFromNs renders KST without ISO T or Z", () => {
   assert.equal(formatKstFromNs("1783255799514000000"), "2026-07-05 21:49:59.514");
+});
+
+test("lokiMetricTimestampToMs converts metric query seconds to epoch milliseconds", () => {
+  assert.equal(lokiMetricTimestampToMs(1783268850), 1783268850000);
+  assert.equal(lokiMetricTimestampToMs("1783268850.5"), 1783268850500);
 });
 
 test("parseApiExchange extracts request row fields", () => {
