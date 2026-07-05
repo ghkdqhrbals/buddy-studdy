@@ -1,12 +1,12 @@
 package com.buddystudy.backend.study.adapter.outbound.apns
 
+import com.buddystudy.backend.common.application.security.JwtSupport
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
 import com.buddystudy.backend.study.application.port.outbound.PushMessageType
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionSender
-import io.jsonwebtoken.Jwts
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -19,7 +19,6 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
-import java.util.Date
 
 @Component
 class ApnsPushNotificationAdapter(
@@ -80,12 +79,17 @@ class ApnsPushNotificationAdapter(
         if (properties.apns.teamId.isBlank() || properties.apns.keyId.isBlank() || properties.apns.authKeyP8.isBlank()) {
             throw IllegalStateException("APNs credentials are not configured.")
         }
-        return Jwts.builder()
-            .header().keyId(properties.apns.keyId).and()
-            .issuer(properties.apns.teamId)
-            .issuedAt(Date())
-            .signWith(privateKey(), Jwts.SIG.ES256)
-            .compact()
+        return JwtSupport.es256(
+            header = linkedMapOf(
+                "alg" to "ES256",
+                "kid" to properties.apns.keyId,
+            ),
+            payload = linkedMapOf(
+                "iss" to properties.apns.teamId,
+                "iat" to Instant.now().epochSecond,
+            ),
+            privateKey = privateKey(),
+        )
     }
 
     private fun privateKey(): ECPrivateKey {

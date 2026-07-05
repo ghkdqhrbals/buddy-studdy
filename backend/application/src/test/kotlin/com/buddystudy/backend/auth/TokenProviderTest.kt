@@ -24,6 +24,15 @@ class TokenProviderTest {
     }
 
     @Test
+    fun `validate returns false for a token with a tampered signature`() {
+        val provider = tokenProvider()
+        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
+        val tampered = token.dropLast(1) + if (token.last() == 'a') "b" else "a"
+
+        assertThat(provider.validate(tampered)).isFalse()
+    }
+
+    @Test
     fun `parse returns principal from a valid token`() {
         val provider = tokenProvider()
         val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first

@@ -2,16 +2,13 @@ package com.buddystudy.backend.auth
 
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.security.JwtSupport
 import com.buddystudy.backend.config.BuddyStudyProperties
-import io.jsonwebtoken.Claims
-import io.jsonwebtoken.Jwts
-import io.jsonwebtoken.security.Keys
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
-import java.util.Date
 
 data class Principal(
     val userId: Long,
@@ -23,24 +20,27 @@ data class Principal(
 
 @Component
 class TokenProvider(private val properties: BuddyStudyProperties) {
-    private val key by lazy {
+    private val secret by lazy {
         val seed = properties.auth.jwtSecret.ifBlank { properties.crypto.masterKey.ifBlank { "dev-buddystudy-secret" } }
-        Keys.hmacShaKeyFor(MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8)))
+        MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8))
     }
 
     fun create(userId: Long, deviceId: String, sessionId: Long, anonymous: Boolean, status: String): Pair<String, Instant> {
-        val expiresAt = Instant.now().plusSeconds(properties.auth.accessTokenDays * 86_400)
-        val token = Jwts.builder()
-            .subject(userId.toString())
-            .claim("user_id", userId)
-            .claim("device_id", deviceId)
-            .claim("status", status)
-            .claim("session_id", sessionId)
-            .claim("is_anonymous", anonymous)
-            .issuedAt(Date.from(Instant.now()))
-            .expiration(Date.from(expiresAt))
-            .signWith(key)
-            .compact()
+        val issuedAt = Instant.now()
+        val expiresAt = issuedAt.plusSeconds(properties.auth.accessTokenDays * 86_400)
+        val token = JwtSupport.hs256(
+            payload = linkedMapOf(
+                "sub" to userId.toString(),
+                "user_id" to userId,
+                "device_id" to deviceId,
+                "status" to status,
+                "session_id" to sessionId,
+                "is_anonymous" to anonymous,
+                "iat" to issuedAt.epochSecond,
+                "exp" to expiresAt.epochSecond,
+            ),
+            secret = secret,
+        )
         return token to expiresAt
     }
 
@@ -51,9 +51,9 @@ class TokenProvider(private val properties: BuddyStudyProperties) {
         try {
             val claims = parseClaims(raw)
             return Principal(
-                userId = (claims["user_id"] as Number).toLong(),
+                userId = claims.number("user_id").toLong(),
                 deviceId = claims["device_id"] as String,
-                sessionId = (claims["session_id"] as Number).toLong(),
+                sessionId = claims.number("session_id").toLong(),
                 anonymous = claims["is_anonymous"] as Boolean,
                 status = claims["status"] as? String ?: "ACTIVE",
             )
@@ -62,8 +62,15 @@ class TokenProvider(private val properties: BuddyStudyProperties) {
         }
     }
 
-    private fun parseClaims(raw: String): Claims =
-        Jwts.parser().verifyWith(key).build().parseSignedClaims(raw).payload
+    private fun parseClaims(raw: String): Map<String, Any?> {
+        val claims = JwtSupport.verifyHs256(raw, secret)
+        val expiresAt = claims.number("exp").toLong()
+        require(Instant.ofEpochSecond(expiresAt).isAfter(Instant.now())) { "Access token has expired." }
+        return claims
+    }
+
+    private fun Map<String, Any?>.number(name: String): Number =
+        this[name] as? Number ?: error("JWT claim '$name' must be numeric.")
 }
 
 fun sha256(value: String): String =
