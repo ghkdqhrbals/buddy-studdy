@@ -240,7 +240,7 @@
           "editorMode": "code",
           "expr": "topk(100, quantile_over_time(0.50, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p50",
-          "queryType": "range",
+          "queryType": "instant",
           "refId": "P50"
         },
         {
@@ -251,7 +251,7 @@
           "editorMode": "code",
           "expr": "topk(100, quantile_over_time(0.90, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p90",
-          "queryType": "range",
+          "queryType": "instant",
           "refId": "P90"
         },
         {
@@ -262,7 +262,7 @@
           "editorMode": "code",
           "expr": "topk(100, quantile_over_time(0.95, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p95",
-          "queryType": "range",
+          "queryType": "instant",
           "refId": "P95"
         },
         {
@@ -273,7 +273,7 @@
           "editorMode": "code",
           "expr": "topk(100, quantile_over_time(0.99, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p99",
-          "queryType": "range",
+          "queryType": "instant",
           "refId": "P99"
         }
       ],
