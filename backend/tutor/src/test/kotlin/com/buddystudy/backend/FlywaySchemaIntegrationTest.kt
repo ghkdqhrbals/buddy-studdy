@@ -2,6 +2,10 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCoveragePersistenceAdapter
+import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
+import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -30,6 +34,8 @@ import org.testcontainers.junit.jupiter.Testcontainers
 )
 class FlywaySchemaIntegrationTest {
     @Autowired lateinit var users: UserRepository
+    @Autowired lateinit var studies: StudyRepository
+    @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
 
     companion object {
         @Container
@@ -65,5 +71,63 @@ class FlywaySchemaIntegrationTest {
 
         assertThat(saved.id).isPositive()
         assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiApiKeyCipher).isEqualTo("cipher")
+    }
+
+    @Test
+    fun `flyway schema supports nested question coverage tree`() {
+        val user = users.save(
+            UserEntity(
+                provider = "EMAIL",
+                providerId = "coverage-tree@example.com",
+                email = "coverage-tree@example.com",
+                status = "ACTIVE",
+            )
+        )
+        val study = studies.save(
+            StudyEntity(
+                deviceId = "flyway-device",
+                userId = user.id,
+                topic = "Redis Persistence",
+            )
+        )
+
+        questionCoverage.ensureCoverage(
+            studyId = study.id,
+            topic = study.topic,
+            concepts = listOf(
+                QuestionCoveragePort.CoverageConceptBlueprint(
+                    key = "persistence",
+                    name = "Persistence",
+                    angles = emptyList(),
+                    children = listOf(
+                        QuestionCoveragePort.CoverageConceptBlueprint(
+                            key = "aof",
+                            name = "AOF",
+                            angles = emptyList(),
+                            children = listOf(
+                                QuestionCoveragePort.CoverageConceptBlueprint(
+                                    key = "recovery",
+                                    name = "Recovery",
+                                    angles = listOf(
+                                        QuestionCoveragePort.CoverageAngleBlueprint(
+                                            key = "failure_mode",
+                                            name = "Failure Mode",
+                                        )
+                                    ),
+                                )
+                            ),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val selected = questionCoverage.selectNext(study.id)
+
+        assertThat(selected?.conceptKey).isEqualTo("recovery")
+        assertThat(selected?.conceptName).isEqualTo("Recovery")
+        assertThat(selected?.conceptKeyPath).isEqualTo("persistence/aof/recovery")
+        assertThat(selected?.conceptPath).isEqualTo("Persistence > AOF > Recovery")
+        assertThat(selected?.angleKey).isEqualTo("failure_mode")
     }
 }

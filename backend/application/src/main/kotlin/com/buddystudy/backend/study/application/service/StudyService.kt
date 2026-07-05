@@ -271,7 +271,13 @@ class StudyService(
                 customPrompt = customPrompt,
                 recentQuestions = history,
                 diversity = questionDiversity.choose(topic, studyId, userId, history),
-                coverage = coverageSelection?.let { QuestionCoverageGuide(it.conceptName, it.angleName) },
+                coverage = coverageSelection?.let {
+                    QuestionCoverageGuide(
+                        conceptName = it.conceptName,
+                        angleName = it.angleName,
+                        conceptPath = it.conceptPath,
+                    )
+                },
             )
             val generated = openAI.generateQuestion(apiKey, model, prompt)
             val embedding = openAI.embedText(apiKey, generated.question)
@@ -308,6 +314,7 @@ class StudyService(
                 key = concept.key,
                 name = concept.name,
                 angles = concept.angles.map { QuestionCoveragePort.CoverageAngleBlueprint(it.key, it.name) },
+                children = concept.children.toCoverageBlueprints(),
             )
         }
         questionCoverage.ensureCoverage(study.id, study.topic, blueprint.ifEmpty { defaultCoverageBlueprint(study.topic) })
@@ -350,6 +357,16 @@ internal fun defaultCoverageBlueprint(topic: String): List<QuestionCoveragePort.
             ),
         )
     )
+
+internal fun List<OpenAIPort.QuestionCoverageConcept>.toCoverageBlueprints(): List<QuestionCoveragePort.CoverageConceptBlueprint> =
+    map { concept ->
+        QuestionCoveragePort.CoverageConceptBlueprint(
+            key = concept.key,
+            name = concept.name,
+            angles = concept.angles.map { QuestionCoveragePort.CoverageAngleBlueprint(it.key, it.name) },
+            children = concept.children.toCoverageBlueprints(),
+        )
+    }
 
 private const val RECENT_EMBEDDING_LIMIT = 200
 

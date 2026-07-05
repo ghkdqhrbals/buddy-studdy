@@ -250,9 +250,23 @@ class StudyServiceTest {
         )
         openAI.coverageBlueprint = listOf(
             OpenAIPort.QuestionCoverageConcept(
-                key = "replication",
-                name = "Replication",
-                angles = listOf(OpenAIPort.QuestionCoverageAngle("failure_mode", "Failure Mode")),
+                key = "persistence",
+                name = "Persistence",
+                angles = emptyList(),
+                children = listOf(
+                    OpenAIPort.QuestionCoverageConcept(
+                        key = "aof",
+                        name = "AOF",
+                        angles = emptyList(),
+                        children = listOf(
+                            OpenAIPort.QuestionCoverageConcept(
+                                key = "recovery",
+                                name = "Recovery",
+                                angles = listOf(OpenAIPort.QuestionCoverageAngle("failure_mode", "Failure Mode")),
+                            )
+                        ),
+                    )
+                ),
             )
         )
 
@@ -264,9 +278,19 @@ class StudyServiceTest {
         assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.conceptId).isEqualTo(1)
         assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.angleKey).isEqualTo("failure_mode")
         assertThat(questionCoverage.markAskedCalls).containsExactly(
-            QuestionCoverageSelection(1, 1, "replication", "Replication", "failure_mode", "Failure Mode")
+            QuestionCoverageSelection(
+                conceptId = 1,
+                coverageId = 1,
+                conceptKey = "recovery",
+                conceptName = "Recovery",
+                angleKey = "failure_mode",
+                angleName = "Failure Mode",
+                conceptKeyPath = "persistence/aof/recovery",
+                conceptPath = "Persistence > AOF > Recovery",
+            )
         )
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept: Replication")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept path: Persistence > AOF > Recovery")
+        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept: Recovery")
         assertThat(openAI.generatedPrompt?.userPrompt).contains("Question angle: Failure Mode")
     }
 
@@ -494,6 +518,11 @@ class StudyServiceTest {
             row.deletedAt = now
             return 1
         }
+        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
+            val rows = (visibleRows + pendingRows).filter { it.studyId == studyId && it.userId == userId && it.deletedAt == null }
+            rows.forEach { it.deletedAt = now }
+            return rows.size
+        }
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -518,6 +547,7 @@ class StudyServiceTest {
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         override fun save(entity: StudyEntity): StudyEntity = entity
+        override fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId }
@@ -622,15 +652,35 @@ class StudyServiceTest {
             concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>,
         ) {
             createdBlueprintStudyIds += studyId
+            val leaf = firstLeaf(concepts.first())
             selection = QuestionCoverageSelection(
                 conceptId = 1,
                 coverageId = 1,
-                conceptKey = concepts.first().key,
-                conceptName = concepts.first().name,
-                angleKey = concepts.first().angles.first().key,
-                angleName = concepts.first().angles.first().name,
+                conceptKey = leaf.concept.key,
+                conceptName = leaf.concept.name,
+                angleKey = leaf.concept.angles.first().key,
+                angleName = leaf.concept.angles.first().name,
+                conceptKeyPath = leaf.keyPath,
+                conceptPath = leaf.namePath,
             )
         }
+
+        private fun firstLeaf(
+            concept: QuestionCoveragePort.CoverageConceptBlueprint,
+            parentKeyPath: String = "",
+            parentNamePath: String = "",
+        ): LeafSelection {
+            val keyPath = listOf(parentKeyPath, concept.key).filter { it.isNotBlank() }.joinToString("/")
+            val namePath = listOf(parentNamePath, concept.name).filter { it.isNotBlank() }.joinToString(" > ")
+            if (concept.children.isEmpty()) return LeafSelection(concept, keyPath, namePath)
+            return firstLeaf(concept.children.first(), keyPath, namePath)
+        }
+
+        private data class LeafSelection(
+            val concept: QuestionCoveragePort.CoverageConceptBlueprint,
+            val keyPath: String,
+            val namePath: String,
+        )
 
         override fun selectNext(studyId: Long): QuestionCoverageSelection? = selection
 
@@ -673,6 +723,7 @@ class StudyServiceTest {
     private class FakeQuestionSearchPort : QuestionSearchPort {
         override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
         override fun deleteByQuestionId(questionId: Long): Long = 0
+        override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
         override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null

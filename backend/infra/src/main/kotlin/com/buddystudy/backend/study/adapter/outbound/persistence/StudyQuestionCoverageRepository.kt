@@ -15,7 +15,6 @@ import java.time.Instant
 
 interface StudyQuestionConceptRepository : JpaRepository<StudyQuestionConceptEntity, Long> {
     fun existsByStudyId(studyId: Long): Boolean
-    fun findByStudyIdAndConceptKey(studyId: Long, conceptKey: String): StudyQuestionConceptEntity?
 }
 
 interface StudyQuestionCoverageJpaRepository : JpaRepository<StudyQuestionCoverageEntity, Long> {
@@ -27,6 +26,8 @@ interface StudyQuestionCoverageJpaRepository : JpaRepository<StudyQuestionCovera
                c.conceptId as conceptId,
                concept.conceptKey as conceptKey,
                concept.conceptName as conceptName,
+               concept.path as conceptKeyPath,
+               concept.conceptPath as conceptPath,
                c.angleKey as angleKey,
                c.angleName as angleName
         from StudyQuestionCoverageEntity c
@@ -77,6 +78,8 @@ interface QuestionCoverageSelectionRow {
     val conceptId: Long
     val conceptKey: String
     val conceptName: String
+    val conceptKeyPath: String
+    val conceptPath: String
     val angleKey: String
     val angleName: String
 }
@@ -90,32 +93,15 @@ class StudyQuestionCoveragePersistenceAdapter(
     override fun ensureCoverage(studyId: Long, topic: String, concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>) {
         if (concepts.isEmpty() || this.concepts.existsByStudyId(studyId)) return
         val now = Instant.now()
-        concepts.forEachIndexed { index, concept ->
-            val savedConcept = this.concepts.save(
-                StudyQuestionConceptEntity(
-                    studyId = studyId,
-                    conceptKey = concept.key.normalizedCoverageKey(),
-                    conceptName = concept.name.ifBlank { concept.key },
-                    displayOrder = index,
-                    createdAt = now,
-                    updatedAt = now,
-                )
-            )
-            concept.angles
-                .ifEmpty { listOf(QuestionCoveragePort.CoverageAngleBlueprint("general", "General")) }
-                .forEach { angle ->
-                    coverage.save(
-                        StudyQuestionCoverageEntity(
-                            studyId = studyId,
-                            conceptId = savedConcept.id,
-                            angleKey = angle.key.normalizedCoverageKey(),
-                            angleName = angle.name.ifBlank { angle.key },
-                            createdAt = now,
-                            updatedAt = now,
-                        )
-                    )
-                }
-        }
+        saveConceptTree(
+            studyId = studyId,
+            parentConceptId = null,
+            depth = 0,
+            parentKeyPath = "",
+            parentNamePath = "",
+            concepts = concepts,
+            now = now,
+        )
     }
 
     override fun selectNext(studyId: Long): QuestionCoverageSelection? =
@@ -127,6 +113,8 @@ class StudyQuestionCoveragePersistenceAdapter(
                 conceptName = it.conceptName,
                 angleKey = it.angleKey,
                 angleName = it.angleName,
+                conceptKeyPath = it.conceptKeyPath,
+                conceptPath = it.conceptPath,
             )
         }
 
@@ -138,6 +126,65 @@ class StudyQuestionCoveragePersistenceAdapter(
     @Transactional
     override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
         coverage.incrementAnswered(conceptId, angleKey, score.coerceIn(0, 100), if (correct) 1 else 0, now)
+    }
+
+    private fun saveConceptTree(
+        studyId: Long,
+        parentConceptId: Long?,
+        depth: Int,
+        parentKeyPath: String,
+        parentNamePath: String,
+        concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>,
+        now: Instant,
+    ) {
+        concepts.forEachIndexed { index, concept ->
+            val key = concept.key.normalizedCoverageKey()
+            val name = concept.name.ifBlank { concept.key.ifBlank { key } }
+            val keyPath = listOf(parentKeyPath, key).filter { it.isNotBlank() }.joinToString("/")
+            val namePath = listOf(parentNamePath, name).filter { it.isNotBlank() }.joinToString(" > ")
+            val leaf = concept.children.isEmpty()
+            val savedConcept = this.concepts.save(
+                StudyQuestionConceptEntity(
+                    studyId = studyId,
+                    parentConceptId = parentConceptId,
+                    conceptKey = key,
+                    conceptName = name,
+                    depth = depth,
+                    path = keyPath,
+                    conceptPath = namePath,
+                    leaf = leaf,
+                    displayOrder = index,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+            if (leaf) {
+                concept.angles
+                    .ifEmpty { listOf(QuestionCoveragePort.CoverageAngleBlueprint("general", "General")) }
+                    .forEach { angle ->
+                        coverage.save(
+                            StudyQuestionCoverageEntity(
+                                studyId = studyId,
+                                conceptId = savedConcept.id,
+                                angleKey = angle.key.normalizedCoverageKey(),
+                                angleName = angle.name.ifBlank { angle.key },
+                                createdAt = now,
+                                updatedAt = now,
+                            )
+                        )
+                    }
+            } else {
+                saveConceptTree(
+                    studyId = studyId,
+                    parentConceptId = savedConcept.id,
+                    depth = depth + 1,
+                    parentKeyPath = keyPath,
+                    parentNamePath = namePath,
+                    concepts = concept.children,
+                    now = now,
+                )
+            }
+        }
     }
 }
 

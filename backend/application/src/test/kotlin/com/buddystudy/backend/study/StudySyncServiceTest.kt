@@ -1,10 +1,19 @@
 package com.buddystudy.backend.study
 
+import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.community.application.port.outbound.QuestionSearchPort
+import com.buddystudy.backend.community.application.port.outbound.SearchResult
+import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.study.application.port.outbound.TranslatedQuestionSearchText
 import com.buddystudy.backend.study.application.service.StudySyncService
+import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -20,7 +29,7 @@ class StudySyncServiceTest {
     private val studies = FakeStudyPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
-    private val service = StudySyncService(studies, questions, questionStats)
+    private val service = StudySyncService(studies, questions, questionStats, fakeSearchSyncManager())
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
@@ -132,6 +141,7 @@ class StudySyncServiceTest {
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         override fun save(entity: StudyEntity): StudyEntity = entity
+        override fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = rows.firstOrNull { it.userId == userId && it.topic == topic }
@@ -186,6 +196,7 @@ class StudySyncServiceTest {
         override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -206,4 +217,36 @@ class StudySyncServiceTest {
         override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
         override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
+
+    private class FakeUserPort : UserPort {
+        override fun save(entity: UserEntity): UserEntity = entity
+        override fun findById(id: Long): Optional<UserEntity> = Optional.empty()
+        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = mutableListOf()
+        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+    }
+
+    private class FakeQuestionSearchPort : QuestionSearchPort {
+        override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
+        override fun deleteByQuestionId(questionId: Long): Long = 0
+        override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+        override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
+        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
+    }
+
+    private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {
+        override fun translateSearchText(
+            sourceLanguage: String,
+            targetLanguage: String,
+            topic: String,
+            question: String,
+            answer: String?,
+            feedback: String?,
+            explanation: String?,
+        ): TranslatedQuestionSearchText = TranslatedQuestionSearchText(topic, question, answer, feedback, explanation)
+    }
+
+    private fun fakeSearchSyncManager() =
+        QuestionSearchSyncManager(BuddyStudyProperties(), FakeQuestionPort(), FakeUserPort(), FakeQuestionSearchPort(), FakeQuestionSearchTranslator())
 }

@@ -84,6 +84,8 @@ data class QuestionCoverageSelection(
     val conceptName: String,
     val angleKey: String,
     val angleName: String,
+    val conceptKeyPath: String = conceptKey,
+    val conceptPath: String = conceptName,
 )
 
 interface QuestionCoveragePort {
@@ -91,6 +93,7 @@ interface QuestionCoveragePort {
         val key: String,
         val name: String,
         val angles: List<CoverageAngleBlueprint>,
+        val children: List<CoverageConceptBlueprint> = emptyList(),
     )
 
     data class CoverageAngleBlueprint(

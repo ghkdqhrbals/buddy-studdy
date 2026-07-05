@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study
 
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
+import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityGuide
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -68,6 +69,27 @@ class QuestionPromptProviderTest {
         assertThat(prompt.userPrompt).contains("Language: Korean")
         assertThat(prompt.userPrompt).contains("Extra tutor prompt: None")
         assertThat(prompt.userPrompt).contains("Previously asked questions for this learner and topic: None")
+    }
+
+    @Test
+    fun `question prompt includes full concept path when coverage selects nested leaf`() {
+        val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
+            topic = "Redis",
+            level = 7,
+            language = "en",
+            customPrompt = "",
+            recentQuestions = emptyList(),
+            diversity = testDiversity,
+            coverage = QuestionCoverageGuide(
+                conceptName = "Recovery",
+                conceptPath = "Persistence > AOF > Recovery",
+                angleName = "Failure Mode",
+            ),
+        )
+
+        assertThat(prompt.userPrompt).contains("Focus concept path: Persistence > AOF > Recovery")
+        assertThat(prompt.userPrompt).contains("Focus concept: Recovery")
+        assertThat(prompt.userPrompt).contains("Question angle: Failure Mode")
     }
 
     private val testDiversity = QuestionDiversityGuide(

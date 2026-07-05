@@ -121,6 +121,7 @@ class SettingsServiceTest {
             return persisted
         }
 
+        override fun deleteByIdAndUserId(id: Long, userId: Long): Long = 0
         override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = rows.firstOrNull { it.userId == userId }
         override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
         override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? {
