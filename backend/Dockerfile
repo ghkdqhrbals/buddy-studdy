@@ -13,6 +13,7 @@ RUN ./gradlew --no-daemon clean :tutor:nativeCompile
 FROM oraclelinux:9-slim
 
 ENV APP_PORT=8080
+ENV FLYWAY_LOCATIONS=classpath:db/migration,filesystem:/app/db/migration
 WORKDIR /app
 
 RUN microdnf install -y shadow-utils && \
