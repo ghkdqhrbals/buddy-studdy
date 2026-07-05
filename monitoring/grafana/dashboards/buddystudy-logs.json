@@ -68,6 +68,15 @@
               {
                 "id": "custom.width",
                 "value": 82
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -80,6 +89,15 @@
               {
                 "id": "custom.width",
                 "value": 330
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -92,6 +110,15 @@
               {
                 "id": "custom.width",
                 "value": 82
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -104,6 +131,15 @@
               {
                 "id": "custom.width",
                 "value": 110
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -116,6 +152,15 @@
               {
                 "id": "custom.width",
                 "value": 190
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -128,6 +173,15 @@
               {
                 "id": "custom.width",
                 "value": 520
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__data.fields.requestId}"
+                  }
+                ]
               }
             ]
           },
@@ -140,27 +194,7 @@
               {
                 "id": "custom.width",
                 "value": 160
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "requestId"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 300
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "path"
-            },
-            "properties": [
+              },
               {
                 "id": "links",
                 "value": [
@@ -178,6 +212,10 @@
               "options": "requestId"
             },
             "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              },
               {
                 "id": "links",
                 "value": [
@@ -264,7 +302,8 @@
           }
         }
       ],
-      "type": "table"
+      "type": "table",
+      "description": "Sentry-style API request list. Click any value in a request row to open logs connected by requestId."
     },
     {
       "datasource": {
@@ -596,5 +635,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 5
+  "version": 6
 }
