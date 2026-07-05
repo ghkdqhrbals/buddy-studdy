@@ -799,7 +799,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let state = try await remotePushBackendClient.fetchAccess(registration: registration)
+            let state = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "page-access-\(reason)",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchAccess(registration: recoveredRegistration)
+                }
+            )
             backendAccessState = state
             isCommunitySignedIn = state.user.status != "ANONYMOUS"
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
@@ -1263,12 +1269,18 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let recordsPage = try await remotePushBackendClient.fetchRecords(
+            let recordsPage = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                limit: settings.sanitizedMaxHistoryCount,
-                offset: 0,
-                query: "",
-                language: settings.appLanguage
+                reason: "records",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchRecords(
+                        registration: recoveredRegistration,
+                        limit: settings.sanitizedMaxHistoryCount,
+                        offset: 0,
+                        query: "",
+                        language: settings.appLanguage
+                    )
+                }
             )
             let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
             applyBackendRecordsPage(
@@ -1296,7 +1308,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let unreadCount = try await remotePushBackendClient.fetchNotificationUnreadCount(registration: registration)
+            let unreadCount = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "notification-count",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchNotificationUnreadCount(registration: recoveredRegistration)
+                }
+            )
             updateNotificationState { state in
                 state.applyUnreadCount(unreadCount)
             }
@@ -1329,10 +1347,16 @@ final class AppState: ObservableObject {
 
         let offset = reset ? 0 : notifications.count
         do {
-            let page = try await remotePushBackendClient.fetchNotifications(
+            let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                limit: 30,
-                offset: offset
+                reason: "notifications",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchNotifications(
+                        registration: recoveredRegistration,
+                        limit: 30,
+                        offset: offset
+                    )
+                }
             )
             updateNotificationState { state in
                 state.applyPage(page, reset: reset)
@@ -1374,7 +1398,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await remotePushBackendClient.markNotificationRead(registration: registration, notificationID: notificationID)
+            try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "notification-read",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.markNotificationRead(registration: recoveredRegistration, notificationID: notificationID)
+                }
+            )
             await refreshNotificationUnreadCount()
         } catch {
             log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
@@ -1388,7 +1418,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await remotePushBackendClient.deleteNotification(registration: registration, notificationID: notification.id)
+            try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "notification-delete",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.deleteNotification(registration: recoveredRegistration, notificationID: notification.id)
+                }
+            )
             updateNotificationState { state in
                 state.delete(notificationID: notification.id)
             }
@@ -1404,7 +1440,13 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await remotePushBackendClient.deleteAllNotifications(registration: registration)
+            try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "notifications-delete-all",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.deleteAllNotifications(registration: recoveredRegistration)
+                }
+            )
             updateNotificationState { state in
                 state.deleteAll()
             }
@@ -1507,18 +1549,25 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let recordsPage = try await remotePushBackendClient.fetchRecords(
+            let (recordsPage, studyPage) = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                limit: settings.sanitizedMaxHistoryCount,
-                offset: 0,
-                query: "",
-                language: settings.appLanguage
-            )
-            let studyPage = try await remotePushBackendClient.fetchStudy(
-                registration: registration,
-                limit: 100,
-                offset: 0,
-                query: ""
+                reason: "state",
+                operation: { recoveredRegistration in
+                    let recordsPage = try await remotePushBackendClient.fetchRecords(
+                        registration: recoveredRegistration,
+                        limit: settings.sanitizedMaxHistoryCount,
+                        offset: 0,
+                        query: "",
+                        language: settings.appLanguage
+                    )
+                    let studyPage = try await remotePushBackendClient.fetchStudy(
+                        registration: recoveredRegistration,
+                        limit: 100,
+                        offset: 0,
+                        query: ""
+                    )
+                    return (recordsPage, studyPage)
+                }
             )
             applyBackendStudyPage(studyPage)
             let pendingRecords = studyPage.studies.compactMap(\.pendingQuestion)
@@ -1624,11 +1673,17 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let page = try await remotePushBackendClient.fetchStudy(
+            let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                limit: 100,
-                offset: 0,
-                query: trimmedQuery
+                reason: "study-search",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchStudy(
+                        registration: recoveredRegistration,
+                        limit: 100,
+                        offset: 0,
+                        query: trimmedQuery
+                    )
+                }
             )
             let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
                 let key = Self.normalizedCategoryText(for: category.title)
@@ -1671,12 +1726,18 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let page = try await remotePushBackendClient.fetchRecords(
+            let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                limit: limit ?? settings.sanitizedMaxHistoryCount,
-                offset: 0,
-                query: trimmedQuery,
-                language: settings.appLanguage
+                reason: "record-search",
+                operation: { recoveredRegistration in
+                    try await remotePushBackendClient.fetchRecords(
+                        registration: recoveredRegistration,
+                        limit: limit ?? settings.sanitizedMaxHistoryCount,
+                        offset: 0,
+                        query: trimmedQuery,
+                        language: settings.appLanguage
+                    )
+                }
             )
             replaceRecordSearchResults(page.records)
         } catch {
@@ -4873,7 +4934,13 @@ final class AppState: ObservableObject {
                     return
                 }
                 do {
-                    try await remotePushBackendClient.clearRecords(registration: tokenRegistration)
+                    try await performWithBackendIdentityRecovery(
+                        registration: tokenRegistration,
+                        reason: "clear-records",
+                        operation: { recoveredRegistration in
+                            try await remotePushBackendClient.clearRecords(registration: recoveredRegistration)
+                        }
+                    )
                     await syncRemotePushScheduleIfPossible(reason: "clear-records")
                 } catch {
                     log(.warning, "백엔드 학습 기록 전체삭제 실패: \(error.localizedDescription)")
@@ -4907,7 +4974,13 @@ final class AppState: ObservableObject {
                     return
                 }
                 do {
-                    try await remotePushBackendClient.deleteRecord(registration: tokenRegistration, recordID: record.id)
+                    try await performWithBackendIdentityRecovery(
+                        registration: tokenRegistration,
+                        reason: "delete-record",
+                        operation: { recoveredRegistration in
+                            try await remotePushBackendClient.deleteRecord(registration: recoveredRegistration, recordID: record.id)
+                        }
+                    )
                     await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "delete-record")
                 } catch {
@@ -4942,10 +5015,16 @@ final class AppState: ObservableObject {
                 return
             }
             do {
-                let backendRecord = try await remotePushBackendClient.updateRecordPublicity(
+                let backendRecord = try await performWithBackendIdentityRecovery(
                     registration: tokenRegistration,
-                    recordID: record.id,
-                    isPublic: isPublic
+                    reason: "record-publicity",
+                    operation: { recoveredRegistration in
+                        try await remotePushBackendClient.updateRecordPublicity(
+                            registration: recoveredRegistration,
+                            recordID: record.id,
+                            isPublic: isPublic
+                        )
+                    }
                 )
                 settingsStore.saveStudyRecord(backendRecord)
                 reloadStudyRecordsFromStore()
@@ -5364,19 +5443,58 @@ final class AppState: ObservableObject {
             return updatedRegistration
         } catch {
             if Self.isBackendDeviceNotFound(error) {
-                do {
-                    log(.warning, "저장된 백엔드 기기를 찾을 수 없어 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID)")
-                    return try await registerFreshBackendDevice(
-                        apnsToken: registration.apnsToken.isEmpty ? nil : registration.apnsToken,
-                        reason: "\(reason)-device-recovery",
-                        includeAPIKey: true
-                    )
-                } catch {
-                    log(.warning, "백엔드 기기 재등록 실패: \(error.localizedDescription)")
-                    return nil
-                }
+                log(.warning, "저장된 백엔드 기기를 찾을 수 없어 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID)")
+                return await resetBackendIdentityAndRegisterFresh(
+                    previousRegistration: registration,
+                    reason: "\(reason)-device-recovery"
+                )
             }
             log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func performWithBackendIdentityRecovery<T>(
+        registration: RemotePushRegistration,
+        reason: String,
+        operation: (RemotePushRegistration) async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation(registration)
+        } catch {
+            guard Self.shouldResetBackendIdentity(after: error) else {
+                throw error
+            }
+
+            guard let recoveredRegistration = await resetBackendIdentityAndRegisterFresh(
+                previousRegistration: registration,
+                reason: reason
+            ) else {
+                throw error
+            }
+
+            return try await operation(recoveredRegistration)
+        }
+    }
+
+    private func resetBackendIdentityAndRegisterFresh(
+        previousRegistration: RemotePushRegistration,
+        reason: String
+    ) async -> RemotePushRegistration? {
+        settingsStore.saveRemotePushRegistration(nil)
+        resetCommunitySignInState()
+        clearCommunityFeedPage()
+        let apnsToken = previousRegistration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let registration = try await registerFreshBackendDevice(
+                apnsToken: apnsToken.isEmpty ? nil : apnsToken,
+                reason: "\(reason)-identity-reset",
+                includeAPIKey: true
+            )
+            log(.warning, "백엔드 device/token이 무효화되어 새 기기로 복구했습니다. reason=\(reason), oldDeviceID=\(previousRegistration.deviceID), newDeviceID=\(registration.deviceID)")
+            return registration
+        } catch {
+            log(.warning, "백엔드 device/token 복구 실패: \(error.localizedDescription), reason=\(reason), oldDeviceID=\(previousRegistration.deviceID)")
             return nil
         }
     }
@@ -5466,10 +5584,16 @@ final class AppState: ObservableObject {
                 guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-update") else {
                     return
                 }
-                registration = try await remotePushBackendClient.updatePushToken(
+                registration = try await performWithBackendIdentityRecovery(
                     registration: tokenRegistration,
-                    apnsToken: token,
-                    apnsEnvironment: Self.backendAPNSEnvironment
+                    reason: "device-token-update",
+                    operation: { recoveredRegistration in
+                        try await remotePushBackendClient.updatePushToken(
+                            registration: recoveredRegistration,
+                            apnsToken: token,
+                            apnsEnvironment: Self.backendAPNSEnvironment
+                        )
+                    }
                 )
                 settingsStore.saveRemotePushRegistration(registration)
                 log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
@@ -5484,9 +5608,15 @@ final class AppState: ObservableObject {
                 log(.info, "서버 push 백엔드에 iPhone 기기를 등록했습니다.")
             }
 
-            try await updateBackendSettings(
+            try await performWithBackendIdentityRecovery(
                 registration: registration,
-                reason: "device-token"
+                reason: "device-token",
+                operation: { recoveredRegistration in
+                    try await updateBackendSettings(
+                        registration: recoveredRegistration,
+                        reason: "device-token"
+                    )
+                }
             )
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         } catch {
@@ -5501,9 +5631,15 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await updateBackendSettings(
+            try await performWithBackendIdentityRecovery(
                 registration: registration,
-                reason: reason
+                reason: reason,
+                operation: { recoveredRegistration in
+                    try await updateBackendSettings(
+                        registration: recoveredRegistration,
+                        reason: reason
+                    )
+                }
             )
         } catch {
             log(.warning, "서버 push 일정 동기화 실패: \(error.localizedDescription)")
@@ -6814,6 +6950,23 @@ final class AppState: ObservableObject {
             return status == 401
                 || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
                 || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
+        case .invalidResponse:
+            return false
+        }
+    }
+
+    nonisolated private static func shouldResetBackendIdentity(after error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            let code = apiError?.code
+            return status == 401
+                || code == "DEVICE_NOT_FOUND"
+                || code == "AUTH_ACCESS_TOKEN_REQUIRED"
+                || code == "AUTH_INVALID_ACCESS_TOKEN"
         case .invalidResponse:
             return false
         }

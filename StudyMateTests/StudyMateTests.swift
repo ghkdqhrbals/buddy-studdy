@@ -428,6 +428,72 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testDeviceNotFoundDuringAccessTokenBootstrapReRegistersDevice() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "missing-device",
+                clientSecret: "missing-secret",
+                apnsToken: "apns-old"
+            )
+        )
+        let backend = FakeRemotePushBackendClient()
+        backend.bootstrapAccessTokenError = Self.backendError(code: "DEVICE_NOT_FOUND", status: 404)
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.refreshPageAccess(reason: "test")
+
+        XCTAssertEqual(backend.bootstrapAccessTokenCallCount, 1)
+        XCTAssertEqual(backend.registeredAPNSTokens, ["apns-old"])
+        XCTAssertEqual(backend.fetchAccessCallCount, 1)
+        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, backend.registration.deviceID)
+        XCTAssertEqual(appState.backendAccessState.user.status, "ACTIVE")
+    }
+
+    @MainActor
+    func testDeviceNotFoundAfterExistingAccessTokenReRegistersAndRetriesRequest() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        let accessToken = Self.jwt(
+            payload: [
+                "device_id": "stale-device",
+                "is_anonymous": false,
+                "status": "ACTIVE"
+            ]
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "stale-device",
+                clientSecret: "stale-secret",
+                apnsToken: "apns-old",
+                accessToken: accessToken,
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        backend.fetchAccessErrors = [Self.backendError(code: "DEVICE_NOT_FOUND", status: 404)]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.refreshPageAccess(reason: "test")
+
+        XCTAssertEqual(backend.registeredAPNSTokens, ["apns-old"])
+        XCTAssertEqual(backend.fetchAccessCallCount, 2)
+        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, backend.registration.deviceID)
+        XCTAssertEqual(appState.backendAccessState.user.status, "ACTIVE")
+    }
+
+    @MainActor
     func testDebugBackendBaseURLParticipatesInSettingsDirtyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3908,6 +3974,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
     var fetchAccessCallCount = 0
+    var bootstrapAccessTokenCallCount = 0
+    var bootstrapAccessTokenError: Error?
+    var fetchAccessErrors: [Error] = []
     var fetchedSettings: BackendStudySettings?
     var accessState = BackendAccessState(
         user: BackendAccessUser(id: 1, status: "ACTIVE", displayName: "Tester"),
@@ -3951,6 +4020,11 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        bootstrapAccessTokenCallCount += 1
+        if let error = bootstrapAccessTokenError {
+            bootstrapAccessTokenError = nil
+            throw error
+        }
         self.registration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -3963,8 +4037,31 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
         fetchAccessCallCount += 1
+        if !fetchAccessErrors.isEmpty {
+            throw fetchAccessErrors.removeFirst()
+        }
         return accessState
     }
+
+    func logout(registration: RemotePushRegistration) async throws {}
+
+    func fetchNotifications(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendNotificationsPage {
+        BackendNotificationsPage(notifications: [], unreadCount: 0, totalCount: 0, limit: limit, offset: offset)
+    }
+
+    func fetchNotificationUnreadCount(registration: RemotePushRegistration) async throws -> Int {
+        0
+    }
+
+    func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws {}
+
+    func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {}
+
+    func deleteAllNotifications(registration: RemotePushRegistration) async throws {}
 
     func updateSchedule(
         registration: RemotePushRegistration,
@@ -4004,6 +4101,11 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             updatedAt: now
         )
     }
+
+    func deleteStudy(
+        registration: RemotePushRegistration,
+        studyID: Int
+    ) async throws {}
 
     func fetchStudy(
         registration: RemotePushRegistration,
@@ -4076,7 +4178,6 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         period: BackendStatsPeriod,
         startAt: Date?,
         endAt: Date?,
-        search: String,
         sort: BackendStatsSort,
         limit: Int,
         offset: Int
@@ -4084,12 +4185,21 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         throw RemotePushBackendError.invalidResponse
     }
 
+    func fetchStatsActivity(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStatsActivity {
+        BackendStatsActivity(days: [], streakDays: 0, monthAnswerCount: 0, generatedAt: Date())
+    }
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
         limit: Int,
         offset: Int,
-        excludeDeviceID: String?
+        excludeDeviceID: String?,
+        language: AppLanguage
     ) async throws -> CommunityQuestionsResponse {
         CommunityQuestionsResponse(
             questions: [],
@@ -4101,7 +4211,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
-        questionID: String
+        questionID: String,
+        language: AppLanguage
     ) async throws -> CommunityQuestion {
         CommunityQuestion(
             id: questionID,
@@ -4353,6 +4464,19 @@ private extension StudyMateTests {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    static func backendError(code: String, status: Int) -> RemotePushBackendError {
+        let body = """
+        {"error":{"code":"\(code)","message":"test","status":\(status)}}
+        """
+        let apiError = BackendAPIError(
+            code: code,
+            message: "test",
+            requestID: "request-test",
+            status: status
+        )
+        return .httpStatus(status, body, apiError)
     }
 }
 
