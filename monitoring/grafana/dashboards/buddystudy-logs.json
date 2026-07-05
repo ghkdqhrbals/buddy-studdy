@@ -336,9 +336,33 @@
       "title": "API Requests",
       "transformations": [
         {
-          "id": "labelsToFields",
+          "id": "extractFields",
           "options": {
-            "mode": "columns"
+            "source": "Line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": true
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": true
+          }
+        },
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "NewField",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": false,
+            "keepTime": true
           }
         },
         {
@@ -346,6 +370,7 @@
           "options": {
             "excludeByName": {
               "Line": true,
+              "line": true,
               "NewField": true,
               "labels": true,
               "labelTypes": true,
