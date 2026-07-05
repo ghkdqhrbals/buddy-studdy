@@ -588,6 +588,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
+      "description": "Full exception stack trace for the selected requestId. This filters to api_error logs so the throwable is not hidden behind the api_exchange summary.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -614,6 +615,74 @@
       "gridPos": {
         "x": 0,
         "y": 36,
+        "w": 24,
+        "h": 18
+      },
+      "id": 9,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": true,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showControls": true,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": false,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_error\"",
+          "maxLines": 20,
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected Error Stack Trace",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 54,
         "w": 24,
         "h": 16
       },
