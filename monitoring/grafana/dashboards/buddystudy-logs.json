@@ -230,7 +230,7 @@
         ]
       },
       "gridPos": {
-        "h": 14,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 0
@@ -428,7 +428,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 12
       },
       "id": 5,
       "options": {
@@ -542,6 +542,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
+      "description": "Selected API request object extracted from api_exchange by requestId.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -566,10 +567,216 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 13,
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "id": 6,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": false,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 1,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp \"\\\"request\\\":(?P<request>\\{.*\\}),\\\"response\\\":\" | line_format \"{{.request}}\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected Request",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Selected API response object extracted from api_exchange by requestId.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "id": 7,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": false,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 1,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp \"\\\"response\\\":(?P<response>\\{.*\\})\\}$\" | line_format \"{{.response}}\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected Response",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Raw selected api_exchange line for fallback when request/response parsing is not enough.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 27
+      },
+      "id": 8,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": false,
+        "logDetailsMode": "inline",
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showControls": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "syntaxHighlighting": true,
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "direction": "backward",
+          "editorMode": "code",
+          "maxLines": 3,
+          "queryType": "range",
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\" |= \"api_exchange\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Selected API Exchange Raw",
+      "transformations": [],
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 35
       },
       "id": 2,
       "options": {
@@ -668,7 +875,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 47
       },
       "id": 3,
       "options": {
@@ -734,7 +941,7 @@
         "h": 16,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 52
       },
       "id": 4,
       "options": {
@@ -867,5 +1074,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 7
+  "version": 8
 }
