@@ -29,7 +29,8 @@ class StudySyncServiceTest {
     private val studies = FakeStudyPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
-    private val service = StudySyncService(studies, questions, questionStats, fakeSearchSyncManager())
+    private val serviceSearchPort = FakeQuestionSearchPort()
+    private val service = StudySyncService(studies, questions, questionStats, fakeSearchSyncManager(serviceSearchPort))
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
@@ -113,6 +114,18 @@ class StudySyncServiceTest {
         assertThat(existingStudy.nextDueAt).isAfter(existingDueAt)
     }
 
+    @Test
+    fun `deleting study also removes same-topic records and search rows`() {
+        studies.rows += study(id = 8, topic = "Redis")
+
+        service.deleteStudy(principal, studyId = 8)
+
+        assertThat(questions.softDeletedStudyIds).containsExactly(8)
+        assertThat(questions.softDeletedTopics).containsExactly("Redis")
+        assertThat(serviceSearchPort.deletedStudyIds).containsExactly(8)
+        assertThat(serviceSearchPort.deletedTopics).containsExactly("Redis")
+    }
+
     private fun study(id: Long, topic: String) = StudyEntity(
         id = id,
         deviceId = principal.deviceId,
@@ -156,6 +169,8 @@ class StudySyncServiceTest {
 
     private class FakeQuestionPort : QuestionPort {
         val pendingRows = mutableListOf<QuestionEntity>()
+        val softDeletedStudyIds = mutableListOf<Long>()
+        val softDeletedTopics = mutableListOf<String>()
         var findPendingByStudyIdCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
         override fun save(entity: QuestionEntity): QuestionEntity = entity
@@ -196,7 +211,14 @@ class StudySyncServiceTest {
         override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
+            softDeletedStudyIds += studyId
+            return 0
+        }
+        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
+            softDeletedTopics += topic
+            return 0
+        }
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -227,9 +249,18 @@ class StudySyncServiceTest {
     }
 
     private class FakeQuestionSearchPort : QuestionSearchPort {
+        val deletedStudyIds = mutableListOf<Long>()
+        val deletedTopics = mutableListOf<String>()
         override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
         override fun deleteByQuestionId(questionId: Long): Long = 0
-        override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override fun deleteByStudyId(studyId: Long, userId: Long): Long {
+            deletedStudyIds += studyId
+            return 0
+        }
+        override fun deleteByUserIdAndTopic(userId: Long, topic: String): Long {
+            deletedTopics += topic
+            return 0
+        }
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
         override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
@@ -247,6 +278,6 @@ class StudySyncServiceTest {
         ): TranslatedQuestionSearchText = TranslatedQuestionSearchText(topic, question, answer, feedback, explanation)
     }
 
-    private fun fakeSearchSyncManager() =
-        QuestionSearchSyncManager(BuddyStudyProperties(), FakeQuestionPort(), FakeUserPort(), FakeQuestionSearchPort(), FakeQuestionSearchTranslator())
+    private fun fakeSearchSyncManager(search: QuestionSearchPort = FakeQuestionSearchPort()) =
+        QuestionSearchSyncManager(BuddyStudyProperties(), FakeQuestionPort(), FakeUserPort(), search, FakeQuestionSearchTranslator())
 }

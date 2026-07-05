@@ -513,6 +513,7 @@ class UserStatsServiceTest {
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {

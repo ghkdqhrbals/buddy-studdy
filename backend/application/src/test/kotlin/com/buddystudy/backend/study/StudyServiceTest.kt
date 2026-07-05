@@ -523,6 +523,13 @@ class StudyServiceTest {
             rows.forEach { it.deletedAt = now }
             return rows.size
         }
+        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
+            val rows = (visibleRows + pendingRows).filter {
+                it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null
+            }
+            rows.forEach { it.deletedAt = now }
+            return rows.size
+        }
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -724,6 +731,7 @@ class StudyServiceTest {
         override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
         override fun deleteByQuestionId(questionId: Long): Long = 0
         override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
         override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
         override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null

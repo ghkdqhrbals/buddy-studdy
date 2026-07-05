@@ -239,6 +239,7 @@ class CommunityServiceTest {
         override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
         override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -320,6 +321,7 @@ class CommunityServiceTest {
         }
         override fun deleteByQuestionId(questionId: Long): Long = 0
         override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
         override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
             rows
                 .filter { it.language == language }

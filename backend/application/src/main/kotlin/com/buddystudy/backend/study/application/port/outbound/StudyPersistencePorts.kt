@@ -46,6 +46,7 @@ interface QuestionPort {
     fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     fun softDelete(id: Long, userId: Long, now: Instant): Int
     fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int
+    fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int
 }
 
 interface QuestionStatsPort {
