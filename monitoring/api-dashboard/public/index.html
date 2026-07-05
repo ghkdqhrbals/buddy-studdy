@@ -81,6 +81,20 @@
         </article>
       </section>
 
+      <section class="timeline-panel" aria-label="API request timeline">
+        <div class="timeline-header">
+          <div>
+            <h2>Timeline</h2>
+            <p id="timelineRangeLabel">Drag on the graph to select a time range.</p>
+          </div>
+          <button id="resetTimelineButton" type="button" disabled>Reset range</button>
+        </div>
+        <div class="timeline-canvas-wrap">
+          <canvas id="timelineCanvas" height="150"></canvas>
+          <div id="timelineSelection" class="timeline-selection" hidden></div>
+        </div>
+      </section>
+
       <main class="panel">
         <div class="panel-header">
           <div>
