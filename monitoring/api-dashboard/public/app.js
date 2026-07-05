@@ -17,7 +17,10 @@ const state = {
   selectedRange: null,
   timeline: [],
   drag: null,
-  visibleLimit: 100,
+  pageSize: 100,
+  pageIndex: 0,
+  pageCursors: [null],
+  hasNextPage: false,
 };
 
 const els = {
@@ -39,6 +42,10 @@ const els = {
   timelineSelection: document.querySelector("#timelineSelection"),
   timelineRangeLabel: document.querySelector("#timelineRangeLabel"),
   resetTimelineButton: document.querySelector("#resetTimelineButton"),
+  pageSizeSelect: document.querySelector("#pageSizeSelect"),
+  prevPageButton: document.querySelector("#prevPageButton"),
+  nextPageButton: document.querySelector("#nextPageButton"),
+  pageInfo: document.querySelector("#pageInfo"),
 };
 
 const DEFAULT_QUERY = '{container=~".+"} |= "api_exchange"';
@@ -85,14 +92,25 @@ async function lokiQueryRange(query, { startNs, endNs, limit = 500, direction = 
 }
 
 async function loadRequests() {
+  resetPagination();
+  await loadRequestPage({ refreshTimeline: true });
+}
+
+async function loadRequestPage({ refreshTimeline = false } = {}) {
   setStatus("Loading API requests...", "loading");
   const range = timeRange();
+  const pageEndNs = state.pageCursors[state.pageIndex] ?? range.endNs;
+  const pageQuery = lokiQueryRange(DEFAULT_QUERY, {
+    ...range,
+    endNs: pageEndNs,
+    limit: state.pageSize + 1,
+  });
   const [timelineValues, values] = await Promise.all([
-    loadTimeline(range),
-    lokiQueryRange(DEFAULT_QUERY, { ...range, limit: 500 }),
+    refreshTimeline ? loadTimeline(range) : Promise.resolve(state.timeline),
+    pageQuery,
   ]);
   state.timeline = timelineValues;
-  state.requests = values
+  const parsed = values
     .map((value) => {
       try {
         return parseApiExchange(value);
@@ -103,12 +121,25 @@ async function loadRequests() {
     })
     .filter(Boolean)
     .sort((a, b) => Number(BigInt(b.nanoseconds) - BigInt(a.nanoseconds)));
+  state.hasNextPage = parsed.length > state.pageSize;
+  state.requests = parsed.slice(0, state.pageSize);
+  const oldest = state.requests[state.requests.length - 1];
+  if (oldest && state.hasNextPage) {
+    state.pageCursors[state.pageIndex + 1] = (BigInt(oldest.nanoseconds) - 1n).toString();
+  } else {
+    state.pageCursors.length = state.pageIndex + 1;
+  }
   state.detailCache.clear();
   state.expandedRequestId = "";
-  state.visibleLimit = 100;
   applyFilters();
   render();
   setStatus("Ready", "ready");
+}
+
+function resetPagination() {
+  state.pageIndex = 0;
+  state.pageCursors = [null];
+  state.hasNextPage = false;
 }
 
 async function loadTimeline(range) {
@@ -160,10 +191,14 @@ function renderSummary() {
 function renderRangeLabel() {
   const count = state.filtered.length;
   const range = timeRange();
-  const suffix = state.requests.length >= 500 ? "latest 500 loaded" : "newest first";
-  els.rangeLabel.textContent = `${count} requests, ${suffix}`;
+  const suffix = state.hasNextPage ? `page ${state.pageIndex + 1}, ${state.pageSize} per page` : `page ${state.pageIndex + 1}`;
+  els.rangeLabel.textContent = `${count} visible requests, ${suffix}`;
   els.timelineRangeLabel.textContent = `${formatKstShort(range.startMs)} - ${formatKstShort(range.endMs)} · drag to zoom`;
   els.resetTimelineButton.disabled = !state.selectedRange;
+  els.pageInfo.textContent = `Page ${state.pageIndex + 1}`;
+  els.prevPageButton.disabled = state.pageIndex === 0;
+  els.nextPageButton.disabled = !state.hasNextPage;
+  els.pageSizeSelect.value = String(state.pageSize);
 }
 
 function renderRows() {
@@ -172,14 +207,11 @@ function renderRows() {
     els.requestRows.append(els.emptyTemplate.content.cloneNode(true));
     return;
   }
-  for (const request of state.filtered.slice(0, state.visibleLimit)) {
+  for (const request of state.filtered) {
     els.requestRows.append(renderRequestRow(request));
     if (state.expandedRequestId === request.requestId) {
       els.requestRows.append(renderDetailRow(request));
     }
-  }
-  if (state.filtered.length > state.visibleLimit) {
-    els.requestRows.append(renderLoadMoreRow());
   }
 }
 
@@ -200,18 +232,6 @@ function renderRequestRow(request) {
     <div class="request-id-cell" role="cell">${escapeHtml(request.requestId)}</div>
   `;
   return row;
-}
-
-function renderLoadMoreRow() {
-  const wrapper = document.createElement("div");
-  wrapper.className = "load-more-row";
-  const remaining = state.filtered.length - state.visibleLimit;
-  wrapper.innerHTML = `<button type="button">Load 100 more (${remaining} remaining)</button>`;
-  wrapper.querySelector("button")?.addEventListener("click", () => {
-    state.visibleLimit += 100;
-    renderRows();
-  });
-  return wrapper;
 }
 
 function renderDetailRow(request) {
@@ -484,7 +504,6 @@ function bindEvents() {
         state.selectedRange = null;
         loadRequests().catch((error) => setStatus(error.message, "error"));
       } else {
-        state.visibleLimit = 100;
         applyFilters();
         render();
       }
@@ -492,11 +511,24 @@ function bindEvents() {
   }
   for (const element of [els.pathInput, els.requestIdInput]) {
     element.addEventListener("input", () => {
-      state.visibleLimit = 100;
       applyFilters();
       render();
     });
   }
+  els.pageSizeSelect.addEventListener("change", () => {
+    state.pageSize = Number(els.pageSizeSelect.value);
+    loadRequests().catch((error) => setStatus(error.message, "error"));
+  });
+  els.prevPageButton.addEventListener("click", () => {
+    if (state.pageIndex === 0) return;
+    state.pageIndex -= 1;
+    loadRequestPage().catch((error) => setStatus(error.message, "error"));
+  });
+  els.nextPageButton.addEventListener("click", () => {
+    if (!state.hasNextPage) return;
+    state.pageIndex += 1;
+    loadRequestPage().catch((error) => setStatus(error.message, "error"));
+  });
   els.refreshButton.addEventListener("click", () => {
     loadRequests().catch((error) => setStatus(error.message, "error"));
   });

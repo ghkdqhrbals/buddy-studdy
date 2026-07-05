@@ -264,6 +264,64 @@ select {
   font-size: 12px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.page-size-control select {
+  height: 30px;
+  min-width: 74px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 8px;
+  background: #0e141d;
+  color: var(--text);
+}
+
+.pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-controls button {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pagination-controls button:disabled {
+  cursor: not-allowed;
+  color: var(--muted-2);
+  opacity: 0.55;
+}
+
+.pagination-controls span {
+  min-width: 58px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .status-message {
   color: var(--muted);
   font-size: 12px;
@@ -334,29 +392,6 @@ select {
 .data-row.selected {
   background: rgba(96, 165, 250, 0.12);
   box-shadow: inset 3px 0 0 var(--blue);
-}
-
-.load-more-row {
-  display: grid;
-  place-items: center;
-  padding: 14px;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.load-more-row button {
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 14px;
-  color: var(--text);
-  background: var(--surface-2);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.load-more-row button:hover {
-  border-color: rgba(96, 165, 250, 0.45);
-  background: var(--blue-soft);
 }
 
 .path-cell,
