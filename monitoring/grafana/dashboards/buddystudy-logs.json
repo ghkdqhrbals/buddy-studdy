@@ -310,6 +310,238 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
+      "description": "API latency percentiles computed from api_exchange durationMs over the selected dashboard time range. Grouped by METHOD + path.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "ms",
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "api"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 430
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p50"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p90"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p90"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p95"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "p99"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 5,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "p99"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(100, quantile_over_time(0.50, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "legendFormat": "p50",
+          "queryType": "instant",
+          "refId": "P50"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(100, quantile_over_time(0.90, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "legendFormat": "p90",
+          "queryType": "instant",
+          "refId": "P90"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(100, quantile_over_time(0.95, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "legendFormat": "p95",
+          "queryType": "instant",
+          "refId": "P95"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "buddystudy-loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(100, quantile_over_time(0.99, ${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"\\\\\"method\\\\\":\\\\\"(?P<method>[^\\\\\"]+)\\\\\".*\\\\\"path\\\\\":\\\\\"(?P<path>[^\\\\\"]+)\\\\\".*\\\\\"durationMs\\\\\":\\\\\"?(?P<durationMs>[0-9.]+)\" | label_format api=\"{{.method}} {{.path}}\" | unwrap durationMs [$__range]) by (api))",
+          "legendFormat": "p99",
+          "queryType": "instant",
+          "refId": "P99"
+        }
+      ],
+      "title": "API Latency Percentiles",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "api": 0,
+              "P50": 1,
+              "P90": 2,
+              "P95": 3,
+              "P99": 4
+            },
+            "renameByName": {
+              "P50": "p50",
+              "P90": "p90",
+              "P95": "p95",
+              "P99": "p99",
+              "Value #P50": "p50",
+              "Value #P90": "p90",
+              "Value #P95": "p95",
+              "Value #P99": "p99"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -337,7 +569,7 @@
         "h": 13,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 21
       },
       "id": 2,
       "options": {
@@ -436,7 +668,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 34
       },
       "id": 3,
       "options": {
@@ -502,7 +734,7 @@
         "h": 16,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 39
       },
       "id": 4,
       "options": {
@@ -635,5 +867,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 6
+  "version": 7
 }
