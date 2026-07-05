@@ -534,6 +534,8 @@ final class AppState: ObservableObject {
     private var clipboardPasteRequestID = 0
     private var isEditingSettings = false
     private var didReceiveCloudStateWhileEditing = false
+    private var locallyDeletedStudyIDs = Set<Int>()
+    private var locallyDeletedStudyTopicKeys = Set<String>()
 
     private struct PendingAnswerDraft {
         var question: QuestionItem?
@@ -1574,8 +1576,9 @@ final class AppState: ObservableObject {
     }
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
-        studyRoomState.replace(with: studyPage.studies)
-        guard !isEditingSettings, !studyPage.studies.isEmpty else {
+        let visibleStudies = studyPage.studies.filter { !isLocallyDeletedStudy($0) }
+        studyRoomState.replace(with: visibleStudies)
+        guard !isEditingSettings, !visibleStudies.isEmpty else {
             return
         }
 
@@ -1589,7 +1592,7 @@ final class AppState: ObservableObject {
             .category(for: settings.selectedStudyCategoryID)
             .map { Self.normalizedCategoryText(for: $0.title) }
 
-        let categories = studyPage.studies.map { room in
+        let categories = visibleStudies.map { room in
             let topicKey = Self.normalizedCategoryText(for: room.topic)
             let existing = existingCategoriesByTopic[topicKey]
             return StudyCategory(
@@ -1672,13 +1675,14 @@ final class AppState: ObservableObject {
                     )
                 }
             )
+            let visibleStudies = page.studies.filter { !isLocallyDeletedStudy($0) }
             let existingCategoriesByTopic = settings.studyCategories.reduce(into: [String: StudyCategory]()) { result, category in
                 let key = Self.normalizedCategoryText(for: category.title)
                 if result[key] == nil {
                     result[key] = category
                 }
             }
-            replaceHomeStudySearchResults(page.studies.map { room in
+            replaceHomeStudySearchResults(visibleStudies.map { room in
                 let existing = existingCategoriesByTopic[Self.normalizedCategoryText(for: room.topic)]
                 return StudyCategory(
                     id: existing?.id ?? String(room.id),
@@ -3271,6 +3275,7 @@ final class AppState: ObservableObject {
             customPrompt: customPrompt ?? settings.customPrompt,
             openAIModel: openAIModel ?? settings.sanitizedOpenAIModel
         )
+        locallyDeletedStudyTopicKeys.remove(Self.normalizedCategoryText(for: raw))
         let nextSettings = StudySettings(
             topic: settings.topic,
             difficulty: settings.difficulty,
@@ -3308,6 +3313,7 @@ final class AppState: ObservableObject {
             return
         }
 
+        locallyDeletedStudyTopicKeys.remove(Self.normalizedCategoryText(for: raw))
         let categories = settings.studyCategories.map { category in
             guard category.id == id else {
                 return category
@@ -3504,6 +3510,8 @@ final class AppState: ObservableObject {
         }
         let studyIDsToDelete = Set(categoriesToDelete.compactMap { backendStudyIDIfLoaded(for: $0) })
         let topicKeysToDelete = Set(categoriesToDelete.map { Self.normalizedCategoryText(for: $0.title) })
+        locallyDeletedStudyIDs.formUnion(studyIDsToDelete)
+        locallyDeletedStudyTopicKeys.formUnion(topicKeysToDelete)
 
         let currentSelectedID = settings.selectedStudyCategoryID
         let didDeleteActiveCategory = currentSelectedID.map { idsToDelete.contains($0) } ?? false
@@ -3589,16 +3597,23 @@ final class AppState: ObservableObject {
         var studyIDs = knownStudyIDs
         if !topicKeys.isEmpty {
             do {
-                let studyPage = try await remotePushBackendClient.fetchStudy(
+                let studyPage = try await performWithBackendIdentityRecovery(
                     registration: registration,
-                    limit: 500,
-                    offset: 0,
-                    query: ""
+                    reason: "delete-study-resolve",
+                    operation: { recoveredRegistration in
+                        try await remotePushBackendClient.fetchStudy(
+                            registration: recoveredRegistration,
+                            limit: 500,
+                            offset: 0,
+                            query: ""
+                        )
+                    }
                 )
                 let resolvedIDs = studyPage.studies
                     .filter { topicKeys.contains(Self.normalizedCategoryText(for: $0.topic)) }
                     .map(\.id)
                 studyIDs.formUnion(resolvedIDs)
+                locallyDeletedStudyIDs.formUnion(resolvedIDs)
             } catch {
                 log(.warning, "백엔드 학습 삭제용 id 조회 실패: topics=\(topicKeys.sorted()), error=\(error.localizedDescription)")
             }
@@ -3611,12 +3626,23 @@ final class AppState: ObservableObject {
 
         for studyID in studyIDs.sorted() {
             do {
-                try await remotePushBackendClient.deleteStudy(registration: registration, studyID: studyID)
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "delete-study",
+                    operation: { recoveredRegistration in
+                        try await remotePushBackendClient.deleteStudy(registration: recoveredRegistration, studyID: studyID)
+                    }
+                )
                 log(.info, "백엔드 학습을 삭제했습니다. id=\(studyID)")
             } catch {
                 log(.warning, "백엔드 학습 삭제 실패: id=\(studyID), error=\(error.localizedDescription)")
             }
         }
+    }
+
+    private func isLocallyDeletedStudy(_ study: BackendStudyRoom) -> Bool {
+        locallyDeletedStudyIDs.contains(study.id) ||
+            locallyDeletedStudyTopicKeys.contains(Self.normalizedCategoryText(for: study.topic))
     }
 
     func moveStudyCategories(from source: IndexSet, to destination: Int) {
