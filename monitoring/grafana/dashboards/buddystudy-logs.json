@@ -29,18 +29,12 @@
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
-          "links": [
-            {
-              "title": "Open request context",
-              "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__field.labels.requestId}"
-            }
-          ],
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -52,28 +46,102 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "requestId"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open connected logs",
+                    "url": "/d/buddystudy-logs/buddystudy-logs?orgId=1&from=${__from}&to=${__to}&var-labelSelector=${labelSelector:queryparam}&var-logqlSearch=${logqlSearch:queryparam}&var-requestId=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 360
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "durationMs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 10,
+        "h": 9,
         "w": 24,
         "x": 0,
         "y": 0
       },
       "id": 1,
       "options": {
-        "dedupStrategy": "none",
-        "enableInfiniteScrolling": true,
-        "enableLogDetails": true,
-        "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
-        "showCommonLabels": false,
-        "showControls": true,
-        "showLabels": false,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "syntaxHighlighting": true,
-        "wrapLogMessage": true
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "time"
+          }
+        ]
       },
       "pluginVersion": "12.3.0",
       "targets": [
@@ -84,15 +152,43 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | line_format \"{{.method}} {{.path}} status={{.status}} durationMs={{.durationMs}} requestId={{.requestId}}\"",
-          "maxLines": 200,
+          "expr": "${labelSelector:raw} |= \"api_exchange\" ${logqlSearch:raw} | regexp \"api_exchange \\\\{\\\"requestId\\\":\\\"(?P<requestId>[^\\\"]+)\\\".*\\\"method\\\":\\\"(?P<method>[^\\\"]+)\\\".*\\\"path\\\":\\\"(?P<path>[^\\\"]+)\\\".*\\\"status\\\":(?P<status>[0-9]+).*\\\"durationMs\\\":\\\"?(?P<durationMs>[0-9.]+)\" | line_format \"method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} requestId={{.requestId}}\"",
+          "maxLines": 300,
           "queryType": "range",
           "refId": "A"
         }
       ],
       "title": "API Requests",
-      "transformations": [],
-      "type": "logs"
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) requestId=(?<requestId>[0-9a-fA-F-]+)",
+            "replace": true,
+            "keepTime": true
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "Time": 0,
+              "method": 1,
+              "path": 2,
+              "status": 3,
+              "durationMs": 4,
+              "requestId": 5
+            },
+            "renameByName": {
+              "Time": "time"
+            }
+          }
+        }
+      ],
+      "type": "table"
     },
     {
       "datasource": {
@@ -126,7 +222,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 9
       },
       "id": 2,
       "options": {
@@ -134,13 +230,13 @@
         "enableInfiniteScrolling": true,
         "enableLogDetails": true,
         "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
+        "prettifyLogMessage": false,
         "showCommonLabels": false,
         "showControls": true,
         "showLabels": false,
         "showTime": true,
         "sortOrder": "Descending",
-        "syntaxHighlighting": true,
+        "syntaxHighlighting": false,
         "wrapLogMessage": true
       },
       "pluginVersion": "12.3.0",
@@ -152,13 +248,13 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "${labelSelector:raw} |~ \"${requestId:raw}\"",
-          "maxLines": 300,
+          "expr": "${labelSelector:raw} |= \"${requestId:raw}\"",
+          "maxLines": 500,
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Request Context Logs",
+      "title": "Connected Logs",
       "transformations": [],
       "type": "logs"
     },
@@ -224,7 +320,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 21
       },
       "id": 3,
       "options": {
@@ -290,7 +386,7 @@
         "h": 16,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 26
       },
       "id": 4,
       "options": {
@@ -298,7 +394,7 @@
         "enableInfiniteScrolling": true,
         "enableLogDetails": true,
         "logDetailsMode": "inline",
-        "prettifyLogMessage": true,
+        "prettifyLogMessage": false,
         "showCommonLabels": false,
         "showControls": true,
         "showLabels": false,
@@ -366,14 +462,14 @@
       {
         "current": {
           "selected": false,
-          "text": ".+",
-          "value": ".+"
+          "text": "__select_request_id__",
+          "value": "__select_request_id__"
         },
         "hide": 0,
-        "label": "Request ID Regex",
+        "label": "Selected Request ID",
         "name": "requestId",
         "options": [],
-        "query": ".+",
+        "query": "__select_request_id__",
         "skipUrlSync": false,
         "type": "textbox"
       },
@@ -423,5 +519,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Logs",
   "uid": "buddystudy-logs",
-  "version": 2
+  "version": 3
 }
