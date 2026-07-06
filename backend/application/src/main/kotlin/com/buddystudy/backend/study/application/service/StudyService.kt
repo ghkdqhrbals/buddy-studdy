@@ -82,7 +82,6 @@ class StudyService(
         } catch (error: StudyRoomPendingLimitExceeded) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
         }
-
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {
             val recentEmbeddingsDeferred = async(Dispatchers.IO) {

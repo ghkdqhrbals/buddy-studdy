@@ -3,7 +3,6 @@ package com.buddystudy.backend.study.adapter.inbound.scheduler
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
@@ -59,7 +58,6 @@ class QuestionSchedulerTest {
         scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
         openai = BuddyStudyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
     )
-    private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val scheduler = ScheduledQuestionService(
         properties = properties,
         studies = studies,
@@ -71,7 +69,7 @@ class QuestionSchedulerTest {
         questionCreatedPublisher = questionCreatedPublisher,
         notifications = notifications,
         openAI = openAI,
-        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
+        questionKeys = OpenAIQuestionKeyProvider(properties, memberships),
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
     )
@@ -247,7 +245,7 @@ class QuestionSchedulerTest {
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101)
         assertThat(memberships.usedCount).isEqualTo(30)
         assertThat(studies.rows.single { it.id == 102L }.lastError)
-            .isEqualTo("Monthly question limit reached. Add your OpenAI API key to continue.")
+            .isEqualTo("Monthly question limit reached.")
     }
 
     @Test

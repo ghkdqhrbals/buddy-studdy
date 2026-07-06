@@ -64,7 +64,7 @@ class StudyServiceTest {
         questionCoverage = questionCoverage,
         users = users,
         cipher = cipher,
-        questionKeys = OpenAIQuestionKeyProvider(properties, cipher, memberships),
+        questionKeys = OpenAIQuestionKeyProvider(properties, memberships),
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
         questionWriter = QuestionCreationWriteManager(
@@ -337,7 +337,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question requires user key after monthly tier question limit`() {
+    fun `create question rejects after monthly tier question limit`() {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -359,13 +359,13 @@ class StudyServiceTest {
             service.createQuestion(principal, studyId = 79)
         }
             .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
-            .hasMessage("Monthly question limit reached. Add your OpenAI API key to continue.")
+            .hasMessage("Monthly question limit reached.")
 
         assertThat(openAI.generateCalls).isZero()
     }
 
     @Test
-    fun `create question uses user key without consuming monthly tier quota`() {
+    fun `create question uses system key and consumes monthly tier quota even when user key is configured`() {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -373,7 +373,7 @@ class StudyServiceTest {
             appLanguage = "en",
             openaiApiKeyCipher = cipher.encrypt("sk-user"),
         )
-        memberships.usedCount = 30
+        memberships.usedCount = 29
         serviceStudies.rows += StudyEntity(
             id = 80,
             deviceId = principal.deviceId,
@@ -386,8 +386,9 @@ class StudyServiceTest {
 
         service.createQuestion(principal, studyId = 80)
 
-        assertThat(openAI.generatedApiKeys).containsExactly("sk-user")
-        assertThat(memberships.consumeCalls).isZero()
+        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
+        assertThat(memberships.usedCount).isEqualTo(30)
+        assertThat(memberships.consumeCalls).isEqualTo(1)
     }
 
     @Test
