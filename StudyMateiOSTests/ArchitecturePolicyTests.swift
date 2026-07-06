@@ -125,6 +125,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotOwnApplicationUninstallInfrastructure() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "Bundle.main.bundleURL",
+            "FileManager.default.temporaryDirectory",
+            "Process()",
+            "launchUninstaller(",
+            "makeUninstallScript(",
+            "shellEscaped(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must delegate platform uninstall infrastructure to AppPlatformEffectsProvider: \(violations)"
+        )
+    }
+
     func testAppStateDoesNotReadClipboardPlatformAPIsDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
