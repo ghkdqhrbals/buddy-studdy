@@ -1,11 +1,5 @@
 import Foundation
 import Combine
-#if os(macOS)
-import AppKit
-#elseif os(iOS)
-import UIKit
-import UniformTypeIdentifiers
-#endif
 
 private enum QuestionGenerationSkip: Error {
     case pendingLimit
@@ -465,6 +459,7 @@ final class AppState: ObservableObject {
     private let notificationService: NotificationServicing
     private let cloudSyncProvider: CloudSyncProviding
     private let platformEffectsProvider: AppPlatformEffectsProviding
+    private let clipboardProvider: ClipboardProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -982,6 +977,7 @@ final class AppState: ObservableObject {
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncProvider: CloudSyncProviding = DefaultCloudSyncProvider(),
         platformEffectsProvider: AppPlatformEffectsProviding = DefaultAppPlatformEffectsProvider(),
+        clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let loadedSettings = settingsStore.loadSettings()
@@ -1064,6 +1060,7 @@ final class AppState: ObservableObject {
         self.notificationService = notificationService
         self.cloudSyncProvider = cloudSyncProvider
         self.platformEffectsProvider = platformEffectsProvider
+        self.clipboardProvider = clipboardProvider
         self.cloudSyncService = cloudSyncService
         let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         self.appUseCasesProvider = appUseCasesProvider
@@ -3082,286 +3079,15 @@ final class AppState: ObservableObject {
     }
 
     private func currentClipboardChangeCount() -> Int {
-        #if os(macOS)
-        return Int(NSPasteboard.general.changeCount)
-        #elseif os(iOS)
-        return UIPasteboard.general.changeCount
-        #else
-        return 0
-        #endif
+        clipboardProvider.changeCount()
     }
 
     func fetchClipboardOpenAIAPIKey() -> String? {
-        #if os(macOS)
-        let candidates: [NSPasteboard.PasteboardType] = [
-            .string,
-            .init("public.utf8-plain-text"),
-            .init("public.text"),
-            .init("public.utf16-plain-text"),
-            .init("public.utf16-external-plain-text"),
-            .init("public.html"),
-            .init("public.rtf")
-        ]
-
-        for type in candidates {
-            if let value = NSPasteboard.general.string(forType: type) {
-                if let extracted = Self.extractOpenAIAPIKey(from: value) {
-                    return extracted
-                }
-            }
-        }
-
-        for item in NSPasteboard.general.pasteboardItems ?? [] {
-            for type in item.types {
-                if let value = Self.extractString(fromPasteboardItem: item, type: type),
-                   let extracted = Self.extractOpenAIAPIKey(from: value) {
-                    return extracted
-                }
-            }
-        }
-
-        let classes: [NSPasteboardReading.Type] = [NSString.self, NSAttributedString.self]
-        if let objects = NSPasteboard.general.readObjects(forClasses: classes, options: nil),
-           let extracted = objects
-                .compactMap({ object -> String? in
-                    if let string = object as? String {
-                        return Self.extractOpenAIAPIKey(from: string)
-                    }
-                    if let attributed = object as? NSAttributedString {
-                        return Self.extractOpenAIAPIKey(from: attributed.string)
-                    }
-                    return nil
-                })
-                .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            return extracted
-        }
-
-        return nil
-        #elseif os(iOS)
-        if let directString = UIPasteboard.general.string,
-           let extracted = Self.extractOpenAIAPIKey(from: directString) {
-            return extracted
-        }
-
-        let candidates: [String] = [
-            UTType.text.identifier,
-            UTType.plainText.identifier,
-            UTType.html.identifier,
-            UTType.utf8PlainText.identifier,
-            "public.text",
-            "public.utf16-plain-text",
-            "public.utf16-external-plain-text",
-            UTType.utf16PlainText.identifier,
-            UTType.rtf.identifier,
-            "public.url",
-            "public.url-name"
-        ]
-
-        for item in UIPasteboard.general.items {
-            for value in item.values {
-                if let extracted = Self.extractOpenAIAPIKeyFromNestedClipboardValue(value) {
-                    return extracted
-                }
-            }
-        }
-
-        for type in candidates {
-            if let value = UIPasteboard.general.value(forPasteboardType: type) {
-                if let extracted = Self.extractOpenAIAPIKeyFromNestedClipboardValue(value) {
-                    return extracted
-                }
-            }
-
-            if let data = UIPasteboard.general.data(forPasteboardType: type),
-               let dataText = String(data: data, encoding: .utf8),
-               let extracted = Self.extractOpenAIAPIKey(from: dataText) {
-                return extracted
-            }
-
-            if let data = UIPasteboard.general.data(forPasteboardType: type),
-               let extracted = Self.extractOpenAIAPIKeyFromNestedData(data) {
-                return extracted
-            }
-        }
-
-        return nil
-        #else
-        return nil
-        #endif
+        clipboardProvider.fetchOpenAIAPIKey()
     }
-
-    #if os(iOS)
-    private static func extractOpenAIAPIKey(fromClipboardValue value: Any) -> String? {
-        if let valueString = value as? String,
-           let extracted = extractOpenAIAPIKey(from: valueString) {
-            return extracted
-        }
-
-        if let url = value as? URL,
-           let extracted = extractOpenAIAPIKey(from: url.absoluteString) {
-            return extracted
-        }
-
-        if let data = value as? Data {
-            if let utf8Text = String(data: data, encoding: .utf8),
-               let extracted = extractOpenAIAPIKey(from: utf8Text) {
-                return extracted
-            }
-
-            if let utf16Text = String(data: data, encoding: .utf16LittleEndian),
-               let extracted = extractOpenAIAPIKey(from: utf16Text) {
-                return extracted
-            }
-
-            if let utf16Text = String(data: data, encoding: .utf16BigEndian),
-               let extracted = extractOpenAIAPIKey(from: utf16Text) {
-                return extracted
-            }
-
-            if let asciiText = String(data: data, encoding: .ascii),
-               let extracted = extractOpenAIAPIKey(from: asciiText) {
-                return extracted
-            }
-        }
-
-        return nil
-    }
-
-    private static func extractOpenAIAPIKeyFromNestedClipboardValue(_ value: Any) -> String? {
-        if let found = extractOpenAIAPIKey(fromClipboardValue: value) {
-            return found
-        }
-
-        if let arrayValue = value as? [Any] {
-            for element in arrayValue {
-                if let found = extractOpenAIAPIKeyFromNestedClipboardValue(element) {
-                    return found
-                }
-            }
-        }
-
-        if let dictValue = value as? [String: Any] {
-            for element in dictValue.values {
-                if let found = extractOpenAIAPIKeyFromNestedClipboardValue(element) {
-                    return found
-                }
-            }
-        }
-
-        return nil
-    }
-
-    private static func extractOpenAIAPIKeyFromNestedData(_ data: Data) -> String? {
-        let encodings: [String.Encoding] = [.utf8, .utf16LittleEndian, .utf16BigEndian, .ascii]
-
-        for encoding in encodings {
-            if let text = String(data: data, encoding: encoding),
-               let extracted = extractOpenAIAPIKey(from: text) {
-                return extracted
-            }
-        }
-
-        return nil
-    }
-    #endif
-
-    #if os(macOS)
-    private static func extractString(fromPasteboardItem item: NSPasteboardItem, type: NSPasteboard.PasteboardType) -> String? {
-        if let value = item.string(forType: type), !value.isEmpty {
-            return value
-        }
-
-        guard let data = item.data(forType: type) else {
-            return nil
-        }
-
-        if let text = String(data: data, encoding: .utf8), !text.isEmpty {
-            return text
-        }
-
-        if let text = String(data: data, encoding: .utf16LittleEndian), !text.isEmpty {
-            return text
-        }
-
-        if let text = String(data: data, encoding: .utf16BigEndian), !text.isEmpty {
-            return text
-        }
-
-        return nil
-    }
-    #endif
 
     nonisolated static func extractOpenAIAPIKey(from text: String) -> String? {
-        let normalized = text
-            .replacingOccurrences(of: "`", with: " ")
-            .replacingOccurrences(of: "\"", with: " ")
-            .replacingOccurrences(of: "'", with: " ")
-            .replacingOccurrences(of: "“", with: " ")
-            .replacingOccurrences(of: "”", with: " ")
-            .replacingOccurrences(of: "<", with: " ")
-            .replacingOccurrences(of: ">", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\u{200b}", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else {
-            return nil
-        }
-
-        let candidateSeparators = CharacterSet(charactersIn: " \t\n\r.,:;()[]{}<>/\\\"'`~!@#$%^&*+=|?:;<>[]{}")
-        let tokenCandidates = normalized
-            .components(separatedBy: candidateSeparators)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-        for token in tokenCandidates {
-            if (token.hasPrefix("sk-proj-") || token.hasPrefix("sk-")) && token.count >= 20 {
-                return token
-            }
-        }
-
-        let patterns = [
-            "sk-(?:proj-)?[A-Za-z0-9_-]{20,}",
-            "sk-proj-[A-Za-z0-9_-]{20,}",
-            "sk-[A-Za-z0-9_-]{20,}"
-        ]
-
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
-                  let match = regex.firstMatch(
-                      in: normalized,
-                      options: [],
-                      range: NSRange(location: 0, length: normalized.utf16.count)
-                  ) else {
-                continue
-            }
-
-            let start = String.Index(utf16Offset: match.range.location, in: normalized)
-            let end = String.Index(utf16Offset: match.range.location + match.range.length, in: normalized)
-            let extracted = String(normalized[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if !extracted.isEmpty {
-                return extracted
-            }
-        }
-
-        if let tokenRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9_-]+", options: []) {
-            let tokenRange = NSRange(location: 0, length: normalized.utf16.count)
-            let tokenMatches = tokenRegex.matches(in: normalized, options: [], range: tokenRange)
-            for token in tokenMatches {
-                let start = String.Index(utf16Offset: token.range.location, in: normalized)
-                let end = String.Index(utf16Offset: token.range.location + token.range.length, in: normalized)
-                let tokenText = String(normalized[start..<end])
-
-                if (tokenText.hasPrefix("sk-proj-") || tokenText.hasPrefix("sk-")) && tokenText.count >= 20 {
-                    return tokenText
-                }
-            }
-        }
-
-        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("sk-") && trimmed.count >= 20 ? trimmed : nil
+        OpenAIAPIKeyExtractionPolicy.extract(from: text)
     }
 
     func saveSettings() {

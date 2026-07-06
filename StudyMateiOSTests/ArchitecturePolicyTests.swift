@@ -125,6 +125,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotReadClipboardPlatformAPIsDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "UIPasteboard.general",
+            "NSPasteboard.general",
+            "NSPasteboard.PasteboardType",
+            "NSPasteboardReading",
+            "NSPasteboardItem",
+            "UTType.",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use a clipboard provider boundary instead of reading pasteboard platform APIs directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
