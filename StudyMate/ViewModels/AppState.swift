@@ -450,6 +450,7 @@ final class AppState: ObservableObject {
     private let communitySessionRepository: CommunitySessionRepository
     private let onboardingStateRepository: OnboardingStateRepository
     private let developerSettingsRepository: DeveloperSettingsRepository
+    private let currentStudySessionRepository: CurrentStudySessionRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -991,6 +992,7 @@ final class AppState: ObservableObject {
         communitySessionRepository: CommunitySessionRepository? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
+        currentStudySessionRepository: CurrentStudySessionRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -1004,6 +1006,8 @@ final class AppState: ObservableObject {
             ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
         let resolvedDeveloperSettingsRepository = developerSettingsRepository
             ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
+        let resolvedCurrentStudySessionRepository = currentStudySessionRepository
+            ?? SettingsStoreCurrentStudySessionRepository(settingsStore: settingsStore)
         let loadedSettings = settingsStore.loadSettings()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
@@ -1034,19 +1038,21 @@ final class AppState: ObservableObject {
         self.communitySessionRepository = resolvedCommunitySessionRepository
         self.onboardingStateRepository = resolvedOnboardingStateRepository
         self.developerSettingsRepository = resolvedDeveloperSettingsRepository
+        self.currentStudySessionRepository = resolvedCurrentStudySessionRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
-        self.currentQuestion = settingsStore.loadQuestion()
-        self.lastAnswer = settingsStore.loadLastAnswer()
-        self.gradingResult = settingsStore.loadGradingResult()
-        let loadedIsRunning = settingsStore.loadIsRunning()
+        let loadedCurrentStudySession = resolvedCurrentStudySessionRepository.loadCurrentStudySession()
+        self.currentQuestion = loadedCurrentStudySession.question
+        self.lastAnswer = loadedCurrentStudySession.lastAnswer
+        self.gradingResult = loadedCurrentStudySession.gradingResult
+        let loadedIsRunning = loadedCurrentStudySession.isRunning
         let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
             && !loadedIsRunning
-            && !settingsStore.hasExplicitRunningPreference()
+            && !resolvedCurrentStudySessionRepository.hasExplicitRunningPreference()
             && !loadedAPIKey.isEmpty
         self.isRunning = shouldRecoverLegacyRunningState ? true : loadedIsRunning
         if shouldRecoverLegacyRunningState {
-            settingsStore.saveIsRunning(true)
+            resolvedCurrentStudySessionRepository.saveIsRunning(true)
         }
         self.recordsState = RecordsStateStore(records: settingsStore.loadStudyRecords())
         self.statsState = StatsStateStore()
@@ -2065,9 +2071,9 @@ final class AppState: ObservableObject {
                 currentQuestion = localCurrentQuestion
                 lastAnswer = localLastAnswer
                 gradingResult = localGradingResult
-                settingsStore.saveQuestion(localCurrentQuestion)
-                settingsStore.saveLastAnswer(localLastAnswer)
-                settingsStore.saveGradingResult(localGradingResult)
+                currentStudySessionRepository.saveQuestion(localCurrentQuestion)
+                currentStudySessionRepository.saveLastAnswer(localLastAnswer)
+                currentStudySessionRepository.saveGradingResult(localGradingResult)
             }
             restartTimer()
             return
@@ -2082,9 +2088,9 @@ final class AppState: ObservableObject {
         currentQuestion = visibleRecord?.question
         lastAnswer = visibleRecord?.answer ?? ""
         gradingResult = visibleRecord?.gradingResult
-        settingsStore.saveQuestion(currentQuestion)
-        settingsStore.saveLastAnswer(lastAnswer)
-        settingsStore.saveGradingResult(gradingResult)
+        currentStudySessionRepository.saveQuestion(currentQuestion)
+        currentStudySessionRepository.saveLastAnswer(lastAnswer)
+        currentStudySessionRepository.saveGradingResult(gradingResult)
         restartTimer()
     }
 
@@ -2096,10 +2102,11 @@ final class AppState: ObservableObject {
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
 
         settings = synchronizedLoadedSettings
-        currentQuestion = settingsStore.loadQuestion()
-        lastAnswer = settingsStore.loadLastAnswer()
-        gradingResult = settingsStore.loadGradingResult()
-        isRunning = settingsStore.loadIsRunning()
+        let loadedCurrentStudySession = currentStudySessionRepository.loadCurrentStudySession()
+        currentQuestion = loadedCurrentStudySession.question
+        lastAnswer = loadedCurrentStudySession.lastAnswer
+        gradingResult = loadedCurrentStudySession.gradingResult
+        isRunning = loadedCurrentStudySession.isRunning
         reloadStudyRecordsFromStore(refreshRooms: true)
         apiKey = loadedAPIKey
         savedSettings = synchronizedLoadedSettings
@@ -2126,9 +2133,10 @@ final class AppState: ObservableObject {
     }
 
     private func refreshStudyProgressFromStore() {
-        currentQuestion = settingsStore.loadQuestion()
-        lastAnswer = settingsStore.loadLastAnswer()
-        gradingResult = settingsStore.loadGradingResult()
+        let loadedCurrentStudySession = currentStudySessionRepository.loadCurrentStudySession()
+        currentQuestion = loadedCurrentStudySession.question
+        lastAnswer = loadedCurrentStudySession.lastAnswer
+        gradingResult = loadedCurrentStudySession.gradingResult
         reloadStudyRecordsFromStore(refreshRooms: true)
     }
 
@@ -2251,7 +2259,7 @@ final class AppState: ObservableObject {
                 didReceiveCloudStateWhileEditing = false
 
                 settingsStore.saveSettings(normalizedNextSettings)
-                settingsStore.saveIsRunning(backendSettings.enabled)
+                currentStudySessionRepository.saveIsRunning(backendSettings.enabled)
                 log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
             },
             onFailure: { error in
@@ -3435,9 +3443,9 @@ final class AppState: ObservableObject {
                 currentQuestion = nil
                 lastAnswer = ""
                 gradingResult = nil
-                settingsStore.saveQuestion(nil)
-                settingsStore.saveLastAnswer("")
-                settingsStore.saveGradingResult(nil)
+                currentStudySessionRepository.saveQuestion(nil)
+                currentStudySessionRepository.saveLastAnswer("")
+                currentStudySessionRepository.saveGradingResult(nil)
             }
         }
     }
@@ -3728,7 +3736,7 @@ final class AppState: ObservableObject {
 
     func setRunning(_ running: Bool) {
         isRunning = running
-        settingsStore.saveExplicitIsRunning(running)
+        currentStudySessionRepository.saveExplicitIsRunning(running)
         statusMessage = running ? "질문 타이머가 실행 중입니다." : "질문 타이머를 일시정지했습니다."
         log(.info, running ? "질문 타이머를 실행했습니다." : "질문 타이머를 중지했습니다.")
         markCloudDataChanged()
@@ -3859,9 +3867,9 @@ final class AppState: ObservableObject {
                     currentQuestion = record.question
                     gradingResult = record.gradingResult
                     lastAnswer = record.answer ?? ""
-                    settingsStore.saveQuestion(record.question)
-                    settingsStore.saveGradingResult(record.gradingResult)
-                    settingsStore.saveLastAnswer(record.answer ?? "")
+                    currentStudySessionRepository.saveQuestion(record.question)
+                    currentStudySessionRepository.saveGradingResult(record.gradingResult)
+                    currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
                 }
 
                 hasAPIKeyError = false
@@ -4088,9 +4096,9 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
         gradingResult = record.gradingResult
-        settingsStore.saveQuestion(record.question)
-        settingsStore.saveLastAnswer(record.answer ?? "")
-        settingsStore.saveGradingResult(record.gradingResult)
+        currentStudySessionRepository.saveQuestion(record.question)
+        currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
+        currentStudySessionRepository.saveGradingResult(record.gradingResult)
     }
 
     private func studyCategoryForRoom(_ categoryID: String?) -> StudyCategory? {
@@ -4134,7 +4142,7 @@ final class AppState: ObservableObject {
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
-        settingsStore.saveLastAnswer(answerToGrade)
+        currentStudySessionRepository.saveLastAnswer(answerToGrade)
         settingsStore.updateStudyRecordAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
         reloadStudyRecordsFromStore()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
@@ -4181,9 +4189,9 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = answer
         gradingResult = record.gradingResult
-        settingsStore.saveQuestion(record.question)
-        settingsStore.saveLastAnswer(answer)
-        settingsStore.saveGradingResult(record.gradingResult)
+        currentStudySessionRepository.saveQuestion(record.question)
+        currentStudySessionRepository.saveLastAnswer(answer)
+        currentStudySessionRepository.saveGradingResult(record.gradingResult)
         settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         notificationService.cancelQuestionNotification(for: record.question)
         reloadStudyRecordsFromStore()
@@ -4294,9 +4302,9 @@ final class AppState: ObservableObject {
             gradingResult = nil
 
             guard shouldOpenNextQuestion else {
-                settingsStore.saveQuestion(nil)
-                settingsStore.saveLastAnswer("")
-                settingsStore.saveGradingResult(nil)
+                currentStudySessionRepository.saveQuestion(nil)
+                currentStudySessionRepository.saveLastAnswer("")
+                currentStudySessionRepository.saveGradingResult(nil)
                 statusMessage = "질문을 넘겼습니다."
                 errorMessage = nil
                 log(.info, "미제출 질문을 넘겼습니다.")
@@ -4313,14 +4321,14 @@ final class AppState: ObservableObject {
                 self.currentQuestion = nextRecord.question
                 lastAnswer = nextRecord.answer ?? ""
                 gradingResult = nil
-                settingsStore.saveQuestion(nextRecord.question)
-                settingsStore.saveLastAnswer(nextRecord.answer ?? "")
-                settingsStore.saveGradingResult(nil)
+                currentStudySessionRepository.saveQuestion(nextRecord.question)
+                currentStudySessionRepository.saveLastAnswer(nextRecord.answer ?? "")
+                currentStudySessionRepository.saveGradingResult(nil)
                 statusMessage = "질문을 넘기고 다음 미제출 질문을 열었습니다."
             } else {
-                settingsStore.saveQuestion(nil)
-                settingsStore.saveLastAnswer("")
-                settingsStore.saveGradingResult(nil)
+                currentStudySessionRepository.saveQuestion(nil)
+                currentStudySessionRepository.saveLastAnswer("")
+                currentStudySessionRepository.saveGradingResult(nil)
                 statusMessage = "질문을 넘겼습니다."
             }
         } else {
@@ -4399,7 +4407,7 @@ final class AppState: ObservableObject {
 
         guard let question = draft.question else {
             lastAnswer = draft.answer
-            settingsStore.saveLastAnswer(draft.answer)
+            currentStudySessionRepository.saveLastAnswer(draft.answer)
             return
         }
 
@@ -4409,7 +4417,7 @@ final class AppState: ObservableObject {
         if let currentQuestion,
            Self.questionsMatch(currentQuestion, question) {
             lastAnswer = draft.answer
-            settingsStore.saveLastAnswer(draft.answer)
+            currentStudySessionRepository.saveLastAnswer(draft.answer)
         }
 
         markCloudDataChanged(syncDelaySeconds: 4)
@@ -4429,9 +4437,9 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
         gradingResult = record.gradingResult
-        settingsStore.saveQuestion(record.question)
-        settingsStore.saveLastAnswer(record.answer ?? "")
-        settingsStore.saveGradingResult(record.gradingResult)
+        currentStudySessionRepository.saveQuestion(record.question)
+        currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
+        currentStudySessionRepository.saveGradingResult(record.gradingResult)
         showStudyScreen(categoryID: categoryID(forTopic: record.topic))
         focusedRecordRequest = nil
         statusMessage = record.gradingResult == nil ? "미제출 질문을 열었습니다." : "학습 기록을 열었습니다."
@@ -4532,8 +4540,8 @@ final class AppState: ObservableObject {
         if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = record.answer ?? lastAnswer
             gradingResult = record.gradingResult
-            settingsStore.saveLastAnswer(lastAnswer)
-            settingsStore.saveGradingResult(gradingResult)
+            currentStudySessionRepository.saveLastAnswer(lastAnswer)
+            currentStudySessionRepository.saveGradingResult(gradingResult)
         }
 
         return record
@@ -4657,7 +4665,7 @@ final class AppState: ObservableObject {
 
         if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = trimmedReply
-            settingsStore.saveLastAnswer(trimmedReply)
+            currentStudySessionRepository.saveLastAnswer(trimmedReply)
         }
 
         reloadStudyRecordsFromStore()
@@ -4758,7 +4766,7 @@ final class AppState: ObservableObject {
 
         if currentQuestion.map({ Self.questionsMatch($0, question) }) == true {
             lastAnswer = trimmedReply
-            settingsStore.saveLastAnswer(trimmedReply)
+            currentStudySessionRepository.saveLastAnswer(trimmedReply)
         }
 
         reloadStudyRecordsFromStore()
@@ -4777,9 +4785,9 @@ final class AppState: ObservableObject {
             currentQuestion = nil
             lastAnswer = ""
             gradingResult = nil
-            settingsStore.saveQuestion(nil)
-            settingsStore.saveLastAnswer("")
-            settingsStore.saveGradingResult(nil)
+            currentStudySessionRepository.saveQuestion(nil)
+            currentStudySessionRepository.saveLastAnswer("")
+            currentStudySessionRepository.saveGradingResult(nil)
         }
 
         notificationLandingMessage = strings.notificationQuestionUnavailable
@@ -4823,9 +4831,9 @@ final class AppState: ObservableObject {
             currentQuestion = nil
             gradingResult = nil
             lastAnswer = ""
-            settingsStore.saveQuestion(nil)
-            settingsStore.saveGradingResult(nil)
-            settingsStore.saveLastAnswer("")
+            currentStudySessionRepository.saveQuestion(nil)
+            currentStudySessionRepository.saveGradingResult(nil)
+            currentStudySessionRepository.saveLastAnswer("")
         }
 
         statusMessage = "기록을 삭제했습니다."
@@ -6298,11 +6306,11 @@ final class AppState: ObservableObject {
         isCloudSyncEnabled = preservedCloudSyncEnabled
 
         settingsStore.saveSettings(effectiveSettings)
-        settingsStore.saveQuestion(appliedCurrentQuestion)
+        currentStudySessionRepository.saveQuestion(appliedCurrentQuestion)
         settingsStore.saveQuestionHistory(mergedHistory)
-        settingsStore.saveLastAnswer(appliedLastAnswer)
-        settingsStore.saveGradingResult(appliedGradingResult)
-        settingsStore.saveIsRunning(state.isRunning)
+        currentStudySessionRepository.saveLastAnswer(appliedLastAnswer)
+        currentStudySessionRepository.saveGradingResult(appliedGradingResult)
+        currentStudySessionRepository.saveIsRunning(state.isRunning)
         onboardingStateRepository.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
         settingsStore.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
         settingsStore.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
@@ -6611,16 +6619,16 @@ final class AppState: ObservableObject {
             currentQuestion = preferredRecord.question
             lastAnswer = preferredRecord.answer ?? ""
             gradingResult = preferredRecord.gradingResult
-            settingsStore.saveQuestion(preferredRecord.question)
-            settingsStore.saveLastAnswer(preferredRecord.answer ?? "")
-            settingsStore.saveGradingResult(preferredRecord.gradingResult)
+            currentStudySessionRepository.saveQuestion(preferredRecord.question)
+            currentStudySessionRepository.saveLastAnswer(preferredRecord.answer ?? "")
+            currentStudySessionRepository.saveGradingResult(preferredRecord.gradingResult)
         } else {
             currentQuestion = nil
             lastAnswer = ""
             gradingResult = nil
-            settingsStore.saveQuestion(nil)
-            settingsStore.saveLastAnswer("")
-            settingsStore.saveGradingResult(nil)
+            currentStudySessionRepository.saveQuestion(nil)
+            currentStudySessionRepository.saveLastAnswer("")
+            currentStudySessionRepository.saveGradingResult(nil)
         }
     }
 

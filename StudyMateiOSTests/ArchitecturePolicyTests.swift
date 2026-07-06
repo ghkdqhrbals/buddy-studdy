@@ -297,6 +297,31 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesCurrentStudySessionRepositoryForStoredSessionState() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadQuestion()",
+            "settingsStore.saveQuestion(",
+            "settingsStore.loadLastAnswer()",
+            "settingsStore.saveLastAnswer(",
+            "settingsStore.loadGradingResult()",
+            "settingsStore.saveGradingResult(",
+            "settingsStore.loadIsRunning()",
+            "settingsStore.saveIsRunning(",
+            "settingsStore.saveExplicitIsRunning(",
+            "settingsStore.hasExplicitRunningPreference",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CurrentStudySessionRepository for stored study session state instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
