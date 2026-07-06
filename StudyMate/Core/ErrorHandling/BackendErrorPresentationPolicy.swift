@@ -16,11 +16,23 @@ enum BackendErrorPresentationPolicy {
             return presentation(for: backendError, fallback: fallback)
         }
 
+        if isCancellationLike(error) {
+            return BackendErrorPresentation(
+                message: "",
+                inlineMessage: nil,
+                shouldShowPopup: false,
+                requiresLogin: false,
+                isPageAccessDenied: false,
+                requiresEmailVerification: false,
+                shouldResetBackendIdentity: false
+            )
+        }
+
         let message = fallbackMessage(for: error, fallback: fallback)
         return BackendErrorPresentation(
             message: message,
             inlineMessage: message,
-            shouldShowPopup: true,
+            shouldShowPopup: false,
             requiresLogin: false,
             isPageAccessDenied: false,
             requiresEmailVerification: false,
@@ -188,7 +200,15 @@ enum BackendErrorPresentationPolicy {
         return localized.isEmpty ? fallback : localized
     }
 
+    static func shouldClearFeatureMessage(for error: Error) -> Bool {
+        isCancellationLike(error)
+    }
+
     private static func fallbackMessage(for error: Error, fallback: String) -> String {
+        if error is DecodingError {
+            return "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요."
+        }
+
         let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !localized.isEmpty else {
             return fallback
@@ -233,6 +253,21 @@ enum BackendErrorPresentationPolicy {
             return false
         }
         return (100..<200).contains(code)
+    }
+
+    private static func isCancellationLike(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        return error.localizedDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveContains("cancelled")
     }
 }
 

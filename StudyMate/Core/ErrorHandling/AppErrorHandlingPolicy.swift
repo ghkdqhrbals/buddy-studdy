@@ -16,6 +16,8 @@ enum AppErrorHandlingPolicy {
         let suppressFeatureMessage = presentation.requiresLogin ||
             presentation.isPageAccessDenied ||
             presentation.shouldResetBackendIdentity
+        let shouldClearFeatureMessage = suppressFeatureMessage ||
+            BackendErrorPresentationPolicy.shouldClearFeatureMessage(for: error)
 
         return AppErrorHandlingResolution(
             featureMessage: suppressFeatureMessage ? nil : presentation.inlineMessage,
@@ -24,7 +26,7 @@ enum AppErrorHandlingPolicy {
             isPageAccessDenied: presentation.isPageAccessDenied,
             requiresEmailVerification: presentation.requiresEmailVerification,
             shouldResetBackendIdentity: presentation.shouldResetBackendIdentity,
-            shouldClearFeatureMessage: suppressFeatureMessage
+            shouldClearFeatureMessage: shouldClearFeatureMessage
         )
     }
 }

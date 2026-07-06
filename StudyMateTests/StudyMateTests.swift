@@ -174,6 +174,35 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
     }
 
+    func testAppErrorHandlingNormalizesDecodingErrorsWithoutPopup() {
+        struct RequiredBodyPayload: Decodable {
+            let body: String
+        }
+
+        do {
+            _ = try JSONDecoder().decode(RequiredBodyPayload.self, from: Data("{}".utf8))
+            XCTFail("Expected decoding to fail.")
+        } catch {
+            let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+            XCTAssertEqual(resolution.featureMessage, "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요.")
+            XCTAssertFalse(resolution.shouldShowPopup)
+            XCTAssertFalse(resolution.requiresLogin)
+            XCTAssertFalse(resolution.shouldResetBackendIdentity)
+            XCTAssertFalse(resolution.shouldClearFeatureMessage)
+        }
+    }
+
+    func testAppErrorHandlingSuppressesCancellationNoise() {
+        let resolution = AppErrorHandlingPolicy.resolve(CancellationError(), fallback: "fallback")
+
+        XCTAssertNil(resolution.featureMessage)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+        XCTAssertTrue(resolution.shouldClearFeatureMessage)
+    }
+
     func testBackendAPIErrorDecodesNumericAndStringCodes() throws {
         let payload = try XCTUnwrap(
             """
