@@ -90,6 +90,23 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotInstantiateCloudSyncInfrastructureDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "CloudSyncService.canUseCloudKitContainer",
+            "cloudSyncService = CloudSyncService()",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use a cloud-sync provider boundary instead of constructing CloudKit infrastructure directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)

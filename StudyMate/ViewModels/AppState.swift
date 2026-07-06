@@ -486,6 +486,7 @@ final class AppState: ObservableObject {
     private var communityUseCase: CommunityUseCase { appUseCases.community }
     private let actionRunner = AppActionRunner()
     private let notificationService: NotificationServicing
+    private let cloudSyncProvider: CloudSyncProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -1001,6 +1002,7 @@ final class AppState: ObservableObject {
         settingsStore: SettingsStore = SettingsStore(),
         remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
         notificationService: NotificationServicing = NotificationService(),
+        cloudSyncProvider: CloudSyncProviding = DefaultCloudSyncProvider(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let loadedSettings = settingsStore.loadSettings()
@@ -1081,6 +1083,7 @@ final class AppState: ObservableObject {
         self.cloudLastSyncedAt = loadedCloudLastSyncedAt
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
+        self.cloudSyncProvider = cloudSyncProvider
         self.cloudSyncService = cloudSyncService
         let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         self.appUseCasesProvider = appUseCasesProvider
@@ -5281,7 +5284,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard cloudSyncService != nil || CloudSyncService.canUseCloudKitContainer() else {
+        guard cloudSyncService != nil || cloudSyncProvider.canUseCloudSync() else {
             cloudSyncMessage = strings.syncEntitlementMissing
             hasCloudSyncError = true
             log(.error, "이 앱 빌드에 iCloud CloudKit entitlement가 없어 동기화할 수 없습니다.")
@@ -6790,11 +6793,7 @@ final class AppState: ObservableObject {
 
     private func resolvedCloudSyncService() -> CloudSyncServiceProtocol? {
         if cloudSyncService == nil {
-            guard CloudSyncService.canUseCloudKitContainer() else {
-                return nil
-            }
-
-            cloudSyncService = CloudSyncService()
+            cloudSyncService = cloudSyncProvider.makeService()
         }
 
         return cloudSyncService
