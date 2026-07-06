@@ -274,33 +274,3 @@ enum BackendErrorPresentationPolicy {
             .localizedCaseInsensitiveContains("cancelled")
     }
 }
-
-extension RemotePushBackendError {
-    var requiresLogin: Bool {
-        BackendErrorPresentationPolicy.requiresLogin(self)
-    }
-
-    var isPageAccessDenied: Bool {
-        BackendErrorPresentationPolicy.isPageAccessDenied(self)
-    }
-
-    var requiresEmailVerification: Bool {
-        BackendErrorPresentationPolicy.requiresEmailVerification(self)
-    }
-
-    var shouldShowPopup: Bool {
-        BackendErrorPresentationPolicy.shouldShowPopup(for: self)
-    }
-
-    var shouldShowInlineError: Bool {
-        BackendErrorPresentationPolicy.shouldShowInlineError(for: self)
-    }
-
-    func userFacingMessage(fallback: String) -> String {
-        BackendErrorPresentationPolicy.userFacingMessage(for: self, fallback: fallback)
-    }
-
-    func presentation(fallback: String) -> BackendErrorPresentation {
-        BackendErrorPresentationPolicy.presentation(for: self, fallback: fallback)
-    }
-}

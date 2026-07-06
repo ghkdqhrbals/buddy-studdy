@@ -2488,8 +2488,7 @@ final class AppState: ObservableObject {
                 settingsStore.saveIsCommunitySignedIn(true)
             },
             onFailure: { error in
-                if let backendError = error as? RemotePushBackendError,
-                   backendError.requiresEmailVerification {
+                if appErrorResolution(error, fallback: strings.communityRequestFailed).requiresEmailVerification {
                     communityErrorMessage = strings.emailVerificationRequired
                     log(.info, "Email 로그인에 인증코드가 필요합니다.")
                     return
