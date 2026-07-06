@@ -2217,87 +2217,6 @@ enum RemotePushBackendError: LocalizedError {
         }
     }
 
-    var shouldShowPopup: Bool {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
-                return true
-            }
-            return !Self.suppressedPopupCodes.contains(code)
-        case .invalidResponse:
-            return true
-        }
-    }
-
-    var shouldShowInlineError: Bool {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
-                return true
-            }
-            return !Self.suppressedInlineCodes.contains(code)
-        case .invalidResponse:
-            return true
-        }
-    }
-
-    var requiresLogin: Bool {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
-                return false
-            }
-            return Self.loginRequiredCodes.contains(code)
-        case .invalidResponse:
-            return false
-        }
-    }
-
-    var isPageAccessDenied: Bool {
-        switch self {
-        case .httpStatus(let statusCode, _, let apiError):
-            return statusCode == 401
-                || requiresLogin
-                || apiError?.code == "PAGE_ACCESS_DENIED"
-                || apiError?.code == "ACCOUNT_FORBIDDEN"
-        case .invalidResponse:
-            return false
-        }
-    }
-
-    var requiresEmailVerification: Bool {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            guard let apiError else {
-                return false
-            }
-
-            if apiError.code == "AUTH_EMAIL_VERIFICATION_REQUIRED" {
-                return true
-            }
-
-            return apiError.code == "AUTH_GOOGLE_REQUIRED"
-                && apiError.message.localizedCaseInsensitiveContains("verification code")
-        case .invalidResponse:
-            return false
-        }
-    }
-
-    func userFacingMessage(fallback: String) -> String {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
-               !message.isEmpty {
-                return message
-            }
-        case .invalidResponse:
-            break
-        }
-
-        let localized = localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return localized.isEmpty ? fallback : localized
-    }
-
     var responseBody: String? {
         switch self {
         case .httpStatus(_, let body, _):
@@ -2321,27 +2240,6 @@ enum RemotePushBackendError: LocalizedError {
         return nil
     }
 
-    private static let suppressedPopupCodes: Set<String> = [
-        "AUTH_ACCESS_TOKEN_REQUIRED",
-        "AUTH_DEVICE_CREDENTIALS_REQUIRED",
-        "AUTH_DEVICE_MISMATCH",
-        "AUTH_INVALID_ACCESS_TOKEN",
-        "AUTH_INVALID_DEVICE_CREDENTIALS",
-        "DEVICE_NOT_FOUND",
-    ]
-
-    private static let suppressedInlineCodes: Set<String> = suppressedPopupCodes
-
-    private static let loginRequiredCodes: Set<String> = [
-        "AUTH_ACCESS_TOKEN_REQUIRED",
-        "AUTH_DEVICE_CREDENTIALS_REQUIRED",
-        "AUTH_DEVICE_MISMATCH",
-        "AUTH_GOOGLE_REQUIRED",
-        "AUTH_INVALID_ACCESS_TOKEN",
-        "AUTH_INVALID_DEVICE_CREDENTIALS",
-        "DEVICE_NOT_FOUND",
-        "PERMISSION_DENIED",
-    ]
 }
 
 private extension AppLanguage {

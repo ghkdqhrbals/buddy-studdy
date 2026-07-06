@@ -6963,62 +6963,19 @@ final class AppState: ObservableObject {
     }
 
     nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
-        if let backendError = error as? RemotePushBackendError {
-            switch backendError {
-            case .httpStatus(let status, let body, let apiError):
-                let lowercasedBody = (apiError?.message ?? body).lowercased()
-                let code = apiError?.code ?? ""
-                return status == 401 ||
-                    status == 403 ||
-                    code.contains("OPENAI_API_KEY") ||
-                    lowercasedBody.contains("api key") ||
-                    lowercasedBody.contains("unauthorized")
-            case .invalidResponse:
-                return false
-            }
-        }
-
-        return false
+        BackendErrorPresentationPolicy.isAPIKeyError(error)
     }
 
     nonisolated private static func isBackendDeviceNotFound(_ error: Error) -> Bool {
-        guard let backendError = error as? RemotePushBackendError else {
-            return false
-        }
-
-        return backendError.backendCode == "DEVICE_NOT_FOUND"
+        BackendErrorPresentationPolicy.isBackendDeviceNotFound(error)
     }
 
     nonisolated private static func isUnauthorizedBackendError(_ error: Error) -> Bool {
-        guard let backendError = error as? RemotePushBackendError else {
-            return false
-        }
-
-        switch backendError {
-        case .httpStatus(let status, _, let apiError):
-            return status == 401
-                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
-                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
-        case .invalidResponse:
-            return false
-        }
+        BackendErrorPresentationPolicy.isUnauthorizedBackendError(error)
     }
 
     nonisolated private static func shouldResetBackendIdentity(after error: Error) -> Bool {
-        guard let backendError = error as? RemotePushBackendError else {
-            return false
-        }
-
-        switch backendError {
-        case .httpStatus(let status, _, let apiError):
-            let code = apiError?.code
-            return status == 401
-                || code == "DEVICE_NOT_FOUND"
-                || code == "AUTH_ACCESS_TOKEN_REQUIRED"
-                || code == "AUTH_INVALID_ACCESS_TOKEN"
-        case .invalidResponse:
-            return false
-        }
+        BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: error)
     }
 
     nonisolated private static func isCancellationLikeError(_ error: Error) -> Bool {
