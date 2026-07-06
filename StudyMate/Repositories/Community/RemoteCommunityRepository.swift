@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct CommunityUseCase {
-    private let repository: CommunityRepository
+struct RemoteCommunityRepository: CommunityRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: CommunityRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func fetchPublicQuestions(
@@ -16,7 +16,7 @@ struct CommunityUseCase {
         excludeDeviceID: String?,
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse {
-        try await repository.fetchPublicQuestions(
+        try await backendClient.fetchPublicQuestions(
             registration: registration,
             query: query,
             limit: limit,
@@ -31,7 +31,7 @@ struct CommunityUseCase {
         questionID: String,
         language: AppLanguage
     ) async throws -> CommunityQuestion {
-        try await repository.fetchPublicQuestion(
+        try await backendClient.fetchPublicQuestion(
             registration: registration,
             questionID: questionID,
             language: language
@@ -42,7 +42,7 @@ struct CommunityUseCase {
         registration: RemotePushRegistration,
         idToken: String
     ) async throws -> CommunityLoginResult {
-        try await repository.loginWithGoogle(
+        try await backendClient.loginWithGoogle(
             registration: registration,
             idToken: idToken
         )
@@ -52,7 +52,7 @@ struct CommunityUseCase {
         registration: RemotePushRegistration,
         email: String
     ) async throws -> EmailVerificationCodeResult {
-        try await repository.requestEmailVerificationCode(
+        try await backendClient.requestEmailVerificationCode(
             registration: registration,
             email: email
         )
@@ -64,7 +64,7 @@ struct CommunityUseCase {
         password: String,
         verificationCode: String?
     ) async throws -> CommunityLoginResult {
-        try await repository.loginWithEmail(
+        try await backendClient.loginWithEmail(
             registration: registration,
             email: email,
             password: password,
@@ -73,11 +73,11 @@ struct CommunityUseCase {
     }
 
     func logout(registration: RemotePushRegistration) async throws {
-        try await repository.logout(registration: registration)
+        try await backendClient.logout(registration: registration)
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
-        try await repository.fetchMyProfile(registration: registration)
+        try await backendClient.fetchMyProfile(registration: registration)
     }
 
     func updateMyProfile(
@@ -88,7 +88,7 @@ struct CommunityUseCase {
         avatarColorSeed: String?,
         pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile {
-        try await repository.updateMyProfile(
+        try await backendClient.updateMyProfile(
             registration: registration,
             displayName: displayName,
             bio: bio,
@@ -99,7 +99,7 @@ struct CommunityUseCase {
     }
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
-        try await repository.withdrawMyProfile(registration: registration)
+        try await backendClient.withdrawMyProfile(registration: registration)
     }
 
     func reportQuestion(
@@ -108,7 +108,7 @@ struct CommunityUseCase {
         reason: String,
         message: String
     ) async throws {
-        try await repository.reportQuestion(
+        try await backendClient.reportCommunityQuestion(
             registration: registration,
             questionID: questionID,
             reason: reason,
@@ -121,7 +121,7 @@ struct CommunityUseCase {
         questionID: String,
         isLiked: Bool
     ) async throws -> CommunityLikeState {
-        try await repository.setQuestionLike(
+        try await backendClient.setCommunityQuestionLike(
             registration: registration,
             questionID: questionID,
             isLiked: isLiked
@@ -134,7 +134,7 @@ struct CommunityUseCase {
         limit: Int,
         offset: Int
     ) async throws -> CommunityCommentsResponse {
-        try await repository.fetchComments(
+        try await backendClient.fetchCommunityQuestionComments(
             registration: registration,
             questionID: questionID,
             limit: limit,
@@ -147,7 +147,7 @@ struct CommunityUseCase {
         questionID: String,
         body: String
     ) async throws -> CommunityQuestionComment {
-        try await repository.createComment(
+        try await backendClient.createCommunityQuestionComment(
             registration: registration,
             questionID: questionID,
             body: body
@@ -159,7 +159,7 @@ struct CommunityUseCase {
         questionID: String,
         commentID: String
     ) async throws {
-        try await repository.deleteComment(
+        try await backendClient.deleteCommunityQuestionComment(
             registration: registration,
             questionID: questionID,
             commentID: commentID

@@ -13,6 +13,7 @@ struct AppUseCases {
     let community: CommunityUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
+        let communityRepository = RemoteCommunityRepository(backendClient: backendClient)
         backendIdentity = BackendIdentityUseCase(backendClient: backendClient)
         googleSignIn = GoogleSignInUseCase()
         refreshPageAccess = RefreshPageAccessUseCase(backendClient: backendClient)
@@ -21,6 +22,6 @@ struct AppUseCases {
         notifications = NotificationsUseCase(backendClient: backendClient)
         stats = StatsUseCase(backendClient: backendClient)
         settings = SettingsUseCase(backendClient: backendClient)
-        community = CommunityUseCase(backendClient: backendClient)
+        community = CommunityUseCase(repository: communityRepository)
     }
 }
