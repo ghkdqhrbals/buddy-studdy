@@ -345,6 +345,25 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesCloudSyncStateRepositoryForStoredCloudSyncState() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadIsCloudSyncEnabled()",
+            "settingsStore.saveIsCloudSyncEnabled(",
+            "settingsStore.loadCloudSyncStateUpdatedAt()",
+            "settingsStore.saveCloudSyncStateUpdatedAt(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CloudSyncStateRepository for stored cloud sync state instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
