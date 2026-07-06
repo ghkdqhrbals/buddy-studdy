@@ -27,6 +27,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - Services do not import SwiftUI or depend on view models.
 - App-wide decisions such as "show login page", "suppress popup", or "preserve current draft" live in Core policy or use cases, not inside views.
 - `AppState` is the current composition root and compatibility facade. New logic must not make it larger unless it is temporary orchestration for migration.
+- Backend client construction and use-case composition must stay behind `AppUseCasesProvider`; `AppState` may hold `AppUseCases`, but must not store backend transport clients or directly construct use cases from a backend client.
 - Domain models stay platform-neutral and must not know about network response status, SwiftUI state, or local storage keys.
 
 ## Current Migration Map

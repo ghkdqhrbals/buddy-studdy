@@ -473,7 +473,7 @@ final class AppState: ObservableObject {
     @Published var pageAccessPrompt: PageAccessPrompt?
 
     private let settingsStore: SettingsStore
-    private var remotePushBackendClient: RemotePushBackendClientProtocol
+    private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
     private var googleSignInUseCase: GoogleSignInUseCase { appUseCases.googleSignIn }
@@ -485,7 +485,6 @@ final class AppState: ObservableObject {
     private var settingsUseCase: SettingsUseCase { appUseCases.settings }
     private var communityUseCase: CommunityUseCase { appUseCases.community }
     private let actionRunner = AppActionRunner()
-    private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
@@ -900,16 +899,6 @@ final class AppState: ObservableObject {
         BackendBaseURLConfiguration.normalizedDebugBackendBaseURL(value)
     }
 
-    private static func makeRemotePushBackendClient(
-        isDebuggingEnabled: Bool,
-        debugBackendBaseURL: String
-    ) -> RemotePushBackendClient {
-        BackendBaseURLConfiguration(
-            isDebuggingEnabled: isDebuggingEnabled,
-            debugBackendBaseURL: debugBackendBaseURL
-        ).makeClient()
-    }
-
     private static func resolvedDebugBackendURL(from value: String) -> URL? {
         BackendBaseURLConfiguration.resolvedDebugBackendURL(from: value)
     }
@@ -922,16 +911,14 @@ final class AppState: ObservableObject {
     }
 
     private func refreshRemotePushBackendClient(reason: String) {
-        guard usesConfigurableRemotePushBackendClient else {
+        guard appUseCasesProvider.usesConfigurableBackendClient else {
             return
         }
 
-        let backendClient = Self.makeRemotePushBackendClient(
+        appUseCases = appUseCasesProvider.makeUseCases(
             isDebuggingEnabled: isDebuggingEnabled,
             debugBackendBaseURL: debugBackendBaseURL
         )
-        remotePushBackendClient = backendClient
-        appUseCases = AppUseCases(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1095,13 +1082,12 @@ final class AppState: ObservableObject {
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
-        let backendClient = remotePushBackendClient ?? Self.makeRemotePushBackendClient(
+        let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
+        self.appUseCasesProvider = appUseCasesProvider
+        self.appUseCases = appUseCasesProvider.makeUseCases(
             isDebuggingEnabled: loadedIsDebuggingEnabled,
             debugBackendBaseURL: loadedDebugBackendBaseURL
         )
-        self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
-        self.remotePushBackendClient = backendClient
-        self.appUseCases = AppUseCases(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,

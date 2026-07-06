@@ -55,6 +55,25 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotOwnBackendTransportComposition() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "private var remotePushBackendClient",
+            "usesConfigurableRemotePushBackendClient",
+            "makeRemotePushBackendClient(",
+            "AppUseCases(backendClient:",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must delegate backend client composition to an app-use-case provider: \(violations)"
+        )
+    }
+
     func testAppStateDoesNotInstantiateOAuthServicesDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
