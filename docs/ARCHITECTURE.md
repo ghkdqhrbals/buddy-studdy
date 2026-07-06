@@ -26,6 +26,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Core/`
   - App-wide pure policies and shared decision rules.
   - `AppRuntime/AppActionRunner.swift` provides the common async action boundary for view-model orchestration: execute a use case, apply success state, route errors through app policy, and clear loading state from one repeatable shape.
+  - New or modified async view-model flows should use the common action boundary unless they are pure local state mutations or low-level callback bridges.
   - `ErrorHandling/BackendErrorPresentationPolicy.swift` converts backend error codes into UI presentation, login, page-access, and identity-reset decisions.
   - `ErrorHandling/AppErrorHandlingPolicy.swift` maps backend error presentation into app UI behavior so login/device/token errors do not leak as repeated popups or feature banners.
   - Backend error parsing accepts both string error identifiers and numeric code ranges; auth-range numeric codes are treated as login/identity errors by policy instead of being surfaced as popups.

@@ -1280,34 +1280,39 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            let recordsPage = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "records",
-                operation: { recoveredRegistration in
-                    try await recordsUseCase.fetchRecords(
-                        registration: recoveredRegistration,
-                        limit: settings.sanitizedMaxHistoryCount,
-                        offset: 0,
-                        query: "",
-                        language: settings.appLanguage
-                    )
+        await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "records",
+                    operation: { recoveredRegistration in
+                        try await recordsUseCase.fetchRecords(
+                            registration: recoveredRegistration,
+                            limit: settings.sanitizedMaxHistoryCount,
+                            offset: 0,
+                            query: "",
+                            language: settings.appLanguage
+                        )
+                    }
+                )
+            },
+            onSuccess: { recordsPage in
+                let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
+                applyBackendRecordsPage(
+                    recordsPage,
+                    pendingRecords: pendingRecords,
+                    updateVisibleQuestion: false,
+                    preserveLocalQuestionState: true
+                )
+                log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
+            },
+            onFailure: { error in
+                if handlePageAccessError(error, page: .records) {
+                    return
                 }
-            )
-            let pendingRecords = studyRecords.filter { $0.gradingResult == nil }
-            applyBackendRecordsPage(
-                recordsPage,
-                pendingRecords: pendingRecords,
-                updateVisibleQuestion: false,
-                preserveLocalQuestionState: true
-            )
-            log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
-        } catch {
-            if handlePageAccessError(error, page: .records) {
-                return
+                log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
             }
-            log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func refreshNotificationUnreadCount() async {
@@ -1848,99 +1853,109 @@ final class AppState: ObservableObject {
         offset: Int = 0
     ) async {
         let requestID = beginBackendStatsRequest()
-        defer {
-            finishBackendStatsRequest(requestID)
-        }
 
         let normalizedLimit = max(1, min(limit, 100))
         let normalizedOffset = max(0, offset)
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats") else {
             applyBackendStatsError("백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요.", requestID: requestID)
+            finishBackendStatsRequest(requestID)
             log(.warning, "통계 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
             return
         }
 
-        do {
-            let stats = try await statsUseCase.fetchStats(
-                registration: registration,
-                period: period,
-                startAt: startAt,
-                endAt: endAt,
-                sort: sort,
-                limit: normalizedLimit,
-                offset: normalizedOffset
-            )
+        await actionRunner.run(
+            operation: {
+                try await statsUseCase.fetchStats(
+                    registration: registration,
+                    period: period,
+                    startAt: startAt,
+                    endAt: endAt,
+                    sort: sort,
+                    limit: normalizedLimit,
+                    offset: normalizedOffset
+                )
+            },
+            onSuccess: { stats in
+                guard isCurrentBackendStatsRequest(requestID) else {
+                    return
+                }
 
-            guard isCurrentBackendStatsRequest(requestID) else {
-                return
+                applyBackendStats(stats, requestID: requestID)
+                log(.info, "통계 조회 완료. topics=\(stats.topics.count), totalTopics=\(stats.totalTopics), totalResponses=\(stats.totalResponses), offset=\(stats.offset)")
+            },
+            onFailure: { error in
+                guard isCurrentBackendStatsRequest(requestID) else {
+                    return
+                }
+
+                if Self.isCancellationLikeError(error) {
+                    log(.info, "통계 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
+                    return
+                }
+
+                if handlePageAccessError(error, page: .statistics) {
+                    applyBackendStatsError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
+                    return
+                }
+
+                applyBackendStatsError(backendErrorDisplayMessage(error, fallback: "통계 조회 실패"), requestID: requestID)
+                log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                finishBackendStatsRequest(requestID)
             }
-
-            applyBackendStats(stats, requestID: requestID)
-            log(.info, "통계 조회 완료. topics=\(stats.topics.count), totalTopics=\(stats.totalTopics), totalResponses=\(stats.totalResponses), offset=\(stats.offset)")
-        } catch {
-            guard isCurrentBackendStatsRequest(requestID) else {
-                return
-            }
-
-            if Self.isCancellationLikeError(error) {
-                log(.info, "통계 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
-                return
-            }
-
-            if handlePageAccessError(error, page: .statistics) {
-                applyBackendStatsError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
-                return
-            }
-
-            applyBackendStatsError(backendErrorDisplayMessage(error, fallback: "통계 조회 실패"), requestID: requestID)
-            log(.warning, "백엔드 통계 조회 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func fetchBackendStatsActivity(startAt: Date? = nil, endAt: Date? = nil) async {
         let requestID = beginBackendStatsActivityRequest()
-        defer {
-            finishBackendStatsActivityRequest(requestID)
-        }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats-activity") else {
             applyBackendStatsActivityError("백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요.", requestID: requestID)
+            finishBackendStatsActivityRequest(requestID)
             log(.warning, "통계 활동 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
             return
         }
 
-        do {
-            let activity = try await statsUseCase.fetchStatsActivity(
-                registration: registration,
-                startAt: startAt,
-                endAt: endAt
-            )
+        await actionRunner.run(
+            operation: {
+                try await statsUseCase.fetchStatsActivity(
+                    registration: registration,
+                    startAt: startAt,
+                    endAt: endAt
+                )
+            },
+            onSuccess: { activity in
+                guard isCurrentBackendStatsActivityRequest(requestID) else {
+                    return
+                }
 
-            guard isCurrentBackendStatsActivityRequest(requestID) else {
-                return
+                applyBackendStatsActivity(activity, requestID: requestID)
+                log(.info, "통계 활동 조회 완료. days=\(activity.days.count), streak=\(activity.streakDays), month=\(activity.monthAnswerCount)")
+            },
+            onFailure: { error in
+                guard isCurrentBackendStatsActivityRequest(requestID) else {
+                    return
+                }
+
+                if Self.isCancellationLikeError(error) {
+                    log(.info, "통계 활동 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
+                    return
+                }
+
+                if handlePageAccessError(error, page: .statistics) {
+                    applyBackendStatsActivityError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
+                    return
+                }
+
+                applyBackendStatsActivityError(backendErrorDisplayMessage(error, fallback: "통계 활동 조회 실패"), requestID: requestID)
+                log(.warning, "백엔드 통계 활동 조회 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                finishBackendStatsActivityRequest(requestID)
             }
-
-            applyBackendStatsActivity(activity, requestID: requestID)
-            log(.info, "통계 활동 조회 완료. days=\(activity.days.count), streak=\(activity.streakDays), month=\(activity.monthAnswerCount)")
-        } catch {
-            guard isCurrentBackendStatsActivityRequest(requestID) else {
-                return
-            }
-
-            if Self.isCancellationLikeError(error) {
-                log(.info, "통계 활동 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
-                return
-            }
-
-            if handlePageAccessError(error, page: .statistics) {
-                applyBackendStatsActivityError(strings.pageAccessDenied(strings.tabStatistics), requestID: requestID)
-                return
-            }
-
-            applyBackendStatsActivityError(backendErrorDisplayMessage(error, fallback: "통계 활동 조회 실패"), requestID: requestID)
-            log(.warning, "백엔드 통계 활동 조회 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
