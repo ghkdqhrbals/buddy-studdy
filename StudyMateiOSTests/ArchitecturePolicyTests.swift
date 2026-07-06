@@ -219,6 +219,23 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesStoredBackendIdentityThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "remotePushRegistrationRepository.loadRemotePushRegistration",
+            "remotePushRegistrationRepository.saveRemotePushRegistration",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use StoredBackendIdentityUseCase for stored backend identity reads/writes instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesCommunityProfileCacheRepositoryForStoredProfileState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

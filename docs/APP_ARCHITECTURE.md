@@ -25,6 +25,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `ClipboardProvider`: the service boundary for reading pasteboard contents and turning platform clipboard payloads into app-level values.
 - `AppLogRepository`: the repository boundary for persisted, paginated app diagnostics. View models may page and append app logs through this repository, but must not call `SettingsStore` log APIs directly.
 - `RemotePushRegistrationRepository`: the local repository boundary for persisted backend device identity and access-token registration. View models must not call `SettingsStore` registration APIs directly.
+- `StoredBackendIdentityUseCase`: the application boundary for reading and updating persisted backend device identity. View models must use this use case instead of calling the registration repository directly.
 - `CommunityProfileCacheRepository`: the local repository boundary for cached community profile identity and avatar state. View models must not call `SettingsStore` profile-cache APIs directly.
 - `CommunitySessionRepository`: the local repository boundary for cached community sign-in state. View models must not call `SettingsStore` community-session APIs directly.
 - `OnboardingStateRepository`: the local repository boundary for persisted onboarding completion state. View models must not call `SettingsStore` onboarding APIs directly.
@@ -95,6 +96,7 @@ The policy is split into two deterministic steps:
 - Settings backend operations must go through `SettingsRepository`. `SettingsUseCase` owns backend settings, model options, API-key validation, and schedule sync workflows and must not depend directly on backend transport protocols.
 - Persisted app diagnostics must go through `AppLogRepository`. `AppState` can orchestrate debug-log paging, but local persistence details stay behind a repository adapter.
 - Persisted backend device identity must go through `RemotePushRegistrationRepository`. `AppState` may request or update registration state, but local storage details stay behind a repository adapter.
+- Stored backend device identity reads and writes in `AppState` must go through `StoredBackendIdentityUseCase`. The registration repository remains the adapter hidden behind that use case.
 - Cached community profile state must go through `CommunityProfileCacheRepository`. `AppState` may reconcile profile state with backend responses, but user-default keys and trimming behavior stay behind a repository adapter.
 - Cached community sign-in state must go through `CommunitySessionRepository`. `AppState` may change sign-in state as part of login/logout/recovery flows, but local storage details stay behind a repository adapter.
 - Persisted onboarding completion state must go through `OnboardingStateRepository`. `AppState` may gate startup flows with onboarding state, but local storage details stay behind a repository adapter.

@@ -46,6 +46,7 @@
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		1100000000000000000001A4 /* AppUseCasesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006F /* AppUseCasesProvider.swift */; };
 		11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
+		1100000000000000000001C2 /* StoredBackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009C /* StoredBackendIdentityUseCase.swift */; };
 		110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
 		1100000000000000000001A5 /* GoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000074 /* GoogleSignInRepository.swift */; };
 		1100000000000000000001A6 /* OAuthGoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000075 /* OAuthGoogleSignInRepository.swift */; };
@@ -144,6 +145,7 @@
 		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		120000000000000000000149 /* AppUseCasesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006F /* AppUseCasesProvider.swift */; };
 		12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
+		120000000000000000000174 /* StoredBackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009C /* StoredBackendIdentityUseCase.swift */; };
 		120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
 		120000000000000000000156 /* GoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000074 /* GoogleSignInRepository.swift */; };
 		120000000000000000000157 /* OAuthGoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000075 /* OAuthGoogleSignInRepository.swift */; };
@@ -252,6 +254,7 @@
 		110000000000000000000046 /* AppUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCases.swift; sourceTree = "<group>"; };
 		11000000000000000000006F /* AppUseCasesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCasesProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000047 /* BackendIdentityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendIdentityUseCase.swift; sourceTree = "<group>"; };
+		11000000000000000000009C /* StoredBackendIdentityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredBackendIdentityUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000049 /* GoogleSignInUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000074 /* GoogleSignInRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000075 /* OAuthGoogleSignInRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthGoogleSignInRepository.swift; sourceTree = "<group>"; };
@@ -482,6 +485,7 @@
 			isa = PBXGroup;
 			children = (
 				110000000000000000000047 /* BackendIdentityUseCase.swift */,
+				11000000000000000000009C /* StoredBackendIdentityUseCase.swift */,
 			);
 			path = Identity;
 			sourceTree = "<group>";
@@ -1010,6 +1014,7 @@
 				11000000000000000000018D /* AppUseCases.swift in Sources */,
 				1100000000000000000001A4 /* AppUseCasesProvider.swift in Sources */,
 				11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */,
+				1100000000000000000001C2 /* StoredBackendIdentityUseCase.swift in Sources */,
 				110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */,
 				1100000000000000000001A5 /* GoogleSignInRepository.swift in Sources */,
 				1100000000000000000001A6 /* OAuthGoogleSignInRepository.swift in Sources */,
@@ -1123,6 +1128,7 @@
 				12000000000000000000012E /* AppUseCases.swift in Sources */,
 				120000000000000000000149 /* AppUseCasesProvider.swift in Sources */,
 				12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */,
+				120000000000000000000174 /* StoredBackendIdentityUseCase.swift in Sources */,
 				120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */,
 				120000000000000000000156 /* GoogleSignInRepository.swift in Sources */,
 				120000000000000000000157 /* OAuthGoogleSignInRepository.swift in Sources */,

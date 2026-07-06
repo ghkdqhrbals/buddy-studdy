@@ -445,7 +445,7 @@ final class AppState: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let appLogRepository: AppLogRepository
-    private let remotePushRegistrationRepository: RemotePushRegistrationRepository
+    private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheRepository: CommunityProfileCacheRepository
     private let communitySessionRepository: CommunitySessionRepository
     private let onboardingStateRepository: OnboardingStateRepository
@@ -583,13 +583,13 @@ final class AppState: ObservableObject {
             return true
         }
 
-        return remotePushRegistrationRepository.loadRemotePushRegistration()?.hasAccessToken == true
+        return storedBackendIdentityUseCase.hasAccessToken()
     }
 
     private func shouldAllowProvisionalAccessWhileRefreshing(_ page: ProtectedAppPage) -> Bool {
         PageAccessPolicy.shouldAllowProvisionalAccess(
             to: page,
-            hasRegisteredAccessToken: remotePushRegistrationRepository.loadRemotePushRegistration()?.hasRegisteredAccessToken == true,
+            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken(),
             userStatus: backendAccessState.user.status
         )
     }
@@ -991,6 +991,7 @@ final class AppState: ObservableObject {
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         appLogRepository: AppLogRepository? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
+        storedBackendIdentityUseCase: StoredBackendIdentityUseCase? = nil,
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
         communitySessionRepository: CommunitySessionRepository? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
@@ -1047,7 +1048,8 @@ final class AppState: ObservableObject {
 
         self.settingsStore = settingsStore
         self.appLogRepository = resolvedAppLogRepository
-        self.remotePushRegistrationRepository = resolvedRemotePushRegistrationRepository
+        self.storedBackendIdentityUseCase = storedBackendIdentityUseCase
+            ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
         self.communityProfileCacheRepository = resolvedCommunityProfileCacheRepository
         self.communitySessionRepository = resolvedCommunitySessionRepository
         self.onboardingStateRepository = resolvedOnboardingStateRepository
@@ -1272,7 +1274,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshBackendRecords() async {
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "records") else {
             log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
             return
@@ -1314,7 +1316,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshNotificationUnreadCount() async {
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-count") else {
             updateNotificationState { state in
                 state.applyUnreadCount(0)
@@ -1350,7 +1352,7 @@ final class AppState: ObservableObject {
         guard !isLoadingNotifications else {
             return
         }
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notifications") else {
             notificationErrorMessage = strings.myStudyLoginHelp
             return
@@ -1462,7 +1464,7 @@ final class AppState: ObservableObject {
         onSuccess: () async -> Void = {},
         failureMessage: (Error) -> String
     ) async {
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
             return
         }
@@ -1568,7 +1570,7 @@ final class AppState: ObservableObject {
         preserveLocalSettings: Bool = true
     ) async -> Bool {
         _ = preserveLocalSettings
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "state") else {
             return false
         }
@@ -1683,7 +1685,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "study-search") else {
             replaceHomeStudySearchResults([])
             return
@@ -1737,7 +1739,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
             replaceRecordSearchResults([])
             return
@@ -2363,7 +2365,7 @@ final class AppState: ObservableObject {
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
-                remotePushRegistrationRepository.saveRemotePushRegistration(result.registration)
+                storedBackendIdentityUseCase.saveRegistration(result.registration)
                 isCommunitySignedIn = true
                 communitySessionRepository.saveIsCommunitySignedIn(true)
                 communityErrorMessage = nil
@@ -2461,7 +2463,7 @@ final class AppState: ObservableObject {
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
-                remotePushRegistrationRepository.saveRemotePushRegistration(result.registration)
+                storedBackendIdentityUseCase.saveRegistration(result.registration)
                 isCommunitySignedIn = true
                 communitySessionRepository.saveIsCommunitySignedIn(true)
             },
@@ -2490,12 +2492,12 @@ final class AppState: ObservableObject {
     }
 
     func signOutFromCommunity() {
-        let registrationForLogout = remotePushRegistrationRepository.loadRemotePushRegistration()
+        let registrationForLogout = storedBackendIdentityUseCase.loadRegistration()
         resetCommunitySignInState()
         if var registration = registrationForLogout {
             registration.accessToken = nil
             registration.accessTokenExpiresAt = nil
-            remotePushRegistrationRepository.saveRemotePushRegistration(registration)
+            storedBackendIdentityUseCase.saveRegistration(registration)
         }
         clearCommunityFeedPage()
         communityErrorMessage = nil
@@ -2708,7 +2710,7 @@ final class AppState: ObservableObject {
                 try await communityUseCase.withdrawMyProfile(registration: registration)
             },
             onSuccess: { updatedRegistration in
-                remotePushRegistrationRepository.saveRemotePushRegistration(updatedRegistration)
+                storedBackendIdentityUseCase.saveRegistration(updatedRegistration)
                 signOutFromCommunity()
                 communityProfileCacheRepository.saveCommunityProfileID(nil)
                 communityProfileCacheRepository.saveCommunityProfileDisplayName("")
@@ -4361,7 +4363,7 @@ final class AppState: ObservableObject {
     }
 
     private func sendRemoteSkip(for record: StudyRecord) {
-        if let registration = remotePushRegistrationRepository.loadRemotePushRegistration() {
+        if let registration = storedBackendIdentityUseCase.loadRegistration() {
             Task {
                 do {
                     _ = try await recordsUseCase.skipRecord(registration: registration, recordID: record.id)
@@ -4507,7 +4509,7 @@ final class AppState: ObservableObject {
         replyText: String? = nil
     ) -> Bool {
         if let recordID,
-           remotePushRegistrationRepository.loadRemotePushRegistration() != nil {
+           storedBackendIdentityUseCase.loadRegistration() != nil {
             guard requirePageAccess(.studyDetail) else {
                 return false
             }
@@ -4529,7 +4531,7 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendNotificationRecord(recordID: String, replyText: String? = nil) async throws -> StudyRecord {
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "backend-record-push") else {
             log(.warning, "백엔드 push record를 열 수 없습니다. 기기 등록 정보가 없습니다.")
             throw AppStateError.missingRemotePushRegistration
@@ -4652,7 +4654,7 @@ final class AppState: ObservableObject {
         replyText: String?
     ) -> Bool {
         if let recordID,
-           remotePushRegistrationRepository.loadRemotePushRegistration() != nil {
+           storedBackendIdentityUseCase.loadRegistration() != nil {
             Task {
                 await handleBackendRecordPush(
                     recordID: recordID,
@@ -4913,7 +4915,7 @@ final class AppState: ObservableObject {
         onSuccess: @escaping (Value) async -> Void = { _ in },
         failureMessage: @escaping (Error) -> String
     ) {
-        guard let registration = remotePushRegistrationRepository.loadRemotePushRegistration() else {
+        guard let registration = storedBackendIdentityUseCase.loadRegistration() else {
             return
         }
 
@@ -5188,7 +5190,7 @@ final class AppState: ObservableObject {
     }
 
     private func backendRegistrationForOpenAIRequests(reason: String) async -> RemotePushRegistration? {
-        if let registration = remotePushRegistrationRepository.loadRemotePushRegistration() {
+        if let registration = storedBackendIdentityUseCase.loadRegistration() {
             return await registrationWithAccessToken(registration, reason: reason)
         }
 
@@ -5233,7 +5235,7 @@ final class AppState: ObservableObject {
 
         do {
             let updatedRegistration = try await backendIdentityUseCase.bootstrapAccessToken(registration: registration)
-            remotePushRegistrationRepository.saveRemotePushRegistration(updatedRegistration)
+            storedBackendIdentityUseCase.saveRegistration(updatedRegistration)
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
@@ -5276,7 +5278,7 @@ final class AppState: ObservableObject {
         previousRegistration: RemotePushRegistration,
         reason: String
     ) async -> RemotePushRegistration? {
-        remotePushRegistrationRepository.saveRemotePushRegistration(nil)
+        storedBackendIdentityUseCase.saveRegistration(nil)
         resetCommunitySignInState()
         clearCommunityFeedPage()
         let apnsToken = previousRegistration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5305,7 +5307,7 @@ final class AppState: ObservableObject {
             timezone: TimeZone.current.identifier,
             apnsEnvironment: Self.backendAPNSEnvironment
         )
-        remotePushRegistrationRepository.saveRemotePushRegistration(registration)
+        storedBackendIdentityUseCase.saveRegistration(registration)
         log(.info, "새 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
         try await updateBackendSettings(
             registration: registration,
@@ -5316,14 +5318,14 @@ final class AppState: ObservableObject {
     }
 
     private func clearStoredBackendAccessToken() {
-        guard var registration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
             return
         }
 
         registration.accessToken = nil
         registration.accessTokenExpiresAt = nil
-        remotePushRegistrationRepository.saveRemotePushRegistration(registration)
+        storedBackendIdentityUseCase.saveRegistration(registration)
         backendAccessState = .signedOut
         isCommunitySignedIn = false
         communityProfile = nil
@@ -5366,7 +5368,7 @@ final class AppState: ObservableObject {
     func registerRemotePushDeviceToken(_ deviceToken: Data) async {
         let token = Self.hexDeviceToken(deviceToken)
         do {
-            let existingRegistration = remotePushRegistrationRepository.loadRemotePushRegistration()
+            let existingRegistration = storedBackendIdentityUseCase.loadRegistration()
             let registration: RemotePushRegistration
 
             if let existingRegistration,
@@ -5390,7 +5392,7 @@ final class AppState: ObservableObject {
                         )
                     }
                 )
-                remotePushRegistrationRepository.saveRemotePushRegistration(registration)
+                storedBackendIdentityUseCase.saveRegistration(registration)
                 log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
             } else {
                 registration = try await backendIdentityUseCase.registerDevice(
@@ -5399,7 +5401,7 @@ final class AppState: ObservableObject {
                     timezone: TimeZone.current.identifier,
                     apnsEnvironment: Self.backendAPNSEnvironment
                 )
-                remotePushRegistrationRepository.saveRemotePushRegistration(registration)
+                storedBackendIdentityUseCase.saveRegistration(registration)
                 log(.info, "서버 push 백엔드에 iPhone 기기를 등록했습니다.")
             }
 
@@ -5420,7 +5422,7 @@ final class AppState: ObservableObject {
     }
 
     private func syncRemotePushScheduleIfPossible(reason: String) async {
-        guard let storedRegistration = remotePushRegistrationRepository.loadRemotePushRegistration(),
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
             return
         }
