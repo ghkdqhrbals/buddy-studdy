@@ -305,12 +305,7 @@ final class SettingsStore {
     }
 
     nonisolated static func normalizedQuestionText(_ question: String) -> String {
-        question
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        StudyRecordIdentityPolicy.normalizedQuestionText(question)
     }
 
     private func trimStudyRecords(to limit: Int) {

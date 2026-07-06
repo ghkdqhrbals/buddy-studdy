@@ -16,6 +16,7 @@
 		110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
 		11000000000000000000018C /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
+		1100000000000000000001A7 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -86,6 +87,7 @@
 		120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
 		12000000000000000000012D /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
+		120000000000000000000158 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -193,6 +195,7 @@
 		11000000000000000000000E /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		11000000000000000000000F /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
 		110000000000000000000045 /* AppActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActionRunner.swift; sourceTree = "<group>"; };
+		110000000000000000000077 /* StudyRecordIdentityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRecordIdentityPolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000046 /* AppUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCases.swift; sourceTree = "<group>"; };
 		11000000000000000000006F /* AppUseCasesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCasesProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000047 /* BackendIdentityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendIdentityUseCase.swift; sourceTree = "<group>"; };
@@ -329,8 +332,17 @@
 				110000000000000000000044 /* AppRuntime */,
 				11000000000000000000002B /* ErrorHandling */,
 				11000000000000000000002D /* PageAccess */,
+				110000000000000000000078 /* StudyRecord */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		110000000000000000000078 /* StudyRecord */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000077 /* StudyRecordIdentityPolicy.swift */,
+			);
+			path = StudyRecord;
 			sourceTree = "<group>";
 		};
 		110000000000000000000044 /* AppRuntime */ = {
@@ -853,6 +865,7 @@
 				110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */,
 				110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */,
 				11000000000000000000018C /* AppActionRunner.swift in Sources */,
+				1100000000000000000001A7 /* StudyRecordIdentityPolicy.swift in Sources */,
 				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
 				11000000000000000000018D /* AppUseCases.swift in Sources */,
@@ -938,6 +951,7 @@
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
 				120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */,
 				12000000000000000000012D /* AppActionRunner.swift in Sources */,
+				120000000000000000000158 /* StudyRecordIdentityPolicy.swift in Sources */,
 				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
 				12000000000000000000012E /* AppUseCases.swift in Sources */,

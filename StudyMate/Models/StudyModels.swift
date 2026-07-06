@@ -1087,12 +1087,7 @@ struct DeletedStudyRecordMarker: Codable, Equatable, Identifiable {
     }
 
     static func normalizedQuestionText(_ question: String) -> String {
-        question
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        StudyRecordIdentityPolicy.normalizedQuestionText(question)
     }
 }
 

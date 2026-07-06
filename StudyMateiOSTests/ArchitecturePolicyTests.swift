@@ -90,6 +90,20 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testViewsDoNotDependOnSettingsStore() throws {
+        let root = try repositoryRoot()
+        let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
+        let violations = try swiftFiles(in: views).compactMap { file -> String? in
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return content.contains("SettingsStore") ? file.lastPathComponent : nil
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "Views must render state and use Core policies instead of depending on SettingsStore: \(violations)"
+        )
+    }
+
     func testGoogleSignInUseCaseDependsOnAuthRepositoryBoundary() throws {
         let root = try repositoryRoot()
         let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Auth/GoogleSignInUseCase.swift")

@@ -5110,8 +5110,7 @@ final class AppState: ObservableObject {
         reloadStudyRecordsFromStore()
         notificationLandingMessage = nil
 
-        if SettingsStore.normalizedQuestionText(currentQuestion?.question ?? "") ==
-            SettingsStore.normalizedQuestionText(record.question.question) {
+        if StudyRecordIdentityPolicy.questionsMatch(currentQuestion?.question ?? "", record.question.question) {
             currentQuestion = nil
             gradingResult = nil
             lastAnswer = ""
@@ -6462,7 +6461,7 @@ final class AppState: ObservableObject {
         var questionsByKey: [String: QuestionItem] = [:]
 
         for question in remote + local {
-            let key = SettingsStore.normalizedQuestionText(question.question)
+            let key = StudyRecordIdentityPolicy.normalizedQuestionText(question.question)
             if let existingQuestion = questionsByKey[key] {
                 questionsByKey[key] = question.createdAt >= existingQuestion.createdAt ? question : existingQuestion
             } else {
@@ -6486,8 +6485,7 @@ final class AppState: ObservableObject {
 
     nonisolated private static func questionsMatch(_ lhs: QuestionItem, _ rhs: QuestionItem) -> Bool {
         lhs.createdAt == rhs.createdAt ||
-            SettingsStore.normalizedQuestionText(lhs.question) ==
-            SettingsStore.normalizedQuestionText(rhs.question)
+            StudyRecordIdentityPolicy.questionsMatch(lhs.question, rhs.question)
     }
 
     private func preferredStudyRecord(_ existingRecord: StudyRecord, _ candidateRecord: StudyRecord) -> StudyRecord {
@@ -6803,9 +6801,9 @@ final class AppState: ObservableObject {
     }
 
     nonisolated private static func isDuplicate(_ question: QuestionItem, in recentQuestions: [QuestionItem]) -> Bool {
-        let normalizedQuestion = SettingsStore.normalizedQuestionText(question.question)
+        let normalizedQuestion = StudyRecordIdentityPolicy.normalizedQuestionText(question.question)
         return recentQuestions.contains {
-            SettingsStore.normalizedQuestionText($0.question) == normalizedQuestion
+            StudyRecordIdentityPolicy.normalizedQuestionText($0.question) == normalizedQuestion
         }
     }
 

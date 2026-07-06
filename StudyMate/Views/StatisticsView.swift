@@ -364,7 +364,7 @@ struct StudyRecordDetailView: View {
     private var latestRecord: StudyRecord {
         appState.studyRecords.first {
             $0.id == record.id ||
-                SettingsStore.normalizedQuestionText($0.question.question) == SettingsStore.normalizedQuestionText(record.question.question)
+                StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
         } ?? record
     }
 
