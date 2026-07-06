@@ -267,10 +267,11 @@ private struct MobileHomeView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            homeTitleHeader
+            homeScopePickerHeader
+
             List {
-                homeTitleRow
-                homeScopePickerRow
                 homeContentSection
             }
             .listStyle(.plain)
@@ -278,7 +279,6 @@ private struct MobileHomeView: View {
             .refreshable {
                 await startHomeRefresh()
             }
-            .searchSafeRefreshControlOffset(offset: 36)
         }
         .background(Color(.systemBackground))
         .environment(\.editMode, $editMode)
@@ -477,14 +477,13 @@ private struct MobileHomeView: View {
         appState.appRouteRequest = nil
     }
 
-    private var homeTitleRow: some View {
+    private var homeTitleHeader: some View {
         MobileRootLargeTitle(strings.tabHome)
-            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
     }
 
-    private var homeScopePickerRow: some View {
+    private var homeScopePickerHeader: some View {
         Picker("", selection: $selectedHomeScope) {
             ForEach(HomeFeedScope.allCases) { scope in
                 Text(scope.title(strings: strings))
@@ -493,9 +492,8 @@ private struct MobileHomeView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -884,7 +882,7 @@ private struct MobileHomeView: View {
             homeRefreshTask = nil
         }
 
-        try? await Task.sleep(nanoseconds: 220_000_000)
+        await Task.yield()
     }
 
     @MainActor
