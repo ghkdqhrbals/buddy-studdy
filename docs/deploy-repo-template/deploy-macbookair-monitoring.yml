@@ -15,13 +15,15 @@ jobs:
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
       MONITORING_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/monitoring
-      GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3000' }}
+      API_DASHBOARD_PORT: ${{ vars.API_DASHBOARD_PORT || '3000' }}
+      GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
 
     steps:
-      - name: Deploy Loki and Grafana
+      - name: Deploy monitoring module
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
         run: |
           set -euo pipefail
 
@@ -29,10 +31,15 @@ jobs:
             echo "Missing GitHub Actions secret: GRAFANA_ADMIN_PASSWORD" >&2
             exit 1
           fi
+          if [ -z "${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" ]; then
+            echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
+            exit 1
+          fi
 
           monitoring_root="$(eval echo "${MONITORING_ROOT}")"
 
           mkdir -p \
+            "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
             "${monitoring_root}/grafana/dashboards" \
@@ -53,6 +60,14 @@ jobs:
           curl -fsSL \
             "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
             -o "${monitoring_root}/loki/config/loki.yml"
+          for file in index.html app.js logs.js performance.html performance.js styles.css; do
+            curl -fsSL \
+              "${MONITORING_SOURCE_BASE}/api-dashboard/public/${file}" \
+              -o "${monitoring_root}/api-dashboard/public/${file}"
+          done
+          curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/api-dashboard/nginx.conf" \
+            -o "${monitoring_root}/api-dashboard/nginx.conf"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 
@@ -69,19 +84,20 @@ jobs:
           path.write_text(json.dumps(data, indent=2))
           PY
           fi
+          docker pull nginx:1.27-alpine
           docker pull grafana/loki:3.3.2
           docker pull grafana/grafana:12.3.0
           if [ -n "${docker_config_backup}" ]; then
             cp "${docker_config_backup}" "${HOME}/.docker/config.json"
           fi
 
-          docker rm -f buddystudy-loki buddystudy-grafana >/dev/null 2>&1 || true
+          docker rm -f buddystudy-api-dashboard buddystudy-loki buddystudy-grafana >/dev/null 2>&1 || true
 
           docker run -d \
             --name buddystudy-loki \
             --network buddystudy-monitoring \
             --restart unless-stopped \
-            -p "${LOKI_PORT}:3100" \
+            -p "127.0.0.1:${LOKI_PORT}:3100" \
             -v "${monitoring_root}/loki/data:/loki" \
             -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
             grafana/loki:3.3.2 \
@@ -91,16 +107,30 @@ jobs:
             --name buddystudy-grafana \
             --network buddystudy-monitoring \
             --restart unless-stopped \
-            -p "${GRAFANA_PORT}:3000" \
+            -p "127.0.0.1:${GRAFANA_PORT}:3000" \
             -e GF_SECURITY_ADMIN_USER=admin \
             -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
             -e GF_USERS_ALLOW_SIGN_UP=false \
+            -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/grafana/ \
+            -e GF_SERVER_SERVE_FROM_SUB_PATH=true \
             -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/buddystudy-logs.json \
             -v "${monitoring_root}/grafana/data:/var/lib/grafana" \
             -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
             grafana/grafana:12.3.0
 
-          echo "MacBook Air PLG receiver is running."
-          echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}"
+          docker run -d \
+            --name buddystudy-api-dashboard \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
+            -e API_DASHBOARD_BASIC_AUTH_HTPASSWD="${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" \
+            -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
+            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine \
+            /bin/sh -c 'printf "%s\n" "$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
+
+          echo "MacBook Air monitoring module is running."
+          echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
+          echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/grafana/"
           echo "Loki push: http://127.0.0.1:${LOKI_PORT}/loki/api/v1/push"

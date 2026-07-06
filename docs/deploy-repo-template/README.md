@@ -1,10 +1,25 @@
 # BuddyStudy Deploy
 
-Deployment repository for the BuddyStudy Spring Boot Kotlin push backend.
+Deployment repository for BuddyStudy runtime modules.
 
-This repo is triggered by `repository_dispatch` from the app repository after a backend Docker image is published to GHCR.
+This repo is triggered by `repository_dispatch` from the app repository after
+module Docker images are published to GHCR.
 
 The public API domain is `https://api.ghkdqhrbals.org`.
+
+## Deployment Modules
+
+Deployments are module-scoped. Backend, admin frontend, monitoring, and health
+monitor changes must be deployed through separate workflows/jobs. Start with
+`deployment-modules.md` before adding or changing deploy workflows.
+
+Current workflow templates:
+
+- `deploy-backend.yml`: backend API runtime on EC2.
+- `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
+- `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
+  MacBook Air.
+- `deploy-monitoring.yml`: legacy EC2-local monitoring fallback only.
 
 ## Required Secrets
 
@@ -31,6 +46,7 @@ EC2 log forwarding to MacBook Air Loki:
 MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
+- `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
 
 Repository variables:
 
@@ -87,6 +103,18 @@ runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
 Use an ARM instance such as `t4g.medium` when backend, Postgres, Redis,
 coordinator, nginx, and promtail share the host.
 
+## Admin Frontend Deploy
+
+The admin frontend is deployed separately from the backend. Copy
+`deploy-admin-frontend.yml` into the deploy repository's `.github/workflows/`
+directory. The app repository's `Build Admin Frontend Image` workflow dispatches
+`admin-frontend-image-published` and waits for **Deploy BuddyStudy Admin
+Frontend**.
+
+The admin deploy workflow owns only the `buddystudy-admin-frontend` container.
+It must not rebuild backend, recreate Postgres, recreate Loki/Grafana, or run
+runtime health checks.
+
 ## Monitoring Deploy
 
 Monitoring is deployed separately from backend image rollout and runs on the
@@ -102,6 +130,7 @@ runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
 
 The MacBook Air workflow creates or replaces:
 
+- `buddystudy-api-dashboard`: API Logs dashboard reverse proxy with Basic Auth.
 - `buddystudy-loki`: Loki with persistent host data under
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under

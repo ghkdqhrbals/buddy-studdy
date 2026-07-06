@@ -1,0 +1,65 @@
+name: Deploy BuddyStudy Admin Frontend
+
+on:
+  repository_dispatch:
+    types:
+      - admin-frontend-image-published
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Admin frontend image ref to deploy."
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-admin-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy_admin_frontend:
+    name: Deploy Admin Frontend
+    runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+    timeout-minutes: 10
+    env:
+      IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+
+    steps:
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          if [ -z "${IMAGE_REF}" ]; then
+            echo "Missing admin frontend image ref." >&2
+            exit 1
+          fi
+
+      - name: Deploy admin frontend container
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          docker pull "${IMAGE_REF}"
+          docker network create buddystudy-net >/dev/null 2>&1 || true
+
+          docker rm -f buddystudy-admin-frontend >/dev/null 2>&1 || true
+          docker run -d \
+            --name buddystudy-admin-frontend \
+            --network buddystudy-net \
+            --restart unless-stopped \
+            "${IMAGE_REF}"
+
+          for attempt in $(seq 1 20); do
+            if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
+              sleep 2
+              if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+
+          echo "Admin frontend did not stay running." >&2
+          docker logs buddystudy-admin-frontend || true
+          exit 1
