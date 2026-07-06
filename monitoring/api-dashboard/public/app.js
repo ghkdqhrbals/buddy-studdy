@@ -6,7 +6,7 @@ import {
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070613";
+} from "./logs.js?v=2026070614";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -29,8 +29,10 @@ const state = {
 const els = {
   rangeSelect: document.querySelector("#rangeSelect"),
   customRangeFields: document.querySelector("#customRangeFields"),
-  customStartInput: document.querySelector("#customStartInput"),
-  customEndInput: document.querySelector("#customEndInput"),
+  customStartDateInput: document.querySelector("#customStartDateInput"),
+  customStartTimeInput: document.querySelector("#customStartTimeInput"),
+  customEndDateInput: document.querySelector("#customEndDateInput"),
+  customEndTimeInput: document.querySelector("#customEndTimeInput"),
   applyCustomRangeButton: document.querySelector("#applyCustomRangeButton"),
   methodSelect: document.querySelector("#methodSelect"),
   statusSelect: document.querySelector("#statusSelect"),
@@ -40,7 +42,6 @@ const els = {
   refreshButton: document.querySelector("#refreshButton"),
   requestRows: document.querySelector("#requestRows"),
   requestLoadingOverlay: document.querySelector("#requestLoadingOverlay"),
-  detailPanel: document.querySelector("#detailPanel"),
   statusMessage: document.querySelector("#statusMessage"),
   rangeLabel: document.querySelector("#rangeLabel"),
   emptyTemplate: document.querySelector("#emptyTemplate"),
@@ -211,7 +212,6 @@ function render() {
   renderRangeLabel();
   renderTimeline();
   renderRows();
-  renderDetailPanel();
   renderLoadingState();
 }
 
@@ -237,6 +237,9 @@ function renderRows() {
   }
   for (const request of state.filtered) {
     els.requestRows.append(renderRequestRow(request));
+    if (state.expandedRequestId === request.requestId) {
+      els.requestRows.append(renderDetailElement(request));
+    }
   }
 }
 
@@ -247,8 +250,10 @@ function renderLoadingState() {
   els.prevPageButton.disabled = state.loadingRequests || state.pageIndex === 0;
   els.nextPageButton.disabled = state.loadingRequests || !state.hasNextPage;
   els.pageSizeSelect.disabled = state.loadingRequests;
-  els.customStartInput.disabled = state.loadingRequests;
-  els.customEndInput.disabled = state.loadingRequests;
+  els.customStartDateInput.disabled = state.loadingRequests;
+  els.customStartTimeInput.disabled = state.loadingRequests;
+  els.customEndDateInput.disabled = state.loadingRequests;
+  els.customEndTimeInput.disabled = state.loadingRequests;
   els.applyCustomRangeButton.disabled = state.loadingRequests;
 }
 
@@ -271,34 +276,23 @@ function renderRequestRow(request) {
   return row;
 }
 
-function renderDetailPanel() {
-  if (!state.expandedRequestId) {
-    els.detailPanel.hidden = true;
-    els.detailPanel.innerHTML = "";
-    return;
-  }
-  const request = state.filtered.find((candidate) => candidate.requestId === state.expandedRequestId);
-  if (!request) {
-    els.detailPanel.hidden = true;
-    els.detailPanel.innerHTML = "";
-    return;
-  }
-
-  els.detailPanel.hidden = false;
-  els.detailPanel.setAttribute("aria-label", `Request details for ${request.requestId}`);
+function renderDetailElement(request) {
+  const detail = document.createElement("section");
+  detail.className = "detail-panel inline-detail";
+  detail.setAttribute("aria-label", `Request details for ${request.requestId}`);
   const details = state.detailCache.get(request.requestId);
   if (!details) {
-    els.detailPanel.innerHTML = `
+    detail.innerHTML = `
       <div class="detail-loading">
         <span class="loading-spinner" aria-hidden="true"></span>
         <strong>Loading connected logs</strong>
       </div>
     `;
-    return;
+    return detail;
   }
 
   const error = details.errors[0];
-  els.detailPanel.innerHTML = `
+  detail.innerHTML = `
     <div class="detail-toolbar">
       <div>
         <strong>${escapeHtml(request.method)} ${escapeHtml(request.path)}</strong>
@@ -313,10 +307,11 @@ function renderDetailPanel() {
     ${error ? stackPanel(error) : ""}
     ${relatedLogsPanel(details.logs)}
   `;
-  els.detailPanel.querySelector("[data-copy]")?.addEventListener("click", (event) => {
+  detail.querySelector("[data-copy]")?.addEventListener("click", (event) => {
     event.stopPropagation();
     navigator.clipboard?.writeText(request.requestId);
   });
+  return detail;
 }
 
 function jsonPanel(title, value) {
@@ -415,7 +410,7 @@ function renderTimeline() {
   const max = Math.max(1, ...visiblePoints.map((point) => point.count));
   els.timelineCountLabel.textContent = `Requests ${total}`;
 
-  context.strokeStyle = "#263244";
+  context.strokeStyle = "#e1e7f0";
   context.lineWidth = 1;
   context.beginPath();
   for (let i = 0; i <= 4; i += 1) {
@@ -425,7 +420,7 @@ function renderTimeline() {
   }
   context.stroke();
 
-  context.fillStyle = "#98a6b8";
+  context.fillStyle = "#66758a";
   context.font = "11px Inter, system-ui, sans-serif";
   context.textAlign = "right";
   context.textBaseline = "middle";
@@ -450,13 +445,13 @@ function renderTimeline() {
       context.fillRect(safeX, padding.top + height - barHeight, barWidth, barHeight);
     }
   } else {
-    context.fillStyle = "#718096";
+    context.fillStyle = "#8b98aa";
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText("No requests in this time range", padding.left + width / 2, padding.top + height / 2);
   }
 
-  context.fillStyle = "#98a6b8";
+  context.fillStyle = "#66758a";
   context.textAlign = "left";
   context.textBaseline = "top";
   context.fillText(formatKstAxis(range.startMs), padding.left, padding.top + height + 9);
@@ -565,15 +560,19 @@ function formatKstAxis(ms) {
   }).format(new Date(ms));
 }
 
-function formatDatetimeLocal(ms) {
+function formatLocalParts(ms) {
   const date = new Date(ms);
   const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return localDate.toISOString().slice(0, 19);
+  const iso = localDate.toISOString();
+  return {
+    date: iso.slice(0, 10),
+    time: iso.slice(11, 19),
+  };
 }
 
-function parseDatetimeLocal(value) {
-  if (!value) return NaN;
-  const time = new Date(value).getTime();
+function parseLocalDateTime(dateValue, timeValue) {
+  if (!dateValue || !timeValue) return NaN;
+  const time = new Date(`${dateValue}T${timeValue}`).getTime();
   return Number.isFinite(time) ? time : NaN;
 }
 
@@ -583,10 +582,20 @@ function syncCustomRangeControls(range, { force = false } = {}) {
   if (isCustom) {
     els.rangeSelect.value = "custom";
   }
-  const isEditing = document.activeElement === els.customStartInput || document.activeElement === els.customEndInput;
+  const timeInputs = [
+    els.customStartDateInput,
+    els.customStartTimeInput,
+    els.customEndDateInput,
+    els.customEndTimeInput,
+  ];
+  const isEditing = timeInputs.includes(document.activeElement);
   if (force || !isEditing) {
-    els.customStartInput.value = formatDatetimeLocal(range.startMs);
-    els.customEndInput.value = formatDatetimeLocal(range.endMs);
+    const start = formatLocalParts(range.startMs);
+    const end = formatLocalParts(range.endMs);
+    els.customStartDateInput.value = start.date;
+    els.customStartTimeInput.value = start.time;
+    els.customEndDateInput.value = end.date;
+    els.customEndTimeInput.value = end.time;
   }
 }
 
@@ -650,18 +659,23 @@ function bindEvents() {
   });
   els.applyCustomRangeButton.addEventListener("click", () => {
     applyCustomRange(
-      parseDatetimeLocal(els.customStartInput.value),
-      parseDatetimeLocal(els.customEndInput.value),
+      parseLocalDateTime(els.customStartDateInput.value, els.customStartTimeInput.value),
+      parseLocalDateTime(els.customEndDateInput.value, els.customEndTimeInput.value),
       "manual"
     );
   });
-  for (const element of [els.customStartInput, els.customEndInput]) {
+  for (const element of [
+    els.customStartDateInput,
+    els.customStartTimeInput,
+    els.customEndDateInput,
+    els.customEndTimeInput,
+  ]) {
     element.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       applyCustomRange(
-        parseDatetimeLocal(els.customStartInput.value),
-        parseDatetimeLocal(els.customEndInput.value),
+        parseLocalDateTime(els.customStartDateInput.value, els.customStartTimeInput.value),
+        parseLocalDateTime(els.customEndDateInput.value, els.customEndTimeInput.value),
         "manual"
       );
     });

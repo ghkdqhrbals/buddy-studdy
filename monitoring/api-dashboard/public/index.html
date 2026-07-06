@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070613" />
+    <link rel="stylesheet" href="/styles.css?v=2026070615" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -34,14 +34,16 @@
             </select>
           </label>
           <div id="customRangeFields" class="custom-range-fields">
-            <label>
-              From
-              <input id="customStartInput" type="datetime-local" step="1" />
-            </label>
-            <label>
-              To
-              <input id="customEndInput" type="datetime-local" step="1" />
-            </label>
+            <fieldset>
+              <legend>From</legend>
+              <input id="customStartDateInput" type="date" />
+              <input id="customStartTimeInput" type="time" step="1" />
+            </fieldset>
+            <fieldset>
+              <legend>To</legend>
+              <input id="customEndDateInput" type="date" />
+              <input id="customEndTimeInput" type="time" step="1" />
+            </fieldset>
             <button id="applyCustomRangeButton" type="button">Apply</button>
           </div>
         </div>
@@ -142,7 +144,6 @@
             </div>
           </div>
         </div>
-        <section id="detailPanel" class="detail-panel" hidden></section>
       </main>
     </div>
 
@@ -153,6 +154,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070613"></script>
+    <script type="module" src="/app.js?v=2026070614"></script>
   </body>
 </html>
