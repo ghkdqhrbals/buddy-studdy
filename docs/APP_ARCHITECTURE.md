@@ -71,6 +71,7 @@ The policy is split into two deterministic steps:
 - Records backend operations must go through `RecordsRepository`. `RecordsUseCase` owns record list/detail/answer/grade/delete/publicity workflows and must not depend directly on backend transport protocols.
 - Statistics backend operations must go through `StatsRepository`. `StatsUseCase` owns topic stats and activity workflows and must not depend directly on backend transport protocols.
 - Notification backend operations must go through `NotificationsRepository`. `NotificationsUseCase` owns notification list/read/delete workflows and must not depend directly on backend transport protocols.
+- Settings backend operations must go through `SettingsRepository`. `SettingsUseCase` owns backend settings, model options, API-key validation, and schedule sync workflows and must not depend directly on backend transport protocols.
 
 ## Testing Rules
 

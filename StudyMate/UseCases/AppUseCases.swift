@@ -18,6 +18,7 @@ struct AppUseCases {
         let recordsRepository = RemoteRecordsRepository(backendClient: backendClient)
         let statsRepository = RemoteStatsRepository(backendClient: backendClient)
         let notificationsRepository = RemoteNotificationsRepository(backendClient: backendClient)
+        let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         backendIdentity = BackendIdentityUseCase(backendClient: backendClient)
         googleSignIn = GoogleSignInUseCase()
         refreshPageAccess = RefreshPageAccessUseCase(backendClient: backendClient)
@@ -25,7 +26,7 @@ struct AppUseCases {
         records = RecordsUseCase(repository: recordsRepository)
         notifications = NotificationsUseCase(repository: notificationsRepository)
         stats = StatsUseCase(repository: statsRepository)
-        settings = SettingsUseCase(backendClient: backendClient)
+        settings = SettingsUseCase(repository: settingsRepository)
         community = CommunityUseCase(repository: communityRepository)
     }
 }
