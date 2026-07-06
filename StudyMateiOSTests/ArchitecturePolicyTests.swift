@@ -492,6 +492,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesCloudSyncStateThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "cloudSyncStateRepository.loadCloudSyncState",
+            "cloudSyncStateRepository.saveIsCloudSyncEnabled",
+            "cloudSyncStateRepository.saveCloudSyncStateUpdatedAt",
+            "resolvedCloudSyncStateRepository.loadCloudSyncState",
+            "resolvedCloudSyncStateRepository.saveIsCloudSyncEnabled",
+            "resolvedCloudSyncStateRepository.saveCloudSyncStateUpdatedAt",
+            "private let cloudSyncStateRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CloudSyncStateUseCase for stored cloud-sync state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesLocalStudyRecordRepositoryForStoredRecordState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

@@ -452,7 +452,7 @@ final class AppState: ObservableObject {
     private let developerSettingsUseCase: DeveloperSettingsUseCase
     private let currentStudySessionUseCase: CurrentStudySessionUseCase
     private let localStudySettingsRepository: LocalStudySettingsRepository
-    private let cloudSyncStateRepository: CloudSyncStateRepository
+    private let cloudSyncStateUseCase: CloudSyncStateUseCase
     private let localStudyRecordRepository: LocalStudyRecordRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
@@ -1004,6 +1004,7 @@ final class AppState: ObservableObject {
         currentStudySessionUseCase: CurrentStudySessionUseCase? = nil,
         localStudySettingsRepository: LocalStudySettingsRepository? = nil,
         cloudSyncStateRepository: CloudSyncStateRepository? = nil,
+        cloudSyncStateUseCase: CloudSyncStateUseCase? = nil,
         localStudyRecordRepository: LocalStudyRecordRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
@@ -1032,10 +1033,12 @@ final class AppState: ObservableObject {
             ?? SettingsStoreLocalStudySettingsRepository(settingsStore: settingsStore)
         let resolvedCloudSyncStateRepository = cloudSyncStateRepository
             ?? SettingsStoreCloudSyncStateRepository(settingsStore: settingsStore)
+        let resolvedCloudSyncStateUseCase = cloudSyncStateUseCase
+            ?? CloudSyncStateUseCase(repository: resolvedCloudSyncStateRepository)
         let resolvedLocalStudyRecordRepository = localStudyRecordRepository
             ?? SettingsStoreLocalStudyRecordRepository(settingsStore: settingsStore)
         let loadedLocalStudySettings = resolvedLocalStudySettingsRepository.loadLocalStudySettings()
-        let loadedCloudSyncState = resolvedCloudSyncStateRepository.loadCloudSyncState()
+        let loadedCloudSyncState = resolvedCloudSyncStateUseCase.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
@@ -1070,7 +1073,7 @@ final class AppState: ObservableObject {
         self.currentStudySessionUseCase = currentStudySessionUseCase
             ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
         self.localStudySettingsRepository = resolvedLocalStudySettingsRepository
-        self.cloudSyncStateRepository = resolvedCloudSyncStateRepository
+        self.cloudSyncStateUseCase = resolvedCloudSyncStateUseCase
         self.localStudyRecordRepository = resolvedLocalStudyRecordRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
@@ -1106,7 +1109,7 @@ final class AppState: ObservableObject {
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
         self.isCloudSyncEnabled = cloudSyncService == nil ? false : loadedCloudSyncState.isEnabled
         if cloudSyncService == nil {
-            resolvedCloudSyncStateRepository.saveIsCloudSyncEnabled(false)
+            resolvedCloudSyncStateUseCase.saveIsEnabled(false)
         }
         self.isCommunitySignedIn = loadedIsCommunitySignedIn
         let loadedAvatarCache = resolvedCommunityProfileCacheUseCase.loadAvatarCache {
@@ -2125,7 +2128,7 @@ final class AppState: ObservableObject {
 
     private func reloadPersistedState(restartTimerAfterReload: Bool = true) {
         let loadedLocalStudySettings = localStudySettingsRepository.loadLocalStudySettings()
-        let loadedCloudSyncState = cloudSyncStateRepository.loadCloudSyncState()
+        let loadedCloudSyncState = cloudSyncStateUseCase.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
         let synchronizedLoadedSettings = synchronizedTopicCategories(for: loadedSettings)
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4996,7 +4999,7 @@ final class AppState: ObservableObject {
 
     func setCloudSyncEnabled(_ isEnabled: Bool) {
         isCloudSyncEnabled = isEnabled
-        cloudSyncStateRepository.saveIsCloudSyncEnabled(isEnabled)
+        cloudSyncStateUseCase.saveIsEnabled(isEnabled)
         cloudSyncMessage = isEnabled ? strings.iCloudSyncOn : strings.iCloudSyncOff
         hasCloudSyncError = false
 
@@ -5042,7 +5045,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let storedLocalUpdatedAt = cloudSyncStateRepository.loadCloudSyncState().stateUpdatedAt
+            let storedLocalUpdatedAt = cloudSyncStateUseCase.loadState().stateUpdatedAt
             let localUpdatedAt = storedLocalUpdatedAt ?? .distantPast
             let fetchedRemoteState = try await cloudSyncService.fetchState()
 
@@ -5055,7 +5058,7 @@ final class AppState: ObservableObject {
 
                     if firstSync.shouldPushMergedState {
                         try await cloudSyncService.saveState(firstSync.state)
-                        cloudSyncStateRepository.saveCloudSyncStateUpdatedAt(firstSync.state.updatedAt)
+                        cloudSyncStateUseCase.saveStateUpdatedAt(firstSync.state.updatedAt)
                         cloudLastSyncedAt = firstSync.state.updatedAt
                         cloudSyncMessage = strings.syncMergedRemote
                         log(.info, "iCloud 데이터를 불러오고 이 기기의 기록을 병합했습니다.")
@@ -5072,7 +5075,7 @@ final class AppState: ObservableObject {
                         mergedRemoteState.updatedAt = max(Date(), remoteState.updatedAt, localUpdatedAt)
                         try await cloudSyncService.saveState(mergedRemoteState)
                         applyCloudState(mergedRemoteState, updateVisibleQuestion: updateVisibleQuestion)
-                        cloudSyncStateRepository.saveCloudSyncStateUpdatedAt(mergedRemoteState.updatedAt)
+                        cloudSyncStateUseCase.saveStateUpdatedAt(mergedRemoteState.updatedAt)
                         cloudLastSyncedAt = mergedRemoteState.updatedAt
                         cloudSyncMessage = strings.syncMergedRemote
                         log(.info, "iCloud 최신 데이터에 이 기기의 로컬 변경사항을 병합했습니다.")
@@ -5111,7 +5114,7 @@ final class AppState: ObservableObject {
         } catch {
             cloudSyncMessage = cloudSyncFailureMessage(for: error)
             hasCloudSyncError = true
-            cloudSyncStateRepository.saveIsCloudSyncEnabled(isCloudSyncEnabled)
+            cloudSyncStateUseCase.saveIsEnabled(isCloudSyncEnabled)
             log(.warning, cloudSyncMessage ?? "iCloud 동기화에 실패했습니다.")
         }
     }
@@ -5560,7 +5563,7 @@ final class AppState: ObservableObject {
         }
 
         let updatedAt = Date()
-        cloudSyncStateRepository.saveCloudSyncStateUpdatedAt(updatedAt)
+        cloudSyncStateUseCase.saveStateUpdatedAt(updatedAt)
         cloudLastSyncedAt = updatedAt
     }
 
@@ -6173,7 +6176,7 @@ final class AppState: ObservableObject {
 
         if isEditingSettings {
             didReceiveCloudStateWhileEditing = true
-            cloudSyncStateRepository.saveCloudSyncStateUpdatedAt(state.updatedAt)
+            cloudSyncStateUseCase.saveStateUpdatedAt(state.updatedAt)
             if cloudLastSyncedAt == nil || state.updatedAt > cloudLastSyncedAt! {
                 cloudLastSyncedAt = state.updatedAt
             }
@@ -6335,7 +6338,7 @@ final class AppState: ObservableObject {
         currentStudySessionUseCase.saveGradingResult(appliedGradingResult)
         currentStudySessionUseCase.saveIsRunning(state.isRunning)
         onboardingStateUseCase.setHasCompletedOnboarding(mergedHasCompletedOnboarding)
-        cloudSyncStateRepository.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
+        cloudSyncStateUseCase.saveIsEnabled(preservedCloudSyncEnabled)
         localStudyRecordRepository.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
         localStudyRecordRepository.saveStudyRecordsClearedAt(mergedRecordsClearedAt)
         localStudyRecordRepository.replaceStudyRecords(mergedRecords)
@@ -6344,7 +6347,7 @@ final class AppState: ObservableObject {
             cloudLastSyncedAt ?? state.updatedAt,
             lastLocalSettingsMutationAt ?? .distantPast
         )
-        cloudSyncStateRepository.saveCloudSyncStateUpdatedAt(nextCloudSyncTimestamp)
+        cloudSyncStateUseCase.saveStateUpdatedAt(nextCloudSyncTimestamp)
 
         reloadStudyRecordsFromStore()
         savedSettings = effectiveSettings
