@@ -62,6 +62,7 @@ The policy is split into two deterministic steps:
 ## Testing Rules
 
 - Any new policy or use case must have a focused test before production code changes.
+- iOS app architecture tests live in the `StudyMateiOSTests` target and are attached to the `StudyMateiOS` scheme. Put new Core policy and iOS-safe use-case tests there instead of relying on the legacy macOS-hosted `StudyMateTests` target.
 - iOS feature work must at least pass:
 
 ```sh

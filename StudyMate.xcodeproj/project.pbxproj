@@ -55,6 +55,7 @@
 		110000000000000000000154 /* study_tap.wav in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000149 /* study_tap.wav */; };
 		110000000000000000000155 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000014A /* Assets.xcassets */; };
 		110000000000000000000170 /* CloudSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* CloudSyncService.swift */; };
+		120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000200 /* ArchitecturePolicyTests.swift */; };
 		120000000000000000000101 /* StudyMateiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000001 /* StudyMateiOSApp.swift */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		120000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
@@ -110,6 +111,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 110000000000000000000040;
 			remoteInfo = StudyMate;
+		};
+		120000000000000000000130 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 110000000000000000000030 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 120000000000000000000040;
+			remoteInfo = StudyMateiOS;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -185,6 +193,8 @@
 		120000000000000000000001 /* StudyMateiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateiOSApp.swift; sourceTree = "<group>"; };
 		120000000000000000000003 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		120000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		120000000000000000000021 /* StudyMateiOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		120000000000000000000200 /* ArchitecturePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchitecturePolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -196,6 +206,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		110000000000000000000051 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		120000000000000000000051 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -217,6 +234,7 @@
 			children = (
 				110000000000000000000061 /* StudyMate */,
 				110000000000000000000066 /* StudyMateTests */,
+				120000000000000000000066 /* StudyMateiOSTests */,
 				110000000000000000000062 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -353,6 +371,7 @@
 				110000000000000000000020 /* StudyMate.app */,
 				120000000000000000000020 /* StudyMate.app */,
 				110000000000000000000021 /* StudyMateTests.xctest */,
+				120000000000000000000021 /* StudyMateiOSTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -403,6 +422,14 @@
 				11000000000000000000000C /* StudyMateTests.swift */,
 			);
 			path = StudyMateTests;
+			sourceTree = "<group>";
+		};
+		120000000000000000000066 /* StudyMateiOSTests */ = {
+			isa = PBXGroup;
+			children = (
+				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
+			);
+			path = StudyMateiOSTests;
 			sourceTree = "<group>";
 		};
 		110000000000000000000067 /* Views */ = {
@@ -493,6 +520,24 @@
 			productReference = 110000000000000000000021 /* StudyMateTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		120000000000000000000041 /* StudyMateiOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 120000000000000000000091 /* Build configuration list for PBXNativeTarget "StudyMateiOSTests" */;
+			buildPhases = (
+				120000000000000000000072 /* Sources */,
+				120000000000000000000051 /* Frameworks */,
+				120000000000000000000073 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				120000000000000000000131 /* PBXTargetDependency */,
+			);
+			name = StudyMateiOSTests;
+			productName = StudyMateiOSTests;
+			productReference = 120000000000000000000021 /* StudyMateiOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		120000000000000000000040 /* StudyMateiOS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 120000000000000000000090 /* Build configuration list for PBXNativeTarget "StudyMateiOS" */;
@@ -540,6 +585,10 @@
 							};
 						};
 					};
+					120000000000000000000041 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 120000000000000000000040;
+					};
 				};
 			};
 			buildConfigurationList = 110000000000000000000080 /* Build configuration list for PBXProject "StudyMate" */;
@@ -560,6 +609,7 @@
 			targets = (
 				110000000000000000000040 /* StudyMate */,
 				120000000000000000000040 /* StudyMateiOS */,
+				120000000000000000000041 /* StudyMateiOSTests */,
 				110000000000000000000041 /* StudyMateTests */,
 			);
 		};
@@ -580,6 +630,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		110000000000000000000073 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		120000000000000000000073 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -658,6 +715,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		120000000000000000000072 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		120000000000000000000070 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -712,6 +777,11 @@
 			isa = PBXTargetDependency;
 			target = 110000000000000000000040 /* StudyMate */;
 			targetProxy = 110000000000000000000130 /* PBXContainerItemProxy */;
+		};
+		120000000000000000000131 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 120000000000000000000040 /* StudyMateiOS */;
+			targetProxy = 120000000000000000000130 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -922,6 +992,56 @@
 			};
 			name = Release;
 		};
+		1200000000000000000000A4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 16;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.16;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMateiOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StudyMate.app/StudyMate";
+			};
+			name = Debug;
+		};
+		1200000000000000000000A5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 16;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.16;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMateiOSTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StudyMate.app/StudyMate";
+			};
+			name = Release;
+		};
 		1200000000000000000000A2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1011,6 +1131,15 @@
 			buildConfigurations = (
 				1100000000000000000000A4 /* Debug */,
 				1100000000000000000000A5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		120000000000000000000091 /* Build configuration list for PBXNativeTarget "StudyMateiOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1200000000000000000000A4 /* Debug */,
+				1200000000000000000000A5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
