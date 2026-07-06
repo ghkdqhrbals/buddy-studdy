@@ -25,6 +25,7 @@
 		1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
 		1100000000000000000001AE /* AppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000082 /* AppLogRepository.swift */; };
 		1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
+		1100000000000000000001CB /* AppLogUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C8 /* AppLogUseCase.swift */; };
 		1100000000000000000001B0 /* RemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000085 /* RemotePushRegistrationRepository.swift */; };
 		1100000000000000000001B1 /* SettingsStoreRemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000086 /* SettingsStoreRemotePushRegistrationRepository.swift */; };
 		1100000000000000000001B2 /* CommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000087 /* CommunityProfileCacheRepository.swift */; };
@@ -131,6 +132,7 @@
 		12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
 		12000000000000000000015F /* AppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000082 /* AppLogRepository.swift */; };
 		120000000000000000000160 /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
+		12000000000000000000017D /* AppLogUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C8 /* AppLogUseCase.swift */; };
 		120000000000000000000161 /* RemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000085 /* RemotePushRegistrationRepository.swift */; };
 		120000000000000000000162 /* SettingsStoreRemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000086 /* SettingsStoreRemotePushRegistrationRepository.swift */; };
 		120000000000000000000163 /* CommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000087 /* CommunityProfileCacheRepository.swift */; };
@@ -318,6 +320,7 @@
 		11000000000000000000007D /* QuestionSchedulePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionSchedulePolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000082 /* AppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000083 /* SettingsStoreAppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreAppLogRepository.swift; sourceTree = "<group>"; };
+		1100000000000000000000C8 /* AppLogUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
@@ -485,6 +488,7 @@
 				110000000000000000000046 /* AppUseCases.swift */,
 				11000000000000000000006F /* AppUseCasesProvider.swift */,
 				11000000000000000000004A /* Auth */,
+				1100000000000000000000C9 /* AppLog */,
 				110000000000000000000048 /* Identity */,
 				11000000000000000000003F /* Notifications */,
 				110000000000000000000043 /* Community */,
@@ -557,6 +561,14 @@
 				1100000000000000000000C4 /* CloudSyncStateUseCase.swift */,
 			);
 			path = CloudSync;
+			sourceTree = "<group>";
+		};
+		1100000000000000000000C9 /* AppLog */ = {
+			isa = PBXGroup;
+			children = (
+				1100000000000000000000C8 /* AppLogUseCase.swift */,
+			);
+			path = AppLog;
 			sourceTree = "<group>";
 		};
 		11000000000000000000004D /* Repositories */ = {
@@ -1109,6 +1121,7 @@
 					11000000000000000000018B /* CommunityUseCase.swift in Sources */,
 					110000000000000000000188 /* StatsUseCase.swift in Sources */,
 					110000000000000000000189 /* SettingsUseCase.swift in Sources */,
+					1100000000000000000001CB /* AppLogUseCase.swift in Sources */,
 					1100000000000000000001C7 /* DeveloperSettingsUseCase.swift in Sources */,
 					1100000000000000000001C9 /* LocalStudySettingsUseCase.swift in Sources */,
 					1100000000000000000001C8 /* CloudSyncStateUseCase.swift in Sources */,
@@ -1231,6 +1244,7 @@
 					12000000000000000000012C /* CommunityUseCase.swift in Sources */,
 					120000000000000000000129 /* StatsUseCase.swift in Sources */,
 					12000000000000000000012A /* SettingsUseCase.swift in Sources */,
+					12000000000000000000017D /* AppLogUseCase.swift in Sources */,
 					120000000000000000000179 /* DeveloperSettingsUseCase.swift in Sources */,
 					12000000000000000000017B /* LocalStudySettingsUseCase.swift in Sources */,
 					12000000000000000000017A /* CloudSyncStateUseCase.swift in Sources */,

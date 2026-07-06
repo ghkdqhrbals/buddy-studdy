@@ -24,6 +24,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `AppNotificationEventProvider`: the service boundary for app-wide notification streams such as backend traffic logs and unauthorized backend events. View models consume typed callbacks instead of subscribing to `NotificationCenter` names and payload keys directly.
 - `ClipboardProvider`: the service boundary for reading pasteboard contents and turning platform clipboard payloads into app-level values.
 - `AppLogRepository`: the repository boundary for persisted, paginated app diagnostics. View models may page and append app logs through this repository, but must not call `SettingsStore` log APIs directly.
+- `AppLogUseCase`: the application boundary for persisted, paginated app diagnostics. View models must use this use case instead of calling the app-log repository directly.
 - `RemotePushRegistrationRepository`: the local repository boundary for persisted backend device identity and access-token registration. View models must not call `SettingsStore` registration APIs directly.
 - `StoredBackendIdentityUseCase`: the application boundary for reading and updating persisted backend device identity. View models must use this use case instead of calling the registration repository directly.
 - `CommunityProfileCacheRepository`: the local repository boundary for cached community profile identity and avatar state. View models must not call `SettingsStore` profile-cache APIs directly.
@@ -103,6 +104,7 @@ The policy is split into two deterministic steps:
 - Notification backend operations must go through `NotificationsRepository`. `NotificationsUseCase` owns notification list/read/delete workflows and must not depend directly on backend transport protocols.
 - Settings backend operations must go through `SettingsRepository`. `SettingsUseCase` owns backend settings, model options, API-key validation, and schedule sync workflows and must not depend directly on backend transport protocols.
 - Persisted app diagnostics must go through `AppLogRepository`. `AppState` can orchestrate debug-log paging, but local persistence details stay behind a repository adapter.
+- Persisted app diagnostic reads and writes in `AppState` must go through `AppLogUseCase`. The repository remains the adapter hidden behind that use case.
 - Persisted backend device identity must go through `RemotePushRegistrationRepository`. `AppState` may request or update registration state, but local storage details stay behind a repository adapter.
 - Stored backend device identity reads and writes in `AppState` must go through `StoredBackendIdentityUseCase`. The registration repository remains the adapter hidden behind that use case.
 - Cached community profile state must go through `CommunityProfileCacheRepository`. `AppState` may reconcile profile state with backend responses, but user-default keys and trimming behavior stay behind a repository adapter.

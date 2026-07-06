@@ -444,7 +444,7 @@ final class AppState: ObservableObject {
     @Published var pageAccessPrompt: PageAccessPrompt?
 
     private let settingsStore: SettingsStore
-    private let appLogRepository: AppLogRepository
+    private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
     private let communitySessionUseCase: CommunitySessionUseCase
@@ -990,6 +990,7 @@ final class AppState: ObservableObject {
         clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         appLogRepository: AppLogRepository? = nil,
+        appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
         storedBackendIdentityUseCase: StoredBackendIdentityUseCase? = nil,
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
@@ -1060,7 +1061,8 @@ final class AppState: ObservableObject {
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
-        let loadedLogPage = resolvedAppLogRepository.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
+        let resolvedAppLogUseCase = appLogUseCase ?? AppLogUseCase(repository: resolvedAppLogRepository)
+        let loadedLogPage = resolvedAppLogUseCase.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedHasCompletedOnboarding = resolvedOnboardingStateUseCase.hasCompletedOnboarding()
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
@@ -1069,7 +1071,7 @@ final class AppState: ObservableObject {
         let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
         self.settingsStore = settingsStore
-        self.appLogRepository = resolvedAppLogRepository
+        self.appLogUseCase = resolvedAppLogUseCase
         self.storedBackendIdentityUseCase = storedBackendIdentityUseCase
             ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
         self.communityProfileCacheUseCase = resolvedCommunityProfileCacheUseCase
@@ -4950,7 +4952,7 @@ final class AppState: ObservableObject {
     }
 
     func clearAppLogs() {
-        appLogRepository.clearAppLogs()
+        appLogUseCase.clearLogs()
         var nextState = developerState
         nextState.clearAppLogs()
         developerState = nextState
@@ -4982,7 +4984,7 @@ final class AppState: ObservableObject {
     }
 
     func loadAppLogPage(_ page: Int) {
-        let logPage = appLogRepository.loadAppLogs(page: page, pageSize: Self.developerLogPageSize)
+        let logPage = appLogUseCase.loadLogs(page: page, pageSize: Self.developerLogPageSize)
         var nextState = developerState
         nextState.applyLogPage(logPage)
         developerState = nextState
@@ -6458,7 +6460,7 @@ final class AppState: ObservableObject {
 
     private func log(_ level: LogLevel, _ message: String) {
         let entry = AppLogEntry(level: level, message: message)
-        appLogRepository.appendAppLog(entry)
+        appLogUseCase.appendLog(entry)
         loadAppLogPage(appLogPage)
     }
 

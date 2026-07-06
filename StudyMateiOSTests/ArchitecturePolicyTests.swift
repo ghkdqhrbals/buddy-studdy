@@ -202,6 +202,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesAppLogsThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "appLogRepository.loadAppLogs",
+            "appLogRepository.appendAppLog",
+            "appLogRepository.clearAppLogs",
+            "resolvedAppLogRepository.loadAppLogs",
+            "resolvedAppLogRepository.appendAppLog",
+            "resolvedAppLogRepository.clearAppLogs",
+            "private let appLogRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use AppLogUseCase for persisted logs instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesRemotePushRegistrationRepositoryForStoredBackendIdentity() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
