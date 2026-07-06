@@ -30,7 +30,7 @@ struct MobileRootView: View {
 
                     NavigationStack {
                         if let prompt = appState.pageAccessPrompt {
-                            PageAccessRequiredView(prompt: prompt)
+                            MobileLoginPage(prompt: prompt)
                                 .padding(.horizontal, 16)
                         } else {
                             HistoryView()
@@ -44,7 +44,7 @@ struct MobileRootView: View {
 
                     NavigationStack {
                         if let prompt = appState.pageAccessPrompt {
-                            PageAccessRequiredView(prompt: prompt)
+                            MobileLoginPage(prompt: prompt)
                                 .padding(.horizontal, 16)
                         } else {
                             StatisticsView()
@@ -70,15 +70,6 @@ struct MobileRootView: View {
                 }
             }
         }
-        .alert(item: $appState.globalErrorPopup) { popup in
-            Alert(
-                title: Text(strings.errorPopupTitle),
-                message: Text(popup.message),
-                dismissButton: .default(Text(strings.close)) {
-                    appState.dismissGlobalErrorPopup()
-                }
-            )
-        }
     }
 
     private var selectedMobileTab: Binding<AppTab> {
@@ -97,51 +88,6 @@ struct MobileRootView: View {
         }
 
         return appState.strings.tabStudy
-    }
-}
-
-private struct PageAccessRequiredView: View {
-    @EnvironmentObject private var appState: AppState
-    var prompt: PageAccessPrompt
-
-    private var strings: AppStrings {
-        appState.strings
-    }
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 6) {
-                Text(prompt.title)
-                    .font(.title3.weight(.bold))
-                    .multilineTextAlignment(.center)
-
-                Text(prompt.message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            NavigationLink {
-                MobileLoginPage(prompt: prompt)
-            } label: {
-                Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(.vertical, 40)
-        .navigationTitle(prompt.title)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -188,7 +134,7 @@ private struct MobileLoginPage: View {
                 Button {
                     isShowingEmailSignIn = true
                 } label: {
-                    Label(strings.signInWithEmail, systemImage: "envelope.fill")
+                    Text(strings.signInWithEmail)
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -576,7 +522,7 @@ private struct MobileHomeView: View {
                         )
                     )
                 } label: {
-                    Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
+                    Text(strings.communityLogin)
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -588,7 +534,7 @@ private struct MobileHomeView: View {
                 Button {
                     isShowingEmailSignIn = true
                 } label: {
-                    Label(strings.signInWithEmail, systemImage: "envelope.fill")
+                    Text(strings.signInWithEmail)
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -939,11 +885,14 @@ private struct MobileHomeView: View {
         let scope = selectedHomeScope
         refreshingHomeScope = scope
         homeRefreshTask = Task { @MainActor in
-            await refreshHomeData(for: scope)
-            if refreshingHomeScope == scope {
-                refreshingHomeScope = nil
+            defer {
+                if refreshingHomeScope == scope {
+                    refreshingHomeScope = nil
+                }
+                homeRefreshTask = nil
             }
-            homeRefreshTask = nil
+
+            await refreshHomeData(for: scope)
         }
 
         await Task.yield()

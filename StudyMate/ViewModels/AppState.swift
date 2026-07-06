@@ -617,6 +617,7 @@ final class AppState: ObservableObject {
                 refreshPageAccessThenOpen(nextTab, protectedPage: protectedPage)
                 return
             }
+            selectedTab = nextTab
             redirectToPageAccessGuide(for: protectedPage)
             return
         }
@@ -678,6 +679,7 @@ final class AppState: ObservableObject {
             if canAccess(protectedPage) {
                 applySelectedTab(nextTab)
             } else {
+                selectedTab = nextTab
                 redirectToPageAccessGuide(for: protectedPage)
             }
         }
@@ -745,7 +747,11 @@ final class AppState: ObservableObject {
         switch tab {
         case .study:
             return .studyDetail
-        case .home, .records, .statistics, .settings:
+        case .records:
+            return .records
+        case .statistics:
+            return .statistics
+        case .home, .settings:
             return nil
         }
     }

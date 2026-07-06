@@ -1501,6 +1501,37 @@ struct BackendStudyPage: Decodable, Equatable {
     var limit: Int
     var offset: Int
     var serverTime: Date
+
+    init(
+        studies: [BackendStudyRoom] = [],
+        totalCount: Int = 0,
+        limit: Int = 0,
+        offset: Int = 0,
+        serverTime: Date = Date()
+    ) {
+        self.studies = studies
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+        self.serverTime = serverTime
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case studies
+        case totalCount
+        case limit
+        case offset
+        case serverTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        studies = try container.decodeIfPresent([BackendStudyRoom].self, forKey: .studies) ?? []
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? studies.count
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? studies.count
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+        serverTime = try container.decodeIfPresent(Date.self, forKey: .serverTime) ?? Date()
+    }
 }
 
 struct BackendStudyRoom: Decodable, Equatable, Identifiable {
@@ -1817,6 +1848,28 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
     var totalCount: Int
     var limit: Int
     var offset: Int
+
+    init(questions: [CommunityQuestion] = [], totalCount: Int = 0, limit: Int = 0, offset: Int = 0) {
+        self.questions = questions
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case questions
+        case totalCount
+        case limit
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        questions = try container.decodeIfPresent([CommunityQuestion].self, forKey: .questions) ?? []
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? questions.count
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? questions.count
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
 }
 
 struct CommunityCommentsResponse: Decodable, Equatable {
