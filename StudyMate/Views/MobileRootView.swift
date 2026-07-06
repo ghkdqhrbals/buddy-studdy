@@ -29,8 +29,8 @@ struct MobileRootView: View {
                     .tag(AppTab.home)
 
                     NavigationStack {
-                        if let prompt = appState.pageAccessPrompt {
-                            MobileLoginPage(prompt: prompt)
+                        if appState.shouldShowRecordsLoginPage {
+                            MobileLoginPage(prompt: appState.pageAccessPrompt)
                                 .padding(.horizontal, 16)
                         } else {
                             HistoryView()
@@ -43,8 +43,8 @@ struct MobileRootView: View {
                     .tag(AppTab.records)
 
                     NavigationStack {
-                        if let prompt = appState.pageAccessPrompt {
-                            MobileLoginPage(prompt: prompt)
+                        if appState.shouldShowStatisticsLoginPage {
+                            MobileLoginPage(prompt: appState.pageAccessPrompt)
                                 .padding(.horizontal, 16)
                         } else {
                             StatisticsView()
@@ -103,25 +103,8 @@ private struct MobileLoginPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let prompt {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(prompt.title)
-                        .font(.title3.weight(.bold))
-                    Text(prompt.message)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(strings.communityLogin)
-                        .font(.title3.weight(.bold))
-                    Text(strings.communityLoginHelp)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            Text(prompt?.title ?? strings.communityLogin)
+                .font(.title3.weight(.bold))
 
             VStack(spacing: 10) {
                 Button {
@@ -147,14 +130,6 @@ private struct MobileLoginPage: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-            }
-
-            if let message = appState.communityErrorMessage,
-               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
@@ -517,8 +492,8 @@ private struct MobileHomeView: View {
                 NavigationLink {
                     MobileLoginPage(
                         prompt: PageAccessPrompt(
-                            title: strings.signInRequiredTitle,
-                            message: strings.myStudyLoginHelp
+                            title: strings.communityLogin,
+                            message: ""
                         )
                     )
                 } label: {
@@ -2958,7 +2933,6 @@ private extension StudyCategory {
         let searchableFields = [
             normalizedTitle,
             normalizedCustomPrompt,
-            sanitizedOpenAIModel,
             difficulty.displayName(language: appLanguage),
             "level \(difficulty.level)",
             "레벨 \(difficulty.level)"
@@ -3014,7 +2988,7 @@ private struct MobileHomeCategoryRow: View {
                     .lineLimit(1)
                     .fontWeight(.regular)
 
-                Text("\(category.difficulty.displayName(language: strings.language)) · \(category.sanitizedOpenAIModel)")
+                Text(category.difficulty.displayName(language: strings.language))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -3049,12 +3023,10 @@ private struct StudyCategoryEditorSheet: View {
     var onDelete: (() -> Void)?
     var onSave: (String, Difficulty, String, String) -> Void
 
-    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var difficultyLevel: Double
     @State private var customPrompt: String
-    @State private var openAIModel: String
 
     init(
         category: StudyCategory?,
@@ -3069,7 +3041,6 @@ private struct StudyCategoryEditorSheet: View {
         _title = State(initialValue: category?.title ?? "")
         _difficultyLevel = State(initialValue: Double((category?.difficulty ?? .beginner).level))
         _customPrompt = State(initialValue: category?.customPrompt ?? StudySettings.defaultCustomPrompt)
-        _openAIModel = State(initialValue: category?.sanitizedOpenAIModel ?? StudySettings.defaultOpenAIModel)
     }
 
     private var canSave: Bool {
@@ -3100,12 +3071,6 @@ private struct StudyCategoryEditorSheet: View {
                         }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    }
-
-                    Picker(strings.openAIModel, selection: $openAIModel) {
-                        ForEach(modelOptions) { option in
-                            Text(option.displayName).tag(option.id)
-                        }
                     }
                 }
 
@@ -3146,7 +3111,7 @@ private struct StudyCategoryEditorSheet: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button(strings.save) {
-                        onSave(title, Difficulty(level: resolvedDifficultyLevel), customPrompt, openAIModel)
+                        onSave(title, Difficulty(level: resolvedDifficultyLevel), customPrompt, category?.sanitizedOpenAIModel ?? StudySettings.defaultOpenAIModel)
                         dismiss()
                     }
                     .disabled(!canSave)
@@ -3157,15 +3122,6 @@ private struct StudyCategoryEditorSheet: View {
 
     private var resolvedDifficultyLevel: Int {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
-    }
-
-    private var modelOptions: [OpenAIModelOption] {
-        let options = appState.openAIModelOptions.isEmpty ? OpenAIModelOption.all : appState.openAIModelOptions
-        if options.contains(where: { $0.id == openAIModel }) {
-            return options
-        }
-
-        return options + [OpenAIModelOption(id: openAIModel, displayName: openAIModel, supportsTextVerbosity: false)]
     }
 }
 
@@ -3709,7 +3665,6 @@ private extension View {
 private struct MobileOnboardingView: View {
     @EnvironmentObject private var appState: AppState
     @State private var language: AppLanguage = .korean
-    @State private var apiKey = ""
     @State private var topic = ""
     @State private var difficultyLevel = Difficulty.beginner.level
     @State private var intervalMinutes = 15
@@ -3728,8 +3683,6 @@ private struct MobileOnboardingView: View {
             Form {
                 Section {
                     Text(strings.onboardingSubtitle)
-                    Text(strings.onboardingFreeNote)
-                        .fontWeight(.semibold)
                 }
 
                 Section(strings.onboardingLanguage) {
@@ -3740,23 +3693,6 @@ private struct MobileOnboardingView: View {
                     }
                     .pickerStyle(.segmented)
                 }
-
-                Section(strings.onboardingOpenAI) {
-                    SecureField(strings.openAIAPIKey, text: $apiKey)
-                        .textContentType(.password)
-
-                    Text(strings.onboardingAPIKeyHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        HStack(spacing: 4) {
-                            Text(strings.onboardingCreateAPIKeyHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Link(strings.onboardingCreateAPIKeyAction, destination: URL(string: "https://platform.openai.com/api-keys")!)
-                                .font(.caption)
-                        }
-                    }
 
                 Section(strings.onboardingStudySetup) {
                     TextField(strings.studyTopic, text: $topic)
@@ -3808,7 +3744,7 @@ private struct MobileOnboardingView: View {
                     Button {
                         Task {
                             isCompleting = true
-                            await appState.completeOnboarding(settings: pendingSettings, apiKey: apiKey)
+                            await appState.completeOnboarding(settings: pendingSettings)
                             isCompleting = false
                         }
                     } label: {
@@ -3823,7 +3759,6 @@ private struct MobileOnboardingView: View {
             }
                 .onAppear {
                 language = appState.settings.appLanguage
-                apiKey = appState.apiKey
                 let fallbackTopic = StudySettings.fallbackTopic(for: language)
                 topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ? fallbackTopic
@@ -3862,7 +3797,6 @@ private struct MobileOnboardingView: View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showsAPIKey = false
 
     private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
@@ -3879,51 +3813,6 @@ private struct MobileSettingsView: View {
                         in: 1...240
                     )
 
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Group {
-                                if showsAPIKey {
-                                    TextField(strings.openAIAPIKey, text: $appState.draftAPIKey)
-                                } else {
-                                    SecureField(strings.openAIAPIKey, text: $appState.draftAPIKey)
-                                }
-                            }
-                            .textContentType(.password)
-                            #if os(iOS)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            #endif
-
-                            Button {
-                                showsAPIKey.toggle()
-                            } label: {
-                                Image(systemName: showsAPIKey ? "eye.slash" : "eye")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel(showsAPIKey ? strings.hide : strings.show)
-                        }
-
-                        if let validationMessage = appState.apiKeyValidationMessage {
-                            Text(validationMessage)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .lineLimit(2)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                } header: {
-                    HStack(spacing: 6) {
-                        Text("OpenAI")
-                        Link("settings", destination: URL(string: "https://platform.openai.com/api-keys")!)
-                            .font(.caption)
-                            .textCase(nil)
-                    }
                 }
 
                 Section(strings.generalSettings) {

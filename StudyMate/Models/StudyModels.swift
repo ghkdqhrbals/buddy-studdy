@@ -1488,7 +1488,7 @@ struct AppStrings {
     var saving: String { text("저장 중", "Saving") }
     var cancel: String { text("취소", "Cancel") }
     var close: String { text("닫기", "Close") }
-    var errorPopupTitle: String { text("문제가 발생했습니다", "Something went wrong") }
+    var errorPopupTitle: String { text("알림", "Notice") }
     var pasteboardChecking: String { text("클립보드에서 키를 확인 중입니다.", "Checking clipboard for API key.") }
     var saved: String { text("저장됨", "Saved") }
     var done: String { text("완료", "Done") }
@@ -1688,8 +1688,8 @@ struct AppStrings {
     var homeScopeAll: String { text("모든 학습들", "All Studies") }
     var myStudyLoginHelp: String {
         text(
-            "내 학습을 만들고 답변하려면 먼저 로그인하세요.",
-            "Sign in first to create and answer your own studies."
+            "로그인하면 내 학습을 관리할 수 있습니다.",
+            "Sign in to manage your studies."
         )
     }
     var editCategories: String { text("학습 편집", "Edit Studies") }
@@ -1897,7 +1897,7 @@ struct AppStrings {
             "This email is new. Send a verification code, then enter it to sign in."
         )
     }
-    var signInRequiredTitle: String { text("로그인이 필요합니다", "Sign In Required") }
+    var signInRequiredTitle: String { text("로그인", "Sign In") }
     var communityLogout: String { text("로그아웃", "Sign Out") }
     var communitySignedIn: String { text("다른 사용자 질문 기능을 사용할 수 있습니다.", "Community questions are enabled.") }
     var communitySignedOut: String { text("다른 사용자 질문 기능을 껐습니다.", "Community questions are disabled.") }
@@ -1958,14 +1958,14 @@ struct AppStrings {
     var accessAllowed: String { text("허용됨", "Allowed") }
     var pageAccessRequiresLogin: String {
         text(
-            "이 페이지는 로그인 후 사용할 수 있습니다.",
-            "Sign in to use this page."
+            "로그인이 필요합니다.",
+            "Sign in required."
         )
     }
-    func pageAccessDenied(_ page: String) -> String {
+    func pageAccessDenied(_: String) -> String {
         text(
-            "\(page)은 로그인 후 사용할 수 있습니다.",
-            "\(page) is available after sign-in."
+            "로그인이 필요합니다.",
+            "Sign in required."
         )
     }
     var report: String { text("신고", "Report") }

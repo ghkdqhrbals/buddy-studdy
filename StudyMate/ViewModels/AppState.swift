@@ -581,7 +581,6 @@ final class AppState: ObservableObject {
         }
 
         return comparableActiveSettings != comparableSavedSettings ||
-            activeAPIKeyForEditing.trimmingCharacters(in: .whitespacesAndNewlines) != savedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) ||
             Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing) != Self.normalizedDebugBackendBaseURL(savedDebugBackendBaseURL)
     }
 
@@ -597,6 +596,14 @@ final class AppState: ObservableObject {
         case .study:
             return .home
         }
+    }
+
+    var shouldShowRecordsLoginPage: Bool {
+        !canAccess(.records)
+    }
+
+    var shouldShowStatisticsLoginPage: Bool {
+        !canAccess(.statistics)
     }
 
     func normalizeSelectedTabForMobile() {
@@ -792,10 +799,9 @@ final class AppState: ObservableObject {
     private func redirectToPageAccessGuide(for page: ProtectedAppPage) {
         homeStudyRoute = nil
         focusedRecordRequest = nil
-        let message = strings.pageAccessDenied(page.title(strings: strings))
         pageAccessPrompt = PageAccessPrompt(
-            title: strings.signInRequiredTitle,
-            message: message
+            title: strings.communityLogin,
+            message: ""
         )
     }
 
@@ -849,9 +855,6 @@ final class AppState: ObservableObject {
             return
         }
 
-        if selectedTab == .records || selectedTab == .statistics {
-            selectedTab = .home
-        }
         redirectToPageAccessGuide(for: visibleProtectedPage)
     }
 
@@ -3752,10 +3755,10 @@ final class AppState: ObservableObject {
         showStudyScreen(categoryID: targetCategoryID)
     }
 
-    func completeOnboarding(settings pendingSettings: StudySettings, apiKey pendingAPIKey: String) async {
+    func completeOnboarding(settings pendingSettings: StudySettings, apiKey _: String = "") async {
         persistSettings(
             pendingSettings,
-            apiKey: pendingAPIKey
+            apiKey: ""
         )
         settingsStore.saveHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
@@ -3766,46 +3769,12 @@ final class AppState: ObservableObject {
         #endif
         markCloudDataChanged()
 
-        let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAPIKey.isEmpty else {
-            isRunning = false
-            settingsStore.saveIsRunning(false)
-            hasAPIKeyError = true
-            errorMessage = strings.apiKeyEmptyDetailed
-            statusMessage = strings.onboardingCompletedWithoutAPIKey
-            log(.warning, "온보딩을 완료했지만 API 키가 비어 있어 타이머를 일시정지했습니다.")
-            restartTimer()
-            return
-        }
-
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
-        isValidatingAPIKey = true
-        statusMessage = strings.apiKeyCheckingAfterOnboarding
-        errorMessage = nil
-
-        do {
-            guard let registration = await backendRegistrationForOpenAIRequests(reason: "onboarding-api-validation") else {
-                throw RemotePushBackendError.invalidResponse
-            }
-            try await updateBackendSettings(
-                registration: registration,
-                reason: "onboarding-api-validation",
-                includeAPIKey: true
-            )
-            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
-            hasAPIKeyError = false
-            statusMessage = strings.onboardingCompleted
-            isBackendOpenAIKeyConfigured = true
-            log(.info, "온보딩 완료 후 백엔드 OpenAI API 키 검증에 성공했습니다.")
-        } catch {
-            if handlePageAccessError(error, page: .studyDetail) {
-                return
-            }
-            handleOpenAIError(error)
-            statusMessage = nil
-        }
-
         isValidatingAPIKey = false
+        hasAPIKeyError = false
+        errorMessage = nil
+        statusMessage = strings.onboardingCompleted
+        log(.info, "온보딩을 완료했습니다. OpenAI 요청은 서버 시스템 키로 처리됩니다.")
         restartTimer()
     }
 
@@ -3814,13 +3783,8 @@ final class AppState: ObservableObject {
         hasCompletedOnboarding = true
         selectedTab = .settings
 
-        if apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            isRunning = false
-            settingsStore.saveIsRunning(false)
-            hasAPIKeyError = true
-            errorMessage = strings.apiKeyEmptyDetailed
-        }
-
+        hasAPIKeyError = false
+        errorMessage = nil
         statusMessage = strings.onboardingSkipped
         log(.info, "온보딩을 나중에 설정하도록 건너뛰었습니다.")
         markCloudDataChanged()
@@ -3871,8 +3835,8 @@ final class AppState: ObservableObject {
         savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
         reloadStudyRecordsFromStore()
         if trimmedAPIKey.isEmpty {
-            hasAPIKeyError = true
-            errorMessage = strings.apiKeyEmptyDetailed
+            hasAPIKeyError = false
+            errorMessage = nil
         } else if didAPIKeyChange {
             isBackendOpenAIKeyConfigured = false
             hasAPIKeyError = false
@@ -3934,55 +3898,16 @@ final class AppState: ObservableObject {
 
     func saveSettingsAndValidateAPIKey() async {
         let pendingSettings = activeSettingsForEditing
-        let pendingAPIKey = activeAPIKeyForEditing
-        let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let didAPIKeyChange = trimmedAPIKey != savedAPIKey
 
         persistSettings(
             pendingSettings,
-            apiKey: pendingAPIKey
+            apiKey: ""
         )
-
-        guard didAPIKeyChange else {
-            log(.info, "API 키 변경사항이 없어 저장 후 검증을 건너뛰었습니다.")
-            return
-        }
-
-        guard !trimmedAPIKey.isEmpty else {
-            hasAPIKeyError = true
-            errorMessage = strings.apiKeyEmptyDetailed
-            statusMessage = nil
-            log(.warning, "API 키가 비어 있어 검증을 건너뛰었습니다.")
-            return
-        }
-
-        isValidatingAPIKey = true
+        hasAPIKeyError = false
+        isValidatingAPIKey = false
         statusMessage = nil
         errorMessage = nil
-
-        do {
-            guard let registration = await backendRegistrationForOpenAIRequests(reason: "settings-api-validation") else {
-                throw RemotePushBackendError.invalidResponse
-            }
-            try await updateBackendSettings(
-                registration: registration,
-                reason: "settings-api-validation",
-                includeAPIKey: true
-            )
-            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
-            hasAPIKeyError = false
-            statusMessage = nil
-            isBackendOpenAIKeyConfigured = true
-            log(.info, "백엔드 OpenAI API 키 검증에 성공했습니다.")
-        } catch {
-            if handlePageAccessError(error, page: .studyDetail) {
-                return
-            }
-            handleOpenAIError(error)
-            statusMessage = nil
-        }
-
-        isValidatingAPIKey = false
+        log(.info, "설정을 저장했습니다. OpenAI 요청은 서버 시스템 키로 처리됩니다.")
     }
 
     func setRunning(_ running: Bool) {
