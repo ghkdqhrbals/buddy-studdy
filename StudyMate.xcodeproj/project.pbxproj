@@ -14,6 +14,7 @@
 		110000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		110000000000000000000172 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
+		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		110000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
 		110000000000000000000177 /* StudyRoomStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* StudyRoomStateStore.swift */; };
@@ -51,6 +52,7 @@
 		120000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		120000000000000000000113 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
+		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		120000000000000000000115 /* GoogleOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* GoogleOAuthService.swift */; };
 		120000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
@@ -140,6 +142,7 @@
 		110000000000000000000028 /* CommunityProfileStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityProfileStateStore.swift; sourceTree = "<group>"; };
 		110000000000000000000029 /* DeveloperStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperStateStore.swift; sourceTree = "<group>"; };
 		11000000000000000000002C /* BackendErrorPresentationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendErrorPresentationPolicy.swift; sourceTree = "<group>"; };
+		11000000000000000000002E /* PageAccessPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicy.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -211,6 +214,7 @@
 			isa = PBXGroup;
 			children = (
 				11000000000000000000002B /* ErrorHandling */,
+				11000000000000000000002D /* PageAccess */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -221,6 +225,14 @@
 				11000000000000000000002C /* BackendErrorPresentationPolicy.swift */,
 			);
 			path = ErrorHandling;
+			sourceTree = "<group>";
+		};
+		11000000000000000000002D /* PageAccess */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000002E /* PageAccessPolicy.swift */,
+			);
+			path = PageAccess;
 			sourceTree = "<group>";
 		};
 		110000000000000000000062 /* Products */ = {
@@ -490,6 +502,7 @@
 				110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */,
 				110000000000000000000172 /* RemotePushBackendClient.swift in Sources */,
 				110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */,
+				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000107 /* AppState.swift in Sources */,
 				110000000000000000000177 /* StudyRoomStateStore.swift in Sources */,
 				110000000000000000000178 /* RecordsStateStore.swift in Sources */,
@@ -535,6 +548,7 @@
 				120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */,
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
+				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000115 /* GoogleOAuthService.swift in Sources */,
 				120000000000000000000107 /* AppState.swift in Sources */,
 				120000000000000000000119 /* StudyRoomStateStore.swift in Sources */,

@@ -27,55 +27,6 @@ private enum AppStateError: LocalizedError {
     }
 }
 
-private enum ProtectedAppPage {
-    case publicQuestions
-    case myStudies
-    case records
-    case statistics
-    case studyDetail
-    case profile
-
-    var accessLogName: String {
-        switch self {
-        case .publicQuestions:
-            return "public-questions"
-        case .myStudies:
-            return "my-studies"
-        case .records:
-            return "records"
-        case .statistics:
-            return "statistics"
-        case .studyDetail:
-            return "study-detail"
-        case .profile:
-            return "profile"
-        }
-    }
-
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .publicQuestions:
-            return strings.homeScopeAll
-        case .myStudies:
-            return strings.homeScopeMy
-        case .records:
-            return strings.tabRecords
-        case .statistics:
-            return strings.tabStatistics
-        case .studyDetail:
-            return strings.tabStudy
-        case .profile:
-            return strings.profile
-        }
-    }
-}
-
-struct PageAccessPrompt: Identifiable, Equatable {
-    let id = UUID()
-    var title: String
-    var message: String
-}
-
 struct AppErrorPopup: Identifiable, Equatable {
     let id = UUID()
     var message: String
@@ -642,20 +593,11 @@ final class AppState: ObservableObject {
     }
 
     private func shouldAllowProvisionalAccessWhileRefreshing(_ page: ProtectedAppPage) -> Bool {
-        guard settingsStore.loadRemotePushRegistration()?.hasRegisteredAccessToken == true else {
-            return false
-        }
-
-        guard backendAccessState.user.status == "ANONYMOUS" else {
-            return false
-        }
-
-        switch page {
-        case .myStudies, .studyDetail, .records, .statistics, .profile:
-            return true
-        case .publicQuestions:
-            return false
-        }
+        PageAccessPolicy.shouldAllowProvisionalAccess(
+            to: page,
+            hasRegisteredAccessToken: settingsStore.loadRemotePushRegistration()?.hasRegisteredAccessToken == true,
+            userStatus: backendAccessState.user.status
+        )
     }
 
     private func refreshPageAccessInBackground(reason: String) {
@@ -745,33 +687,11 @@ final class AppState: ObservableObject {
     }
 
     private func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
-        switch tab {
-        case .study:
-            return .studyDetail
-        case .records:
-            return .records
-        case .statistics:
-            return .statistics
-        case .home, .settings:
-            return nil
-        }
+        PageAccessPolicy.protectedPage(for: tab)
     }
 
     private func canAccess(_ page: ProtectedAppPage) -> Bool {
-        switch page {
-        case .publicQuestions:
-            return backendAccessState.pageAccess.publicQuestions
-        case .myStudies:
-            return backendAccessState.pageAccess.myStudies
-        case .records:
-            return backendAccessState.pageAccess.records
-        case .statistics:
-            return backendAccessState.pageAccess.stats
-        case .studyDetail:
-            return backendAccessState.pageAccess.studyRoom
-        case .profile:
-            return backendAccessState.pageAccess.profile
-        }
+        PageAccessPolicy.canAccess(page, in: backendAccessState.pageAccess)
     }
 
     @discardableResult
@@ -793,10 +713,7 @@ final class AppState: ObservableObject {
     private func redirectToPageAccessGuide(for page: ProtectedAppPage) {
         homeStudyRoute = nil
         focusedRecordRequest = nil
-        pageAccessPrompt = PageAccessPrompt(
-            title: strings.communityLogin,
-            message: ""
-        )
+        pageAccessPrompt = PageAccessPolicy.prompt(for: page, strings: strings)
     }
 
     func dismissPageAccessPrompt() {

@@ -119,6 +119,49 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(validationError.shouldShowPopup)
     }
 
+    func testPageAccessPolicyCentralizesProtectedTabRules() {
+        XCTAssertNil(PageAccessPolicy.protectedPage(for: .home))
+        XCTAssertNil(PageAccessPolicy.protectedPage(for: .settings))
+        XCTAssertEqual(PageAccessPolicy.protectedPage(for: .study), .studyDetail)
+        XCTAssertEqual(PageAccessPolicy.protectedPage(for: .records), .records)
+        XCTAssertEqual(PageAccessPolicy.protectedPage(for: .statistics), .statistics)
+
+        XCTAssertTrue(PageAccessPolicy.canAccess(.publicQuestions, in: .signedOut))
+        XCTAssertFalse(PageAccessPolicy.canAccess(.myStudies, in: .signedOut))
+        XCTAssertFalse(PageAccessPolicy.canAccess(.studyDetail, in: .signedOut))
+        XCTAssertFalse(PageAccessPolicy.canAccess(.records, in: .signedOut))
+        XCTAssertFalse(PageAccessPolicy.canAccess(.statistics, in: .signedOut))
+
+        XCTAssertTrue(
+            PageAccessPolicy.shouldAllowProvisionalAccess(
+                to: .records,
+                hasRegisteredAccessToken: true,
+                userStatus: "ANONYMOUS"
+            )
+        )
+        XCTAssertFalse(
+            PageAccessPolicy.shouldAllowProvisionalAccess(
+                to: .publicQuestions,
+                hasRegisteredAccessToken: true,
+                userStatus: "ANONYMOUS"
+            )
+        )
+        XCTAssertFalse(
+            PageAccessPolicy.shouldAllowProvisionalAccess(
+                to: .records,
+                hasRegisteredAccessToken: false,
+                userStatus: "ANONYMOUS"
+            )
+        )
+        XCTAssertFalse(
+            PageAccessPolicy.shouldAllowProvisionalAccess(
+                to: .records,
+                hasRegisteredAccessToken: true,
+                userStatus: "ACTIVE"
+            )
+        )
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
