@@ -6,7 +6,7 @@ import {
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070610";
+} from "./logs.js?v=2026070611";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -36,6 +36,7 @@ const els = {
   statusSelect: document.querySelector("#statusSelect"),
   pathInput: document.querySelector("#pathInput"),
   requestIdInput: document.querySelector("#requestIdInput"),
+  logSearchInput: document.querySelector("#logSearchInput"),
   refreshButton: document.querySelector("#refreshButton"),
   requestRows: document.querySelector("#requestRows"),
   requestLoadingOverlay: document.querySelector("#requestLoadingOverlay"),
@@ -54,7 +55,7 @@ const els = {
   pageInfo: document.querySelector("#pageInfo"),
 };
 
-const DEFAULT_QUERY = '{container=~".+"} |= "api_exchange"';
+const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
 const TIMELINE_QUERY = 'sum(count_over_time(({container=~".+"} |= "api_exchange")[$__range]))';
 
 function nowMs() {
@@ -111,7 +112,7 @@ async function loadRequestPage({ refreshTimeline = false } = {}) {
   const range = timeRange();
   try {
     const pageEndNs = state.pageCursors[state.pageIndex] ?? range.endNs;
-    const pageQuery = lokiQueryRange(DEFAULT_QUERY, {
+    const pageQuery = lokiQueryRange(buildApiExchangeQuery(), {
       ...range,
       endNs: pageEndNs,
       limit: state.pageSize + 1,
@@ -174,17 +175,36 @@ async function loadTimeline(range) {
 }
 
 function applyFilters() {
-  const method = els.methodSelect.value;
-  const statusPrefix = els.statusSelect.value;
-  const path = els.pathInput.value.trim().toLowerCase();
-  const requestId = els.requestIdInput.value.trim().toLowerCase();
-  state.filtered = state.requests.filter((request) => {
-    if (method && request.method !== method) return false;
-    if (statusPrefix && !String(request.status).startsWith(statusPrefix)) return false;
-    if (path && !request.path.toLowerCase().includes(path)) return false;
-    if (requestId && !request.requestId.toLowerCase().includes(requestId)) return false;
-    return true;
-  });
+  state.filtered = state.requests;
+}
+
+function buildApiExchangeQuery() {
+  const parts = [API_EXCHANGE_QUERY];
+  const method = els.methodSelect.value.trim();
+  const statusPrefix = els.statusSelect.value.trim();
+  const path = els.pathInput.value.trim();
+  const requestId = els.requestIdInput.value.trim();
+  const logSearch = els.logSearchInput.value.trim();
+  if (method) {
+    parts.push(`|= ${quoteLogql(`"method":"${method}"`)}`);
+  }
+  if (statusPrefix) {
+    parts.push(`|~ ${quoteLogql(`"status":${statusPrefix}[0-9][0-9]`)}`);
+  }
+  if (path) {
+    parts.push(`|= ${quoteLogql(`"path":"${path}`)}`);
+  }
+  if (requestId) {
+    parts.push(`|= ${quoteLogql(requestId)}`);
+  }
+  if (logSearch) {
+    parts.push(`|= ${quoteLogql(logSearch)}`);
+  }
+  return parts.join(" ");
+}
+
+function quoteLogql(value) {
+  return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function render() {
@@ -596,17 +616,15 @@ function bindEvents() {
           state.selectedRange = null;
           syncCustomRangeControls(timeRange(), { force: true });
         }
-        loadRequests().catch((error) => setStatus(error.message, "error"));
-      } else {
-        applyFilters();
-        render();
       }
+      loadRequests().catch((error) => setStatus(error.message, "error"));
     });
   }
-  for (const element of [els.pathInput, els.requestIdInput]) {
-    element.addEventListener("input", () => {
-      applyFilters();
-      render();
+  for (const element of [els.pathInput, els.requestIdInput, els.logSearchInput]) {
+    element.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      loadRequests().catch((error) => setStatus(error.message, "error"));
     });
   }
   els.pageSizeSelect.addEventListener("change", () => {
@@ -674,11 +692,15 @@ function applyInitialQueryParams() {
   const params = new URLSearchParams(window.location.search);
   const path = params.get("path");
   const requestId = params.get("requestId");
+  const logSearch = params.get("q");
   if (path) {
     els.pathInput.value = path;
   }
   if (requestId) {
     els.requestIdInput.value = requestId;
+  }
+  if (logSearch) {
+    els.logSearchInput.value = logSearch;
   }
 }
 

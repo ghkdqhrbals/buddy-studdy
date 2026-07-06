@@ -10,6 +10,18 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 - Grafana provisioning: `monitoring/grafana/provisioning` -> `/etc/grafana/provisioning`
 - Grafana dashboards: `monitoring/grafana/dashboards` -> `/var/lib/grafana/dashboards`
 
+## Access Control
+
+- `api-dashboard` is protected with nginx Basic Auth.
+- Set `API_DASHBOARD_BASIC_AUTH_HTPASSWD` to a full htpasswd line before starting the stack.
+- Generate the value with:
+
+```sh
+docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
+```
+
+- Loki and Grafana container ports are bound to `127.0.0.1` only. External access should go through the API dashboard reverse proxy.
+
 ## Dashboards
 
 - `https://grafana.lowfidev.cloud`
@@ -26,4 +38,3 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 
 - API Logs: `https://grafana.lowfidev.cloud`
 - Grafana: `https://grafana.lowfidev.cloud/grafana/`
-- Loki: `https://loki.lowfidev.cloud`

@@ -97,7 +97,7 @@ select {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(560px, 1.6fr) 110px 110px minmax(220px, 1fr) minmax(220px, 1fr) 96px;
+  grid-template-columns: minmax(560px, 1.5fr) 96px 96px minmax(180px, 0.8fr) minmax(210px, 1fr) minmax(230px, 1fr) 86px;
   gap: 10px;
   align-items: end;
   padding: 14px;
