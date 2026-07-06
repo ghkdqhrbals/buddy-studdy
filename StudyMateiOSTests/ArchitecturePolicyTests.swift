@@ -261,6 +261,33 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesCommunityProfileCacheThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "communityProfileCacheRepository.loadProfileAvatarSymbolName",
+            "communityProfileCacheRepository.saveProfileAvatarSymbolName",
+            "communityProfileCacheRepository.loadProfileAvatarImageData",
+            "communityProfileCacheRepository.saveProfileAvatarImageData",
+            "communityProfileCacheRepository.loadProfileAvatarColorSeed",
+            "communityProfileCacheRepository.saveProfileAvatarColorSeed",
+            "communityProfileCacheRepository.loadCommunityProfileDisplayName",
+            "communityProfileCacheRepository.saveCommunityProfileDisplayName",
+            "communityProfileCacheRepository.loadCommunityProfileID",
+            "communityProfileCacheRepository.saveCommunityProfileID",
+            "resolvedCommunityProfileCacheRepository.load",
+            "resolvedCommunityProfileCacheRepository.save",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CommunityProfileCacheUseCase for cached profile identity and avatar state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesCommunitySessionRepositoryForStoredSignInState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
