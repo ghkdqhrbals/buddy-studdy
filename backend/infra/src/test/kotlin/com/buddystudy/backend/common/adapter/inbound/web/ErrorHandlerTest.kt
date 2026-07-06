@@ -27,7 +27,8 @@ class ErrorHandlerTest {
         addMessage("error.internal.server_error", Locale.KOREA, "Internal backend error.")
         addMessage("error.validation", Locale.ENGLISH, "Invalid request.")
     }
-    private val handler = ErrorHandler(messageSource)
+    private val errorResponseFactory = ApiErrorResponseFactory(messageSource)
+    private val handler = ErrorHandler(errorResponseFactory)
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Test

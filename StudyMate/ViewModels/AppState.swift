@@ -6987,21 +6987,10 @@ final class AppState: ObservableObject {
     }
 
     private func communityErrorMessage(for error: Error) -> String {
-        if let backendError = error as? RemotePushBackendError,
-           case let .httpStatus(statusCode, _, _) = backendError,
-           statusCode == 404 {
-            return strings.communityUnavailable
-        }
-
         return backendErrorDisplayMessage(error, fallback: strings.communityRequestFailed)
     }
 
     private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
-        if let backendError = error as? RemotePushBackendError,
-           !backendError.shouldShowPopup {
-            return ""
-        }
-
         if let backendError = error as? RemotePushBackendError,
            let message = backendError.backendMessage,
            !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

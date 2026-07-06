@@ -3,8 +3,7 @@ package com.buddystudy.backend.config
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
-import com.buddystudy.backend.common.adapter.inbound.web.ApiError
-import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorEnvelope
+import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -19,8 +18,6 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.MessageSource
-import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -59,7 +56,7 @@ class SecurityConfig {
         http: HttpSecurity,
         bearerTokenFilter: BearerTokenFilter,
         objectMapper: ObjectMapper,
-        messageSource: MessageSource,
+        errorResponseFactory: ApiErrorResponseFactory,
     ): SecurityFilterChain =
         http
             .csrf { it.disable() }
@@ -80,7 +77,7 @@ class SecurityConfig {
                         response,
                         HttpStatus.UNAUTHORIZED,
                         ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
-                        messageSource,
+                        errorResponseFactory,
                     )
                 }
             }
@@ -94,7 +91,7 @@ class BearerTokenFilter(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val objectMapper: ObjectMapper,
-    private val messageSource: MessageSource,
+    private val errorResponseFactory: ApiErrorResponseFactory,
 ) : OncePerRequestFilter() {
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
         SecurityContextHolder.clearContext()
@@ -113,7 +110,7 @@ class BearerTokenFilter(
                     response,
                     error.status,
                     error.errorCode,
-                    messageSource,
+                    errorResponseFactory,
                     requiredPermissions = error.requiredPermissions,
                 )
             }
@@ -225,43 +222,31 @@ private fun writeSecurityError(
     response: HttpServletResponse,
     status: HttpStatus,
     code: ApiErrorCode,
-    messageSource: MessageSource,
+    errorResponseFactory: ApiErrorResponseFactory,
     requiredPermissions: List<String>? = null,
 ) {
     if (response.isCommitted) return
-    val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
-    val message = messageSource.getMessage(
-        code.messageKey,
-        null,
-        code.debugDescription,
-        LocaleContextHolder.getLocale(),
-    ) ?: code.debugDescription
+    val body = errorResponseFactory.envelope(
+        code = code,
+        status = status,
+        request = request,
+        requiredPermissions = requiredPermissions,
+    )
     securityLog.warn(
         "api_auth_failed requestId={} clientIp={} method={} path={} status={} code={} message={}",
-        requestId,
+        body.error.requestId,
         ClientIpResolver.resolve(request),
         request.method,
         request.requestURI,
         status.value(),
         code.name,
-        message,
+        body.error.message,
     )
     response.status = status.value()
     response.contentType = "application/json"
     objectMapper.writeValue(
         response.outputStream,
-        ApiErrorEnvelope(
-            ApiError(
-                errorCode = code.name,
-                code = code.code,
-                messageKey = code.messageKey,
-                debugDescription = code.debugDescription,
-                message = message,
-                requestId = requestId,
-                status = status.value(),
-                requiredPermissions = requiredPermissions,
-            )
-        ),
+        body,
     )
 }
 

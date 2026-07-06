@@ -68,13 +68,15 @@ class RequestLoggingFilterTest {
         filter.doFilter(request, response, chain)
 
         assertThat(output.out).contains("api_exchange")
-        assertThat(output.out).contains("\"request\":{")
-        assertThat(output.out).contains("\"response\":{")
-        assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
+        assertThat(output.out).contains("\"method\":\"POST\"")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
+        assertThat(output.out).contains("\"requestHeaders\":{")
+        assertThat(output.out).contains("\"requestBody\":{\"idToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).doesNotContain("\"request\":{")
+        assertThat(output.out).doesNotContain("\"response\":{")
+        assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
         assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
-        assertThat(output.out).contains("\"body\":{\"idToken\":\"[REDACTED]\"}")
-        assertThat(output.out).contains("\"body\":{\"accessToken\":\"[REDACTED]\"}")
         assertThat(output.out).doesNotContain("api_request")
         assertThat(output.out).doesNotContain("api_response {\"requestId\"")
     }
@@ -106,8 +108,8 @@ class RequestLoggingFilterTest {
 
         filter.doFilter(request, response, chain)
 
-        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1,\"question\":\"Swift?\"}]}")
-        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+        assertThat(output.out).contains("\"responseBody\":{\"records\":[{\"id\":1,\"question\":\"Swift?\"}]}")
+        assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
     }
 
     @Test
@@ -120,8 +122,8 @@ class RequestLoggingFilterTest {
 
         filter.doFilter(request, response, chain)
 
-        assertThat(output.out).contains("\"body\":{\"records\":[{\"id\":1}]}")
-        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+        assertThat(output.out).contains("\"responseBody\":{\"records\":[{\"id\":1}]}")
+        assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
     }
 
     @Test
@@ -154,11 +156,11 @@ class RequestLoggingFilterTest {
         filter.doFilter(request, response, chain)
 
         assertThat(response.contentAsString).contains("question-300")
-        assertThat(output.out).contains("\"body\":{\"truncated\":true")
+        assertThat(output.out).contains("\"responseBody\":{\"truncated\":true")
         assertThat(output.out).contains("\"originalChars\":")
         assertThat(output.out).contains("\"preview\":")
         assertThat(output.out).doesNotContain("question-300")
-        assertThat(output.out).doesNotContain("\"body\":\"{\\\"records\\\"")
+        assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
     }
 
     @Test

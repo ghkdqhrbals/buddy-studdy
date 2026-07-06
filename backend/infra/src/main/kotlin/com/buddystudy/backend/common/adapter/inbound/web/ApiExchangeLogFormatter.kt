@@ -22,8 +22,15 @@ internal class ApiExchangeLogFormatter(
         buildJson(
             "requestId" to requestId,
             "clientIp" to ClientIpResolver.resolve(request),
-            "request" to requestFields(request),
-            "response" to responseFields(response, durationMs),
+            "method" to request.method,
+            "path" to request.requestURI,
+            "query" to (request.queryString ?: ""),
+            "requestHeaders" to headers(request),
+            "requestBody" to body(request.contentAsByteArray, request.characterEncoding, request.contentType),
+            "status" to response.status,
+            "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseHeaders" to responseHeaders(response),
+            "responseBody" to body(response.contentAsByteArray, response.characterEncoding, response.contentType),
         )
 
     fun apiResponseJson(
@@ -39,15 +46,6 @@ internal class ApiExchangeLogFormatter(
             "method" to request.method,
             "path" to request.requestURI,
             "response" to responseFields(response, durationMs, includeBody),
-        )
-
-    private fun requestFields(request: ContentCachingRequestWrapper): Map<String, Any?> =
-        mapOf(
-            "method" to request.method,
-            "path" to request.requestURI,
-            "query" to (request.queryString ?: ""),
-            "headers" to headers(request),
-            "body" to body(request.contentAsByteArray, request.characterEncoding, request.contentType),
         )
 
     private fun responseFields(

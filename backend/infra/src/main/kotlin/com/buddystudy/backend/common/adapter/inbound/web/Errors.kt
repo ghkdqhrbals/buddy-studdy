@@ -10,6 +10,7 @@ import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.MediaType
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.stereotype.Component
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -31,76 +32,11 @@ data class ApiError(
     val requiredPermissions: List<String>? = null,
 )
 
-@RestControllerAdvice
-class ErrorHandler(
+@Component
+class ApiErrorResponseFactory(
     private val messageSource: MessageSource,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
-
-    @ExceptionHandler(ApiRuntimeException::class)
-    fun api(error: ApiRuntimeException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
-        val body = envelope(
-            error.errorCode,
-            error.status,
-            request,
-            debugDescription = error.message,
-            requiredPermissions = error.requiredPermissions,
-        )
-        log.warn(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
-            body.error.requestId,
-            ClientIpResolver.resolve(request),
-            request.method,
-            request.requestURI,
-            error.status.value(),
-            error.errorCode.name,
-            error.message,
-        )
-        return json(error.status, body)
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        json(
-            HttpStatus.UNPROCESSABLE_ENTITY,
-            envelope(ApiErrorCode.VALIDATION_ERROR, HttpStatus.UNPROCESSABLE_ENTITY, request),
-        )
-
-    @ExceptionHandler(NoResourceFoundException::class, NoHandlerFoundException::class)
-    fun notFound(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
-        json(
-            HttpStatus.NOT_FOUND,
-            envelope(ApiErrorCode.RESOURCE_NOT_FOUND, HttpStatus.NOT_FOUND, request),
-        )
-
-    @ExceptionHandler(Exception::class)
-    fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
-        val body = envelope(
-            ApiErrorCode.INTERNAL_SERVER_ERROR,
-            HttpStatus.INTERNAL_SERVER_ERROR,
-            request,
-            error.toReason(),
-        )
-        log.error(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
-            body.error.requestId,
-            ClientIpResolver.resolve(request),
-            request.method,
-            request.requestURI,
-            HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            ApiErrorCode.INTERNAL_SERVER_ERROR.name,
-            body.error.message,
-            error,
-        )
-        return json(HttpStatus.INTERNAL_SERVER_ERROR, body)
-    }
-
-    private fun json(status: HttpStatus, body: ApiErrorEnvelope): ResponseEntity<ApiErrorEnvelope> =
-        ResponseEntity.status(status)
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(body)
-
-    private fun envelope(
+    fun envelope(
         code: ApiErrorCode,
         status: HttpStatus,
         request: HttpServletRequest,
@@ -129,6 +65,76 @@ class ErrorHandler(
             )
         )
     }
+}
+
+@RestControllerAdvice
+class ErrorHandler(
+    private val errorResponseFactory: ApiErrorResponseFactory,
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(ApiRuntimeException::class)
+    fun api(error: ApiRuntimeException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
+        val body = errorResponseFactory.envelope(
+            error.errorCode,
+            error.status,
+            request,
+            debugDescription = error.message,
+            requiredPermissions = error.requiredPermissions,
+        )
+        log.warn(
+            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
+            body.error.requestId,
+            ClientIpResolver.resolve(request),
+            request.method,
+            request.requestURI,
+            error.status.value(),
+            error.errorCode.name,
+            error.message,
+        )
+        return json(error.status, body)
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
+        json(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            errorResponseFactory.envelope(ApiErrorCode.VALIDATION_ERROR, HttpStatus.UNPROCESSABLE_ENTITY, request),
+        )
+
+    @ExceptionHandler(NoResourceFoundException::class, NoHandlerFoundException::class)
+    fun notFound(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
+        json(
+            HttpStatus.NOT_FOUND,
+            errorResponseFactory.envelope(ApiErrorCode.RESOURCE_NOT_FOUND, HttpStatus.NOT_FOUND, request),
+        )
+
+    @ExceptionHandler(Exception::class)
+    fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
+        val body = errorResponseFactory.envelope(
+            ApiErrorCode.INTERNAL_SERVER_ERROR,
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            request,
+            error.toReason(),
+        )
+        log.error(
+            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
+            body.error.requestId,
+            ClientIpResolver.resolve(request),
+            request.method,
+            request.requestURI,
+            HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            ApiErrorCode.INTERNAL_SERVER_ERROR.name,
+            body.error.message,
+            error,
+        )
+        return json(HttpStatus.INTERNAL_SERVER_ERROR, body)
+    }
+
+    private fun json(status: HttpStatus, body: ApiErrorEnvelope): ResponseEntity<ApiErrorEnvelope> =
+        ResponseEntity.status(status)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
 
     private fun Exception.toReason(): String {
         val type = this::class.simpleName ?: javaClass.simpleName

@@ -29,8 +29,13 @@ struct MobileRootView: View {
                     .tag(AppTab.home)
 
                     NavigationStack {
-                        HistoryView()
-                            .padding(.horizontal, 16)
+                        if let prompt = appState.pageAccessPrompt {
+                            PageAccessRequiredView(prompt: prompt)
+                                .padding(.horizontal, 16)
+                        } else {
+                            HistoryView()
+                                .padding(.horizontal, 16)
+                        }
                     }
                     .tabItem {
                         Label(strings.tabRecords, systemImage: "clock.arrow.circlepath")
@@ -38,8 +43,13 @@ struct MobileRootView: View {
                     .tag(AppTab.records)
 
                     NavigationStack {
-                        StatisticsView()
-                            .padding(.horizontal, 16)
+                        if let prompt = appState.pageAccessPrompt {
+                            PageAccessRequiredView(prompt: prompt)
+                                .padding(.horizontal, 16)
+                        } else {
+                            StatisticsView()
+                                .padding(.horizontal, 16)
+                        }
                     }
                     .tabItem {
                         Label(strings.tabStatistics, systemImage: "chart.xyaxis.line")
@@ -55,19 +65,6 @@ struct MobileRootView: View {
                     .tag(AppTab.settings)
                 }
                 .background(Color(.systemBackground))
-                .sheet(item: $appState.pageAccessPrompt) { prompt in
-                    PageAccessSignInSheet(
-                        prompt: prompt,
-                        onGoogleSignIn: {
-                            appState.dismissPageAccessPrompt()
-                            appState.signInToCommunity()
-                        },
-                        onCancel: {
-                            appState.dismissPageAccessPrompt()
-                        }
-                    )
-                    .environmentObject(appState)
-                }
                 .onAppear {
                     appState.normalizeSelectedTabForMobile()
                 }
@@ -103,21 +100,64 @@ struct MobileRootView: View {
     }
 }
 
-private struct PageAccessSignInSheet: View {
+private struct PageAccessRequiredView: View {
     @EnvironmentObject private var appState: AppState
-    @Environment(\.dismiss) private var dismiss
-    @State private var isShowingEmailSignIn = false
     var prompt: PageAccessPrompt
-    var onGoogleSignIn: () -> Void
-    var onCancel: () -> Void
 
     private var strings: AppStrings {
         appState.strings
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 14) {
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 6) {
+                Text(prompt.title)
+                    .font(.title3.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(prompt.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            NavigationLink {
+                MobileLoginPage(prompt: prompt)
+            } label: {
+                Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.vertical, 40)
+        .navigationTitle(prompt.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct MobileLoginPage: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var isShowingEmailSignIn = false
+    var prompt: PageAccessPrompt?
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let prompt {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(prompt.title)
                         .font(.title3.weight(.bold))
@@ -126,49 +166,63 @@ private struct PageAccessSignInSheet: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                VStack(spacing: 10) {
-                    Button {
-                        dismiss()
-                        onGoogleSignIn()
-                    } label: {
-                        GoogleSignInButtonLabel(title: strings.signInWithGoogle)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        isShowingEmailSignIn = true
-                    } label: {
-                        Label(strings.signInWithEmail, systemImage: "envelope.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 12)
-                            .background(Color.secondary.opacity(0.06))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(20)
-            .navigationTitle(strings.communityLogin)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.cancel) {
-                        dismiss()
-                        onCancel()
-                    }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(strings.communityLogin)
+                        .font(.title3.weight(.bold))
+                    Text(strings.communityLoginHelp)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            VStack(spacing: 10) {
+                Button {
+                    appState.signInToCommunity()
+                } label: {
+                    GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    isShowingEmailSignIn = true
+                } label: {
+                    Label(strings.signInWithEmail, systemImage: "envelope.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .background(Color.secondary.opacity(0.06))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let message = appState.communityErrorMessage,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
         }
-        .presentationDetents([.medium])
+        .padding(20)
+        .navigationTitle(strings.communityLogin)
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+            guard isSignedIn else {
+                return
+            }
+            appState.dismissPageAccessPrompt()
+            dismiss()
+        }
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
                 isShowingEmailSignIn = false
@@ -514,10 +568,20 @@ private struct MobileHomeView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Button {
-                    appState.signInToCommunity()
+                NavigationLink {
+                    MobileLoginPage(
+                        prompt: PageAccessPrompt(
+                            title: strings.signInRequiredTitle,
+                            message: strings.myStudyLoginHelp
+                        )
+                    )
                 } label: {
-                    GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                    Label(strings.communityLogin, systemImage: "person.crop.circle.badge.checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
 
