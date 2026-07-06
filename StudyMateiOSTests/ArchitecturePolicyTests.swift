@@ -658,6 +658,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testHomePullToRefreshDoesNotHoldSystemRefreshControlForNetworkLoad() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("await homeRefreshTask?.value"),
+            "Home pull-to-refresh must launch a background refresh and return promptly so the system refresh control does not pin the list while network requests run."
+        )
+    }
+
+    func testHomeCommunityRefreshIndicatorStaysInsideEmptyContentSlot() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("if appState.communityQuestions.isEmpty {\n                if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
+            "When public questions are empty, the refresh indicator should render in the public-question content slot instead of shifting the fixed title or tab area."
+        )
+    }
+
     func testGoogleSignInUseCaseDependsOnAuthRepositoryBoundary() throws {
         let root = try repositoryRoot()
         let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Auth/GoogleSignInUseCase.swift")

@@ -240,7 +240,7 @@ private struct MobileHomeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .refreshable {
-                await startHomeRefresh()
+                startHomeRefresh()
             }
         }
         .background(Color(.systemBackground))
@@ -495,24 +495,31 @@ private struct MobileHomeView: View {
 
     private var myStudySection: some View {
         Section {
-            if isRefreshingMyStudyContent {
-                MobileHomeRefreshIndicator()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, filteredStudyCategories.isEmpty ? 34 : 8)
-                    .listRowSeparator(.hidden)
-            }
-
             if filteredStudyCategories.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(strings.noMatchingTopics)
-                        .font(.subheadline.weight(.semibold))
+                if isRefreshingMyStudyContent {
+                    MobileHomeRefreshIndicator()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 34)
+                        .listRowSeparator(.hidden)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(strings.noMatchingTopics)
+                            .font(.subheadline.weight(.semibold))
 
-                    Text(strings.noMatchingTopicsDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        Text(strings.noMatchingTopicsDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
             } else {
+                if isRefreshingMyStudyContent {
+                    MobileHomeRefreshIndicator()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                        .listRowSeparator(.hidden)
+                }
+
                 ForEach(filteredStudyCategories) { category in
                     myStudyCategoryRow(category)
                 }
@@ -559,10 +566,17 @@ private struct MobileHomeView: View {
     private var communityQuestionSection: some View {
         Section {
             if appState.communityQuestions.isEmpty {
-                MobileCommunityEmptyState(strings: strings)
-                    .frame(maxWidth: .infinity, minHeight: 320)
-                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                    .listRowSeparator(.hidden)
+                if isRefreshingCommunityContent {
+                    MobileHomeRefreshIndicator()
+                        .frame(maxWidth: .infinity, minHeight: 320)
+                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                        .listRowSeparator(.hidden)
+                } else {
+                    MobileCommunityEmptyState(strings: strings)
+                        .frame(maxWidth: .infinity, minHeight: 320)
+                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                        .listRowSeparator(.hidden)
+                }
             } else {
                 if isRefreshingCommunityContent {
                     MobileHomeRefreshIndicator()
@@ -814,9 +828,8 @@ private struct MobileHomeView: View {
     }
 
     @MainActor
-    private func startHomeRefresh() async {
-        if let homeRefreshTask {
-            await homeRefreshTask.value
+    private func startHomeRefresh() {
+        if homeRefreshTask != nil {
             return
         }
 
@@ -832,8 +845,6 @@ private struct MobileHomeView: View {
 
             await refreshHomeData(for: scope)
         }
-
-        await homeRefreshTask?.value
     }
 
     @MainActor
