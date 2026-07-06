@@ -1437,6 +1437,7 @@ final class AppState: ObservableObject {
                 await refreshNotificationUnreadCount()
             },
             onFailure: { error in
+                handleAppError(error, fallback: "", target: .notification)
                 log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
             }
         )
@@ -1467,6 +1468,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
+                handleAppError(error, fallback: "", target: .notification)
                 log(.warning, "알림 삭제 실패: \(error.localizedDescription)")
             }
         )
@@ -1494,6 +1496,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
+                handleAppError(error, fallback: "", target: .notification)
                 log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
             }
         )

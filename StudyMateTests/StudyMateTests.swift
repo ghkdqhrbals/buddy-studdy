@@ -180,6 +180,7 @@ final class StudyMateTests: XCTestCase {
 
         let studyPage = try JSONDecoder().decode(BackendStudyPage.self, from: payload)
         let recordsPage = try JSONDecoder().decode(BackendRecordsPage.self, from: payload)
+        let communityPage = try JSONDecoder().decode(CommunityQuestionsResponse.self, from: payload)
         let commentsPage = try JSONDecoder().decode(CommunityCommentsResponse.self, from: payload)
         let notificationsPage = try JSONDecoder().decode(BackendNotificationsPage.self, from: payload)
 
@@ -187,6 +188,8 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(studyPage.totalCount, 0)
         XCTAssertTrue(recordsPage.records.isEmpty)
         XCTAssertEqual(recordsPage.totalCount, 0)
+        XCTAssertTrue(communityPage.questions.isEmpty)
+        XCTAssertEqual(communityPage.totalCount, 0)
         XCTAssertTrue(commentsPage.comments.isEmpty)
         XCTAssertEqual(commentsPage.totalCount, 0)
         XCTAssertTrue(notificationsPage.notifications.isEmpty)
@@ -997,6 +1000,99 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backend.fetchAccessCallCount, 2)
         XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, backend.registration.deviceID)
         XCTAssertEqual(appState.backendAccessState.user.status, "ACTIVE")
+    }
+
+    @MainActor
+    func testRecordMutationFailureUsesSharedAuthErrorPolicy() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        let accessToken = Self.jwt(
+            payload: [
+                "device_id": backend.registration.deviceID,
+                "is_anonymous": false,
+                "status": "ACTIVE"
+            ]
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: backend.registration.deviceID,
+                clientSecret: backend.registration.clientSecret,
+                apnsToken: "",
+                accessToken: accessToken,
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        backend.deleteRecordErrors = [
+            Self.backendError(code: "DEVICE_NOT_FOUND", status: 404),
+            Self.backendError(code: "DEVICE_NOT_FOUND", status: 404)
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+        appState.selectedTab = .records
+        let record = StudyRecord(
+            id: "record-auth-failure",
+            question: QuestionItem(question: "Question", expectedAnswerHint: nil, createdAt: Date()),
+            topic: "Auth",
+            difficulty: .level5
+        )
+        store.saveStudyRecord(record)
+
+        appState.deleteStudyRecord(record)
+
+        for _ in 0..<30 where appState.pageAccessPrompt == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(backend.registeredAPNSTokens, [nil])
+        XCTAssertNil(store.loadRemotePushRegistration())
+        XCTAssertFalse(appState.isCommunitySignedIn)
+        XCTAssertNotNil(appState.pageAccessPrompt)
+        XCTAssertNil(appState.globalErrorPopup)
+    }
+
+    @MainActor
+    func testNotificationMutationFailureUsesSharedAuthErrorPolicy() async throws {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        let accessToken = Self.jwt(
+            payload: [
+                "device_id": backend.registration.deviceID,
+                "is_anonymous": false,
+                "status": "ACTIVE"
+            ]
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: backend.registration.deviceID,
+                clientSecret: backend.registration.clientSecret,
+                apnsToken: "",
+                accessToken: accessToken,
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        backend.markNotificationReadErrors = [
+            Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401),
+            Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401)
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.markNotificationRead(notificationID: "notification-auth-failure")
+
+        XCTAssertEqual(backend.registeredAPNSTokens, [nil])
+        XCTAssertNil(store.loadRemotePushRegistration())
+        XCTAssertFalse(appState.isCommunitySignedIn)
+        XCTAssertNil(appState.globalErrorPopup)
     }
 
     @MainActor
@@ -4595,6 +4691,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var deletedRecordIDs: [String] = []
     var updatedRecordPublicity: [String] = []
     var clearRecordsCallCount = 0
+    var deleteRecordErrors: [Error] = []
+    var updateRecordPublicityErrors: [Error] = []
+    var clearRecordsErrors: [Error] = []
     var fetchedRecordIDs: [String] = []
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
@@ -4605,6 +4704,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var markedNotificationIDs: [String] = []
     var deletedNotificationIDs: [String] = []
     var deleteAllNotificationsCallCount = 0
+    var markNotificationReadErrors: [Error] = []
+    var deleteNotificationErrors: [Error] = []
+    var deleteAllNotificationsErrors: [Error] = []
     var fetchPublicQuestionsRequests: [(
         query: String?,
         limit: Int,
@@ -4713,14 +4815,23 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws {
+        if !markNotificationReadErrors.isEmpty {
+            throw markNotificationReadErrors.removeFirst()
+        }
         markedNotificationIDs.append(notificationID)
     }
 
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {
+        if !deleteNotificationErrors.isEmpty {
+            throw deleteNotificationErrors.removeFirst()
+        }
         deletedNotificationIDs.append(notificationID)
     }
 
     func deleteAllNotifications(registration: RemotePushRegistration) async throws {
+        if !deleteAllNotificationsErrors.isEmpty {
+            throw deleteAllNotificationsErrors.removeFirst()
+        }
         deleteAllNotificationsCallCount += 1
     }
 
@@ -5130,6 +5241,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         recordID: String
     ) async throws {
+        if !deleteRecordErrors.isEmpty {
+            throw deleteRecordErrors.removeFirst()
+        }
         deletedRecordIDs.append(recordID)
     }
 
@@ -5138,6 +5252,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         recordID: String,
         isPublic: Bool
     ) async throws -> StudyRecord {
+        if !updateRecordPublicityErrors.isEmpty {
+            throw updateRecordPublicityErrors.removeFirst()
+        }
         updatedRecordPublicity.append("\(recordID):\(isPublic)")
         let category = StudyCategory(title: "Publicity", difficulty: .beginner)
         return StudyRecord(
@@ -5150,6 +5267,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func clearRecords(registration: RemotePushRegistration) async throws {
+        if !clearRecordsErrors.isEmpty {
+            throw clearRecordsErrors.removeFirst()
+        }
         clearRecordsCallCount += 1
     }
 
