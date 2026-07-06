@@ -481,6 +481,7 @@ final class AppState: ObservableObject {
     private let settingsStore: SettingsStore
     private var remotePushBackendClient: RemotePushBackendClientProtocol
     private var appUseCases: AppUseCases
+    private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase { appUseCases.refreshPageAccess }
     private var studyRoomUseCase: StudyRoomUseCase { appUseCases.studyRoom }
     private var recordsUseCase: RecordsUseCase { appUseCases.records }
@@ -5633,7 +5634,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let updatedRegistration = try await remotePushBackendClient.bootstrapAccessToken(registration: registration)
+            let updatedRegistration = try await backendIdentityUseCase.bootstrapAccessToken(registration: registration)
             settingsStore.saveRemotePushRegistration(updatedRegistration)
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
@@ -5700,7 +5701,7 @@ final class AppState: ObservableObject {
         reason: String,
         includeAPIKey: Bool
     ) async throws -> RemotePushRegistration {
-        let registration = try await remotePushBackendClient.registerDevice(
+        let registration = try await backendIdentityUseCase.registerDevice(
             apnsToken: apnsToken,
             language: settings.appLanguage,
             timezone: TimeZone.current.identifier,
@@ -5784,7 +5785,7 @@ final class AppState: ObservableObject {
                     registration: tokenRegistration,
                     reason: "device-token-update",
                     operation: { recoveredRegistration in
-                        try await remotePushBackendClient.updatePushToken(
+                        try await backendIdentityUseCase.updatePushToken(
                             registration: recoveredRegistration,
                             apnsToken: token,
                             apnsEnvironment: Self.backendAPNSEnvironment
@@ -5794,7 +5795,7 @@ final class AppState: ObservableObject {
                 settingsStore.saveRemotePushRegistration(registration)
                 log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
             } else {
-                registration = try await remotePushBackendClient.registerDevice(
+                registration = try await backendIdentityUseCase.registerDevice(
                     apnsToken: token,
                     language: settings.appLanguage,
                     timezone: TimeZone.current.identifier,

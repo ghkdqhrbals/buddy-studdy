@@ -37,6 +37,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotCallBackendIdentityTransportDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "remotePushBackendClient.bootstrapAccessToken",
+            "remotePushBackendClient.registerDevice",
+            "remotePushBackendClient.updatePushToken",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use BackendIdentityUseCase for backend identity transport calls: \(violations)"
+        )
+    }
+
     func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopup() {
         let apiError = BackendAPIError(
             code: "101",

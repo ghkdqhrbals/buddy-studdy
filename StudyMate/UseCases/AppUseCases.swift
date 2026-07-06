@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 struct AppUseCases {
+    let backendIdentity: BackendIdentityUseCase
     let refreshPageAccess: RefreshPageAccessUseCase
     let studyRoom: StudyRoomUseCase
     let records: RecordsUseCase
@@ -11,6 +12,7 @@ struct AppUseCases {
     let community: CommunityUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
+        backendIdentity = BackendIdentityUseCase(backendClient: backendClient)
         refreshPageAccess = RefreshPageAccessUseCase(backendClient: backendClient)
         studyRoom = StudyRoomUseCase(backendClient: backendClient)
         records = RecordsUseCase(backendClient: backendClient)

@@ -60,6 +60,7 @@ The policy is split into two deterministic steps:
 - `StudyMate/Core/ErrorHandling/BackendErrorPresentationPolicy.swift` extracts backend code, server message, auth requirements, and reset decisions.
 - `StudyMate/Core/ErrorHandling/AppErrorHandlingPolicy.swift` converts that presentation into app UI behavior. Auth, device, token, and page-access errors clear feature messages and drive login/access flows instead of repeated popups or inline banners.
 - ViewModels must consume `AppErrorHandlingPolicy`; `RemotePushBackendError` must not expose UI presentation convenience properties.
+- Backend identity transport calls such as device registration, access-token bootstrap, and APNs token updates must go through `BackendIdentityUseCase`, not direct `AppState` calls to `RemotePushBackendClientProtocol`.
 
 ## Testing Rules
 
