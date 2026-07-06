@@ -103,20 +103,38 @@ final class StudyMateTests: XCTestCase {
             status: 401,
             message: "다시 로그인해 주세요."
         )
+        let loginPresentation = BackendErrorPresentationPolicy.presentation(
+            for: loginError,
+            fallback: "fallback"
+        )
 
         XCTAssertEqual(loginError.userFacingMessage(fallback: "fallback"), "다시 로그인해 주세요.")
         XCTAssertFalse(loginError.shouldShowInlineError)
         XCTAssertFalse(loginError.shouldShowPopup)
+        XCTAssertEqual(loginPresentation.message, "다시 로그인해 주세요.")
+        XCTAssertNil(loginPresentation.inlineMessage)
+        XCTAssertFalse(loginPresentation.shouldShowPopup)
+        XCTAssertTrue(loginPresentation.requiresLogin)
+        XCTAssertTrue(loginPresentation.shouldResetBackendIdentity)
 
         let validationError = Self.backendError(
             code: "RECORD_NOT_FOUND",
             status: 404,
             message: "기록을 찾을 수 없습니다."
         )
+        let validationPresentation = BackendErrorPresentationPolicy.presentation(
+            for: validationError,
+            fallback: "fallback"
+        )
 
         XCTAssertEqual(validationError.userFacingMessage(fallback: "fallback"), "기록을 찾을 수 없습니다.")
         XCTAssertTrue(validationError.shouldShowInlineError)
         XCTAssertTrue(validationError.shouldShowPopup)
+        XCTAssertEqual(validationPresentation.message, "기록을 찾을 수 없습니다.")
+        XCTAssertEqual(validationPresentation.inlineMessage, "기록을 찾을 수 없습니다.")
+        XCTAssertTrue(validationPresentation.shouldShowPopup)
+        XCTAssertFalse(validationPresentation.requiresLogin)
+        XCTAssertFalse(validationPresentation.shouldResetBackendIdentity)
     }
 
     func testPageAccessPolicyCentralizesProtectedTabRules() {
@@ -160,6 +178,17 @@ final class StudyMateTests: XCTestCase {
                 userStatus: "ACTIVE"
             )
         )
+    }
+
+    @MainActor
+    func testRefreshPageAccessUseCaseUsesBackendClientBoundary() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = RefreshPageAccessUseCase(backendClient: backendClient)
+
+        let accessState = try await useCase.execute(registration: backendClient.registration)
+
+        XCTAssertEqual(backendClient.fetchAccessCallCount, 1)
+        XCTAssertEqual(accessState, backendClient.accessState)
     }
 
     func testProfileAvatarOptionsUsePixelCharacterSprites() {

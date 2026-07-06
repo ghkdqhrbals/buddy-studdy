@@ -1,6 +1,47 @@
 import Foundation
 
+struct BackendErrorPresentation: Equatable {
+    var message: String
+    var inlineMessage: String?
+    var shouldShowPopup: Bool
+    var requiresLogin: Bool
+    var isPageAccessDenied: Bool
+    var requiresEmailVerification: Bool
+    var shouldResetBackendIdentity: Bool
+}
+
 enum BackendErrorPresentationPolicy {
+    static func presentation(for error: Error, fallback: String) -> BackendErrorPresentation {
+        if let backendError = error as? RemotePushBackendError {
+            return presentation(for: backendError, fallback: fallback)
+        }
+
+        let message = fallbackMessage(for: error, fallback: fallback)
+        return BackendErrorPresentation(
+            message: message,
+            inlineMessage: message,
+            shouldShowPopup: true,
+            requiresLogin: false,
+            isPageAccessDenied: false,
+            requiresEmailVerification: false,
+            shouldResetBackendIdentity: false
+        )
+    }
+
+    static func presentation(for error: RemotePushBackendError, fallback: String) -> BackendErrorPresentation {
+        let message = userFacingMessage(for: error, fallback: fallback)
+        let shouldShowInlineError = shouldShowInlineError(for: error)
+        return BackendErrorPresentation(
+            message: message,
+            inlineMessage: shouldShowInlineError ? message : nil,
+            shouldShowPopup: shouldShowPopup(for: error),
+            requiresLogin: requiresLogin(error),
+            isPageAccessDenied: isPageAccessDenied(error),
+            requiresEmailVerification: requiresEmailVerification(error),
+            shouldResetBackendIdentity: shouldResetBackendIdentity(after: error)
+        )
+    }
+
     static func isAPIKeyError(_ error: Error) -> Bool {
         guard let backendError = error as? RemotePushBackendError else {
             return false
@@ -140,6 +181,14 @@ enum BackendErrorPresentationPolicy {
         return localized.isEmpty ? fallback : localized
     }
 
+    private static func fallbackMessage(for error: Error, fallback: String) -> String {
+        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !localized.isEmpty else {
+            return fallback
+        }
+        return localized
+    }
+
     private static let suppressedPopupCodes: Set<String> = [
         "AUTH_ACCESS_TOKEN_REQUIRED",
         "AUTH_DEVICE_CREDENTIALS_REQUIRED",
@@ -186,5 +235,9 @@ extension RemotePushBackendError {
 
     func userFacingMessage(fallback: String) -> String {
         BackendErrorPresentationPolicy.userFacingMessage(for: self, fallback: fallback)
+    }
+
+    func presentation(fallback: String) -> BackendErrorPresentation {
+        BackendErrorPresentationPolicy.presentation(for: self, fallback: fallback)
     }
 }

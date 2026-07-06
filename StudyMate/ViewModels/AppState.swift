@@ -474,6 +474,7 @@ final class AppState: ObservableObject {
 
     private let settingsStore: SettingsStore
     private var remotePushBackendClient: RemotePushBackendClientProtocol
+    private var refreshPageAccessUseCase: RefreshPageAccessUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -744,7 +745,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "page-access-\(reason)",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchAccess(registration: recoveredRegistration)
+                    try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
                 }
             )
             backendAccessState = state
@@ -752,7 +753,8 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            if Self.isUnauthorizedBackendError(error) {
+            let presentation = backendErrorPresentation(error, fallback: "")
+            if presentation.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 resetCommunitySignInState()
             }
@@ -792,8 +794,8 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
-        guard let backendError = error as? RemotePushBackendError,
-              backendError.isPageAccessDenied else {
+        let presentation = backendErrorPresentation(error, fallback: "")
+        guard presentation.isPageAccessDenied else {
             return false
         }
 
@@ -856,10 +858,12 @@ final class AppState: ObservableObject {
             return
         }
 
-        remotePushBackendClient = Self.makeRemotePushBackendClient(
+        let backendClient = Self.makeRemotePushBackendClient(
             isDebuggingEnabled: isDebuggingEnabled,
             debugBackendBaseURL: debugBackendBaseURL
         )
+        remotePushBackendClient = backendClient
+        refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1023,11 +1027,13 @@ final class AppState: ObservableObject {
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncService = cloudSyncService
-        self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
-        self.remotePushBackendClient = remotePushBackendClient ?? Self.makeRemotePushBackendClient(
+        let backendClient = remotePushBackendClient ?? Self.makeRemotePushBackendClient(
             isDebuggingEnabled: loadedIsDebuggingEnabled,
             debugBackendBaseURL: loadedDebugBackendBaseURL
         )
+        self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
+        self.remotePushBackendClient = backendClient
+        self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1300,13 +1306,8 @@ final class AppState: ObservableObject {
                 state.applyPage(page, reset: reset)
             }
         } catch {
-            let message: String
-            if let backendError = error as? RemotePushBackendError,
-               backendError.isPageAccessDenied {
-                message = strings.myStudyLoginHelp
-            } else {
-                message = error.localizedDescription
-            }
+            let presentation = backendErrorPresentation(error, fallback: error.localizedDescription)
+            let message = presentation.isPageAccessDenied ? strings.myStudyLoginHelp : presentation.message
             updateNotificationState { state in
                 state.applyError(message)
             }
@@ -2275,7 +2276,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "page-access-\(reason)",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchAccess(registration: recoveredRegistration)
+                    try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
                 }
             )
             backendAccessState = state
@@ -2283,7 +2284,8 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            if Self.isUnauthorizedBackendError(error) {
+            let presentation = backendErrorPresentation(error, fallback: "")
+            if presentation.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 resetCommunitySignInState()
             }
@@ -2459,14 +2461,15 @@ final class AppState: ObservableObject {
             let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
             applyCommunityProfile(profile)
         } catch {
-            if Self.isUnauthorizedBackendError(error) {
+            let presentation = backendErrorPresentation(error, fallback: strings.communityRequestFailed)
+            if presentation.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 communityProfile = nil
                 communityErrorMessage = nil
                 return
             }
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
-            communityErrorMessage = communityErrorMessage(for: error)
+            communityErrorMessage = presentation.inlineMessage
         }
     }
 
@@ -6851,24 +6854,15 @@ final class AppState: ObservableObject {
     }
 
     private func communityErrorMessage(for error: Error) -> String? {
-        if let backendError = error as? RemotePushBackendError,
-           !backendError.shouldShowInlineError {
-            return nil
-        }
-
-        return backendErrorDisplayMessage(error, fallback: strings.communityRequestFailed)
+        backendErrorPresentation(error, fallback: strings.communityRequestFailed).inlineMessage
     }
 
     private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
-        if let backendError = error as? RemotePushBackendError {
-            return backendError.userFacingMessage(fallback: fallback)
-        }
+        backendErrorPresentation(error, fallback: fallback).message
+    }
 
-        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !localized.isEmpty else {
-            return fallback
-        }
-        return localized
+    private func backendErrorPresentation(_ error: Error, fallback: String) -> BackendErrorPresentation {
+        BackendErrorPresentationPolicy.presentation(for: error, fallback: fallback)
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {
