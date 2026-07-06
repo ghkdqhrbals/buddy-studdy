@@ -2620,6 +2620,30 @@ final class AppState: ObservableObject {
         settingsStore.saveCommunityProfileDisplayName(resolvedProfile.displayName)
         settingsStore.saveProfileAvatarSymbolName(resolvedProfile.avatarSymbolName)
         settingsStore.saveProfileAvatarColorSeed(resolvedProfile.avatarColorSeed)
+        applyProfilePageAccess(resolvedProfile)
+    }
+
+    private func applyProfilePageAccess(_ profile: CommunityUserProfile) {
+        let access = profile.pageAccess
+        backendAccessState = BackendAccessState(
+            user: BackendAccessUser(
+                id: Int64(profile.id),
+                status: "ACTIVE",
+                displayName: profile.displayName,
+                createdAt: nil
+            ),
+            pageAccess: BackendPageAccess(
+                home: true,
+                publicQuestions: access.publicQuestions,
+                myStudies: access.studyDetail,
+                studyRoom: access.studyDetail,
+                records: access.records,
+                stats: access.statistics,
+                profile: true,
+                developer: false,
+                admin: false
+            )
+        )
     }
 
     func withdrawCommunityAccount() async {
@@ -6936,12 +6960,7 @@ final class AppState: ObservableObject {
     }
 
     private func presentGlobalErrorPopupIfNeeded(_ message: String?) {
-        let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmedMessage.isEmpty else {
-            return
-        }
-
-        globalErrorPopup = AppErrorPopup(message: trimmedMessage)
+        globalErrorPopup = nil
     }
 
     private func presentGlobalErrorPopupIfNeeded(_ error: Error, fallback: String) {

@@ -593,10 +593,7 @@ private struct MobileHomeView: View {
     private var communityQuestionSection: some View {
         Section {
             if appState.communityQuestions.isEmpty {
-                MobileCommunityEmptyState(
-                    strings: strings,
-                    isRefreshing: isRefreshingCommunityContent || appState.isLoadingCommunityQuestions
-                )
+                MobileCommunityEmptyState(strings: strings)
                     .frame(maxWidth: .infinity, minHeight: 320)
                     .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
                     .listRowSeparator(.hidden)
@@ -2953,15 +2950,9 @@ private struct MobileHomeRefreshIndicator: View {
 
 private struct MobileCommunityEmptyState: View {
     let strings: AppStrings
-    var isRefreshing = false
 
     var body: some View {
         VStack(spacing: 16) {
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.regular)
-            }
-
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundStyle(.secondary)
