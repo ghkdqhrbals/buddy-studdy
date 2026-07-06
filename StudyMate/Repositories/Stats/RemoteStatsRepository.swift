@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct StatsUseCase {
-    private let repository: StatsRepository
+struct RemoteStatsRepository: StatsRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: StatsRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func fetchStats(
@@ -17,7 +17,7 @@ struct StatsUseCase {
         limit: Int,
         offset: Int
     ) async throws -> BackendStats {
-        try await repository.fetchStats(
+        try await backendClient.fetchStats(
             registration: registration,
             period: period,
             startAt: startAt,
@@ -33,7 +33,7 @@ struct StatsUseCase {
         startAt: Date?,
         endAt: Date?
     ) async throws -> BackendStatsActivity {
-        try await repository.fetchStatsActivity(
+        try await backendClient.fetchStatsActivity(
             registration: registration,
             startAt: startAt,
             endAt: endAt

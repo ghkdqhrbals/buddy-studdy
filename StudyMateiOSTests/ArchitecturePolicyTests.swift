@@ -116,6 +116,21 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testStatsUseCaseDependsOnRepositoryBoundary() throws {
+        let root = try repositoryRoot()
+        let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Stats/StatsUseCase.swift")
+        let content = try String(contentsOf: useCaseFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("RemotePushBackendClientProtocol"),
+            "StatsUseCase must depend on StatsRepository instead of the backend transport service."
+        )
+        XCTAssertTrue(
+            content.contains("StatsRepository"),
+            "StatsUseCase should keep backend transport behind a repository boundary."
+        )
+    }
+
     func testAppStateDoesNotAssignRawLocalizedDescriptionToPrimaryErrorMessage() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

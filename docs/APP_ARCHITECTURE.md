@@ -69,6 +69,7 @@ The policy is split into two deterministic steps:
 - Community backend operations must go through `CommunityRepository`. `CommunityUseCase` owns the app workflow contract and must not depend directly on backend transport protocols.
 - Study room backend operations must go through `StudyRoomRepository`. `StudyRoomUseCase` owns study list/create/delete/question workflows and must not depend directly on backend transport protocols.
 - Records backend operations must go through `RecordsRepository`. `RecordsUseCase` owns record list/detail/answer/grade/delete/publicity workflows and must not depend directly on backend transport protocols.
+- Statistics backend operations must go through `StatsRepository`. `StatsUseCase` owns topic stats and activity workflows and must not depend directly on backend transport protocols.
 
 ## Testing Rules
 
