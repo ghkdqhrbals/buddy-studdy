@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct BackendIdentityUseCase {
-    private let repository: IdentityRepository
+struct RemoteIdentityRepository: IdentityRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: IdentityRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func registerDevice(
@@ -14,7 +14,7 @@ struct BackendIdentityUseCase {
         timezone: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
-        try await repository.registerDevice(
+        try await backendClient.registerDevice(
             apnsToken: apnsToken,
             language: language,
             timezone: timezone,
@@ -27,7 +27,7 @@ struct BackendIdentityUseCase {
         apnsToken: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
-        try await repository.updatePushToken(
+        try await backendClient.updatePushToken(
             registration: registration,
             apnsToken: apnsToken,
             apnsEnvironment: apnsEnvironment
@@ -35,6 +35,6 @@ struct BackendIdentityUseCase {
     }
 
     func bootstrapAccessToken(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
-        try await repository.bootstrapAccessToken(registration: registration)
+        try await backendClient.bootstrapAccessToken(registration: registration)
     }
 }
