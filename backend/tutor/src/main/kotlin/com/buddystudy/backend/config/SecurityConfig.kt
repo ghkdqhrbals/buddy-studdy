@@ -8,6 +8,7 @@ import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorEnvelope
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.KotlinModule
@@ -18,6 +19,8 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.MessageSource
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -52,7 +55,12 @@ class SecurityConfig {
     }
 
     @Bean
-    fun securityFilterChain(http: HttpSecurity, bearerTokenFilter: BearerTokenFilter, objectMapper: ObjectMapper): SecurityFilterChain =
+    fun securityFilterChain(
+        http: HttpSecurity,
+        bearerTokenFilter: BearerTokenFilter,
+        objectMapper: ObjectMapper,
+        messageSource: MessageSource,
+    ): SecurityFilterChain =
         http
             .csrf { it.disable() }
             .httpBasic { it.disable() }
@@ -72,7 +80,7 @@ class SecurityConfig {
                         response,
                         HttpStatus.UNAUTHORIZED,
                         ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
-                        "Access token is required.",
+                        messageSource,
                     )
                 }
             }
@@ -86,13 +94,14 @@ class BearerTokenFilter(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val objectMapper: ObjectMapper,
+    private val messageSource: MessageSource,
 ) : OncePerRequestFilter() {
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
         SecurityContextHolder.clearContext()
         try {
             authenticate(request)
             filterChain.doFilter(request, response)
-        } catch (error: ApiException) {
+        } catch (error: ApiRuntimeException) {
             if (AnonymousRoutes.matches(request) || NonApiRoutes.matches(request)) {
                 SecurityContextHolder.clearContext()
                 logIgnoredAuthenticationFailure(request, error)
@@ -103,8 +112,8 @@ class BearerTokenFilter(
                     request,
                     response,
                     error.status,
-                    error.code,
-                    error.message,
+                    error.errorCode,
+                    messageSource,
                     requiredPermissions = error.requiredPermissions,
                     loginRequired = error.loginRequired,
                 )
@@ -197,7 +206,7 @@ private object AnonymousRoutes {
     }
 }
 
-private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiException) {
+private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiRuntimeException) {
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
     securityLog.debug(
         "api_auth_ignored requestId={} clientIp={} method={} path={} status={} code={} message={}",
@@ -206,7 +215,7 @@ private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: 
         request.method,
         request.requestURI,
         error.status.value(),
-        error.code.name,
+        error.errorCode.name,
         error.message,
     )
 }
@@ -217,12 +226,18 @@ private fun writeSecurityError(
     response: HttpServletResponse,
     status: HttpStatus,
     code: ApiErrorCode,
-    message: String,
+    messageSource: MessageSource,
     requiredPermissions: List<String>? = null,
     loginRequired: Boolean? = null,
 ) {
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+    val message = messageSource.getMessage(
+        code.messageKey,
+        null,
+        code.debugDescription,
+        LocaleContextHolder.getLocale(),
+    ) ?: code.debugDescription
     securityLog.warn(
         "api_auth_failed requestId={} clientIp={} method={} path={} status={} code={} message={}",
         requestId,
@@ -240,8 +255,9 @@ private fun writeSecurityError(
         ApiErrorEnvelope(
             ApiError(
                 errorCode = code.name,
-                code = code.code(),
-                description = code.description(),
+                code = code.code,
+                messageKey = code.messageKey,
+                debugDescription = code.debugDescription,
                 message = message,
                 requestId = requestId,
                 status = status.value(),

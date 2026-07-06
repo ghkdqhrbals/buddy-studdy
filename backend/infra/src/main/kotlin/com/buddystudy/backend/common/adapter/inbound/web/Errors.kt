@@ -2,9 +2,11 @@ package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.buddystudy.backend.common.application.error.ApiErrorCode
-import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
+import org.springframework.context.MessageSource
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.MediaType
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -20,7 +22,8 @@ data class ApiErrorEnvelope(val error: ApiError)
 data class ApiError(
     val errorCode: String,
     val code: Int,
-    val description: String,
+    val messageKey: String,
+    val debugDescription: String,
     val message: String,
     val requestId: String,
     val status: Int,
@@ -31,16 +34,18 @@ data class ApiError(
 )
 
 @RestControllerAdvice
-class ErrorHandler {
+class ErrorHandler(
+    private val messageSource: MessageSource,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @ExceptionHandler(ApiException::class)
-    fun api(error: ApiException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
+    @ExceptionHandler(ApiRuntimeException::class)
+    fun api(error: ApiRuntimeException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
         val body = envelope(
-            error.code,
-            error.message,
+            error.errorCode,
             error.status,
             request,
+            debugDescription = error.message,
             requiredPermissions = error.requiredPermissions,
             loginRequired = error.loginRequired,
         )
@@ -51,7 +56,7 @@ class ErrorHandler {
             request.method,
             request.requestURI,
             error.status.value(),
-            error.code.name,
+            error.errorCode.name,
             error.message,
         )
         return json(error.status, body)
@@ -61,21 +66,20 @@ class ErrorHandler {
     fun validation(error: MethodArgumentNotValidException, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
         json(
             HttpStatus.UNPROCESSABLE_ENTITY,
-            envelope(ApiErrorCode.VALIDATION_ERROR, "Invalid request.", HttpStatus.UNPROCESSABLE_ENTITY, request),
+            envelope(ApiErrorCode.VALIDATION_ERROR, HttpStatus.UNPROCESSABLE_ENTITY, request),
         )
 
     @ExceptionHandler(NoResourceFoundException::class, NoHandlerFoundException::class)
     fun notFound(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> =
         json(
             HttpStatus.NOT_FOUND,
-            envelope(ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found.", HttpStatus.NOT_FOUND, request),
+            envelope(ApiErrorCode.RESOURCE_NOT_FOUND, HttpStatus.NOT_FOUND, request),
         )
 
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, request: HttpServletRequest): ResponseEntity<ApiErrorEnvelope> {
         val body = envelope(
             ApiErrorCode.INTERNAL_SERVER_ERROR,
-            "Internal backend error.",
             HttpStatus.INTERNAL_SERVER_ERROR,
             request,
             error.toReason(),
@@ -101,20 +105,27 @@ class ErrorHandler {
 
     private fun envelope(
         code: ApiErrorCode,
-        message: String,
         status: HttpStatus,
         request: HttpServletRequest,
         reason: String? = null,
+        debugDescription: String = code.debugDescription,
         requiredPermissions: List<String>? = null,
         loginRequired: Boolean? = null,
     ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+        val localizedMessage = messageSource.getMessage(
+            code.messageKey,
+            null,
+            code.debugDescription,
+            LocaleContextHolder.getLocale(),
+        ) ?: code.debugDescription
         return ApiErrorEnvelope(
             ApiError(
                 errorCode = code.name,
-                code = code.code(),
-                description = code.description(),
-                message = message,
+                code = code.code,
+                messageKey = code.messageKey,
+                debugDescription = debugDescription,
+                message = localizedMessage,
                 requestId = requestId,
                 status = status.value(),
                 showPopup = code.showPopup,

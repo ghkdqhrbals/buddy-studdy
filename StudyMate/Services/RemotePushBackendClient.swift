@@ -2063,6 +2063,8 @@ struct BackendAPIError: Decodable, Equatable {
     var code: String
     var numericCode: Int?
     var description: String?
+    var messageKey: String?
+    var debugDescription: String?
     var message: String
     var requestID: String?
     var status: Int?
@@ -2074,6 +2076,8 @@ struct BackendAPIError: Decodable, Equatable {
         case code
         case errorCode
         case description
+        case messageKey
+        case debugDescription
         case message
         case requestID = "requestId"
         case status
@@ -2086,6 +2090,8 @@ struct BackendAPIError: Decodable, Equatable {
         code: String,
         numericCode: Int? = nil,
         description: String? = nil,
+        messageKey: String? = nil,
+        debugDescription: String? = nil,
         message: String,
         requestID: String? = nil,
         status: Int? = nil,
@@ -2096,6 +2102,8 @@ struct BackendAPIError: Decodable, Equatable {
         self.code = code
         self.numericCode = numericCode
         self.description = description
+        self.messageKey = messageKey
+        self.debugDescription = debugDescription
         self.message = message
         self.requestID = requestID
         self.status = status
@@ -2113,6 +2121,8 @@ struct BackendAPIError: Decodable, Equatable {
         }
         numericCode = try? container.decodeIfPresent(Int.self, forKey: .code)
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        messageKey = try container.decodeIfPresent(String.self, forKey: .messageKey)
+        debugDescription = try container.decodeIfPresent(String.self, forKey: .debugDescription)
         message = try container.decode(String.self, forKey: .message)
         requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
         status = try container.decodeIfPresent(Int.self, forKey: .status)

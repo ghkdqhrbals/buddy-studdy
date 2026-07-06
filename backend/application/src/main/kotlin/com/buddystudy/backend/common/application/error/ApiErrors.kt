@@ -3,44 +3,59 @@ package com.buddystudy.backend.common.application.error
 import org.springframework.http.HttpStatus
 
 enum class ApiErrorCode(
-    private val description: String,
-    private val code: Int,
+    val status: HttpStatus,
+    val code: Int,
+    val messageKey: String,
+    val debugDescription: String,
     val showPopup: Boolean = true,
 ) {
-    AUTH_ACCESS_TOKEN_REQUIRED("Access token is required.", 100, showPopup = false),
-    AUTH_DEVICE_CREDENTIALS_REQUIRED("Device credentials are required.", 101, showPopup = false),
-    AUTH_DEVICE_MISMATCH("Access token device does not match.", 102, showPopup = false),
-    AUTH_EMAIL_VERIFICATION_REQUIRED("Email verification is required.", 103),
-    AUTH_GOOGLE_REQUIRED("Google login is required.", 104),
-    AUTH_INVALID_ACCESS_TOKEN("Access token is invalid.", 105, showPopup = false),
-    AUTH_INVALID_DEVICE_CREDENTIALS("Device credentials are invalid.", 106, showPopup = false),
-    DEVICE_NOT_FOUND("Device registration was not found.", 107, showPopup = false),
+    AUTH_ACCESS_TOKEN_REQUIRED(HttpStatus.UNAUTHORIZED, 100, "error.auth.access_token_required", "Access token is required.", showPopup = false),
+    AUTH_DEVICE_CREDENTIALS_REQUIRED(HttpStatus.UNAUTHORIZED, 101, "error.auth.device_credentials_required", "Device credentials are required.", showPopup = false),
+    AUTH_DEVICE_MISMATCH(HttpStatus.UNAUTHORIZED, 102, "error.auth.device_mismatch", "Access token device does not match.", showPopup = false),
+    AUTH_EMAIL_VERIFICATION_REQUIRED(HttpStatus.FORBIDDEN, 103, "error.auth.email_verification_required", "Email verification is required."),
+    AUTH_GOOGLE_REQUIRED(HttpStatus.UNAUTHORIZED, 104, "error.auth.google_required", "Google login is required."),
+    AUTH_INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, 105, "error.auth.invalid_access_token", "Access token is invalid.", showPopup = false),
+    AUTH_INVALID_DEVICE_CREDENTIALS(HttpStatus.UNAUTHORIZED, 106, "error.auth.invalid_device_credentials", "Device credentials are invalid.", showPopup = false),
+    DEVICE_NOT_FOUND(HttpStatus.NOT_FOUND, 107, "error.device.not_found", "Device registration was not found.", showPopup = false),
 
-    OPENAI_API_KEY_MISSING("OpenAI API key is missing.", 200),
-    STUDY_SETTINGS_MISSING("Study settings are missing.", 201),
-    OPENAI_API_KEY_INVALID("OpenAI API key is invalid.", 202),
+    OPENAI_API_KEY_MISSING(HttpStatus.BAD_REQUEST, 200, "error.openai.api_key_missing", "OpenAI API key is missing."),
+    STUDY_SETTINGS_MISSING(HttpStatus.NOT_FOUND, 201, "error.study.settings_missing", "Study settings are missing."),
+    OPENAI_API_KEY_INVALID(HttpStatus.BAD_REQUEST, 202, "error.openai.api_key_invalid", "OpenAI API key is invalid."),
 
-    ACCOUNT_FORBIDDEN("Account access is forbidden.", 300),
-    PERMISSION_DENIED("Permission is denied.", 301),
+    ACCOUNT_FORBIDDEN(HttpStatus.FORBIDDEN, 300, "error.account.forbidden", "Account access is forbidden."),
+    PERMISSION_DENIED(HttpStatus.FORBIDDEN, 301, "error.permission.denied", "Permission is denied."),
 
-    RECORD_NOT_FOUND("Record was not found.", 400),
-    RESOURCE_NOT_FOUND("Resource was not found.", 401),
+    RECORD_NOT_FOUND(HttpStatus.NOT_FOUND, 400, "error.record.not_found", "Record was not found."),
+    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, 401, "error.resource.not_found", "Resource was not found."),
 
-    VALIDATION_ERROR("Request validation failed.", 500),
+    VALIDATION_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, 500, "error.validation", "Request validation failed."),
 
-    INTERNAL_SERVER_ERROR("Internal server error.", 900),
-    EMAIL_DELIVERY_FAILED("Email delivery failed.", 901),
+    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
+    EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),
     ;
+}
 
-    fun code(): Int = code
-
-    fun description(): String = description
+open class ApiRuntimeException(
+    val errorCode: ApiErrorCode,
+    override val message: String = errorCode.debugDescription,
+    val statusOverride: HttpStatus? = null,
+    val requiredPermissions: List<String>? = null,
+    val loginRequired: Boolean? = null,
+) : RuntimeException(message) {
+    val status: HttpStatus
+        get() = statusOverride ?: errorCode.status
 }
 
 class ApiException(
-    val status: HttpStatus,
+    status: HttpStatus,
     val code: ApiErrorCode,
     override val message: String,
-    val requiredPermissions: List<String>? = null,
-    val loginRequired: Boolean? = null,
-) : RuntimeException(message)
+    requiredPermissions: List<String>? = null,
+    loginRequired: Boolean? = null,
+) : ApiRuntimeException(
+    errorCode = code,
+    message = message,
+    statusOverride = status,
+    requiredPermissions = requiredPermissions,
+    loginRequired = loginRequired,
+)
