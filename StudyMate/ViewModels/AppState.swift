@@ -4014,21 +4014,21 @@ final class AppState: ObservableObject {
     }
 
     private func isQuestionDue(now: Date) -> Bool {
-        latestQuestionCreatedAt == nil || nextQuestionDueDate(now: now) <= now
+        QuestionSchedulePolicy.isDue(
+            now: now,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            currentQuestion: currentQuestion,
+            studyRecords: studyRecords
+        )
     }
 
     private func nextQuestionDueDate(now: Date) -> Date {
-        let interval = TimeInterval(settings.sanitizedIntervalMinutes * 60)
-        guard let latestQuestionCreatedAt else {
-            return now.addingTimeInterval(interval)
-        }
-
-        return latestQuestionCreatedAt.addingTimeInterval(interval)
-    }
-
-    private var latestQuestionCreatedAt: Date? {
-        let recordDates = studyRecords.map(\.question.createdAt)
-        return ([currentQuestion?.createdAt].compactMap { $0 } + recordDates).max()
+        QuestionSchedulePolicy.nextDueDate(
+            now: now,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            currentQuestion: currentQuestion,
+            studyRecords: studyRecords
+        )
     }
 
     private var hasActiveUngradedCurrentQuestion: Bool {

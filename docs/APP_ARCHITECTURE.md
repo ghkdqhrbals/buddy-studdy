@@ -25,6 +25,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `Core`: Cross-cutting, deterministic policies such as backend error presentation, page access decisions, route decisions, and formatting rules.
 - `StudyRecordIdentityPolicy`: the shared Core policy for question normalization and study-record identity matching. Views and view models should use this policy instead of reaching into persistence services for comparison rules.
 - `OpenAIAPIKeyExtractionPolicy`: the shared Core policy for deterministic OpenAI API key extraction from text.
+- `QuestionSchedulePolicy`: the shared Core policy for scheduled question due-date calculation from the current question and study history.
 
 ## Dependency Rules
 
