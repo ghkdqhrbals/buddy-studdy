@@ -25,6 +25,8 @@
 		110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		110000000000000000000194 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
 		110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
+		110000000000000000000196 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
+		110000000000000000000197 /* RemoteRecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000055 /* RemoteRecordsRepository.swift */; };
 		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -80,6 +82,8 @@
 		120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		120000000000000000000135 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
 		120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
+		120000000000000000000137 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
+		120000000000000000000138 /* RemoteRecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000055 /* RemoteRecordsRepository.swift */; };
 		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -170,6 +174,8 @@
 		11000000000000000000004C /* RemoteCommunityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCommunityRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004F /* StudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000052 /* RemoteStudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStudyRoomRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000054 /* RecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000055 /* RemoteRecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecordsRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* CloudSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncService.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
@@ -367,6 +373,7 @@
 			children = (
 				11000000000000000000004E /* Community */,
 				110000000000000000000053 /* StudyRoom */,
+				110000000000000000000056 /* Records */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -387,6 +394,15 @@
 				110000000000000000000052 /* RemoteStudyRoomRepository.swift */,
 			);
 			path = StudyRoom;
+			sourceTree = "<group>";
+		};
+		110000000000000000000056 /* Records */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000054 /* RecordsRepository.swift */,
+				110000000000000000000055 /* RemoteRecordsRepository.swift */,
+			);
+			path = Records;
 			sourceTree = "<group>";
 		};
 		110000000000000000000032 /* PageAccess */ = {
@@ -746,6 +762,8 @@
 				110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */,
 				110000000000000000000194 /* StudyRoomRepository.swift in Sources */,
 				110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */,
+				110000000000000000000196 /* RecordsRepository.swift in Sources */,
+				110000000000000000000197 /* RemoteRecordsRepository.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 					110000000000000000000186 /* RecordsUseCase.swift in Sources */,
 					11000000000000000000018A /* NotificationsUseCase.swift in Sources */,
@@ -816,6 +834,8 @@
 				120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */,
 				120000000000000000000135 /* StudyRoomRepository.swift in Sources */,
 				120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */,
+				120000000000000000000137 /* RecordsRepository.swift in Sources */,
+				120000000000000000000138 /* RemoteRecordsRepository.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 					120000000000000000000127 /* RecordsUseCase.swift in Sources */,
 					12000000000000000000012B /* NotificationsUseCase.swift in Sources */,

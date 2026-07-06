@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct RecordsUseCase {
-    private let repository: RecordsRepository
+struct RemoteRecordsRepository: RecordsRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: RecordsRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func fetchRecords(
@@ -15,7 +15,7 @@ struct RecordsUseCase {
         query: String,
         language: AppLanguage
     ) async throws -> BackendRecordsPage {
-        try await repository.fetchRecords(
+        try await backendClient.fetchRecords(
             registration: registration,
             limit: limit,
             offset: offset,
@@ -29,7 +29,7 @@ struct RecordsUseCase {
         recordID: String,
         answer: String
     ) async throws -> StudyRecord {
-        try await repository.gradeRecord(registration: registration, recordID: recordID, answer: answer)
+        try await backendClient.gradeRecord(registration: registration, recordID: recordID, answer: answer)
     }
 
     func saveRecordAnswer(
@@ -37,21 +37,21 @@ struct RecordsUseCase {
         recordID: String,
         answer: String
     ) async throws -> StudyRecord {
-        try await repository.saveRecordAnswer(registration: registration, recordID: recordID, answer: answer)
+        try await backendClient.saveRecordAnswer(registration: registration, recordID: recordID, answer: answer)
     }
 
     func skipRecord(
         registration: RemotePushRegistration,
         recordID: String
     ) async throws -> StudyRecord {
-        try await repository.skipRecord(registration: registration, recordID: recordID)
+        try await backendClient.skipRecord(registration: registration, recordID: recordID)
     }
 
     func deleteRecord(
         registration: RemotePushRegistration,
         recordID: String
     ) async throws {
-        try await repository.deleteRecord(registration: registration, recordID: recordID)
+        try await backendClient.deleteRecord(registration: registration, recordID: recordID)
     }
 
     func updateRecordPublicity(
@@ -59,7 +59,7 @@ struct RecordsUseCase {
         recordID: String,
         isPublic: Bool
     ) async throws -> StudyRecord {
-        try await repository.updateRecordPublicity(
+        try await backendClient.updateRecordPublicity(
             registration: registration,
             recordID: recordID,
             isPublic: isPublic
@@ -67,13 +67,13 @@ struct RecordsUseCase {
     }
 
     func clearRecords(registration: RemotePushRegistration) async throws {
-        try await repository.clearRecords(registration: registration)
+        try await backendClient.clearRecords(registration: registration)
     }
 
     func fetchRecord(
         registration: RemotePushRegistration,
         recordID: String
     ) async throws -> StudyRecord {
-        try await repository.fetchRecord(registration: registration, recordID: recordID)
+        try await backendClient.fetchRecord(registration: registration, recordID: recordID)
     }
 }

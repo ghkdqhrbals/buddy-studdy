@@ -1606,6 +1606,7 @@ final class AppState: ObservableObject {
                 log(.info, "백엔드 학습 데이터를 동기화했습니다. studies=\(studyPage.studies.count), pending=\(pendingCount)")
             },
             onFailure: { error in
+                handleAppError(error, fallback: strings.pageAccessRequiresLogin, target: .none)
                 log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
             }
         ) != nil
@@ -2028,9 +2029,8 @@ final class AppState: ObservableObject {
                 if reset {
                     clearCommunityFeedPage()
                 }
-                if userInitiated {
-                    handleCommunityError(error)
-                } else {
+                _ = handleCommunityError(error)
+                if !userInitiated {
                     communityErrorMessage = nil
                 }
                 log(.warning, "공개 질문 로드 실패: \(error.localizedDescription)")

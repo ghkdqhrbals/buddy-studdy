@@ -101,6 +101,21 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testRecordsUseCaseDependsOnRepositoryBoundary() throws {
+        let root = try repositoryRoot()
+        let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Records/RecordsUseCase.swift")
+        let content = try String(contentsOf: useCaseFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("RemotePushBackendClientProtocol"),
+            "RecordsUseCase must depend on RecordsRepository instead of the backend transport service."
+        )
+        XCTAssertTrue(
+            content.contains("RecordsRepository"),
+            "RecordsUseCase should keep backend transport behind a repository boundary."
+        )
+    }
+
     func testAppStateDoesNotAssignRawLocalizedDescriptionToPrimaryErrorMessage() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
@@ -129,6 +144,36 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(resolution.isPageAccessDenied)
         XCTAssertTrue(resolution.shouldResetBackendIdentity)
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
+    }
+
+    func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopupEvenWhenStatusIsForbidden() {
+        let apiError = BackendAPIError(
+            code: "101",
+            numericCode: 101,
+            message: "다시 로그인해 주세요.",
+            status: 403
+        )
+        let error = RemotePushBackendError.httpStatus(403, "", apiError)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "fallback")
+
+        XCTAssertNil(resolution.featureMessage)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertTrue(resolution.requiresLogin)
+        XCTAssertTrue(resolution.isPageAccessDenied)
+        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertTrue(resolution.shouldClearFeatureMessage)
+    }
+
+    func testEmptyBackendStudyPageDecodesAsEmptyList() throws {
+        let data = #"{}"#.data(using: .utf8)!
+
+        let page = try JSONDecoder().decode(BackendStudyPage.self, from: data)
+
+        XCTAssertEqual(page.studies, [])
+        XCTAssertEqual(page.totalCount, 0)
+        XCTAssertEqual(page.limit, 0)
+        XCTAssertEqual(page.offset, 0)
     }
 
     func testValidationBackendErrorsUseServerMessageInline() {

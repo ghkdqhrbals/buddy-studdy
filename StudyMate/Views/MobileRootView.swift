@@ -102,35 +102,23 @@ private struct MobileLoginPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(prompt?.title ?? strings.communityLogin)
-                .font(.title3.weight(.bold))
+        VStack(alignment: .leading, spacing: 12) {
+            Text(prompt?.title ?? strings.pageAccessRequiresLogin)
+                .font(.title3.weight(.semibold))
 
-            VStack(spacing: 10) {
-                Button {
-                    appState.signInToCommunity()
-                } label: {
-                    GoogleSignInButtonLabel(title: strings.signInWithGoogle)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    isShowingEmailSignIn = true
-                } label: {
-                    Text(strings.signInWithEmail)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 12)
-                        .background(Color.secondary.opacity(0.06))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
+            Button {
+                appState.signInToCommunity()
+            } label: {
+                SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
             }
+            .buttonStyle(.plain)
+
+            Button {
+                isShowingEmailSignIn = true
+            } label: {
+                SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
+            }
+            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
         }
@@ -484,42 +472,20 @@ private struct MobileHomeView: View {
 
     private var myStudyLoginSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(strings.myStudyLoginHelp)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 NavigationLink {
                     MobileLoginPage(
                         prompt: PageAccessPrompt(
-                            title: strings.communityLogin,
+                            title: strings.pageAccessRequiresLogin,
                             message: ""
                         )
                     )
                 } label: {
-                    Text(strings.communityLogin)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.accentColor.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    isShowingEmailSignIn = true
-                } label: {
-                    Text(strings.signInWithEmail)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 12)
-                        .background(Color.secondary.opacity(0.06))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
                 }
                 .buttonStyle(.plain)
             }
@@ -849,8 +815,8 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func startHomeRefresh() async {
-        guard homeRefreshTask == nil else {
-            try? await Task.sleep(nanoseconds: 180_000_000)
+        if let homeRefreshTask {
+            await homeRefreshTask.value
             return
         }
 
@@ -867,7 +833,7 @@ private struct MobileHomeView: View {
             await refreshHomeData(for: scope)
         }
 
-        await Task.yield()
+        await homeRefreshTask?.value
     }
 
     @MainActor
@@ -2095,15 +2061,6 @@ private struct MobileProfileSettingsSheet: View {
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
-                            HomeProfileAvatar(
-                                symbolName: ProfileAvatarOption.defaultSymbolName,
-                                displayName: nil,
-                                imageData: nil,
-                                colorSeed: nil,
-                                usesNeutralColor: true,
-                                size: 58
-                            )
-
                             Text(strings.communityLoginHelp)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -2111,24 +2068,14 @@ private struct MobileProfileSettingsSheet: View {
                             Button {
                                 appState.signInToCommunity()
                             } label: {
-                                GoogleSignInButtonLabel(title: strings.signInWithGoogle)
+                                SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
                             }
                             .buttonStyle(.plain)
 
                             Button {
                                 isShowingEmailSignIn = true
                             } label: {
-                                Label(strings.signInWithEmail, systemImage: "envelope.fill")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .padding(.horizontal, 12)
-                                    .background(Color.secondary.opacity(0.06))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                                    }
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
                             }
                             .buttonStyle(.plain)
                         }
@@ -2858,65 +2805,24 @@ private extension Color {
     }
 }
 
-private struct GoogleSignInButtonLabel: View {
+private struct SignInButtonLabel: View {
     var title: String
+    var isPrimary: Bool
 
     var body: some View {
-        HStack(spacing: 10) {
-            GoogleMark()
-                .frame(width: 18, height: 18)
-
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-        }
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
         .padding(.horizontal, 12)
-        .background(Color.secondary.opacity(0.06))
+        .background(isPrimary ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.06))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                .stroke(isPrimary ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.16), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .foregroundStyle(.primary)
-    }
-}
-
-private struct GoogleMark: View {
-    var body: some View {
-        Canvas { context, size in
-            let lineWidth = max(2.4, size.width * 0.16)
-            let radius = min(size.width, size.height) / 2 - lineWidth / 2
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-
-            func arc(_ start: Double, _ end: Double, _ color: Color) {
-                var path = Path()
-                path.addArc(
-                    center: center,
-                    radius: radius,
-                    startAngle: .degrees(start),
-                    endAngle: .degrees(end),
-                    clockwise: false
-                )
-                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            }
-
-            arc(-35, 42, Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255))
-            arc(42, 150, Color(red: 234 / 255, green: 67 / 255, blue: 53 / 255))
-            arc(150, 218, Color(red: 251 / 255, green: 188 / 255, blue: 5 / 255))
-            arc(218, 322, Color(red: 52 / 255, green: 168 / 255, blue: 83 / 255))
-
-            var crossbar = Path()
-            crossbar.move(to: CGPoint(x: center.x, y: center.y))
-            crossbar.addLine(to: CGPoint(x: size.width - lineWidth * 0.4, y: center.y))
-            context.stroke(
-                crossbar,
-                with: .color(Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)),
-                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-            )
-        }
-        .accessibilityHidden(true)
     }
 }
 
