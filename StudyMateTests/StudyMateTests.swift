@@ -191,6 +191,34 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(accessState, backendClient.accessState)
     }
 
+    @MainActor
+    func testStudyRoomUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = StudyRoomUseCase(backendClient: backendClient)
+        let settings = StudySettings()
+        let category = StudyCategory(title: "Message Queue", difficulty: .intermediate)
+
+        _ = try await useCase.createStudy(
+            registration: backendClient.registration,
+            category: category,
+            settings: settings
+        )
+        _ = try await useCase.fetchStudy(
+            registration: backendClient.registration,
+            limit: 500,
+            offset: 0,
+            query: ""
+        )
+        _ = try await useCase.createQuestion(
+            registration: backendClient.registration,
+            studyID: 12
+        )
+
+        XCTAssertEqual(backendClient.createdStudyTopics, ["Message Queue"])
+        XCTAssertEqual(backendClient.fetchStudyCallCount, 1)
+        XCTAssertEqual(backendClient.createQuestionStudyIDs, [12])
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
@@ -4171,7 +4199,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var createdStudyTopics: [String] = []
     var deletedStudyIDs: [Int] = []
     var fetchedStudyPage = BackendStudyPage(studies: [], totalCount: 0, limit: 100, offset: 0, serverTime: Date())
+    var fetchStudyCallCount = 0
     var createQuestionCallCount = 0
+    var createQuestionStudyIDs: [Int] = []
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
     var gradeRecordCallCount = 0
@@ -4322,6 +4352,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         offset: Int,
         query: String
     ) async throws -> BackendStudyPage {
+        fetchStudyCallCount += 1
         BackendStudyPage(
             studies: fetchedStudyPage.studies,
             totalCount: fetchedStudyPage.studies.count,
@@ -4561,6 +4592,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
         createQuestionCallCount += 1
+        createQuestionStudyIDs.append(studyID)
         callEvents.append("createQuestion:\(studyID)")
         if !createQuestionResults.isEmpty {
             return createQuestionResults.removeFirst()
@@ -4568,7 +4600,12 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         if let createQuestionResult {
             return createQuestionResult
         }
-        throw RemotePushBackendError.invalidResponse
+        let category = StudyCategory(title: "Generated", difficulty: .beginner)
+        return StudyRecord(
+            question: QuestionItem(question: "Generated question", hint: nil, category: category),
+            topic: category.title,
+            difficulty: category.difficulty
+        )
     }
 
     func gradeRecord(

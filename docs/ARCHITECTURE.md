@@ -21,6 +21,18 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Main `ObservableObject`.
   - Owns runtime state, drafts, selected tab, backend sync state, pending question limits, and user actions.
   - Coordinates backend API calls, local persistence, notifications, and timers.
+  - Should delegate reusable decision logic to `Core/*` policies and backend action boundaries to `UseCases/*`.
+
+- `Core/`
+  - App-wide pure policies and shared decision rules.
+  - `ErrorHandling/BackendErrorPresentationPolicy.swift` converts backend error codes into UI presentation, login, page-access, and identity-reset decisions.
+  - `PageAccess/PageAccessPolicy.swift` owns tab/page access mapping and provisional access decisions.
+
+- `UseCases/`
+  - Thin application action boundaries around backend capabilities.
+  - `PageAccess/RefreshPageAccessUseCase.swift` fetches backend page access state.
+  - `StudyRoom/StudyRoomUseCase.swift` centralizes study room backend operations such as study fetch/create/delete and backend question creation.
+  - `AppState` may still orchestrate state application and recovery, but it should not grow new direct backend action logic when a use-case boundary exists.
 
 - `Services/SettingsStore.swift`
   - Local persistence facade.

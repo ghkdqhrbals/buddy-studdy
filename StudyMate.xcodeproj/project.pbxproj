@@ -16,6 +16,7 @@
 		110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
+		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		110000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
 		110000000000000000000177 /* StudyRoomStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* StudyRoomStateStore.swift */; };
@@ -55,6 +56,7 @@
 		120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
+		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		120000000000000000000115 /* GoogleOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* GoogleOAuthService.swift */; };
 		120000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
@@ -146,6 +148,7 @@
 		11000000000000000000002C /* BackendErrorPresentationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendErrorPresentationPolicy.swift; sourceTree = "<group>"; };
 		11000000000000000000002E /* PageAccessPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000031 /* RefreshPageAccessUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPageAccessUseCase.swift; sourceTree = "<group>"; };
+		110000000000000000000033 /* StudyRoomUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomUseCase.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -243,6 +246,7 @@
 			isa = PBXGroup;
 			children = (
 				110000000000000000000032 /* PageAccess */,
+				110000000000000000000034 /* StudyRoom */,
 			);
 			path = UseCases;
 			sourceTree = "<group>";
@@ -253,6 +257,14 @@
 				110000000000000000000031 /* RefreshPageAccessUseCase.swift */,
 			);
 			path = PageAccess;
+			sourceTree = "<group>";
+		};
+		110000000000000000000034 /* StudyRoom */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000033 /* StudyRoomUseCase.swift */,
+			);
+			path = StudyRoom;
 			sourceTree = "<group>";
 		};
 		110000000000000000000062 /* Products */ = {
@@ -524,6 +536,7 @@
 				110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */,
 				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
+				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 				110000000000000000000107 /* AppState.swift in Sources */,
 				110000000000000000000177 /* StudyRoomStateStore.swift in Sources */,
 				110000000000000000000178 /* RecordsStateStore.swift in Sources */,
@@ -571,6 +584,7 @@
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
 				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
+				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 				120000000000000000000115 /* GoogleOAuthService.swift in Sources */,
 				120000000000000000000107 /* AppState.swift in Sources */,
 				120000000000000000000119 /* StudyRoomStateStore.swift in Sources */,

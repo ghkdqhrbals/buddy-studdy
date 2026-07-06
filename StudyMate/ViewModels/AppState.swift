@@ -475,6 +475,7 @@ final class AppState: ObservableObject {
     private let settingsStore: SettingsStore
     private var remotePushBackendClient: RemotePushBackendClientProtocol
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase
+    private var studyRoomUseCase: StudyRoomUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -864,6 +865,7 @@ final class AppState: ObservableObject {
         )
         remotePushBackendClient = backendClient
         refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
+        studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1034,6 +1036,7 @@ final class AppState: ObservableObject {
         self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
         self.remotePushBackendClient = backendClient
         self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
+        self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1493,7 +1496,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "state",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchStudy(
+                    try await studyRoomUseCase.fetchStudy(
                         registration: recoveredRegistration,
                         limit: 500,
                         offset: 0,
@@ -1604,7 +1607,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "study-search",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchStudy(
+                    try await studyRoomUseCase.fetchStudy(
                         registration: recoveredRegistration,
                         limit: 100,
                         offset: 0,
@@ -3600,7 +3603,7 @@ final class AppState: ObservableObject {
                     registration: registration,
                     reason: "delete-study-resolve",
                     operation: { recoveredRegistration in
-                        try await remotePushBackendClient.fetchStudy(
+                        try await studyRoomUseCase.fetchStudy(
                             registration: recoveredRegistration,
                             limit: 500,
                             offset: 0,
@@ -3630,7 +3633,7 @@ final class AppState: ObservableObject {
                     registration: registration,
                     reason: "delete-study",
                     operation: { recoveredRegistration in
-                        try await remotePushBackendClient.deleteStudy(registration: recoveredRegistration, studyID: studyID)
+                        try await studyRoomUseCase.deleteStudy(registration: recoveredRegistration, studyID: studyID)
                     }
                 )
                 deletedStudyIDs.insert(studyID)
@@ -3960,7 +3963,7 @@ final class AppState: ObservableObject {
             guard let studyID = await backendStudyID(for: studyCategoryID) else {
                 throw AppStateError.backendStudyMissing
             }
-            let record = try await remotePushBackendClient.createQuestion(
+            let record = try await studyRoomUseCase.createQuestion(
                 registration: registration,
                 studyID: studyID
             )
@@ -5388,7 +5391,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let room = try await remotePushBackendClient.createStudy(
+            let room = try await studyRoomUseCase.createStudy(
                 registration: registration,
                 category: category,
                 settings: settings
