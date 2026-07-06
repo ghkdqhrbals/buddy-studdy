@@ -76,6 +76,7 @@
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
 		110000000000000000000189 /* SettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003C /* SettingsUseCase.swift */; };
+		1100000000000000000001C7 /* DeveloperSettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C3 /* DeveloperSettingsUseCase.swift */; };
 		11000000000000000000018A /* NotificationsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003E /* NotificationsUseCase.swift */; };
 		11000000000000000000018B /* CommunityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* CommunityUseCase.swift */; };
 		110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
@@ -179,6 +180,7 @@
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
 		12000000000000000000012A /* SettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003C /* SettingsUseCase.swift */; };
+		120000000000000000000179 /* DeveloperSettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C3 /* DeveloperSettingsUseCase.swift */; };
 		12000000000000000000012B /* NotificationsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003E /* NotificationsUseCase.swift */; };
 		12000000000000000000012C /* CommunityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* CommunityUseCase.swift */; };
 		120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
@@ -336,6 +338,7 @@
 		110000000000000000000035 /* RecordsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000003A /* StatsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000003C /* SettingsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUseCase.swift; sourceTree = "<group>"; };
+		1100000000000000000000C3 /* DeveloperSettingsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingsUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000003E /* NotificationsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000042 /* CommunityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000009F /* CommunityProfileCacheUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityProfileCacheUseCase.swift; sourceTree = "<group>"; };
@@ -715,6 +718,7 @@
 			isa = PBXGroup;
 			children = (
 				11000000000000000000003C /* SettingsUseCase.swift */,
+				1100000000000000000000C3 /* DeveloperSettingsUseCase.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1084,6 +1088,7 @@
 					11000000000000000000018B /* CommunityUseCase.swift in Sources */,
 					110000000000000000000188 /* StatsUseCase.swift in Sources */,
 					110000000000000000000189 /* SettingsUseCase.swift in Sources */,
+					1100000000000000000001C7 /* DeveloperSettingsUseCase.swift in Sources */,
 					110000000000000000000107 /* AppState.swift in Sources */,
 				110000000000000000000177 /* StudyRoomStateStore.swift in Sources */,
 				110000000000000000000178 /* RecordsStateStore.swift in Sources */,
@@ -1202,6 +1207,7 @@
 					12000000000000000000012C /* CommunityUseCase.swift in Sources */,
 					120000000000000000000129 /* StatsUseCase.swift in Sources */,
 					12000000000000000000012A /* SettingsUseCase.swift in Sources */,
+					120000000000000000000179 /* DeveloperSettingsUseCase.swift in Sources */,
 					120000000000000000000115 /* GoogleOAuthService.swift in Sources */,
 				120000000000000000000107 /* AppState.swift in Sources */,
 				120000000000000000000119 /* StudyRoomStateStore.swift in Sources */,

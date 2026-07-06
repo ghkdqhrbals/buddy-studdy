@@ -381,6 +381,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesDeveloperSettingsThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "developerSettingsRepository.loadDeveloperSettings",
+            "developerSettingsRepository.saveDebugBackendBaseURL",
+            "developerSettingsRepository.saveIsDebuggingEnabled",
+            "resolvedDeveloperSettingsRepository.loadDeveloperSettings",
+            "resolvedDeveloperSettingsRepository.saveDebugBackendBaseURL",
+            "resolvedDeveloperSettingsRepository.saveIsDebuggingEnabled",
+            "private let developerSettingsRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use DeveloperSettingsUseCase for developer/debug settings instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesCurrentStudySessionRepositoryForStoredSessionState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

@@ -449,7 +449,7 @@ final class AppState: ObservableObject {
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
     private let communitySessionUseCase: CommunitySessionUseCase
     private let onboardingStateUseCase: OnboardingStateUseCase
-    private let developerSettingsRepository: DeveloperSettingsRepository
+    private let developerSettingsUseCase: DeveloperSettingsUseCase
     private let currentStudySessionUseCase: CurrentStudySessionUseCase
     private let localStudySettingsRepository: LocalStudySettingsRepository
     private let cloudSyncStateRepository: CloudSyncStateRepository
@@ -999,6 +999,7 @@ final class AppState: ObservableObject {
         onboardingStateRepository: OnboardingStateRepository? = nil,
         onboardingStateUseCase: OnboardingStateUseCase? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
+        developerSettingsUseCase: DeveloperSettingsUseCase? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
         currentStudySessionUseCase: CurrentStudySessionUseCase? = nil,
         localStudySettingsRepository: LocalStudySettingsRepository? = nil,
@@ -1023,6 +1024,8 @@ final class AppState: ObservableObject {
             ?? OnboardingStateUseCase(repository: resolvedOnboardingStateRepository)
         let resolvedDeveloperSettingsRepository = developerSettingsRepository
             ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
+        let resolvedDeveloperSettingsUseCase = developerSettingsUseCase
+            ?? DeveloperSettingsUseCase(repository: resolvedDeveloperSettingsRepository)
         let resolvedCurrentStudySessionRepository = currentStudySessionRepository
             ?? SettingsStoreCurrentStudySessionRepository(settingsStore: settingsStore)
         let resolvedLocalStudySettingsRepository = localStudySettingsRepository
@@ -1052,7 +1055,7 @@ final class AppState: ObservableObject {
         let loadedHasCompletedOnboarding = resolvedOnboardingStateUseCase.hasCompletedOnboarding()
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
-        let loadedDeveloperSettings = resolvedDeveloperSettingsRepository.loadDeveloperSettings()
+        let loadedDeveloperSettings = resolvedDeveloperSettingsUseCase.loadSettings()
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
@@ -1063,7 +1066,7 @@ final class AppState: ObservableObject {
         self.communityProfileCacheUseCase = resolvedCommunityProfileCacheUseCase
         self.communitySessionUseCase = resolvedCommunitySessionUseCase
         self.onboardingStateUseCase = resolvedOnboardingStateUseCase
-        self.developerSettingsRepository = resolvedDeveloperSettingsRepository
+        self.developerSettingsUseCase = resolvedDeveloperSettingsUseCase
         self.currentStudySessionUseCase = currentStudySessionUseCase
             ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
         self.localStudySettingsRepository = resolvedLocalStudySettingsRepository
@@ -3657,7 +3660,7 @@ final class AppState: ObservableObject {
 
         localStudySettingsRepository.saveSettings(sanitizedSettings)
         localStudySettingsRepository.saveAPIKey(trimmedAPIKey)
-        developerSettingsRepository.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
+        developerSettingsUseCase.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
         savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
@@ -4986,7 +4989,7 @@ final class AppState: ObservableObject {
 
     func setDebuggingEnabled(_ isEnabled: Bool) {
         isDebuggingEnabled = isEnabled
-        developerSettingsRepository.saveIsDebuggingEnabled(isEnabled)
+        developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }

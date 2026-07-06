@@ -33,6 +33,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `OnboardingStateRepository`: the local repository boundary for persisted onboarding completion state. View models must not call `SettingsStore` onboarding APIs directly.
 - `OnboardingStateUseCase`: the application boundary for reading and updating onboarding completion state. View models must use this use case instead of calling the onboarding-state repository directly.
 - `DeveloperSettingsRepository`: the local repository boundary for persisted developer/debug runtime settings. View models must not call `SettingsStore` debug-setting APIs directly.
+- `DeveloperSettingsUseCase`: the application boundary for reading and updating developer/debug runtime settings. View models must use this use case instead of calling the developer-settings repository directly.
 - `CurrentStudySessionRepository`: the local repository boundary for the active question, draft answer, grading result, and running state. View models must not call `SettingsStore` current-session APIs directly.
 - `CurrentStudySessionUseCase`: the application boundary for loading and saving the active question, draft answer, grading result, and running state. View models must use this use case instead of calling the current-session repository directly.
 - `LocalStudySettingsRepository`: the local repository boundary for persisted study settings, OpenAI API key state, and local settings mutation metadata. View models must not call `SettingsStore` settings/API-key APIs directly.
@@ -108,6 +109,7 @@ The policy is split into two deterministic steps:
 - Persisted onboarding completion state must go through `OnboardingStateRepository`. `AppState` may gate startup flows with onboarding state, but local storage details stay behind a repository adapter.
 - Persisted onboarding completion reads and writes in `AppState` must go through `OnboardingStateUseCase`. The repository remains the adapter hidden behind that use case.
 - Persisted developer/debug runtime settings must go through `DeveloperSettingsRepository`. `AppState` may recompose runtime backend clients from debug settings, but local storage details stay behind a repository adapter.
+- Persisted developer/debug runtime reads and writes in `AppState` must go through `DeveloperSettingsUseCase`. The repository remains the adapter hidden behind that use case.
 - Persisted current study session state must go through `CurrentStudySessionRepository`. `AppState` may coordinate the active question workflow, but local storage details for current question, answer, grading result, and running state stay behind a repository adapter.
 - Current study session reads and writes in `AppState` must go through `CurrentStudySessionUseCase`. The repository remains the adapter hidden behind that use case.
 - Persisted study settings and OpenAI API key metadata must go through `LocalStudySettingsRepository`. `AppState` may coordinate settings editing and sync conflict resolution, but local storage details for settings, API key, API-key timestamps, and local mutation timestamps stay behind a repository adapter.
