@@ -476,6 +476,7 @@ final class AppState: ObservableObject {
     private var remotePushBackendClient: RemotePushBackendClientProtocol
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase
     private var studyRoomUseCase: StudyRoomUseCase
+    private var recordsUseCase: RecordsUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -866,6 +867,7 @@ final class AppState: ObservableObject {
         remotePushBackendClient = backendClient
         refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
+        recordsUseCase = RecordsUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1037,6 +1039,7 @@ final class AppState: ObservableObject {
         self.remotePushBackendClient = backendClient
         self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
+        self.recordsUseCase = RecordsUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1220,7 +1223,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "records",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchRecords(
+                    try await recordsUseCase.fetchRecords(
                         registration: recoveredRegistration,
                         limit: settings.sanitizedMaxHistoryCount,
                         offset: 0,
@@ -1661,7 +1664,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "record-search",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchRecords(
+                    try await recordsUseCase.fetchRecords(
                         registration: recoveredRegistration,
                         limit: limit ?? settings.sanitizedMaxHistoryCount,
                         offset: 0,
@@ -3474,7 +3477,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+            let updatedRecord = try await recordsUseCase.gradeRecord(
                 registration: registration,
                 recordID: record.id,
                 answer: trimmedAnswer
@@ -4273,7 +4276,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+            let updatedRecord = try await recordsUseCase.gradeRecord(
                 registration: registration,
                 recordID: record.id,
                 answer: trimmedAnswer
@@ -4335,7 +4338,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let updatedRecord = try await remotePushBackendClient.gradeRecord(
+            let updatedRecord = try await recordsUseCase.gradeRecord(
                 registration: registration,
                 recordID: record.id,
                 answer: trimmedAnswer
@@ -4440,7 +4443,7 @@ final class AppState: ObservableObject {
         if let registration = settingsStore.loadRemotePushRegistration() {
             Task {
                 do {
-                    _ = try await remotePushBackendClient.skipRecord(registration: registration, recordID: record.id)
+                    _ = try await recordsUseCase.skipRecord(registration: registration, recordID: record.id)
                     await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
                 } catch {
@@ -4611,14 +4614,14 @@ final class AppState: ObservableObject {
             throw AppStateError.missingRemotePushRegistration
         }
 
-        var record = try await remotePushBackendClient.fetchRecord(
+        var record = try await recordsUseCase.fetchRecord(
             registration: registration,
             recordID: recordID
         )
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedReply.isEmpty, record.gradingResult == nil {
-            record = try await remotePushBackendClient.saveRecordAnswer(
+            record = try await recordsUseCase.saveRecordAnswer(
                 registration: registration,
                 recordID: recordID,
                 answer: trimmedReply
@@ -4913,7 +4916,7 @@ final class AppState: ObservableObject {
                         registration: tokenRegistration,
                         reason: "clear-records",
                         operation: { recoveredRegistration in
-                            try await remotePushBackendClient.clearRecords(registration: recoveredRegistration)
+                            try await recordsUseCase.clearRecords(registration: recoveredRegistration)
                         }
                     )
                     await syncRemotePushScheduleIfPossible(reason: "clear-records")
@@ -4953,7 +4956,7 @@ final class AppState: ObservableObject {
                         registration: tokenRegistration,
                         reason: "delete-record",
                         operation: { recoveredRegistration in
-                            try await remotePushBackendClient.deleteRecord(registration: recoveredRegistration, recordID: record.id)
+                            try await recordsUseCase.deleteRecord(registration: recoveredRegistration, recordID: record.id)
                         }
                     )
                     await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -4994,7 +4997,7 @@ final class AppState: ObservableObject {
                     registration: tokenRegistration,
                     reason: "record-publicity",
                     operation: { recoveredRegistration in
-                        try await remotePushBackendClient.updateRecordPublicity(
+                        try await recordsUseCase.updateRecordPublicity(
                             registration: recoveredRegistration,
                             recordID: record.id,
                             isPublic: isPublic

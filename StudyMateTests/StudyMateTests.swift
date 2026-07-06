@@ -219,6 +219,44 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.createQuestionStudyIDs, [12])
     }
 
+    @MainActor
+    func testRecordsUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = RecordsUseCase(backendClient: backendClient)
+
+        _ = try await useCase.fetchRecords(
+            registration: backendClient.registration,
+            limit: 20,
+            offset: 40,
+            query: "queue",
+            language: .korean
+        )
+        _ = try await useCase.gradeRecord(
+            registration: backendClient.registration,
+            recordID: "record-1",
+            answer: "answer"
+        )
+        _ = try await useCase.saveRecordAnswer(
+            registration: backendClient.registration,
+            recordID: "record-2",
+            answer: "draft"
+        )
+        _ = try await useCase.updateRecordPublicity(
+            registration: backendClient.registration,
+            recordID: "record-3",
+            isPublic: false
+        )
+        try await useCase.deleteRecord(registration: backendClient.registration, recordID: "record-4")
+        try await useCase.clearRecords(registration: backendClient.registration)
+
+        XCTAssertEqual(backendClient.fetchRecordsRequests.map(\.query), ["queue"])
+        XCTAssertEqual(backendClient.gradedAnswers, ["answer"])
+        XCTAssertEqual(backendClient.savedRecordAnswers, ["record-2:draft"])
+        XCTAssertEqual(backendClient.updatedRecordPublicity, ["record-3:false"])
+        XCTAssertEqual(backendClient.deletedRecordIDs, ["record-4"])
+        XCTAssertEqual(backendClient.clearRecordsCallCount, 1)
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
@@ -4204,9 +4242,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var createQuestionStudyIDs: [Int] = []
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
+    var fetchRecordsRequests: [(limit: Int, offset: Int, query: String, language: AppLanguage)] = []
     var gradeRecordCallCount = 0
     var gradedAnswers: [String] = []
     var gradeRecordResult: StudyRecord?
+    var savedRecordAnswers: [String] = []
+    var skippedRecordIDs: [String] = []
+    var deletedRecordIDs: [String] = []
+    var updatedRecordPublicity: [String] = []
+    var clearRecordsCallCount = 0
+    var fetchedRecordIDs: [String] = []
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
     var fetchAccessCallCount = 0
@@ -4369,6 +4414,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         query: String,
         language: AppLanguage
     ) async throws -> BackendRecordsPage {
+        fetchRecordsRequests.append((limit: limit, offset: offset, query: query, language: language))
         BackendRecordsPage(
             records: [],
             totalCount: 0,
@@ -4618,7 +4664,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         if let gradeRecordResult {
             return gradeRecordResult
         }
-        throw RemotePushBackendError.invalidResponse
+        let category = StudyCategory(title: "Graded", difficulty: .beginner)
+        return StudyRecord(
+            id: recordID,
+            question: QuestionItem(question: "Graded question", hint: nil, category: category),
+            answer: answer,
+            gradingResult: GradingResult(score: 80, feedback: "Good", explanation: "Good"),
+            topic: category.title,
+            difficulty: category.difficulty,
+            answeredAt: Date()
+        )
     }
 
     func saveRecordAnswer(
@@ -4626,36 +4681,70 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         recordID: String,
         answer: String
     ) async throws -> StudyRecord {
-        throw RemotePushBackendError.invalidResponse
+        savedRecordAnswers.append("\(recordID):\(answer)")
+        let category = StudyCategory(title: "Saved", difficulty: .beginner)
+        return StudyRecord(
+            id: recordID,
+            question: QuestionItem(question: "Saved question", hint: nil, category: category),
+            answer: answer,
+            topic: category.title,
+            difficulty: category.difficulty
+        )
     }
 
     func skipRecord(
         registration: RemotePushRegistration,
         recordID: String
     ) async throws -> StudyRecord {
-        throw RemotePushBackendError.invalidResponse
+        skippedRecordIDs.append(recordID)
+        let category = StudyCategory(title: "Skipped", difficulty: .beginner)
+        return StudyRecord(
+            id: recordID,
+            question: QuestionItem(question: "Skipped question", hint: nil, category: category),
+            topic: category.title,
+            difficulty: category.difficulty
+        )
     }
 
     func deleteRecord(
         registration: RemotePushRegistration,
         recordID: String
-    ) async throws {}
+    ) async throws {
+        deletedRecordIDs.append(recordID)
+    }
 
     func updateRecordPublicity(
         registration: RemotePushRegistration,
         recordID: String,
         isPublic: Bool
     ) async throws -> StudyRecord {
-        throw RemotePushBackendError.invalidResponse
+        updatedRecordPublicity.append("\(recordID):\(isPublic)")
+        let category = StudyCategory(title: "Publicity", difficulty: .beginner)
+        return StudyRecord(
+            id: recordID,
+            question: QuestionItem(question: "Publicity question", hint: nil, category: category),
+            topic: category.title,
+            difficulty: category.difficulty,
+            isPublic: isPublic
+        )
     }
 
-    func clearRecords(registration: RemotePushRegistration) async throws {}
+    func clearRecords(registration: RemotePushRegistration) async throws {
+        clearRecordsCallCount += 1
+    }
 
     func fetchRecord(
         registration: RemotePushRegistration,
         recordID: String
     ) async throws -> StudyRecord {
-        throw RemotePushBackendError.invalidResponse
+        fetchedRecordIDs.append(recordID)
+        let category = StudyCategory(title: "Fetched", difficulty: .beginner)
+        return StudyRecord(
+            id: recordID,
+            question: QuestionItem(question: "Fetched question", hint: nil, category: category),
+            topic: category.title,
+            difficulty: category.difficulty
+        )
     }
 }
 
