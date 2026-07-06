@@ -4,21 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Performance</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070615" />
+    <link rel="stylesheet" href="/styles.css?v=2026070616" />
   </head>
   <body>
     <div id="app" class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>API Performance</h1>
-          <p>Latency percentiles grouped by API endpoint</p>
+      <aside class="side-nav" aria-label="Monitoring navigation">
+        <div class="side-nav-brand">
+          <span>BuddyStudy</span>
+          <strong>Monitoring</strong>
         </div>
-        <nav class="nav-actions">
+        <nav>
           <a href="/">API Logs</a>
           <a href="/performance.html" aria-current="page">API Performance</a>
           <a href="/grafana/">Grafana</a>
         </nav>
-      </header>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1>API Performance</h1>
+            <p>Latency percentiles grouped by API endpoint</p>
+          </div>
+        </header>
 
       <section class="filters performance-filters" aria-label="Performance filters">
         <label>
@@ -95,6 +103,7 @@
       <template id="emptyTemplate">
         <div class="empty-state">No API requests found for this range.</div>
       </template>
+      </div>
     </div>
 
     <script type="module" src="/performance.js?v=2026070612"></script>

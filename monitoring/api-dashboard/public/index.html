@@ -4,23 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070615" />
+    <link rel="stylesheet" href="/styles.css?v=2026070616" />
   </head>
   <body>
     <div id="app" class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>API Logs</h1>
-          <p>BuddyStudy request traces, payloads, and related backend logs</p>
+      <aside class="side-nav" aria-label="Monitoring navigation">
+        <div class="side-nav-brand">
+          <span>BuddyStudy</span>
+          <strong>Monitoring</strong>
         </div>
-        <nav class="nav-actions">
+        <nav>
           <a href="/" aria-current="page">API Logs</a>
           <a href="/performance.html">API Performance</a>
           <a href="/grafana/">Grafana</a>
         </nav>
-      </header>
+      </aside>
 
-      <section class="filters" aria-label="Log filters">
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1>API Logs</h1>
+            <p>BuddyStudy request traces, payloads, and related backend logs</p>
+          </div>
+        </header>
+
+      <section class="filters log-filters" aria-label="Log filters">
         <div class="time-range-filter">
           <label>
             Time range
@@ -145,6 +153,7 @@
           </div>
         </div>
       </main>
+      </div>
     </div>
 
     <template id="emptyTemplate">
@@ -154,6 +163,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070614"></script>
+    <script type="module" src="/app.js?v=2026070615"></script>
   </body>
 </html>
