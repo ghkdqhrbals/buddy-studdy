@@ -23,6 +23,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `AppPlatformEffectsProvider`: the service boundary for app lifecycle side effects such as background tasks, app badges, external URLs, and platform-owned app removal. View models request the effect instead of calling UIKit/AppKit or process/file APIs directly.
 - `AppNotificationEventProvider`: the service boundary for app-wide notification streams such as backend traffic logs and unauthorized backend events. View models consume typed callbacks instead of subscribing to `NotificationCenter` names and payload keys directly.
 - `ClipboardProvider`: the service boundary for reading pasteboard contents and turning platform clipboard payloads into app-level values.
+- `AppLogRepository`: the repository boundary for persisted, paginated app diagnostics. View models may page and append app logs through this repository, but must not call `SettingsStore` log APIs directly.
 - `Core`: Cross-cutting, deterministic policies such as backend error presentation, page access decisions, route decisions, and formatting rules.
 - `StudyRecordIdentityPolicy`: the shared Core policy for question normalization and study-record identity matching. Views and view models should use this policy instead of reaching into persistence services for comparison rules.
 - `OpenAIAPIKeyExtractionPolicy`: the shared Core policy for deterministic OpenAI API key extraction from text.
@@ -83,6 +84,7 @@ The policy is split into two deterministic steps:
 - Statistics backend operations must go through `StatsRepository`. `StatsUseCase` owns topic stats and activity workflows and must not depend directly on backend transport protocols.
 - Notification backend operations must go through `NotificationsRepository`. `NotificationsUseCase` owns notification list/read/delete workflows and must not depend directly on backend transport protocols.
 - Settings backend operations must go through `SettingsRepository`. `SettingsUseCase` owns backend settings, model options, API-key validation, and schedule sync workflows and must not depend directly on backend transport protocols.
+- Persisted app diagnostics must go through `AppLogRepository`. `AppState` can orchestrate debug-log paging, but local persistence details stay behind a repository adapter.
 
 ## Testing Rules
 

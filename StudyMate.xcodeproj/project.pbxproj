@@ -23,6 +23,8 @@
 		1100000000000000000001AD /* AppNotificationEventProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007E /* AppNotificationEventProvider.swift */; };
 		1100000000000000000001AB /* OpenAIAPIKeyExtractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */; };
 		1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
+		1100000000000000000001AE /* AppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000082 /* AppLogRepository.swift */; };
+		1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -100,6 +102,8 @@
 		12000000000000000000015E /* AppNotificationEventProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007E /* AppNotificationEventProvider.swift */; };
 		12000000000000000000015C /* OpenAIAPIKeyExtractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */; };
 		12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
+		12000000000000000000015F /* AppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000082 /* AppLogRepository.swift */; };
+		120000000000000000000160 /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000202 /* QuestionSchedulePolicyTests.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
@@ -238,6 +242,8 @@
 		11000000000000000000007E /* AppNotificationEventProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNotificationEventProvider.swift; sourceTree = "<group>"; };
 		11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIAPIKeyExtractionPolicy.swift; sourceTree = "<group>"; };
 		11000000000000000000007D /* QuestionSchedulePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionSchedulePolicy.swift; sourceTree = "<group>"; };
+		110000000000000000000082 /* AppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000083 /* SettingsStoreAppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreAppLogRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
@@ -454,8 +460,18 @@
 				11000000000000000000005F /* Settings */,
 				1100000000000000000001A0 /* Identity */,
 				1100000000000000000001A3 /* PageAccess */,
+				110000000000000000000084 /* AppLog */,
 			);
 			path = Repositories;
+			sourceTree = "<group>";
+		};
+		110000000000000000000084 /* AppLog */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000082 /* AppLogRepository.swift */,
+				110000000000000000000083 /* SettingsStoreAppLogRepository.swift */,
+			);
+			path = AppLog;
 			sourceTree = "<group>";
 		};
 		110000000000000000000076 /* Auth */ = {
@@ -950,6 +966,8 @@
 				1100000000000000000001AD /* AppNotificationEventProvider.swift in Sources */,
 				1100000000000000000001AB /* OpenAIAPIKeyExtractionPolicy.swift in Sources */,
 				1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */,
+				1100000000000000000001AE /* AppLogRepository.swift in Sources */,
+				1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */,
 				11000000000000000000010B /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1037,6 +1055,8 @@
 				12000000000000000000015E /* AppNotificationEventProvider.swift in Sources */,
 				12000000000000000000015C /* OpenAIAPIKeyExtractionPolicy.swift in Sources */,
 				12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */,
+				12000000000000000000015F /* AppLogRepository.swift in Sources */,
+				120000000000000000000160 /* SettingsStoreAppLogRepository.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
 					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
 					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,
