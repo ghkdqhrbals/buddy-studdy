@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070609" />
+    <link rel="stylesheet" href="/styles.css?v=2026070610" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -25,6 +25,7 @@
           <label>
             Time range
             <select id="rangeSelect">
+              <option value="300000">Last 5 minutes</option>
               <option value="900000">Last 15 minutes</option>
               <option value="3600000" selected>Last 1 hour</option>
               <option value="21600000">Last 6 hours</option>
@@ -32,7 +33,7 @@
               <option value="custom">Custom</option>
             </select>
           </label>
-          <div id="customRangeFields" class="custom-range-fields" hidden>
+          <div id="customRangeFields" class="custom-range-fields">
             <label>
               From
               <input id="customStartInput" type="datetime-local" step="1" />
@@ -76,25 +77,6 @@
         <button id="refreshButton" type="button">Refresh</button>
       </section>
 
-      <section class="summary-grid" aria-label="API performance summary">
-        <article>
-          <span>Total</span>
-          <strong id="totalCount">-</strong>
-        </article>
-        <article>
-          <span>Errors</span>
-          <strong id="errorCount">-</strong>
-        </article>
-        <article>
-          <span>p95</span>
-          <strong id="p95Latency">-</strong>
-        </article>
-        <article>
-          <span>Slowest</span>
-          <strong id="slowestLatency">-</strong>
-        </article>
-      </section>
-
       <section class="timeline-panel" aria-label="API request timeline">
         <div class="timeline-header">
           <div>
@@ -102,7 +84,7 @@
             <p id="timelineRangeLabel">Drag on the graph to select a time range.</p>
           </div>
           <div class="timeline-actions">
-            <span id="timelineCountLabel">Count - · Peak -</span>
+            <span id="timelineCountLabel">Requests -</span>
             <button id="resetTimelineButton" type="button" disabled>Reset range</button>
           </div>
         </div>
@@ -167,6 +149,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070609"></script>
+    <script type="module" src="/app.js?v=2026070610"></script>
   </body>
 </html>

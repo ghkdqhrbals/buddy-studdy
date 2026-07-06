@@ -97,7 +97,7 @@ select {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1fr) 110px minmax(240px, 1fr) minmax(240px, 1fr) 96px;
+  grid-template-columns: minmax(560px, 1.6fr) 110px 110px minmax(220px, 1fr) minmax(220px, 1fr) 96px;
   gap: 10px;
   align-items: end;
   padding: 14px;
@@ -113,9 +113,10 @@ select {
 
 .time-range-filter {
   display: grid;
-  grid-column: span 2;
+  grid-template-columns: 156px minmax(380px, 1fr);
   gap: 8px;
   align-self: stretch;
+  align-items: end;
 }
 
 .filters label {
@@ -142,14 +143,10 @@ select {
 
 .custom-range-fields {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) 74px;
+  grid-template-columns: minmax(168px, 1fr) minmax(168px, 1fr) 74px;
   gap: 8px;
   align-items: end;
   width: 100%;
-}
-
-.custom-range-fields[hidden] {
-  display: none;
 }
 
 .custom-range-fields label {
@@ -201,7 +198,7 @@ select {
 }
 
 .timeline-panel {
-  margin-bottom: 14px;
+  margin: 14px 0;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   background: rgba(18, 24, 33, 0.78);

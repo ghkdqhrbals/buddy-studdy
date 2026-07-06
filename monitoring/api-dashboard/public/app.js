@@ -4,10 +4,9 @@ import {
   parseApiError,
   parseApiExchange,
   parseRelatedLog,
-  percentile,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070607";
+} from "./logs.js?v=2026070610";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -43,10 +42,6 @@ const els = {
   detailPanel: document.querySelector("#detailPanel"),
   statusMessage: document.querySelector("#statusMessage"),
   rangeLabel: document.querySelector("#rangeLabel"),
-  totalCount: document.querySelector("#totalCount"),
-  errorCount: document.querySelector("#errorCount"),
-  p95Latency: document.querySelector("#p95Latency"),
-  slowestLatency: document.querySelector("#slowestLatency"),
   emptyTemplate: document.querySelector("#emptyTemplate"),
   timelineCanvas: document.querySelector("#timelineCanvas"),
   timelineSelection: document.querySelector("#timelineSelection"),
@@ -193,21 +188,11 @@ function applyFilters() {
 }
 
 function render() {
-  renderSummary();
   renderRangeLabel();
   renderTimeline();
   renderRows();
   renderDetailPanel();
   renderLoadingState();
-}
-
-function renderSummary() {
-  const durations = state.filtered.map((request) => request.durationMs);
-  const slowest = durations.length ? Math.max(...durations) : null;
-  els.totalCount.textContent = String(state.filtered.length);
-  els.errorCount.textContent = String(state.filtered.filter((request) => request.status >= 500).length);
-  els.p95Latency.textContent = percentile(durations, 95) == null ? "-" : durationLabel(percentile(durations, 95));
-  els.slowestLatency.textContent = slowest == null ? "-" : durationLabel(slowest);
 }
 
 function renderRangeLabel() {
@@ -408,7 +393,7 @@ function renderTimeline() {
   const visiblePoints = points.filter((point) => point.count > 0);
   const total = visiblePoints.reduce((sum, point) => sum + point.count, 0);
   const max = Math.max(1, ...visiblePoints.map((point) => point.count));
-  els.timelineCountLabel.textContent = `Count ${total} · Peak ${max}`;
+  els.timelineCountLabel.textContent = `Requests ${total}`;
 
   context.strokeStyle = "#263244";
   context.lineWidth = 1;
@@ -574,14 +559,14 @@ function parseDatetimeLocal(value) {
 
 function syncCustomRangeControls(range, { force = false } = {}) {
   const isCustom = els.rangeSelect.value === "custom" || Boolean(state.selectedRange);
-  els.customRangeFields.hidden = !isCustom;
+  els.customRangeFields.classList.toggle("is-custom", isCustom);
   if (isCustom) {
     els.rangeSelect.value = "custom";
-    const isEditing = document.activeElement === els.customStartInput || document.activeElement === els.customEndInput;
-    if (force || !isEditing) {
-      els.customStartInput.value = formatDatetimeLocal(range.startMs);
-      els.customEndInput.value = formatDatetimeLocal(range.endMs);
-    }
+  }
+  const isEditing = document.activeElement === els.customStartInput || document.activeElement === els.customEndInput;
+  if (force || !isEditing) {
+    els.customStartInput.value = formatDatetimeLocal(range.startMs);
+    els.customEndInput.value = formatDatetimeLocal(range.endMs);
   }
 }
 
