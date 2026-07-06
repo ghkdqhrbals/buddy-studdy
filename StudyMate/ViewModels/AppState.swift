@@ -451,6 +451,7 @@ final class AppState: ObservableObject {
     private let onboardingStateRepository: OnboardingStateRepository
     private let developerSettingsRepository: DeveloperSettingsRepository
     private let currentStudySessionRepository: CurrentStudySessionRepository
+    private let localStudySettingsRepository: LocalStudySettingsRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -993,6 +994,7 @@ final class AppState: ObservableObject {
         onboardingStateRepository: OnboardingStateRepository? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
+        localStudySettingsRepository: LocalStudySettingsRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -1008,7 +1010,10 @@ final class AppState: ObservableObject {
             ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
         let resolvedCurrentStudySessionRepository = currentStudySessionRepository
             ?? SettingsStoreCurrentStudySessionRepository(settingsStore: settingsStore)
-        let loadedSettings = settingsStore.loadSettings()
+        let resolvedLocalStudySettingsRepository = localStudySettingsRepository
+            ?? SettingsStoreLocalStudySettingsRepository(settingsStore: settingsStore)
+        let loadedLocalStudySettings = resolvedLocalStudySettingsRepository.loadLocalStudySettings()
+        let loadedSettings = loadedLocalStudySettings.settings
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
@@ -1018,15 +1023,15 @@ final class AppState: ObservableObject {
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
         if effectiveLoadedSettings != loadedSettings {
-            settingsStore.saveSettings(effectiveLoadedSettings)
+            resolvedLocalStudySettingsRepository.saveSettings(effectiveLoadedSettings)
         }
-        let loadedAPIKey = settingsStore.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        let loadedAPIKeyUpdatedAt = settingsStore.loadOpenAIAPIKeyUpdatedAt()
+        let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
         let loadedLogPage = resolvedAppLogRepository.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedHasCompletedOnboarding = resolvedOnboardingStateRepository.loadHasCompletedOnboarding()
         let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
-        let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
+        let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
         let loadedDeveloperSettings = resolvedDeveloperSettingsRepository.loadDeveloperSettings()
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
@@ -1039,6 +1044,7 @@ final class AppState: ObservableObject {
         self.onboardingStateRepository = resolvedOnboardingStateRepository
         self.developerSettingsRepository = resolvedDeveloperSettingsRepository
         self.currentStudySessionRepository = resolvedCurrentStudySessionRepository
+        self.localStudySettingsRepository = resolvedLocalStudySettingsRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionRepository.loadCurrentStudySession()
@@ -1121,7 +1127,7 @@ final class AppState: ObservableObject {
         }
 
         if loadedAPIKeyUpdatedAt == nil, !loadedAPIKey.isEmpty {
-            settingsStore.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
+            resolvedLocalStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
         }
 
         if !hasCompletedOnboarding {
@@ -1640,7 +1646,7 @@ final class AppState: ObservableObject {
         settings = nextSettings
         savedSettings = nextSettings
         draftSettings = nextSettings
-        settingsStore.saveSettings(nextSettings)
+        localStudySettingsRepository.saveSettings(nextSettings)
     }
 
     private func refreshBackendStudyRoomsFromRecords() {
@@ -2095,10 +2101,11 @@ final class AppState: ObservableObject {
     }
 
     private func reloadPersistedState(restartTimerAfterReload: Bool = true) {
-        let loadedSettings = settingsStore.loadSettings()
+        let loadedLocalStudySettings = localStudySettingsRepository.loadLocalStudySettings()
+        let loadedSettings = loadedLocalStudySettings.settings
         let synchronizedLoadedSettings = synchronizedTopicCategories(for: loadedSettings)
-        let loadedAPIKey = settingsStore.loadAPIKey().trimmingCharacters(in: .whitespacesAndNewlines)
-        let loadedAPIKeyUpdatedAt = settingsStore.loadOpenAIAPIKeyUpdatedAt()
+        let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
 
         settings = synchronizedLoadedSettings
@@ -2128,7 +2135,7 @@ final class AppState: ObservableObject {
         }
 
         if loadedAPIKeyUpdatedAt == nil, !loadedAPIKey.isEmpty {
-            settingsStore.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
+            localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
         }
     }
 
@@ -2258,7 +2265,7 @@ final class AppState: ObservableObject {
                 isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
                 didReceiveCloudStateWhileEditing = false
 
-                settingsStore.saveSettings(normalizedNextSettings)
+                localStudySettingsRepository.saveSettings(normalizedNextSettings)
                 currentStudySessionRepository.saveIsRunning(backendSettings.enabled)
                 log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
             },
@@ -2494,7 +2501,7 @@ final class AppState: ObservableObject {
         if settings.isQuestionPublic || draftSettings.isQuestionPublic {
             settings = settings.withQuestionPrivacy(false)
             draftSettings = draftSettings.withQuestionPrivacy(false)
-            settingsStore.saveSettings(settings)
+            localStudySettingsRepository.saveSettings(settings)
             savedSettings = normalizedSettings(settings)
             Task {
                 await syncRemotePushScheduleIfPossible(reason: "community-logout")
@@ -3635,13 +3642,13 @@ final class AppState: ObservableObject {
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
         if didAPIKeyChange {
             lastAPIKeyUpdatedAt = now
-            settingsStore.saveOpenAIAPIKeyUpdatedAt(now)
-        } else if settingsStore.loadOpenAIAPIKeyUpdatedAt() == nil, !trimmedAPIKey.isEmpty {
+            localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(now)
+        } else if localStudySettingsRepository.loadLocalStudySettings().openAIAPIKeyUpdatedAt == nil, !trimmedAPIKey.isEmpty {
             lastAPIKeyUpdatedAt = now
-            settingsStore.saveOpenAIAPIKeyUpdatedAt(now)
+            localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(now)
         }
         lastLocalSettingsMutationAt = now
-        settingsStore.saveLocalSettingsMutationAt(now)
+        localStudySettingsRepository.saveLocalSettingsMutationAt(now)
 
         settings = sanitizedSettings
         apiKey = trimmedAPIKey
@@ -3651,8 +3658,8 @@ final class AppState: ObservableObject {
         draftDebugBackendBaseURL = normalizedDebugBackendBaseURL
         didReceiveCloudStateWhileEditing = false
 
-        settingsStore.saveSettings(sanitizedSettings)
-        settingsStore.saveAPIKey(trimmedAPIKey)
+        localStudySettingsRepository.saveSettings(sanitizedSettings)
+        localStudySettingsRepository.saveAPIKey(trimmedAPIKey)
         developerSettingsRepository.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
@@ -3749,7 +3756,7 @@ final class AppState: ObservableObject {
 
     func setTimerInterval(_ minutes: Int) {
         settings.intervalMinutes = min(max(minutes, 1), 240)
-        settingsStore.saveSettings(settings)
+        localStudySettingsRepository.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
         reloadStudyRecordsFromStore()
         statusMessage = "질문 간격을 \(settings.intervalMinutes)분으로 설정했습니다."
@@ -3787,7 +3794,7 @@ final class AppState: ObservableObject {
 
     func setAppLanguage(_ language: AppLanguage) {
         updateAppLanguage(language)
-        settingsStore.saveSettings(settings)
+        localStudySettingsRepository.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
         reloadStudyRecordsFromStore()
         StudyNotificationDelegate.shared.register(language: language)
@@ -5706,22 +5713,22 @@ final class AppState: ObservableObject {
                 apiKey = trimmedResolved
                 draftAPIKey = trimmedResolved
                 savedAPIKey = trimmedResolved
-                settingsStore.saveAPIKey(trimmedResolved)
+                localStudySettingsRepository.saveAPIKey(trimmedResolved)
                 lastAPIKeyUpdatedAt = resolvedAPIKey.updatedAt
                 if let updatedAt = resolvedAPIKey.updatedAt {
-                    settingsStore.saveOpenAIAPIKeyUpdatedAt(updatedAt)
+                    localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(updatedAt)
                 } else {
-                    settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                    localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(nil)
                 }
             }
 
             if resolvedAPIKey.key == nil {
-                settingsStore.saveAPIKey("")
+                localStudySettingsRepository.saveAPIKey("")
                 apiKey = ""
                 draftAPIKey = ""
                 savedAPIKey = ""
                 lastAPIKeyUpdatedAt = nil
-                settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(nil)
             }
 
             if errorMessage == strings.apiKeyEmptyDetailed || errorMessage == strings.apiKeyInvalidDetailed {
@@ -6226,15 +6233,15 @@ final class AppState: ObservableObject {
                     apiKey = syncedAPIKey
                     draftAPIKey = syncedAPIKey
                     savedAPIKey = syncedAPIKey
-                    settingsStore.saveAPIKey(syncedAPIKey)
+                    localStudySettingsRepository.saveAPIKey(syncedAPIKey)
                     log(.info, "원격 OpenAI API 키 동기화를 반영해 앱 키를 갱신했습니다.")
                 }
 
                 lastAPIKeyUpdatedAt = resolvedAPIKey.updatedAt
                 if let updatedAt = resolvedAPIKey.updatedAt {
-                    settingsStore.saveOpenAIAPIKeyUpdatedAt(updatedAt)
+                    localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(updatedAt)
                 } else {
-                    settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                    localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(nil)
                 }
 
                 hasAPIKeyError = false
@@ -6243,8 +6250,8 @@ final class AppState: ObservableObject {
                 draftAPIKey = ""
                 savedAPIKey = ""
                 lastAPIKeyUpdatedAt = nil
-                settingsStore.saveAPIKey("")
-                settingsStore.saveOpenAIAPIKeyUpdatedAt(nil)
+                localStudySettingsRepository.saveAPIKey("")
+                localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt(nil)
                 hasAPIKeyError = true
                 log(.warning, "원격 OpenAI API 키가 없어 앱 키를 비웠습니다.")
             }
@@ -6305,7 +6312,7 @@ final class AppState: ObservableObject {
         hasCompletedOnboarding = mergedHasCompletedOnboarding
         isCloudSyncEnabled = preservedCloudSyncEnabled
 
-        settingsStore.saveSettings(effectiveSettings)
+        localStudySettingsRepository.saveSettings(effectiveSettings)
         currentStudySessionRepository.saveQuestion(appliedCurrentQuestion)
         settingsStore.saveQuestionHistory(mergedHistory)
         currentStudySessionRepository.saveLastAnswer(appliedLastAnswer)

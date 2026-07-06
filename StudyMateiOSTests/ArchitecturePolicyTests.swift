@@ -322,6 +322,29 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesLocalStudySettingsRepositoryForStoredSettingsState() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadSettings()",
+            "settingsStore.saveSettings(",
+            "settingsStore.loadAPIKey()",
+            "settingsStore.saveAPIKey(",
+            "settingsStore.loadOpenAIAPIKeyUpdatedAt()",
+            "settingsStore.saveOpenAIAPIKeyUpdatedAt(",
+            "settingsStore.loadLocalSettingsMutationAt()",
+            "settingsStore.saveLocalSettingsMutationAt(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use LocalStudySettingsRepository for stored settings and API key state instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
