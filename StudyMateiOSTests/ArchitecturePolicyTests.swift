@@ -37,6 +37,23 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesBackendErrorPresentationThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "AppErrorHandlingPolicy.",
+            "BackendErrorPresentationPolicy.",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must depend on AppErrorHandlingUseCase for common backend error handling instead of static policies directly: \(violations)"
+        )
+    }
+
     func testAppStateDoesNotCallBackendIdentityTransportDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

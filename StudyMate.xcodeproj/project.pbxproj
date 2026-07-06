@@ -26,6 +26,7 @@
 		1100000000000000000001AE /* AppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000082 /* AppLogRepository.swift */; };
 		1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
 		1100000000000000000001CB /* AppLogUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C8 /* AppLogUseCase.swift */; };
+		1100000000000000000001D0 /* AppErrorHandlingUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D0 /* AppErrorHandlingUseCase.swift */; };
 		1100000000000000000001B0 /* RemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000085 /* RemotePushRegistrationRepository.swift */; };
 		1100000000000000000001B1 /* SettingsStoreRemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000086 /* SettingsStoreRemotePushRegistrationRepository.swift */; };
 		1100000000000000000001B2 /* CommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000087 /* CommunityProfileCacheRepository.swift */; };
@@ -154,6 +155,7 @@
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		120000000000000000000149 /* AppUseCasesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006F /* AppUseCasesProvider.swift */; };
+		1200000000000000000001D0 /* AppErrorHandlingUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D0 /* AppErrorHandlingUseCase.swift */; };
 		12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
 		120000000000000000000174 /* StoredBackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009C /* StoredBackendIdentityUseCase.swift */; };
 		120000000000000000000175 /* CurrentStudySessionUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009D /* CurrentStudySessionUseCase.swift */; };
@@ -321,6 +323,7 @@
 		110000000000000000000082 /* AppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000083 /* SettingsStoreAppLogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreAppLogRepository.swift; sourceTree = "<group>"; };
 		1100000000000000000000C8 /* AppLogUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogUseCase.swift; sourceTree = "<group>"; };
+		1100000000000000000000D0 /* AppErrorHandlingUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppErrorHandlingUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
@@ -487,6 +490,7 @@
 			children = (
 				110000000000000000000046 /* AppUseCases.swift */,
 				11000000000000000000006F /* AppUseCasesProvider.swift */,
+				1100000000000000000000D0 /* AppErrorHandlingUseCase.swift */,
 				11000000000000000000004A /* Auth */,
 				1100000000000000000000C9 /* AppLog */,
 				110000000000000000000048 /* Identity */,
@@ -1081,6 +1085,7 @@
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
 				11000000000000000000018D /* AppUseCases.swift in Sources */,
 				1100000000000000000001A4 /* AppUseCasesProvider.swift in Sources */,
+				1100000000000000000001D0 /* AppErrorHandlingUseCase.swift in Sources */,
 				11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */,
 				1100000000000000000001C2 /* StoredBackendIdentityUseCase.swift in Sources */,
 				1100000000000000000001C3 /* CurrentStudySessionUseCase.swift in Sources */,
@@ -1204,6 +1209,7 @@
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
 				12000000000000000000012E /* AppUseCases.swift in Sources */,
 				120000000000000000000149 /* AppUseCasesProvider.swift in Sources */,
+				1200000000000000000001D0 /* AppErrorHandlingUseCase.swift in Sources */,
 				12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */,
 				120000000000000000000174 /* StoredBackendIdentityUseCase.swift in Sources */,
 				120000000000000000000175 /* CurrentStudySessionUseCase.swift in Sources */,

@@ -454,6 +454,7 @@ final class AppState: ObservableObject {
     private let localStudySettingsUseCase: LocalStudySettingsUseCase
     private let cloudSyncStateUseCase: CloudSyncStateUseCase
     private let localStudyRecordUseCase: LocalStudyRecordUseCase
+    private let appErrorHandlingUseCase: AppErrorHandlingUseCase
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -1009,6 +1010,7 @@ final class AppState: ObservableObject {
         cloudSyncStateUseCase: CloudSyncStateUseCase? = nil,
         localStudyRecordRepository: LocalStudyRecordRepository? = nil,
         localStudyRecordUseCase: LocalStudyRecordUseCase? = nil,
+        appErrorHandlingUseCase: AppErrorHandlingUseCase = AppErrorHandlingUseCase(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -1084,6 +1086,7 @@ final class AppState: ObservableObject {
         self.localStudySettingsUseCase = resolvedLocalStudySettingsUseCase
         self.cloudSyncStateUseCase = resolvedCloudSyncStateUseCase
         self.localStudyRecordUseCase = resolvedLocalStudyRecordUseCase
+        self.appErrorHandlingUseCase = appErrorHandlingUseCase
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
@@ -5249,7 +5252,7 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
-            if Self.shouldResetBackendIdentity(after: error) {
+            if appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) {
                 log(.warning, "저장된 백엔드 identity가 유효하지 않아 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID), error=\(error.localizedDescription)")
                 return await resetBackendIdentityAndRegisterFresh(
                     previousRegistration: registration,
@@ -5269,7 +5272,7 @@ final class AppState: ObservableObject {
         do {
             return try await operation(registration)
         } catch {
-            guard Self.shouldResetBackendIdentity(after: error) else {
+            guard appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) else {
                 throw error
             }
 
@@ -6445,7 +6448,7 @@ final class AppState: ObservableObject {
     }
 
     private func handleOpenAIError(_ error: Error) {
-        if Self.isAPIKeyError(error) {
+        if appErrorHandlingUseCase.isAPIKeyError(error) {
             hasAPIKeyError = true
             errorMessage = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? strings.apiKeyEmptyDetailed
@@ -6689,7 +6692,7 @@ final class AppState: ObservableObject {
     }
 
     private func appErrorResolution(_ error: Error, fallback: String) -> AppErrorHandlingResolution {
-        AppErrorHandlingPolicy.resolve(error, fallback: fallback)
+        appErrorHandlingUseCase.resolve(error, fallback: fallback)
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {
@@ -6698,22 +6701,6 @@ final class AppState: ObservableObject {
 
     private func studyRecord(matching question: QuestionItem?) -> StudyRecord? {
         recordsState.record(matching: question, matches: studyRecordMatches)
-    }
-
-    nonisolated private static func isAPIKeyError(_ error: Error) -> Bool {
-        BackendErrorPresentationPolicy.isAPIKeyError(error)
-    }
-
-    nonisolated private static func isBackendDeviceNotFound(_ error: Error) -> Bool {
-        BackendErrorPresentationPolicy.isBackendDeviceNotFound(error)
-    }
-
-    nonisolated private static func isUnauthorizedBackendError(_ error: Error) -> Bool {
-        BackendErrorPresentationPolicy.isUnauthorizedBackendError(error)
-    }
-
-    nonisolated private static func shouldResetBackendIdentity(after error: Error) -> Bool {
-        BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: error)
     }
 
     nonisolated private static func isCancellationLikeError(_ error: Error) -> Bool {
