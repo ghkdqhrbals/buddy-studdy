@@ -14,10 +14,11 @@ struct AppUseCases {
 
     init(backendClient: RemotePushBackendClientProtocol) {
         let communityRepository = RemoteCommunityRepository(backendClient: backendClient)
+        let studyRoomRepository = RemoteStudyRoomRepository(backendClient: backendClient)
         backendIdentity = BackendIdentityUseCase(backendClient: backendClient)
         googleSignIn = GoogleSignInUseCase()
         refreshPageAccess = RefreshPageAccessUseCase(backendClient: backendClient)
-        studyRoom = StudyRoomUseCase(backendClient: backendClient)
+        studyRoom = StudyRoomUseCase(repository: studyRoomRepository)
         records = RecordsUseCase(backendClient: backendClient)
         notifications = NotificationsUseCase(backendClient: backendClient)
         stats = StatsUseCase(backendClient: backendClient)

@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct StudyRoomUseCase {
-    private let repository: StudyRoomRepository
+struct RemoteStudyRoomRepository: StudyRoomRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: StudyRoomRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func fetchStudy(
@@ -14,7 +14,7 @@ struct StudyRoomUseCase {
         offset: Int,
         query: String
     ) async throws -> BackendStudyPage {
-        try await repository.fetchStudy(
+        try await backendClient.fetchStudy(
             registration: registration,
             limit: limit,
             offset: offset,
@@ -27,7 +27,7 @@ struct StudyRoomUseCase {
         category: StudyCategory,
         settings: StudySettings
     ) async throws -> BackendStudyRoom {
-        try await repository.createStudy(
+        try await backendClient.createStudy(
             registration: registration,
             category: category,
             settings: settings
@@ -38,13 +38,13 @@ struct StudyRoomUseCase {
         registration: RemotePushRegistration,
         studyID: Int
     ) async throws {
-        try await repository.deleteStudy(registration: registration, studyID: studyID)
+        try await backendClient.deleteStudy(registration: registration, studyID: studyID)
     }
 
     func createQuestion(
         registration: RemotePushRegistration,
         studyID: Int
     ) async throws -> StudyRecord {
-        try await repository.createQuestion(registration: registration, studyID: studyID)
+        try await backendClient.createQuestion(registration: registration, studyID: studyID)
     }
 }
