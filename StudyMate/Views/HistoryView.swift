@@ -85,12 +85,12 @@ struct HistoryView: View {
         let displayedVisibleRecords = visibleRecords
 
         VStack(spacing: 0) {
+            MobileRootLargeTitle(strings.tabRecords)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    MobileRootLargeTitle(strings.tabRecords)
-                        .padding(.top, 6)
-                        .padding(.bottom, 8)
-
                     if orderedRecords.isEmpty {
                         ContentUnavailableView(
                             strings.noRecords,

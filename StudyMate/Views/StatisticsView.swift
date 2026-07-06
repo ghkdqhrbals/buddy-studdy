@@ -70,18 +70,19 @@ struct StatisticsView: View {
         let years = activityYearOptions
 
         VStack(spacing: 0) {
+            MobileRootLargeTitle(strings.tabStatistics)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+
+            StatsYearSelector(
+                selectedYear: $selectedActivityYear,
+                years: years,
+                strings: strings
+            )
+            .padding(.bottom, 10)
+
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    MobileRootLargeTitle(strings.tabStatistics)
-                        .padding(.top, 6)
-                        .padding(.bottom, 8)
-
-                    StatsYearSelector(
-                        selectedYear: $selectedActivityYear,
-                        years: years,
-                        strings: strings
-                    )
-
                     if count > 0, let statsErrorMessage = appState.backendStatsErrorMessage {
                         Text(statsErrorMessage)
                             .font(.caption2)
