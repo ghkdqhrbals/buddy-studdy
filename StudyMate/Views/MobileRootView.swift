@@ -196,6 +196,8 @@ private struct MobileHomeView: View {
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
     @State private var searchFocusTask: Task<Void, Never>?
+    @State private var homeRefreshTask: Task<Void, Never>?
+    @State private var refreshingHomeScope: HomeFeedScope?
     @FocusState private var isSearchFocused: Bool
 
     private var strings: AppStrings {
@@ -243,6 +245,18 @@ private struct MobileHomeView: View {
         }
     }
 
+    private var isRefreshingSelectedHomeScope: Bool {
+        refreshingHomeScope == selectedHomeScope && homeRefreshTask != nil
+    }
+
+    private var isRefreshingMyStudyContent: Bool {
+        selectedHomeScope == .my && isRefreshingSelectedHomeScope
+    }
+
+    private var isRefreshingCommunityContent: Bool {
+        selectedHomeScope == .all && isRefreshingSelectedHomeScope
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             List {
@@ -253,7 +267,7 @@ private struct MobileHomeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .refreshable {
-                await refreshHomeData()
+                await startHomeRefresh()
             }
             .searchSafeRefreshControlOffset(offset: 36)
         }
@@ -523,6 +537,13 @@ private struct MobileHomeView: View {
 
     private var myStudySection: some View {
         Section {
+            if isRefreshingMyStudyContent {
+                MobileHomeRefreshIndicator()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, filteredStudyCategories.isEmpty ? 34 : 8)
+                    .listRowSeparator(.hidden)
+            }
+
             if filteredStudyCategories.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(strings.noMatchingTopics)
@@ -579,23 +600,29 @@ private struct MobileHomeView: View {
 
     private var communityQuestionSection: some View {
         Section {
-            if appState.isLoadingCommunityQuestions && appState.communityQuestions.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
-            }
-
-            if appState.communityQuestions.isEmpty && !appState.isLoadingCommunityQuestions {
-                MobileCommunityEmptyState(strings: strings)
+            if appState.communityQuestions.isEmpty {
+                MobileCommunityEmptyState(
+                    strings: strings,
+                    isRefreshing: isRefreshingCommunityContent || appState.isLoadingCommunityQuestions
+                )
                     .frame(maxWidth: .infinity, minHeight: 320)
                     .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
                     .listRowSeparator(.hidden)
             } else {
+                if isRefreshingCommunityContent {
+                    MobileHomeRefreshIndicator()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
+                        .listRowSeparator(.hidden)
+                }
+
                 ForEach(appState.communityQuestions) { question in
                     communityQuestionRow(question)
                 }
 
-                if appState.isLoadingCommunityQuestions && appState.canLoadCommunityQuestions {
+                if appState.isLoadingCommunityQuestions &&
+                    !isRefreshingCommunityContent &&
+                    appState.canLoadCommunityQuestions {
                     HStack {
                         Spacer()
                         ProgressView()
@@ -832,8 +859,28 @@ private struct MobileHomeView: View {
     }
 
     @MainActor
-    private func refreshHomeData() async {
-        switch selectedHomeScope {
+    private func startHomeRefresh() async {
+        guard homeRefreshTask == nil else {
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return
+        }
+
+        let scope = selectedHomeScope
+        refreshingHomeScope = scope
+        homeRefreshTask = Task { @MainActor in
+            await refreshHomeData(for: scope)
+            if refreshingHomeScope == scope {
+                refreshingHomeScope = nil
+            }
+            homeRefreshTask = nil
+        }
+
+        try? await Task.sleep(nanoseconds: 220_000_000)
+    }
+
+    @MainActor
+    private func refreshHomeData(for scope: HomeFeedScope) async {
+        switch scope {
         case .my:
             await appState.refreshVisibleData()
         case .all:
@@ -2903,11 +2950,24 @@ private extension StudyCategory {
     }
 }
 
+private struct MobileHomeRefreshIndicator: View {
+    var body: some View {
+        ProgressView()
+            .controlSize(.regular)
+    }
+}
+
 private struct MobileCommunityEmptyState: View {
     let strings: AppStrings
+    var isRefreshing = false
 
     var body: some View {
         VStack(spacing: 16) {
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.regular)
+            }
+
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundStyle(.secondary)
