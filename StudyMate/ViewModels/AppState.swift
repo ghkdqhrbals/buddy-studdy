@@ -76,6 +76,11 @@ struct PageAccessPrompt: Identifiable, Equatable {
     var message: String
 }
 
+struct AppErrorPopup: Identifiable, Equatable {
+    let id = UUID()
+    var message: String
+}
+
 enum EmailCommunitySignInResult: Equatable {
     case signedIn
     case verificationRequired
@@ -135,7 +140,12 @@ final class AppState: ObservableObject {
     @Published var isValidatingAPIKey = false
     @Published private var developerState = DeveloperStateStore()
     @Published var statusMessage: String?
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet {
+            presentGlobalErrorPopupIfNeeded(errorMessage)
+        }
+    }
+    @Published var globalErrorPopup: AppErrorPopup?
     @Published var notificationLandingMessage: String?
     @Published var selectedTab: AppTab = .study
     @Published var homeStudyRoute: HomeStudyRoute?
@@ -374,6 +384,7 @@ final class AppState: ObservableObject {
             var nextState = communityFeedState
             nextState.errorMessage = newValue
             communityFeedState = nextState
+            presentGlobalErrorPopupIfNeeded(newValue)
         }
     }
 
@@ -429,6 +440,7 @@ final class AppState: ObservableObject {
             var nextState = notificationState
             nextState.errorMessage = newValue
             notificationState = nextState
+            presentGlobalErrorPopupIfNeeded(newValue)
         }
     }
 
@@ -783,6 +795,10 @@ final class AppState: ObservableObject {
 
     func dismissPageAccessPrompt() {
         pageAccessPrompt = nil
+    }
+
+    func dismissGlobalErrorPopup() {
+        globalErrorPopup = nil
     }
 
     func isCurrentCommunityUser(id userID: Int) -> Bool {
@@ -1801,6 +1817,7 @@ final class AppState: ObservableObject {
         var nextState = statsState
         nextState.applyError(message, requestID: requestID)
         statsState = nextState
+        presentGlobalErrorPopupIfNeeded(message)
     }
 
     private func beginBackendStatsActivityRequest() -> UUID {
@@ -1830,6 +1847,7 @@ final class AppState: ObservableObject {
         var nextState = statsState
         nextState.applyActivityError(message, requestID: requestID)
         statsState = nextState
+        presentGlobalErrorPopupIfNeeded(message)
     }
 
     func fetchBackendStats(
@@ -6990,6 +7008,15 @@ final class AppState: ObservableObject {
             return fallback
         }
         return localized
+    }
+
+    private func presentGlobalErrorPopupIfNeeded(_ message: String?) {
+        let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedMessage.isEmpty else {
+            return
+        }
+
+        globalErrorPopup = AppErrorPopup(message: trimmedMessage)
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

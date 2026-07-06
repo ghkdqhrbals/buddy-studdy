@@ -73,6 +73,15 @@ struct MobileRootView: View {
                 }
             }
         }
+        .alert(item: $appState.globalErrorPopup) { popup in
+            Alert(
+                title: Text(strings.errorPopupTitle),
+                message: Text(popup.message),
+                dismissButton: .default(Text(strings.close)) {
+                    appState.dismissGlobalErrorPopup()
+                }
+            )
+        }
     }
 
     private var selectedMobileTab: Binding<AppTab> {

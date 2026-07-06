@@ -1487,6 +1487,8 @@ struct AppStrings {
     var save: String { text("저장", "Save") }
     var saving: String { text("저장 중", "Saving") }
     var cancel: String { text("취소", "Cancel") }
+    var close: String { text("닫기", "Close") }
+    var errorPopupTitle: String { text("문제가 발생했습니다", "Something went wrong") }
     var pasteboardChecking: String { text("클립보드에서 키를 확인 중입니다.", "Checking clipboard for API key.") }
     var saved: String { text("저장됨", "Saved") }
     var done: String { text("완료", "Done") }
