@@ -447,6 +447,7 @@ final class AppState: ObservableObject {
     private let appLogRepository: AppLogRepository
     private let remotePushRegistrationRepository: RemotePushRegistrationRepository
     private let communityProfileCacheRepository: CommunityProfileCacheRepository
+    private let communitySessionRepository: CommunitySessionRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -735,7 +736,7 @@ final class AppState: ObservableObject {
             onSuccess: { state in
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+                communitySessionRepository.saveIsCommunitySignedIn(isCommunitySignedIn)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
@@ -985,6 +986,7 @@ final class AppState: ObservableObject {
         appLogRepository: AppLogRepository? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
+        communitySessionRepository: CommunitySessionRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -992,12 +994,14 @@ final class AppState: ObservableObject {
             ?? SettingsStoreRemotePushRegistrationRepository(settingsStore: settingsStore)
         let resolvedCommunityProfileCacheRepository = communityProfileCacheRepository
             ?? SettingsStoreCommunityProfileCacheRepository(settingsStore: settingsStore)
+        let resolvedCommunitySessionRepository = communitySessionRepository
+            ?? SettingsStoreCommunitySessionRepository(settingsStore: settingsStore)
         let loadedSettings = settingsStore.loadSettings()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
         )
-        let loadedIsCommunitySignedIn = settingsStore.loadIsCommunitySignedIn()
+        let loadedIsCommunitySignedIn = resolvedCommunitySessionRepository.loadIsCommunitySignedIn()
         let effectiveLoadedSettings = loadedIsCommunitySignedIn
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
@@ -1018,6 +1022,7 @@ final class AppState: ObservableObject {
         self.appLogRepository = resolvedAppLogRepository
         self.remotePushRegistrationRepository = resolvedRemotePushRegistrationRepository
         self.communityProfileCacheRepository = resolvedCommunityProfileCacheRepository
+        self.communitySessionRepository = resolvedCommunitySessionRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         self.currentQuestion = settingsStore.loadQuestion()
@@ -2322,7 +2327,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 remotePushRegistrationRepository.saveRemotePushRegistration(result.registration)
                 isCommunitySignedIn = true
-                settingsStore.saveIsCommunitySignedIn(true)
+                communitySessionRepository.saveIsCommunitySignedIn(true)
                 communityErrorMessage = nil
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
@@ -2359,7 +2364,7 @@ final class AppState: ObservableObject {
             onSuccess: { state in
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+                communitySessionRepository.saveIsCommunitySignedIn(isCommunitySignedIn)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
@@ -2420,7 +2425,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 remotePushRegistrationRepository.saveRemotePushRegistration(result.registration)
                 isCommunitySignedIn = true
-                settingsStore.saveIsCommunitySignedIn(true)
+                communitySessionRepository.saveIsCommunitySignedIn(true)
             },
             onFailure: { error in
                 if appErrorResolution(error, fallback: strings.communityRequestFailed).requiresEmailVerification {
@@ -2486,7 +2491,7 @@ final class AppState: ObservableObject {
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
         backendAccessState = .signedOut
-        settingsStore.saveIsCommunitySignedIn(false)
+        communitySessionRepository.saveIsCommunitySignedIn(false)
         communityProfileCacheRepository.saveProfileAvatarSymbolName(profileAvatarSymbolName)
         communityProfileCacheRepository.saveProfileAvatarImageData(nil)
         communityProfileCacheRepository.saveCommunityProfileID(nil)
@@ -5280,7 +5285,7 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         isCommunitySignedIn = false
         communityProfile = nil
-        settingsStore.saveIsCommunitySignedIn(false)
+        communitySessionRepository.saveIsCommunitySignedIn(false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
