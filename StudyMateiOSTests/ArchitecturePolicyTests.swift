@@ -278,6 +278,25 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesDeveloperSettingsRepositoryForStoredDebugSettings() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadIsDebuggingEnabled",
+            "settingsStore.saveIsDebuggingEnabled",
+            "settingsStore.loadDebugBackendBaseURL",
+            "settingsStore.saveDebugBackendBaseURL",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use DeveloperSettingsRepository for stored debug settings instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)

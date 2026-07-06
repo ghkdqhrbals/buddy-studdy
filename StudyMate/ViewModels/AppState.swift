@@ -449,6 +449,7 @@ final class AppState: ObservableObject {
     private let communityProfileCacheRepository: CommunityProfileCacheRepository
     private let communitySessionRepository: CommunitySessionRepository
     private let onboardingStateRepository: OnboardingStateRepository
+    private let developerSettingsRepository: DeveloperSettingsRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -989,6 +990,7 @@ final class AppState: ObservableObject {
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
         communitySessionRepository: CommunitySessionRepository? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
+        developerSettingsRepository: DeveloperSettingsRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -1000,6 +1002,8 @@ final class AppState: ObservableObject {
             ?? SettingsStoreCommunitySessionRepository(settingsStore: settingsStore)
         let resolvedOnboardingStateRepository = onboardingStateRepository
             ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
+        let resolvedDeveloperSettingsRepository = developerSettingsRepository
+            ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
         let loadedSettings = settingsStore.loadSettings()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
@@ -1019,8 +1023,9 @@ final class AppState: ObservableObject {
         let loadedHasCompletedOnboarding = resolvedOnboardingStateRepository.loadHasCompletedOnboarding()
         let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
         let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
-        let loadedIsDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
-        let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(settingsStore.loadDebugBackendBaseURL())
+        let loadedDeveloperSettings = resolvedDeveloperSettingsRepository.loadDeveloperSettings()
+        let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
+        let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
         self.settingsStore = settingsStore
         self.appLogRepository = resolvedAppLogRepository
@@ -1028,6 +1033,7 @@ final class AppState: ObservableObject {
         self.communityProfileCacheRepository = resolvedCommunityProfileCacheRepository
         self.communitySessionRepository = resolvedCommunitySessionRepository
         self.onboardingStateRepository = resolvedOnboardingStateRepository
+        self.developerSettingsRepository = resolvedDeveloperSettingsRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         self.currentQuestion = settingsStore.loadQuestion()
@@ -3639,7 +3645,7 @@ final class AppState: ObservableObject {
 
         settingsStore.saveSettings(sanitizedSettings)
         settingsStore.saveAPIKey(trimmedAPIKey)
-        settingsStore.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
+        developerSettingsRepository.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
         savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
@@ -4952,7 +4958,7 @@ final class AppState: ObservableObject {
 
     func setDebuggingEnabled(_ isEnabled: Bool) {
         isDebuggingEnabled = isEnabled
-        settingsStore.saveIsDebuggingEnabled(isEnabled)
+        developerSettingsRepository.saveIsDebuggingEnabled(isEnabled)
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }

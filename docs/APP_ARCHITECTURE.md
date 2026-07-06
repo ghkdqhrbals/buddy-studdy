@@ -28,6 +28,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `CommunityProfileCacheRepository`: the local repository boundary for cached community profile identity and avatar state. View models must not call `SettingsStore` profile-cache APIs directly.
 - `CommunitySessionRepository`: the local repository boundary for cached community sign-in state. View models must not call `SettingsStore` community-session APIs directly.
 - `OnboardingStateRepository`: the local repository boundary for persisted onboarding completion state. View models must not call `SettingsStore` onboarding APIs directly.
+- `DeveloperSettingsRepository`: the local repository boundary for persisted developer/debug runtime settings. View models must not call `SettingsStore` debug-setting APIs directly.
 - `Core`: Cross-cutting, deterministic policies such as backend error presentation, page access decisions, route decisions, and formatting rules.
 - `StudyRecordIdentityPolicy`: the shared Core policy for question normalization and study-record identity matching. Views and view models should use this policy instead of reaching into persistence services for comparison rules.
 - `OpenAIAPIKeyExtractionPolicy`: the shared Core policy for deterministic OpenAI API key extraction from text.
@@ -93,6 +94,7 @@ The policy is split into two deterministic steps:
 - Cached community profile state must go through `CommunityProfileCacheRepository`. `AppState` may reconcile profile state with backend responses, but user-default keys and trimming behavior stay behind a repository adapter.
 - Cached community sign-in state must go through `CommunitySessionRepository`. `AppState` may change sign-in state as part of login/logout/recovery flows, but local storage details stay behind a repository adapter.
 - Persisted onboarding completion state must go through `OnboardingStateRepository`. `AppState` may gate startup flows with onboarding state, but local storage details stay behind a repository adapter.
+- Persisted developer/debug runtime settings must go through `DeveloperSettingsRepository`. `AppState` may recompose runtime backend clients from debug settings, but local storage details stay behind a repository adapter.
 
 ## Testing Rules
 
