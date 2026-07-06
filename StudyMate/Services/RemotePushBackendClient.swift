@@ -2161,14 +2161,21 @@ struct BackendAPIError: Decodable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if let errorCode = try container.decodeIfPresent(String.self, forKey: .errorCode) {
             code = errorCode
+            numericCode = try? container.decodeIfPresent(Int.self, forKey: .code)
+        } else if let stringCode = try container.decodeIfPresent(String.self, forKey: .code) {
+            code = stringCode
+            numericCode = Int(stringCode)
+        } else if let intCode = try container.decodeIfPresent(Int.self, forKey: .code) {
+            code = String(intCode)
+            numericCode = intCode
         } else {
-            code = try container.decode(String.self, forKey: .code)
+            code = ""
+            numericCode = nil
         }
-        numericCode = try? container.decodeIfPresent(Int.self, forKey: .code)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         messageKey = try container.decodeIfPresent(String.self, forKey: .messageKey)
         debugDescription = try container.decodeIfPresent(String.self, forKey: .debugDescription)
-        message = try container.decode(String.self, forKey: .message)
+        message = try container.decodeIfPresent(String.self, forKey: .message) ?? description ?? ""
         requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
         status = try container.decodeIfPresent(Int.self, forKey: .status)
         requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)

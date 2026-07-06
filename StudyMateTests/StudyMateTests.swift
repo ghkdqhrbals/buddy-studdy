@@ -174,6 +174,71 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
     }
 
+    func testBackendAPIErrorDecodesNumericAndStringCodes() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "error": {
+                "errorCode": "AUTH_INVALID_ACCESS_TOKEN",
+                "code": 101,
+                "message": "다시 로그인해 주세요.",
+                "status": 401
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let response = try JSONDecoder().decode(BackendAPIErrorResponse.self, from: payload)
+
+        XCTAssertEqual(response.error.code, "AUTH_INVALID_ACCESS_TOKEN")
+        XCTAssertEqual(response.error.numericCode, 101)
+        XCTAssertEqual(response.error.message, "다시 로그인해 주세요.")
+    }
+
+    func testBackendAPIErrorDecodesNumericOnlyCodeWithoutPopupNoise() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "error": {
+                "code": 101,
+                "message": "다시 로그인해 주세요.",
+                "status": 401
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let response = try JSONDecoder().decode(BackendAPIErrorResponse.self, from: payload)
+        let error = RemotePushBackendError.httpStatus(401, "", response.error)
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "fallback")
+
+        XCTAssertEqual(response.error.code, "101")
+        XCTAssertEqual(response.error.numericCode, 101)
+        XCTAssertNil(resolution.featureMessage)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertTrue(resolution.requiresLogin)
+        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+    }
+
+    func testBackendAPIErrorUsesDescriptionWhenMessageIsMissing() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "error": {
+                "errorCode": "RECORD_NOT_FOUND",
+                "description": "기록을 찾을 수 없습니다.",
+                "status": 404
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let response = try JSONDecoder().decode(BackendAPIErrorResponse.self, from: payload)
+
+        XCTAssertEqual(response.error.message, "기록을 찾을 수 없습니다.")
+        XCTAssertEqual(response.error.description, "기록을 찾을 수 없습니다.")
+    }
+
     func testPageAccessPolicyCentralizesProtectedTabRules() {
         XCTAssertNil(PageAccessPolicy.protectedPage(for: .home))
         XCTAssertNil(PageAccessPolicy.protectedPage(for: .settings))
@@ -322,6 +387,44 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.fetchStatsRequests.map(\.offset), [20])
         XCTAssertEqual(backendClient.fetchStatsActivityRequests.map(\.startAt), [startAt])
         XCTAssertEqual(backendClient.fetchStatsActivityRequests.map(\.endAt), [endAt])
+    }
+
+    @MainActor
+    func testSettingsUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        backendClient.fetchedSettings = BackendStudySettings(
+            topic: "Redis",
+            difficultyLevel: 5,
+            intervalMinutes: 15,
+            enabled: true,
+            notificationSound: nil,
+            customPrompt: "",
+            appLanguage: "ko",
+            openAIModel: StudySettings.defaultOpenAIModel,
+            maxHistoryCount: 100,
+            isQuestionPublic: false,
+            openAIKeyConfigured: true
+        )
+        let useCase = SettingsUseCase(backendClient: backendClient)
+        var settings = StudySettings()
+        settings.openAIModel = "gpt-4o-mini"
+
+        _ = try await useCase.fetchOpenAIModelOptions()
+        _ = try await useCase.fetchSettings(registration: backendClient.registration)
+        _ = try await useCase.validateAPIKey(registration: backendClient.registration)
+        try await useCase.updateSchedule(
+            registration: backendClient.registration,
+            settings: settings,
+            apiKey: "sk-test",
+            enabled: true
+        )
+
+        XCTAssertEqual(backendClient.fetchOpenAIModelOptionsCallCount, 1)
+        XCTAssertEqual(backendClient.fetchSettingsCallCount, 1)
+        XCTAssertEqual(backendClient.validateCallCount, 1)
+        XCTAssertEqual(backendClient.updateScheduleCallCount, 1)
+        XCTAssertEqual(backendClient.scheduledAPIKeys.last ?? nil, "sk-test")
+        XCTAssertEqual(backendClient.scheduledModels.last, "gpt-4o-mini")
     }
 
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
@@ -4330,6 +4433,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchedRecordIDs: [String] = []
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
+    var fetchOpenAIModelOptionsCallCount = 0
     var fetchAccessCallCount = 0
     var bootstrapAccessTokenCallCount = 0
     var bootstrapAccessTokenError: Error?
@@ -4527,6 +4631,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func fetchOpenAIModelOptions() async throws -> [OpenAIModelOption] {
+        fetchOpenAIModelOptionsCallCount += 1
         [
             OpenAIModelOption(
                 id: StudySettings.defaultOpenAIModel,

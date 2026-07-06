@@ -32,6 +32,12 @@ struct AppErrorPopup: Identifiable, Equatable {
     var message: String
 }
 
+private enum AppErrorMessageTarget: Equatable {
+    case none
+    case community
+    case notification
+}
+
 enum EmailCommunitySignInResult: Equatable {
     case signedIn
     case verificationRequired
@@ -478,6 +484,7 @@ final class AppState: ObservableObject {
     private var studyRoomUseCase: StudyRoomUseCase
     private var recordsUseCase: RecordsUseCase
     private var statsUseCase: StatsUseCase
+    private var settingsUseCase: SettingsUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -756,11 +763,7 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            let resolution = appErrorResolution(error, fallback: "")
-            if resolution.shouldResetBackendIdentity {
-                clearStoredBackendAccessToken()
-                resetCommunitySignInState()
-            }
+            handleAppError(error, fallback: "", target: .none)
             log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
         }
     }
@@ -796,18 +799,72 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
-        let resolution = appErrorResolution(error, fallback: "")
-        guard resolution.isPageAccessDenied else {
-            return false
-        }
+    private func handleAppError(
+        _ error: Error,
+        fallback: String,
+        target: AppErrorMessageTarget,
+        protectedPage: ProtectedAppPage? = nil
+    ) -> Bool {
+        let resolution = appErrorResolution(error, fallback: fallback)
 
         if resolution.shouldResetBackendIdentity {
             clearStoredBackendAccessToken()
             resetCommunitySignInState()
         }
-        redirectToPageAccessGuide(for: page)
-        return true
+
+        if resolution.isPageAccessDenied || resolution.requiresLogin {
+            if let protectedPage {
+                redirectToPageAccessGuide(for: protectedPage)
+            }
+            clearErrorMessage(target)
+            return true
+        }
+
+        if let message = resolution.featureMessage {
+            applyErrorMessage(message, target: target)
+        } else if resolution.shouldClearFeatureMessage {
+            clearErrorMessage(target)
+        }
+
+        if target == .none,
+           resolution.shouldShowPopup,
+           let message = resolution.featureMessage,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            globalErrorPopup = AppErrorPopup(message: message)
+        }
+
+        return false
+    }
+
+    private func applyErrorMessage(_ message: String, target: AppErrorMessageTarget) {
+        switch target {
+        case .none:
+            break
+        case .community:
+            communityErrorMessage = message
+        case .notification:
+            updateNotificationState { state in
+                state.applyError(message)
+            }
+        }
+    }
+
+    private func clearErrorMessage(_ target: AppErrorMessageTarget) {
+        switch target {
+        case .none:
+            break
+        case .community:
+            communityErrorMessage = nil
+        case .notification:
+            updateNotificationState { state in
+                state.applyError(nil)
+            }
+        }
+    }
+
+    @discardableResult
+    private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
+        handleAppError(error, fallback: "", target: .none, protectedPage: page)
     }
 
     var apiKeyValidationMessage: String? {
@@ -874,6 +931,7 @@ final class AppState: ObservableObject {
         studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         recordsUseCase = RecordsUseCase(backendClient: backendClient)
         statsUseCase = StatsUseCase(backendClient: backendClient)
+        settingsUseCase = SettingsUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1047,6 +1105,7 @@ final class AppState: ObservableObject {
         self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         self.recordsUseCase = RecordsUseCase(backendClient: backendClient)
         self.statsUseCase = StatsUseCase(backendClient: backendClient)
+        self.settingsUseCase = SettingsUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1319,20 +1378,7 @@ final class AppState: ObservableObject {
                 state.applyPage(page, reset: reset)
             }
         } catch {
-            let resolution = appErrorResolution(error, fallback: error.localizedDescription)
-            if resolution.shouldResetBackendIdentity {
-                clearStoredBackendAccessToken()
-                resetCommunitySignInState()
-            }
-            if let message = resolution.featureMessage {
-                updateNotificationState { state in
-                    state.applyError(message)
-                }
-            } else if resolution.shouldClearFeatureMessage {
-                updateNotificationState { state in
-                    state.applyError(nil)
-                }
-            }
+            handleAppError(error, fallback: error.localizedDescription, target: .notification)
             log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
         }
     }
@@ -1442,7 +1488,7 @@ final class AppState: ObservableObject {
 
     private func loadOpenAIModelOptions() async {
         do {
-            let fetchedOptions = try await remotePushBackendClient.fetchOpenAIModelOptions()
+            let fetchedOptions = try await settingsUseCase.fetchOpenAIModelOptions()
             let normalized: [OpenAIModelOption] = fetchedOptions.compactMap { option -> OpenAIModelOption? in
                 let id = option.id.trimmingCharacters(in: .whitespacesAndNewlines)
                 let displayName = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1940,7 +1986,7 @@ final class AppState: ObservableObject {
                 clearCommunityFeedPage()
             }
             if userInitiated {
-                communityErrorMessage = communityErrorMessage(for: error)
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             } else {
                 communityErrorMessage = nil
             }
@@ -2113,7 +2159,7 @@ final class AppState: ObservableObject {
                 reason: "startup-api-validation",
                 includeAPIKey: !trimmedAPIKey.isEmpty && !isBackendOpenAIKeyConfigured
             )
-            _ = try await remotePushBackendClient.validateAPIKey(registration: registration)
+            _ = try await settingsUseCase.validateAPIKey(registration: registration)
             hasAPIKeyError = false
             if errorMessage?.contains("API 키") == true {
                 errorMessage = nil
@@ -2166,7 +2212,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let backendSettings = try await remotePushBackendClient.fetchSettings(registration: registration)
+            let backendSettings = try await settingsUseCase.fetchSettings(registration: registration)
 
             guard isEditingSettings else {
                 return
@@ -2248,7 +2294,7 @@ final class AppState: ObservableObject {
                 statusMessage = strings.googleLoginSetupRequired
                 log(.warning, "Google Login 설정이 없습니다.")
             } catch {
-                communityErrorMessage = communityErrorMessage(for: error)
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
                 log(.warning, "Google Login 실패: \(error.localizedDescription)")
             }
             #else
@@ -2275,7 +2321,7 @@ final class AppState: ObservableObject {
             communityErrorMessage = nil
             refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
         }
     }
@@ -2306,11 +2352,7 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            let resolution = appErrorResolution(error, fallback: "")
-            if resolution.shouldResetBackendIdentity {
-                clearStoredBackendAccessToken()
-                resetCommunitySignInState()
-            }
+            handleAppError(error, fallback: "", target: .community)
             log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
         }
 
@@ -2336,7 +2378,7 @@ final class AppState: ObservableObject {
             )
             return true
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
             return false
         }
@@ -2375,7 +2417,7 @@ final class AppState: ObservableObject {
                 log(.info, "Email 로그인에 인증코드가 필요합니다.")
                 return .verificationRequired
             }
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
             return .failed
         }
@@ -2483,15 +2525,12 @@ final class AppState: ObservableObject {
             let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
             applyCommunityProfile(profile)
         } catch {
-            let resolution = appErrorResolution(error, fallback: strings.communityRequestFailed)
-            if resolution.shouldResetBackendIdentity {
-                clearStoredBackendAccessToken()
+            let handled = handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+            if handled {
                 communityProfile = nil
-                communityErrorMessage = nil
                 return
             }
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
-            communityErrorMessage = resolution.featureMessage
         }
     }
 
@@ -2522,7 +2561,7 @@ final class AppState: ObservableObject {
             settingsStore.saveCommunityProfileDisplayName(displayName)
             applyCommunityProfile(profile)
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
         }
     }
@@ -2599,7 +2638,7 @@ final class AppState: ObservableObject {
             settingsStore.saveCommunityProfileDisplayName("")
             statusMessage = strings.accountDeleted
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
         }
     }
@@ -2619,7 +2658,7 @@ final class AppState: ObservableObject {
             )
             statusMessage = strings.reportSubmitted
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
         }
     }
@@ -2649,7 +2688,7 @@ final class AppState: ObservableObject {
             if let previous {
                 updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
             }
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
             return nil
         }
@@ -2669,7 +2708,7 @@ final class AppState: ObservableObject {
                 offset: offset
             )
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
             return nil
         }
@@ -2692,7 +2731,7 @@ final class AppState: ObservableObject {
             }
             return question
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             return nil
         }
@@ -2719,7 +2758,7 @@ final class AppState: ObservableObject {
             }
             return comment
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
             return nil
         }
@@ -2746,7 +2785,7 @@ final class AppState: ObservableObject {
             }
             return true
         } catch {
-            communityErrorMessage = communityErrorMessage(for: error)
+            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
             log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
             return false
         }
@@ -5541,7 +5580,7 @@ final class AppState: ObservableObject {
         let shouldEnableRemotePush = isRunning && hasPushToken && hasRemoteUsableKey
         let shouldUploadAPIKey = !trimmedAPIKey.isEmpty && (includeAPIKey || !isBackendOpenAIKeyConfigured)
         let backendSettings = isCommunitySignedIn ? settings : settings.withQuestionPrivacy(false)
-        try await remotePushBackendClient.updateSchedule(
+        try await settingsUseCase.updateSchedule(
             registration: registration,
             settings: backendSettings,
             apiKey: shouldUploadAPIKey ? trimmedAPIKey : nil,

@@ -95,6 +95,7 @@ enum BackendErrorPresentationPolicy {
                 || code == "AUTH_INVALID_DEVICE_CREDENTIALS"
                 || code == "AUTH_DEVICE_MISMATCH"
                 || code == "DEVICE_NOT_FOUND"
+                || isAuthNumericCode(apiError?.numericCode)
         case .invalidResponse:
             return false
         }
@@ -102,11 +103,11 @@ enum BackendErrorPresentationPolicy {
 
     static func requiresLogin(_ error: RemotePushBackendError) -> Bool {
         switch error {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
-                return false
+        case .httpStatus(let statusCode, _, let apiError):
+            if statusCode == 401 {
+                return true
             }
-            return loginRequiredCodes.contains(code)
+            return apiError.map(requiresLogin) ?? false
         case .invalidResponse:
             return false
         }
@@ -144,11 +145,14 @@ enum BackendErrorPresentationPolicy {
 
     static func shouldShowPopup(for error: RemotePushBackendError) -> Bool {
         switch error {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
+        case .httpStatus(let statusCode, _, let apiError):
+            if statusCode == 401 {
+                return false
+            }
+            guard let apiError else {
                 return true
             }
-            return !suppressedPopupCodes.contains(code)
+            return !suppressesUserMessage(apiError)
         case .invalidResponse:
             return true
         }
@@ -156,11 +160,14 @@ enum BackendErrorPresentationPolicy {
 
     static func shouldShowInlineError(for error: RemotePushBackendError) -> Bool {
         switch error {
-        case .httpStatus(_, _, let apiError):
-            guard let code = apiError?.code else {
+        case .httpStatus(let statusCode, _, let apiError):
+            if statusCode == 401 {
+                return false
+            }
+            guard let apiError else {
                 return true
             }
-            return !suppressedInlineCodes.contains(code)
+            return !suppressesUserMessage(apiError)
         case .invalidResponse:
             return true
         }
@@ -210,6 +217,23 @@ enum BackendErrorPresentationPolicy {
         "DEVICE_NOT_FOUND",
         "PERMISSION_DENIED",
     ]
+
+    private static func requiresLogin(_ apiError: BackendAPIError) -> Bool {
+        loginRequiredCodes.contains(apiError.code) ||
+            isAuthNumericCode(apiError.numericCode)
+    }
+
+    private static func suppressesUserMessage(_ apiError: BackendAPIError) -> Bool {
+        suppressedPopupCodes.contains(apiError.code) ||
+            isAuthNumericCode(apiError.numericCode)
+    }
+
+    private static func isAuthNumericCode(_ code: Int?) -> Bool {
+        guard let code else {
+            return false
+        }
+        return (100..<200).contains(code)
+    }
 }
 
 extension RemotePushBackendError {

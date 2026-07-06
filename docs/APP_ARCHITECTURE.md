@@ -50,7 +50,7 @@ Migration should be done in safe vertical slices:
 Backend errors are normalized once, then consumed by the app:
 
 - Server-provided `message` is the user-facing text when an inline message is appropriate.
-- Auth/device/token errors are not shown as repeated popups or inline banners. They drive login or re-registration flows.
+- Auth/device/token errors are identified from string error codes, HTTP 401, or numeric auth-range codes. They are not shown as repeated popups or inline banners. They drive login or re-registration flows.
 - Validation and resource errors may be shown inline using server text.
 - Debug descriptions remain for logs, not end-user UI.
 
