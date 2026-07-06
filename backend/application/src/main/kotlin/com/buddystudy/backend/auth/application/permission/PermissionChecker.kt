@@ -20,7 +20,6 @@ class PermissionChecker(
                 ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
                 "Access token is required.",
                 requiredPermissions = required,
-                loginRequired = true,
             )
         }
 
@@ -33,7 +32,6 @@ class PermissionChecker(
                 ApiErrorCode.PERMISSION_DENIED,
                 "Permission denied.",
                 requiredPermissions = missing,
-                loginRequired = principal.anonymous,
             )
         }
 
@@ -44,7 +42,6 @@ class PermissionChecker(
                 ApiErrorCode.ACCOUNT_FORBIDDEN,
                 "Account is not allowed to perform this action.",
                 requiredPermissions = required,
-                loginRequired = false,
             )
         }
     }

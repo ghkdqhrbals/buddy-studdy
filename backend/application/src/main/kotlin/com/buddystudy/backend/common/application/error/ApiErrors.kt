@@ -7,16 +7,15 @@ enum class ApiErrorCode(
     val code: Int,
     val messageKey: String,
     val debugDescription: String,
-    val showPopup: Boolean = true,
 ) {
-    AUTH_ACCESS_TOKEN_REQUIRED(HttpStatus.UNAUTHORIZED, 100, "error.auth.access_token_required", "Access token is required.", showPopup = false),
-    AUTH_DEVICE_CREDENTIALS_REQUIRED(HttpStatus.UNAUTHORIZED, 101, "error.auth.device_credentials_required", "Device credentials are required.", showPopup = false),
-    AUTH_DEVICE_MISMATCH(HttpStatus.UNAUTHORIZED, 102, "error.auth.device_mismatch", "Access token device does not match.", showPopup = false),
+    AUTH_ACCESS_TOKEN_REQUIRED(HttpStatus.UNAUTHORIZED, 100, "error.auth.access_token_required", "Access token is required."),
+    AUTH_DEVICE_CREDENTIALS_REQUIRED(HttpStatus.UNAUTHORIZED, 101, "error.auth.device_credentials_required", "Device credentials are required."),
+    AUTH_DEVICE_MISMATCH(HttpStatus.UNAUTHORIZED, 102, "error.auth.device_mismatch", "Access token device does not match."),
     AUTH_EMAIL_VERIFICATION_REQUIRED(HttpStatus.FORBIDDEN, 103, "error.auth.email_verification_required", "Email verification is required."),
     AUTH_GOOGLE_REQUIRED(HttpStatus.UNAUTHORIZED, 104, "error.auth.google_required", "Google login is required."),
-    AUTH_INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, 105, "error.auth.invalid_access_token", "Access token is invalid.", showPopup = false),
-    AUTH_INVALID_DEVICE_CREDENTIALS(HttpStatus.UNAUTHORIZED, 106, "error.auth.invalid_device_credentials", "Device credentials are invalid.", showPopup = false),
-    DEVICE_NOT_FOUND(HttpStatus.NOT_FOUND, 107, "error.device.not_found", "Device registration was not found.", showPopup = false),
+    AUTH_INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, 105, "error.auth.invalid_access_token", "Access token is invalid."),
+    AUTH_INVALID_DEVICE_CREDENTIALS(HttpStatus.UNAUTHORIZED, 106, "error.auth.invalid_device_credentials", "Device credentials are invalid."),
+    DEVICE_NOT_FOUND(HttpStatus.NOT_FOUND, 107, "error.device.not_found", "Device registration was not found."),
 
     OPENAI_API_KEY_MISSING(HttpStatus.BAD_REQUEST, 200, "error.openai.api_key_missing", "OpenAI API key is missing."),
     STUDY_SETTINGS_MISSING(HttpStatus.NOT_FOUND, 201, "error.study.settings_missing", "Study settings are missing."),
@@ -40,7 +39,6 @@ open class ApiRuntimeException(
     override val message: String = errorCode.debugDescription,
     val statusOverride: HttpStatus? = null,
     val requiredPermissions: List<String>? = null,
-    val loginRequired: Boolean? = null,
 ) : RuntimeException(message) {
     val status: HttpStatus
         get() = statusOverride ?: errorCode.status
@@ -51,11 +49,9 @@ class ApiException(
     val code: ApiErrorCode,
     override val message: String,
     requiredPermissions: List<String>? = null,
-    loginRequired: Boolean? = null,
 ) : ApiRuntimeException(
     errorCode = code,
     message = message,
     statusOverride = status,
     requiredPermissions = requiredPermissions,
-    loginRequired = loginRequired,
 )

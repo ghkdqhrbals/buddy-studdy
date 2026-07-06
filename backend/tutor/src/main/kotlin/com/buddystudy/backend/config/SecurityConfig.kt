@@ -115,7 +115,6 @@ class BearerTokenFilter(
                     error.errorCode,
                     messageSource,
                     requiredPermissions = error.requiredPermissions,
-                    loginRequired = error.loginRequired,
                 )
             }
         } finally {
@@ -228,7 +227,6 @@ private fun writeSecurityError(
     code: ApiErrorCode,
     messageSource: MessageSource,
     requiredPermissions: List<String>? = null,
-    loginRequired: Boolean? = null,
 ) {
     if (response.isCommitted) return
     val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
@@ -261,9 +259,7 @@ private fun writeSecurityError(
                 message = message,
                 requestId = requestId,
                 status = status.value(),
-                showPopup = code.showPopup,
                 requiredPermissions = requiredPermissions,
-                loginRequired = loginRequired,
             )
         ),
     )

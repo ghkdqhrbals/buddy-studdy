@@ -45,10 +45,11 @@ class ErrorHandlerTest {
         assertThat(json["error"]["code"].asInt()).isEqualTo(ApiErrorCode.INTERNAL_SERVER_ERROR.code)
         assertThat(json["error"]["messageKey"].asText()).isEqualTo(ApiErrorCode.INTERNAL_SERVER_ERROR.messageKey)
         assertThat(json["error"]["debugDescription"].asText()).isEqualTo(ApiErrorCode.INTERNAL_SERVER_ERROR.debugDescription)
-        assertThat(json["error"]["showPopup"].asBoolean()).isEqualTo(ApiErrorCode.INTERNAL_SERVER_ERROR.showPopup)
         assertThat(json["error"]["message"].asText()).isEqualTo("Internal backend error.")
         assertThat(json["error"]["requestId"].asText()).isEqualTo("req-1")
         assertThat(json["error"]["reason"].asText()).isEqualTo("IllegalStateException: database unavailable")
+        assertThat(json["error"].has("showPopup")).isFalse()
+        assertThat(json["error"].has("loginRequired")).isFalse()
     }
 
     @Test
@@ -90,8 +91,9 @@ class ErrorHandlerTest {
         assertThat(serialized).contains("\"messageKey\":\"${ApiErrorCode.RECORD_NOT_FOUND.messageKey}\"")
         assertThat(serialized).contains("\"debugDescription\":\"${ApiErrorCode.RECORD_NOT_FOUND.debugDescription}\"")
         assertThat(serialized).contains("\"message\":\"기록을 찾을 수 없습니다.\"")
-        assertThat(serialized).contains("\"showPopup\":${ApiErrorCode.RECORD_NOT_FOUND.showPopup}")
         assertThat(serialized).doesNotContain("reason")
+        assertThat(serialized).doesNotContain("showPopup")
+        assertThat(serialized).doesNotContain("loginRequired")
     }
 
     @Test

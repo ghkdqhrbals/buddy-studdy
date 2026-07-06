@@ -213,7 +213,8 @@ class SecurityIntegrationTest {
         assertThat(response.body()).contains("PERMISSION_DENIED")
         assertThat(response.body()).contains("study:read")
         assertThat(response.body()).contains("study:create")
-        assertThat(response.body()).contains("\"loginRequired\":true")
+        assertThat(response.body()).doesNotContain("loginRequired")
+        assertThat(response.body()).doesNotContain("showPopup")
     }
 
     private fun get(path: String, bearerToken: String? = null): HttpResponse<String> {

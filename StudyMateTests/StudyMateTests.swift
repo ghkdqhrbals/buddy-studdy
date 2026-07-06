@@ -86,6 +86,17 @@ final class StudyMateTests: XCTestCase {
         XCTAssertTrue(error.isPageAccessDenied)
     }
 
+    func testBackendErrorUIPolicyIsComputedFromErrorCode() {
+        XCTAssertFalse(Self.backendError(code: "DEVICE_NOT_FOUND", status: 404).shouldShowPopup)
+        XCTAssertTrue(Self.backendError(code: "DEVICE_NOT_FOUND", status: 404).requiresLogin)
+        XCTAssertTrue(Self.backendError(code: "DEVICE_NOT_FOUND", status: 404).isPageAccessDenied)
+        XCTAssertFalse(Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401).shouldShowPopup)
+        XCTAssertTrue(Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401).requiresLogin)
+        XCTAssertTrue(Self.backendError(code: "RECORD_NOT_FOUND", status: 404).shouldShowPopup)
+        XCTAssertFalse(Self.backendError(code: "RECORD_NOT_FOUND", status: 404).requiresLogin)
+        XCTAssertFalse(Self.backendError(code: "RECORD_NOT_FOUND", status: 404).isPageAccessDenied)
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")

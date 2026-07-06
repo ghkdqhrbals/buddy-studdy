@@ -2068,9 +2068,7 @@ struct BackendAPIError: Decodable, Equatable {
     var message: String
     var requestID: String?
     var status: Int?
-    var showPopup: Bool?
     var requiredPermissions: [String]?
-    var loginRequired: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case code
@@ -2081,9 +2079,7 @@ struct BackendAPIError: Decodable, Equatable {
         case message
         case requestID = "requestId"
         case status
-        case showPopup
         case requiredPermissions
-        case loginRequired
     }
 
     init(
@@ -2095,9 +2091,7 @@ struct BackendAPIError: Decodable, Equatable {
         message: String,
         requestID: String? = nil,
         status: Int? = nil,
-        showPopup: Bool? = nil,
-        requiredPermissions: [String]? = nil,
-        loginRequired: Bool? = nil
+        requiredPermissions: [String]? = nil
     ) {
         self.code = code
         self.numericCode = numericCode
@@ -2107,9 +2101,7 @@ struct BackendAPIError: Decodable, Equatable {
         self.message = message
         self.requestID = requestID
         self.status = status
-        self.showPopup = showPopup
         self.requiredPermissions = requiredPermissions
-        self.loginRequired = loginRequired
     }
 
     init(from decoder: Decoder) throws {
@@ -2126,9 +2118,7 @@ struct BackendAPIError: Decodable, Equatable {
         message = try container.decode(String.self, forKey: .message)
         requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
         status = try container.decodeIfPresent(Int.self, forKey: .status)
-        showPopup = try container.decodeIfPresent(Bool.self, forKey: .showPopup)
         requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)
-        loginRequired = try container.decodeIfPresent(Bool.self, forKey: .loginRequired)
     }
 }
 
@@ -2177,9 +2167,24 @@ enum RemotePushBackendError: LocalizedError {
     var shouldShowPopup: Bool {
         switch self {
         case .httpStatus(_, _, let apiError):
-            return apiError?.showPopup ?? true
+            guard let code = apiError?.code else {
+                return true
+            }
+            return !Self.suppressedPopupCodes.contains(code)
         case .invalidResponse:
             return true
+        }
+    }
+
+    var requiresLogin: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            guard let code = apiError?.code else {
+                return false
+            }
+            return Self.loginRequiredCodes.contains(code)
+        case .invalidResponse:
+            return false
         }
     }
 
@@ -2187,12 +2192,9 @@ enum RemotePushBackendError: LocalizedError {
         switch self {
         case .httpStatus(let statusCode, _, let apiError):
             return statusCode == 401
+                || requiresLogin
                 || apiError?.code == "PAGE_ACCESS_DENIED"
-                || apiError?.code == "AUTH_GOOGLE_REQUIRED"
-                || apiError?.code == "PERMISSION_DENIED"
                 || apiError?.code == "ACCOUNT_FORBIDDEN"
-                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
-                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
         case .invalidResponse:
             return false
         }
@@ -2238,6 +2240,26 @@ enum RemotePushBackendError: LocalizedError {
 
         return nil
     }
+
+    private static let suppressedPopupCodes: Set<String> = [
+        "AUTH_ACCESS_TOKEN_REQUIRED",
+        "AUTH_DEVICE_CREDENTIALS_REQUIRED",
+        "AUTH_DEVICE_MISMATCH",
+        "AUTH_INVALID_ACCESS_TOKEN",
+        "AUTH_INVALID_DEVICE_CREDENTIALS",
+        "DEVICE_NOT_FOUND",
+    ]
+
+    private static let loginRequiredCodes: Set<String> = [
+        "AUTH_ACCESS_TOKEN_REQUIRED",
+        "AUTH_DEVICE_CREDENTIALS_REQUIRED",
+        "AUTH_DEVICE_MISMATCH",
+        "AUTH_GOOGLE_REQUIRED",
+        "AUTH_INVALID_ACCESS_TOKEN",
+        "AUTH_INVALID_DEVICE_CREDENTIALS",
+        "DEVICE_NOT_FOUND",
+        "PERMISSION_DENIED",
+    ]
 }
 
 private extension AppLanguage {

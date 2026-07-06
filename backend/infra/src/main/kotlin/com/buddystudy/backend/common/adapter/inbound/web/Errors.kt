@@ -27,10 +27,8 @@ data class ApiError(
     val message: String,
     val requestId: String,
     val status: Int,
-    val showPopup: Boolean,
     val reason: String? = null,
     val requiredPermissions: List<String>? = null,
-    val loginRequired: Boolean? = null,
 )
 
 @RestControllerAdvice
@@ -47,7 +45,6 @@ class ErrorHandler(
             request,
             debugDescription = error.message,
             requiredPermissions = error.requiredPermissions,
-            loginRequired = error.loginRequired,
         )
         log.warn(
             "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
@@ -110,7 +107,6 @@ class ErrorHandler(
         reason: String? = null,
         debugDescription: String = code.debugDescription,
         requiredPermissions: List<String>? = null,
-        loginRequired: Boolean? = null,
     ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
         val localizedMessage = messageSource.getMessage(
@@ -128,10 +124,8 @@ class ErrorHandler(
                 message = localizedMessage,
                 requestId = requestId,
                 status = status.value(),
-                showPopup = code.showPopup,
                 reason = reason,
                 requiredPermissions = requiredPermissions,
-                loginRequired = loginRequired,
             )
         )
     }
