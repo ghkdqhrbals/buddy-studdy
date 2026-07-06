@@ -754,22 +754,27 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            let state = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "page-access-\(reason)",
-                operation: { recoveredRegistration in
-                    try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
-                }
-            )
-            backendAccessState = state
-            isCommunitySignedIn = state.user.status != "ANONYMOUS"
-            settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
-            reconcileVisiblePageAccessAfterRefresh()
-        } catch {
-            handleAppError(error, fallback: "", target: .none)
-            log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
-        }
+        await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "page-access-\(reason)",
+                    operation: { recoveredRegistration in
+                        try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
+                    }
+                )
+            },
+            onSuccess: { state in
+                backendAccessState = state
+                isCommunitySignedIn = state.user.status != "ANONYMOUS"
+                settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+                reconcileVisiblePageAccessAfterRefresh()
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: "", target: .none)
+                log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+            }
+        )
     }
 
     private func reconcileVisiblePageAccessAfterRefresh() {
@@ -1324,23 +1329,28 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            let unreadCount = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "notification-count",
-                operation: { recoveredRegistration in
-                    try await notificationsUseCase.fetchUnreadCount(registration: recoveredRegistration)
+        await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "notification-count",
+                    operation: { recoveredRegistration in
+                        try await notificationsUseCase.fetchUnreadCount(registration: recoveredRegistration)
+                    }
+                )
+            },
+            onSuccess: { unreadCount in
+                updateNotificationState { state in
+                    state.applyUnreadCount(unreadCount)
                 }
-            )
-            updateNotificationState { state in
-                state.applyUnreadCount(unreadCount)
+            },
+            onFailure: { error in
+                updateNotificationState { state in
+                    state.applyUnreadCount(0)
+                }
+                log(.warning, "알림 개수 조회 실패: \(error.localizedDescription)")
             }
-        } catch {
-            updateNotificationState { state in
-                state.applyUnreadCount(0)
-            }
-            log(.warning, "알림 개수 조회 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func loadNotifications(reset: Bool = false) async {
@@ -1356,32 +1366,37 @@ final class AppState: ObservableObject {
         updateNotificationState { state in
             state.beginLoading()
         }
-        defer {
-            updateNotificationState { state in
-                state.finishLoading()
-            }
-        }
 
         let offset = reset ? 0 : notifications.count
-        do {
-            let page = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "notifications",
-                operation: { recoveredRegistration in
-                    try await notificationsUseCase.fetchNotifications(
-                        registration: recoveredRegistration,
-                        limit: 30,
-                        offset: offset
-                    )
+        await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "notifications",
+                    operation: { recoveredRegistration in
+                        try await notificationsUseCase.fetchNotifications(
+                            registration: recoveredRegistration,
+                            limit: 30,
+                            offset: offset
+                        )
+                    }
+                )
+            },
+            onSuccess: { page in
+                updateNotificationState { state in
+                    state.applyPage(page, reset: reset)
                 }
-            )
-            updateNotificationState { state in
-                state.applyPage(page, reset: reset)
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: error.localizedDescription, target: .notification)
+                log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                updateNotificationState { state in
+                    state.finishLoading()
+                }
             }
-        } catch {
-            handleAppError(error, fallback: error.localizedDescription, target: .notification)
-            log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func loadMoreNotificationsIfNeeded(current notification: BackendAppNotification) async {
@@ -1405,21 +1420,26 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "notification-read",
-                operation: { recoveredRegistration in
-                    try await notificationsUseCase.markRead(
-                        registration: recoveredRegistration,
-                        notificationID: notificationID
-                    )
-                }
-            )
-            await refreshNotificationUnreadCount()
-        } catch {
-            log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
-        }
+        await actionRunner.runVoid(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "notification-read",
+                    operation: { recoveredRegistration in
+                        try await notificationsUseCase.markRead(
+                            registration: recoveredRegistration,
+                            notificationID: notificationID
+                        )
+                    }
+                )
+            },
+            onSuccess: {
+                await refreshNotificationUnreadCount()
+            },
+            onFailure: { error in
+                log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
+            }
+        )
     }
 
     func deleteNotification(_ notification: BackendAppNotification) async {
@@ -1428,23 +1448,28 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "notification-delete",
-                operation: { recoveredRegistration in
-                    try await notificationsUseCase.deleteNotification(
-                        registration: recoveredRegistration,
-                        notificationID: notification.id
-                    )
+        await actionRunner.runVoid(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "notification-delete",
+                    operation: { recoveredRegistration in
+                        try await notificationsUseCase.deleteNotification(
+                            registration: recoveredRegistration,
+                            notificationID: notification.id
+                        )
+                    }
+                )
+            },
+            onSuccess: {
+                updateNotificationState { state in
+                    state.delete(notificationID: notification.id)
                 }
-            )
-            updateNotificationState { state in
-                state.delete(notificationID: notification.id)
+            },
+            onFailure: { error in
+                log(.warning, "알림 삭제 실패: \(error.localizedDescription)")
             }
-        } catch {
-            log(.warning, "알림 삭제 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func deleteAllNotifications() async {
@@ -1453,20 +1478,25 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "notifications-delete-all",
-                operation: { recoveredRegistration in
-                    try await notificationsUseCase.deleteAllNotifications(registration: recoveredRegistration)
+        await actionRunner.runVoid(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "notifications-delete-all",
+                    operation: { recoveredRegistration in
+                        try await notificationsUseCase.deleteAllNotifications(registration: recoveredRegistration)
+                    }
+                )
+            },
+            onSuccess: {
+                updateNotificationState { state in
+                    state.deleteAll()
                 }
-            )
-            updateNotificationState { state in
-                state.deleteAll()
+            },
+            onFailure: { error in
+                log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
             }
-        } catch {
-            log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     private func updateNotificationState(_ mutate: (inout NotificationStateStore) -> Void) {
@@ -1494,62 +1524,67 @@ final class AppState: ObservableObject {
     }
 
     private func loadOpenAIModelOptions() async {
-        do {
-            let fetchedOptions = try await settingsUseCase.fetchOpenAIModelOptions()
-            let normalized: [OpenAIModelOption] = fetchedOptions.compactMap { option -> OpenAIModelOption? in
-                let id = option.id.trimmingCharacters(in: .whitespacesAndNewlines)
-                let displayName = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !id.isEmpty && !displayName.isEmpty else {
-                    return nil
-                }
-                return OpenAIModelOption(
-                    id: id,
-                    displayName: displayName,
-                    supportsTextVerbosity: option.supportsTextVerbosity
-                )
-            }
-
-            let uniqueOptions = normalized.enumerated().reduce(into: [OpenAIModelOption]()) { result, current in
-                if !result.contains(where: { $0.id == current.element.id }) {
-                    result.append(current.element)
-                }
-            }
-
-            if !uniqueOptions.isEmpty {
-                openAIModelOptions = uniqueOptions
-                let currentModel = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !currentModel.isEmpty && !openAIModelOptions.contains(where: { $0.id == currentModel }) {
-                    openAIModelOptions.append(
-                        OpenAIModelOption(
-                            id: currentModel,
-                            displayName: currentModel,
-                            supportsTextVerbosity: false
-                        )
-                    )
-                } else if !openAIModelOptions.contains(where: { $0.id == currentModel }) {
-                    settings = synchronizedTopicCategories(
-                        for: StudySettings(
-                            topic: settings.topic,
-                            difficulty: settings.difficulty,
-                            appLanguage: settings.appLanguage,
-                            language: settings.appLanguage.studyLanguage,
-                            openAIModel: uniqueOptions.first?.id ?? StudySettings.defaultOpenAIModel,
-                            notificationSound: settings.notificationSound,
-                            customPrompt: settings.customPrompt,
-                            intervalMinutes: settings.sanitizedIntervalMinutes,
-                            maxHistoryCount: settings.sanitizedMaxHistoryCount,
-                            isQuestionPublic: settings.isQuestionPublic,
-                            studyCategories: settings.studyCategories,
-                            selectedStudyCategoryID: settings.selectedStudyCategoryID
-                        )
+        await actionRunner.run(
+            operation: {
+                try await settingsUseCase.fetchOpenAIModelOptions()
+            },
+            onSuccess: { fetchedOptions in
+                let normalized: [OpenAIModelOption] = fetchedOptions.compactMap { option -> OpenAIModelOption? in
+                    let id = option.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let displayName = option.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !id.isEmpty && !displayName.isEmpty else {
+                        return nil
+                    }
+                    return OpenAIModelOption(
+                        id: id,
+                        displayName: displayName,
+                        supportsTextVerbosity: option.supportsTextVerbosity
                     )
                 }
+
+                let uniqueOptions = normalized.enumerated().reduce(into: [OpenAIModelOption]()) { result, current in
+                    if !result.contains(where: { $0.id == current.element.id }) {
+                        result.append(current.element)
+                    }
+                }
+
+                if !uniqueOptions.isEmpty {
+                    openAIModelOptions = uniqueOptions
+                    let currentModel = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !currentModel.isEmpty && !openAIModelOptions.contains(where: { $0.id == currentModel }) {
+                        openAIModelOptions.append(
+                            OpenAIModelOption(
+                                id: currentModel,
+                                displayName: currentModel,
+                                supportsTextVerbosity: false
+                            )
+                        )
+                    } else if !openAIModelOptions.contains(where: { $0.id == currentModel }) {
+                        settings = synchronizedTopicCategories(
+                            for: StudySettings(
+                                topic: settings.topic,
+                                difficulty: settings.difficulty,
+                                appLanguage: settings.appLanguage,
+                                language: settings.appLanguage.studyLanguage,
+                                openAIModel: uniqueOptions.first?.id ?? StudySettings.defaultOpenAIModel,
+                                notificationSound: settings.notificationSound,
+                                customPrompt: settings.customPrompt,
+                                intervalMinutes: settings.sanitizedIntervalMinutes,
+                                maxHistoryCount: settings.sanitizedMaxHistoryCount,
+                                isQuestionPublic: settings.isQuestionPublic,
+                                studyCategories: settings.studyCategories,
+                                selectedStudyCategoryID: settings.selectedStudyCategoryID
+                            )
+                        )
+                    }
+                }
+                log(.info, "OpenAI 모델 목록을 업데이트했습니다. count=\(openAIModelOptions.count)")
+            },
+            onFailure: { error in
+                openAIModelOptions = OpenAIModelOption.all
+                log(.warning, "OpenAI 모델 목록 갱신 실패: \(error.localizedDescription)")
             }
-            log(.info, "OpenAI 모델 목록을 업데이트했습니다. count=\(openAIModelOptions.count)")
-        } catch {
-            openAIModelOptions = OpenAIModelOption.all
-            log(.warning, "OpenAI 모델 목록 갱신 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     @discardableResult
@@ -1563,28 +1598,32 @@ final class AppState: ObservableObject {
             return false
         }
 
-        do {
-            let studyPage = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "state",
-                operation: { recoveredRegistration in
-                    try await studyRoomUseCase.fetchStudy(
-                        registration: recoveredRegistration,
-                        limit: 500,
-                        offset: 0,
-                        query: ""
-                    )
-                }
-            )
-            applyBackendStudyPage(studyPage)
-            let pendingCount = studyPage.studies.compactMap(\.pendingQuestion).count
-            statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
-            log(.info, "백엔드 학습 데이터를 동기화했습니다. studies=\(studyPage.studies.count), pending=\(pendingCount)")
-            return true
-        } catch {
-            log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
-            return false
-        }
+        let didRefresh = await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "state",
+                    operation: { recoveredRegistration in
+                        try await studyRoomUseCase.fetchStudy(
+                            registration: recoveredRegistration,
+                            limit: 500,
+                            offset: 0,
+                            query: ""
+                        )
+                    }
+                )
+            },
+            onSuccess: { studyPage in
+                applyBackendStudyPage(studyPage)
+                let pendingCount = studyPage.studies.compactMap(\.pendingQuestion).count
+                statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
+                log(.info, "백엔드 학습 데이터를 동기화했습니다. studies=\(studyPage.studies.count), pending=\(pendingCount)")
+            },
+            onFailure: { error in
+                log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
+            }
+        ) != nil
+        return didRefresh
     }
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
@@ -1968,47 +2007,52 @@ final class AppState: ObservableObject {
         }
 
         let requestID = beginCommunityFeedLoad()
-        defer {
-            finishCommunityFeedLoad(requestID)
-        }
 
-        do {
-            guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
-                if userInitiated {
-                    communityErrorMessage = strings.communityRequestFailed
-                }
-                return
-            }
-
-            let response = try await communityUseCase.fetchPublicQuestions(
-                registration: registration,
-                query: trimmedTopic.isEmpty ? nil : trimmedTopic,
-                limit: limit,
-                offset: normalizedOffset,
-                excludeDeviceID: nil,
-                language: settings.appLanguage
-            )
-
-            guard isCurrentCommunityFeedLoad(requestID) else {
-                return
-            }
-
-            applyCommunityFeedPage(response, offset: normalizedOffset, reset: reset)
-            log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
-        } catch {
-            guard isCurrentCommunityFeedLoad(requestID) else {
-                return
-            }
-            if reset {
-                clearCommunityFeedPage()
-            }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
             if userInitiated {
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            } else {
-                communityErrorMessage = nil
+                communityErrorMessage = strings.communityRequestFailed
             }
-            log(.warning, "공개 질문 로드 실패: \(error.localizedDescription)")
+            finishCommunityFeedLoad(requestID)
+            return
         }
+
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchPublicQuestions(
+                    registration: registration,
+                    query: trimmedTopic.isEmpty ? nil : trimmedTopic,
+                    limit: limit,
+                    offset: normalizedOffset,
+                    excludeDeviceID: nil,
+                    language: settings.appLanguage
+                )
+            },
+            onSuccess: { response in
+                guard isCurrentCommunityFeedLoad(requestID) else {
+                    return
+                }
+
+                applyCommunityFeedPage(response, offset: normalizedOffset, reset: reset)
+                log(.info, "공개 질문 목록을 로드했습니다. count=\(response.questions.count), total=\(response.totalCount), offset=\(communityOffset)")
+            },
+            onFailure: { error in
+                guard isCurrentCommunityFeedLoad(requestID) else {
+                    return
+                }
+                if reset {
+                    clearCommunityFeedPage()
+                }
+                if userInitiated {
+                    handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                } else {
+                    communityErrorMessage = nil
+                }
+                log(.warning, "공개 질문 로드 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                finishCommunityFeedLoad(requestID)
+            }
+        )
     }
 
     func loadNextCommunityPage() async {
@@ -2219,50 +2263,55 @@ final class AppState: ObservableObject {
         }
 
         isLoadingBackendSettingsForEditing = true
-        defer {
-            isLoadingBackendSettingsForEditing = false
-        }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "settings-load") else {
+            isLoadingBackendSettingsForEditing = false
             log(.warning, "백엔드 등록이 없어 설정 로드를 건너뛰었습니다.")
             return
         }
 
-        do {
-            let backendSettings = try await settingsUseCase.fetchSettings(registration: registration)
+        await actionRunner.run(
+            operation: {
+                try await settingsUseCase.fetchSettings(registration: registration)
+            },
+            onSuccess: { backendSettings in
+                guard isEditingSettings else {
+                    return
+                }
 
-            guard isEditingSettings else {
-                return
+                guard !hasUnsavedSettingsChanges else {
+                    log(.info, "백엔드 설정 로드 중 사용자가 설정을 수정해 응답 반영을 건너뛰었습니다.")
+                    return
+                }
+
+                var nextSettings = backendSettings.studySettings(fallback: settings)
+                nextSettings = synchronizedTopicCategories(for: nextSettings)
+                if !isCommunitySignedIn {
+                    nextSettings = nextSettings.withQuestionPrivacy(false)
+                }
+                let normalizedNextSettings = normalizedSettings(nextSettings)
+
+                settings = normalizedNextSettings
+                draftSettings = normalizedNextSettings
+                savedSettings = normalizedNextSettings
+                isRunning = backendSettings.enabled
+                isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
+                didReceiveCloudStateWhileEditing = false
+
+                settingsStore.saveSettings(normalizedNextSettings)
+                settingsStore.saveIsRunning(backendSettings.enabled)
+                log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
+            },
+            onFailure: { error in
+                if handlePageAccessError(error, page: .studyDetail) {
+                    return
+                }
+                log(.warning, "백엔드 설정 로드 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                isLoadingBackendSettingsForEditing = false
             }
-
-            guard !hasUnsavedSettingsChanges else {
-                log(.info, "백엔드 설정 로드 중 사용자가 설정을 수정해 응답 반영을 건너뛰었습니다.")
-                return
-            }
-
-            var nextSettings = backendSettings.studySettings(fallback: settings)
-            nextSettings = synchronizedTopicCategories(for: nextSettings)
-            if !isCommunitySignedIn {
-                nextSettings = nextSettings.withQuestionPrivacy(false)
-            }
-            let normalizedNextSettings = normalizedSettings(nextSettings)
-
-            settings = normalizedNextSettings
-            draftSettings = normalizedNextSettings
-            savedSettings = normalizedNextSettings
-            isRunning = backendSettings.enabled
-            isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
-            didReceiveCloudStateWhileEditing = false
-
-            settingsStore.saveSettings(normalizedNextSettings)
-            settingsStore.saveIsRunning(backendSettings.enabled)
-            log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
-        } catch {
-            if handlePageAccessError(error, page: .studyDetail) {
-                return
-            }
-            log(.warning, "백엔드 설정 로드 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func cancelSettingsEditing() {
@@ -2326,21 +2375,26 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            let result = try await communityUseCase.loginWithGoogle(
-                registration: registration,
-                idToken: idToken
-            )
-            applyCommunityProfile(result.profile)
-            settingsStore.saveRemotePushRegistration(result.registration)
-            isCommunitySignedIn = true
-            settingsStore.saveIsCommunitySignedIn(true)
-            communityErrorMessage = nil
-            refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
-        }
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.loginWithGoogle(
+                    registration: registration,
+                    idToken: idToken
+                )
+            },
+            onSuccess: { result in
+                applyCommunityProfile(result.profile)
+                settingsStore.saveRemotePushRegistration(result.registration)
+                isCommunitySignedIn = true
+                settingsStore.saveIsCommunitySignedIn(true)
+                communityErrorMessage = nil
+                refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
+            }
+        )
     }
 
     private func refreshCommunitySignInDataInBackground(
@@ -2356,22 +2410,27 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         reason: String
     ) async {
-        do {
-            let state = try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "page-access-\(reason)",
-                operation: { recoveredRegistration in
-                    try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
-                }
-            )
-            backendAccessState = state
-            isCommunitySignedIn = state.user.status != "ANONYMOUS"
-            settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
-            reconcileVisiblePageAccessAfterRefresh()
-        } catch {
-            handleAppError(error, fallback: "", target: .community)
-            log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
-        }
+        await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "page-access-\(reason)",
+                    operation: { recoveredRegistration in
+                        try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
+                    }
+                )
+            },
+            onSuccess: { state in
+                backendAccessState = state
+                isCommunitySignedIn = state.user.status != "ANONYMOUS"
+                settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
+                reconcileVisiblePageAccessAfterRefresh()
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: "", target: .community)
+                log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+            }
+        )
 
         await refreshBackendStudyIfPossible(
             updateVisibleQuestion: true,
@@ -2411,36 +2470,45 @@ final class AppState: ObservableObject {
             return .failed
         }
 
-        do {
-            communityErrorMessage = nil
-            let result = try await communityUseCase.loginWithEmail(
-                registration: registration,
-                email: normalizedEmail,
-                password: password,
-                verificationCode: verificationCode
-            )
-            applyCommunityProfile(result.profile)
-            settingsStore.saveRemotePushRegistration(result.registration)
-            isCommunitySignedIn = true
-            settingsStore.saveIsCommunitySignedIn(true)
-            await refreshPageAccess(reason: "email-login")
-            await refreshBackendStudyIfPossible(
-                updateVisibleQuestion: true,
-                preserveLocalSettings: false
-            )
-            await loadCommunityQuestions(reset: true, userInitiated: true)
-            return .signedIn
-        } catch {
-            if let backendError = error as? RemotePushBackendError,
-               backendError.requiresEmailVerification {
-                communityErrorMessage = strings.emailVerificationRequired
-                log(.info, "Email 로그인에 인증코드가 필요합니다.")
-                return .verificationRequired
+        communityErrorMessage = nil
+        let result = await actionRunner.run(
+            operation: {
+                try await communityUseCase.loginWithEmail(
+                    registration: registration,
+                    email: normalizedEmail,
+                    password: password,
+                    verificationCode: verificationCode
+                )
+            },
+            onSuccess: { result in
+                applyCommunityProfile(result.profile)
+                settingsStore.saveRemotePushRegistration(result.registration)
+                isCommunitySignedIn = true
+                settingsStore.saveIsCommunitySignedIn(true)
+            },
+            onFailure: { error in
+                if let backendError = error as? RemotePushBackendError,
+                   backendError.requiresEmailVerification {
+                    communityErrorMessage = strings.emailVerificationRequired
+                    log(.info, "Email 로그인에 인증코드가 필요합니다.")
+                    return
+                }
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
             }
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
-            return .failed
+        )
+
+        guard result != nil else {
+            return communityErrorMessage == strings.emailVerificationRequired ? .verificationRequired : .failed
         }
+
+        await refreshPageAccess(reason: "email-login")
+        await refreshBackendStudyIfPossible(
+            updateVisibleQuestion: true,
+            preserveLocalSettings: false
+        )
+        await loadCommunityQuestions(reset: true, userInitiated: true)
+        return .signedIn
     }
 
     func signOutFromCommunity() {
@@ -2541,17 +2609,22 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            let profile = try await communityUseCase.fetchMyProfile(registration: registration)
-            applyCommunityProfile(profile)
-        } catch {
-            let handled = handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            if handled {
-                communityProfile = nil
-                return
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchMyProfile(registration: registration)
+            },
+            onSuccess: { profile in
+                applyCommunityProfile(profile)
+            },
+            onFailure: { error in
+                let handled = handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                if handled {
+                    communityProfile = nil
+                    return
+                }
+                log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
             }
-            log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
-        }
+        )
     }
 
     func updateCommunityProfile(
