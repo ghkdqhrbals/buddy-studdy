@@ -305,6 +305,26 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesCommunitySessionThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "communitySessionRepository.loadIsCommunitySignedIn",
+            "communitySessionRepository.saveIsCommunitySignedIn",
+            "resolvedCommunitySessionRepository.loadIsCommunitySignedIn",
+            "resolvedCommunitySessionRepository.saveIsCommunitySignedIn",
+            "private let communitySessionRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CommunitySessionUseCase for cached community sign-in state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesOnboardingStateRepositoryForStoredOnboardingState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

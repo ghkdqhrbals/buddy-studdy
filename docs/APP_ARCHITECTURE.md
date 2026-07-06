@@ -29,6 +29,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `CommunityProfileCacheRepository`: the local repository boundary for cached community profile identity and avatar state. View models must not call `SettingsStore` profile-cache APIs directly.
 - `CommunityProfileCacheUseCase`: the application boundary for cached community profile identity, display name preservation, and avatar state. View models must use this use case instead of calling the profile-cache repository directly.
 - `CommunitySessionRepository`: the local repository boundary for cached community sign-in state. View models must not call `SettingsStore` community-session APIs directly.
+- `CommunitySessionUseCase`: the application boundary for reading and updating cached community sign-in state. View models must use this use case instead of calling the community-session repository directly.
 - `OnboardingStateRepository`: the local repository boundary for persisted onboarding completion state. View models must not call `SettingsStore` onboarding APIs directly.
 - `DeveloperSettingsRepository`: the local repository boundary for persisted developer/debug runtime settings. View models must not call `SettingsStore` debug-setting APIs directly.
 - `CurrentStudySessionRepository`: the local repository boundary for the active question, draft answer, grading result, and running state. View models must not call `SettingsStore` current-session APIs directly.
@@ -102,6 +103,7 @@ The policy is split into two deterministic steps:
 - Cached community profile state must go through `CommunityProfileCacheRepository`. `AppState` may reconcile profile state with backend responses, but user-default keys and trimming behavior stay behind a repository adapter.
 - Cached community profile reads and writes in `AppState` must go through `CommunityProfileCacheUseCase`. Display-name preservation and avatar-cache defaults belong behind that use-case boundary.
 - Cached community sign-in state must go through `CommunitySessionRepository`. `AppState` may change sign-in state as part of login/logout/recovery flows, but local storage details stay behind a repository adapter.
+- Cached community sign-in reads and writes in `AppState` must go through `CommunitySessionUseCase`. The repository remains the adapter hidden behind that use case.
 - Persisted onboarding completion state must go through `OnboardingStateRepository`. `AppState` may gate startup flows with onboarding state, but local storage details stay behind a repository adapter.
 - Persisted developer/debug runtime settings must go through `DeveloperSettingsRepository`. `AppState` may recompose runtime backend clients from debug settings, but local storage details stay behind a repository adapter.
 - Persisted current study session state must go through `CurrentStudySessionRepository`. `AppState` may coordinate the active question workflow, but local storage details for current question, answer, grading result, and running state stay behind a repository adapter.

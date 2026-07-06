@@ -54,6 +54,7 @@
 		110000000000000000000192 /* CommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004B /* CommunityRepository.swift */; };
 		110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		1100000000000000000001C4 /* CommunityProfileCacheUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009F /* CommunityProfileCacheUseCase.swift */; };
+		1100000000000000000001C5 /* CommunitySessionUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C0 /* CommunitySessionUseCase.swift */; };
 		110000000000000000000194 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
 		110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
 		110000000000000000000196 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
@@ -155,6 +156,7 @@
 		120000000000000000000133 /* CommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004B /* CommunityRepository.swift */; };
 		120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		120000000000000000000176 /* CommunityProfileCacheUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009F /* CommunityProfileCacheUseCase.swift */; };
+		120000000000000000000177 /* CommunitySessionUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000C0 /* CommunitySessionUseCase.swift */; };
 		120000000000000000000135 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
 		120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
 		120000000000000000000137 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
@@ -335,6 +337,7 @@
 		11000000000000000000003E /* NotificationsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000042 /* CommunityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000009F /* CommunityProfileCacheUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityProfileCacheUseCase.swift; sourceTree = "<group>"; };
+		1100000000000000000000C0 /* CommunitySessionUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunitySessionUseCase.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -518,6 +521,7 @@
 			children = (
 				110000000000000000000042 /* CommunityUseCase.swift */,
 				11000000000000000000009F /* CommunityProfileCacheUseCase.swift */,
+				1100000000000000000000C0 /* CommunitySessionUseCase.swift */,
 			);
 			path = Community;
 			sourceTree = "<group>";
@@ -1038,6 +1042,7 @@
 				110000000000000000000192 /* CommunityRepository.swift in Sources */,
 				110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */,
 				1100000000000000000001C4 /* CommunityProfileCacheUseCase.swift in Sources */,
+				1100000000000000000001C5 /* CommunitySessionUseCase.swift in Sources */,
 				1100000000000000000001B2 /* CommunityProfileCacheRepository.swift in Sources */,
 				1100000000000000000001B3 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */,
 				1100000000000000000001B4 /* CommunitySessionRepository.swift in Sources */,
@@ -1154,6 +1159,7 @@
 				120000000000000000000133 /* CommunityRepository.swift in Sources */,
 				120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */,
 				120000000000000000000176 /* CommunityProfileCacheUseCase.swift in Sources */,
+				120000000000000000000177 /* CommunitySessionUseCase.swift in Sources */,
 				120000000000000000000163 /* CommunityProfileCacheRepository.swift in Sources */,
 				120000000000000000000164 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */,
 				120000000000000000000165 /* CommunitySessionRepository.swift in Sources */,

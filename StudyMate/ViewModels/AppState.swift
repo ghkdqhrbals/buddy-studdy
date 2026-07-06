@@ -447,7 +447,7 @@ final class AppState: ObservableObject {
     private let appLogRepository: AppLogRepository
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
-    private let communitySessionRepository: CommunitySessionRepository
+    private let communitySessionUseCase: CommunitySessionUseCase
     private let onboardingStateRepository: OnboardingStateRepository
     private let developerSettingsRepository: DeveloperSettingsRepository
     private let currentStudySessionUseCase: CurrentStudySessionUseCase
@@ -742,7 +742,7 @@ final class AppState: ObservableObject {
             onSuccess: { state in
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                communitySessionRepository.saveIsCommunitySignedIn(isCommunitySignedIn)
+                communitySessionUseCase.setSignedIn(isCommunitySignedIn)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
@@ -995,6 +995,7 @@ final class AppState: ObservableObject {
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
         communityProfileCacheUseCase: CommunityProfileCacheUseCase? = nil,
         communitySessionRepository: CommunitySessionRepository? = nil,
+        communitySessionUseCase: CommunitySessionUseCase? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
@@ -1013,6 +1014,8 @@ final class AppState: ObservableObject {
             ?? CommunityProfileCacheUseCase(repository: resolvedCommunityProfileCacheRepository)
         let resolvedCommunitySessionRepository = communitySessionRepository
             ?? SettingsStoreCommunitySessionRepository(settingsStore: settingsStore)
+        let resolvedCommunitySessionUseCase = communitySessionUseCase
+            ?? CommunitySessionUseCase(repository: resolvedCommunitySessionRepository)
         let resolvedOnboardingStateRepository = onboardingStateRepository
             ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
         let resolvedDeveloperSettingsRepository = developerSettingsRepository
@@ -1032,7 +1035,7 @@ final class AppState: ObservableObject {
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
         )
-        let loadedIsCommunitySignedIn = resolvedCommunitySessionRepository.loadIsCommunitySignedIn()
+        let loadedIsCommunitySignedIn = resolvedCommunitySessionUseCase.isSignedIn()
         let effectiveLoadedSettings = loadedIsCommunitySignedIn
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
@@ -1055,7 +1058,7 @@ final class AppState: ObservableObject {
         self.storedBackendIdentityUseCase = storedBackendIdentityUseCase
             ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
         self.communityProfileCacheUseCase = resolvedCommunityProfileCacheUseCase
-        self.communitySessionRepository = resolvedCommunitySessionRepository
+        self.communitySessionUseCase = resolvedCommunitySessionUseCase
         self.onboardingStateRepository = resolvedOnboardingStateRepository
         self.developerSettingsRepository = resolvedDeveloperSettingsRepository
         self.currentStudySessionUseCase = currentStudySessionUseCase
@@ -2368,7 +2371,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 isCommunitySignedIn = true
-                communitySessionRepository.saveIsCommunitySignedIn(true)
+                communitySessionUseCase.setSignedIn(true)
                 communityErrorMessage = nil
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
@@ -2405,7 +2408,7 @@ final class AppState: ObservableObject {
             onSuccess: { state in
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                communitySessionRepository.saveIsCommunitySignedIn(isCommunitySignedIn)
+                communitySessionUseCase.setSignedIn(isCommunitySignedIn)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
@@ -2466,7 +2469,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 isCommunitySignedIn = true
-                communitySessionRepository.saveIsCommunitySignedIn(true)
+                communitySessionUseCase.setSignedIn(true)
             },
             onFailure: { error in
                 if appErrorResolution(error, fallback: strings.communityRequestFailed).requiresEmailVerification {
@@ -2532,7 +2535,7 @@ final class AppState: ObservableObject {
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
         backendAccessState = .signedOut
-        communitySessionRepository.saveIsCommunitySignedIn(false)
+        communitySessionUseCase.setSignedIn(false)
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
     }
 
@@ -5318,7 +5321,7 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         isCommunitySignedIn = false
         communityProfile = nil
-        communitySessionRepository.saveIsCommunitySignedIn(false)
+        communitySessionUseCase.setSignedIn(false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
