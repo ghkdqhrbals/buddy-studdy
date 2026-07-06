@@ -140,11 +140,7 @@ final class AppState: ObservableObject {
     @Published var isValidatingAPIKey = false
     @Published private var developerState = DeveloperStateStore()
     @Published var statusMessage: String?
-    @Published var errorMessage: String? {
-        didSet {
-            presentGlobalErrorPopupIfNeeded(errorMessage)
-        }
-    }
+    @Published var errorMessage: String?
     @Published var globalErrorPopup: AppErrorPopup?
     @Published var notificationLandingMessage: String?
     @Published var selectedTab: AppTab = .study
@@ -384,7 +380,6 @@ final class AppState: ObservableObject {
             var nextState = communityFeedState
             nextState.errorMessage = newValue
             communityFeedState = nextState
-            presentGlobalErrorPopupIfNeeded(newValue)
         }
     }
 
@@ -440,7 +435,6 @@ final class AppState: ObservableObject {
             var nextState = notificationState
             nextState.errorMessage = newValue
             notificationState = nextState
-            presentGlobalErrorPopupIfNeeded(newValue)
         }
     }
 
@@ -1826,7 +1820,6 @@ final class AppState: ObservableObject {
         var nextState = statsState
         nextState.applyError(message, requestID: requestID)
         statsState = nextState
-        presentGlobalErrorPopupIfNeeded(message)
     }
 
     private func beginBackendStatsActivityRequest() -> UUID {
@@ -1856,7 +1849,6 @@ final class AppState: ObservableObject {
         var nextState = statsState
         nextState.applyActivityError(message, requestID: requestID)
         statsState = nextState
-        presentGlobalErrorPopupIfNeeded(message)
     }
 
     func fetchBackendStats(
@@ -6941,15 +6933,18 @@ final class AppState: ObservableObject {
         #endif
     }
 
-    private func communityErrorMessage(for error: Error) -> String {
+    private func communityErrorMessage(for error: Error) -> String? {
+        if let backendError = error as? RemotePushBackendError,
+           !backendError.shouldShowInlineError {
+            return nil
+        }
+
         return backendErrorDisplayMessage(error, fallback: strings.communityRequestFailed)
     }
 
     private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
-        if let backendError = error as? RemotePushBackendError,
-           let message = backendError.backendMessage,
-           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return message
+        if let backendError = error as? RemotePushBackendError {
+            return backendError.userFacingMessage(fallback: fallback)
         }
 
         let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -6957,18 +6952,6 @@ final class AppState: ObservableObject {
             return fallback
         }
         return localized
-    }
-
-    private func presentGlobalErrorPopupIfNeeded(_ message: String?) {
-        globalErrorPopup = nil
-    }
-
-    private func presentGlobalErrorPopupIfNeeded(_ error: Error, fallback: String) {
-        if let backendError = error as? RemotePushBackendError,
-           !backendError.shouldShowPopup {
-            return
-        }
-        presentGlobalErrorPopupIfNeeded(backendErrorDisplayMessage(error, fallback: fallback))
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

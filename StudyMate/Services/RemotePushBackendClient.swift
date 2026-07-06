@@ -2229,6 +2229,18 @@ enum RemotePushBackendError: LocalizedError {
         }
     }
 
+    var shouldShowInlineError: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            guard let code = apiError?.code else {
+                return true
+            }
+            return !Self.suppressedInlineCodes.contains(code)
+        case .invalidResponse:
+            return true
+        }
+    }
+
     var requiresLogin: Bool {
         switch self {
         case .httpStatus(_, _, let apiError):
@@ -2271,6 +2283,21 @@ enum RemotePushBackendError: LocalizedError {
         }
     }
 
+    func userFacingMessage(fallback: String) -> String {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
+               !message.isEmpty {
+                return message
+            }
+        case .invalidResponse:
+            break
+        }
+
+        let localized = localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return localized.isEmpty ? fallback : localized
+    }
+
     var responseBody: String? {
         switch self {
         case .httpStatus(_, let body, _):
@@ -2302,6 +2329,8 @@ enum RemotePushBackendError: LocalizedError {
         "AUTH_INVALID_DEVICE_CREDENTIALS",
         "DEVICE_NOT_FOUND",
     ]
+
+    private static let suppressedInlineCodes: Set<String> = suppressedPopupCodes
 
     private static let loginRequiredCodes: Set<String> = [
         "AUTH_ACCESS_TOKEN_REQUIRED",

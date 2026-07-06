@@ -97,6 +97,28 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(Self.backendError(code: "RECORD_NOT_FOUND", status: 404).isPageAccessDenied)
     }
 
+    func testBackendErrorPresentationUsesServerMessageAndSuppressesLoginNoise() {
+        let loginError = Self.backendError(
+            code: "AUTH_INVALID_ACCESS_TOKEN",
+            status: 401,
+            message: "다시 로그인해 주세요."
+        )
+
+        XCTAssertEqual(loginError.userFacingMessage(fallback: "fallback"), "다시 로그인해 주세요.")
+        XCTAssertFalse(loginError.shouldShowInlineError)
+        XCTAssertFalse(loginError.shouldShowPopup)
+
+        let validationError = Self.backendError(
+            code: "RECORD_NOT_FOUND",
+            status: 404,
+            message: "기록을 찾을 수 없습니다."
+        )
+
+        XCTAssertEqual(validationError.userFacingMessage(fallback: "fallback"), "기록을 찾을 수 없습니다.")
+        XCTAssertTrue(validationError.shouldShowInlineError)
+        XCTAssertTrue(validationError.shouldShowPopup)
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
@@ -4582,13 +4604,13 @@ private extension StudyMateTests {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    static func backendError(code: String, status: Int) -> RemotePushBackendError {
+    static func backendError(code: String, status: Int, message: String = "test") -> RemotePushBackendError {
         let body = """
-        {"error":{"code":"\(code)","message":"test","status":\(status)}}
+        {"error":{"code":"\(code)","message":"\(message)","status":\(status)}}
         """
         let apiError = BackendAPIError(
             code: code,
-            message: "test",
+            message: message,
             requestID: "request-test",
             status: status
         )
