@@ -483,6 +483,7 @@ final class AppState: ObservableObject {
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase
     private var studyRoomUseCase: StudyRoomUseCase
     private var recordsUseCase: RecordsUseCase
+    private var notificationsUseCase: NotificationsUseCase
     private var statsUseCase: StatsUseCase
     private var settingsUseCase: SettingsUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
@@ -930,6 +931,7 @@ final class AppState: ObservableObject {
         refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         recordsUseCase = RecordsUseCase(backendClient: backendClient)
+        notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
         statsUseCase = StatsUseCase(backendClient: backendClient)
         settingsUseCase = SettingsUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
@@ -1104,6 +1106,7 @@ final class AppState: ObservableObject {
         self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         self.recordsUseCase = RecordsUseCase(backendClient: backendClient)
+        self.notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
         self.statsUseCase = StatsUseCase(backendClient: backendClient)
         self.settingsUseCase = SettingsUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1328,7 +1331,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "notification-count",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchNotificationUnreadCount(registration: recoveredRegistration)
+                    try await notificationsUseCase.fetchUnreadCount(registration: recoveredRegistration)
                 }
             )
             updateNotificationState { state in
@@ -1367,7 +1370,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "notifications",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.fetchNotifications(
+                    try await notificationsUseCase.fetchNotifications(
                         registration: recoveredRegistration,
                         limit: 30,
                         offset: offset
@@ -1409,7 +1412,10 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "notification-read",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.markNotificationRead(registration: recoveredRegistration, notificationID: notificationID)
+                    try await notificationsUseCase.markRead(
+                        registration: recoveredRegistration,
+                        notificationID: notificationID
+                    )
                 }
             )
             await refreshNotificationUnreadCount()
@@ -1429,7 +1435,10 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "notification-delete",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.deleteNotification(registration: recoveredRegistration, notificationID: notification.id)
+                    try await notificationsUseCase.deleteNotification(
+                        registration: recoveredRegistration,
+                        notificationID: notification.id
+                    )
                 }
             )
             updateNotificationState { state in
@@ -1451,7 +1460,7 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "notifications-delete-all",
                 operation: { recoveredRegistration in
-                    try await remotePushBackendClient.deleteAllNotifications(registration: recoveredRegistration)
+                    try await notificationsUseCase.deleteAllNotifications(registration: recoveredRegistration)
                 }
             )
             updateNotificationState { state in

@@ -21,6 +21,7 @@
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
 		110000000000000000000189 /* SettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003C /* SettingsUseCase.swift */; };
+		11000000000000000000018A /* NotificationsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003E /* NotificationsUseCase.swift */; };
 		110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		110000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
 		110000000000000000000177 /* StudyRoomStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* StudyRoomStateStore.swift */; };
@@ -65,6 +66,7 @@
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
 		12000000000000000000012A /* SettingsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003C /* SettingsUseCase.swift */; };
+		12000000000000000000012B /* NotificationsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003E /* NotificationsUseCase.swift */; };
 		120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000180 /* NotificationLandingCoordinator.swift */; };
 		120000000000000000000115 /* GoogleOAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* GoogleOAuthService.swift */; };
 		120000000000000000000107 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* AppState.swift */; };
@@ -161,6 +163,7 @@
 		110000000000000000000035 /* RecordsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000003A /* StatsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsUseCase.swift; sourceTree = "<group>"; };
 		11000000000000000000003C /* SettingsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsUseCase.swift; sourceTree = "<group>"; };
+		11000000000000000000003E /* NotificationsUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsUseCase.swift; sourceTree = "<group>"; };
 		120000000000000000000017 /* StudyMateiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMateiOS.entitlements; sourceTree = "<group>"; };
 		110000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		110000000000000000000021 /* StudyMateTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StudyMateTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -258,6 +261,7 @@
 		11000000000000000000002F /* UseCases */ = {
 			isa = PBXGroup;
 			children = (
+				11000000000000000000003F /* Notifications */,
 				110000000000000000000032 /* PageAccess */,
 				110000000000000000000036 /* Records */,
 				11000000000000000000003D /* Settings */,
@@ -265,6 +269,14 @@
 				110000000000000000000034 /* StudyRoom */,
 			);
 			path = UseCases;
+			sourceTree = "<group>";
+		};
+		11000000000000000000003F /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000003E /* NotificationsUseCase.swift */,
+			);
+			path = Notifications;
 			sourceTree = "<group>";
 		};
 		110000000000000000000032 /* PageAccess */ = {
@@ -579,6 +591,7 @@
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 					110000000000000000000186 /* RecordsUseCase.swift in Sources */,
+					11000000000000000000018A /* NotificationsUseCase.swift in Sources */,
 					110000000000000000000188 /* StatsUseCase.swift in Sources */,
 					110000000000000000000189 /* SettingsUseCase.swift in Sources */,
 					110000000000000000000107 /* AppState.swift in Sources */,
@@ -631,6 +644,7 @@
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 					120000000000000000000127 /* RecordsUseCase.swift in Sources */,
+					12000000000000000000012B /* NotificationsUseCase.swift in Sources */,
 					120000000000000000000129 /* StatsUseCase.swift in Sources */,
 					12000000000000000000012A /* SettingsUseCase.swift in Sources */,
 					120000000000000000000115 /* GoogleOAuthService.swift in Sources */,

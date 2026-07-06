@@ -34,6 +34,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `UseCases/`
   - Thin application action boundaries around backend capabilities.
   - `PageAccess/RefreshPageAccessUseCase.swift` fetches backend page access state.
+  - `Notifications/NotificationsUseCase.swift` centralizes backend notification list, unread count, read, delete, and clear operations.
   - `Records/RecordsUseCase.swift` centralizes backend record operations such as fetch, grading, draft saving, skipping, deletion, publicity, and full clear.
   - `Settings/SettingsUseCase.swift` centralizes backend settings, model option, API validation, and schedule sync requests.
   - `Stats/StatsUseCase.swift` centralizes backend topic statistics and activity requests.

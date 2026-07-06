@@ -351,6 +351,36 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testNotificationsUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = NotificationsUseCase(backendClient: backendClient)
+
+        _ = try await useCase.fetchNotifications(
+            registration: backendClient.registration,
+            limit: 30,
+            offset: 10
+        )
+        _ = try await useCase.fetchUnreadCount(registration: backendClient.registration)
+        try await useCase.markRead(
+            registration: backendClient.registration,
+            notificationID: "notification-1"
+        )
+        try await useCase.deleteNotification(
+            registration: backendClient.registration,
+            notificationID: "notification-2"
+        )
+        try await useCase.deleteAllNotifications(registration: backendClient.registration)
+
+        XCTAssertEqual(backendClient.fetchNotificationsRequests.count, 1)
+        XCTAssertEqual(backendClient.fetchNotificationsRequests.first?.limit, 30)
+        XCTAssertEqual(backendClient.fetchNotificationsRequests.first?.offset, 10)
+        XCTAssertEqual(backendClient.fetchNotificationUnreadCountCallCount, 1)
+        XCTAssertEqual(backendClient.markedNotificationIDs, ["notification-1"])
+        XCTAssertEqual(backendClient.deletedNotificationIDs, ["notification-2"])
+        XCTAssertEqual(backendClient.deleteAllNotificationsCallCount, 1)
+    }
+
+    @MainActor
     func testRecordsUseCaseCentralizesBackendOperations() async throws {
         let backendClient = FakeRemotePushBackendClient()
         let useCase = RecordsUseCase(backendClient: backendClient)
@@ -4464,6 +4494,11 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchSettingsCallCount = 0
     var fetchOpenAIModelOptionsCallCount = 0
     var fetchAccessCallCount = 0
+    var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
+    var fetchNotificationUnreadCountCallCount = 0
+    var markedNotificationIDs: [String] = []
+    var deletedNotificationIDs: [String] = []
+    var deleteAllNotificationsCallCount = 0
     var bootstrapAccessTokenCallCount = 0
     var bootstrapAccessTokenError: Error?
     var fetchAccessErrors: [Error] = []
@@ -4540,18 +4575,26 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         limit: Int,
         offset: Int
     ) async throws -> BackendNotificationsPage {
+        fetchNotificationsRequests.append((limit: limit, offset: offset))
         BackendNotificationsPage(notifications: [], unreadCount: 0, totalCount: 0, limit: limit, offset: offset)
     }
 
     func fetchNotificationUnreadCount(registration: RemotePushRegistration) async throws -> Int {
+        fetchNotificationUnreadCountCallCount += 1
         0
     }
 
-    func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws {}
+    func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws {
+        markedNotificationIDs.append(notificationID)
+    }
 
-    func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {}
+    func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {
+        deletedNotificationIDs.append(notificationID)
+    }
 
-    func deleteAllNotifications(registration: RemotePushRegistration) async throws {}
+    func deleteAllNotifications(registration: RemotePushRegistration) async throws {
+        deleteAllNotificationsCallCount += 1
+    }
 
     func updateSchedule(
         registration: RemotePushRegistration,
