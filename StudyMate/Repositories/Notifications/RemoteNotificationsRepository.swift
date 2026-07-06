@@ -1,11 +1,11 @@
 import Foundation
 
 @MainActor
-struct NotificationsUseCase {
-    private let repository: NotificationsRepository
+struct RemoteNotificationsRepository: NotificationsRepository {
+    private let backendClient: RemotePushBackendClientProtocol
 
-    init(repository: NotificationsRepository) {
-        self.repository = repository
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
     }
 
     func fetchNotifications(
@@ -13,7 +13,7 @@ struct NotificationsUseCase {
         limit: Int,
         offset: Int
     ) async throws -> BackendNotificationsPage {
-        try await repository.fetchNotifications(
+        try await backendClient.fetchNotifications(
             registration: registration,
             limit: limit,
             offset: offset
@@ -21,14 +21,14 @@ struct NotificationsUseCase {
     }
 
     func fetchUnreadCount(registration: RemotePushRegistration) async throws -> Int {
-        try await repository.fetchUnreadCount(registration: registration)
+        try await backendClient.fetchNotificationUnreadCount(registration: registration)
     }
 
     func markRead(
         registration: RemotePushRegistration,
         notificationID: String
     ) async throws {
-        try await repository.markRead(
+        try await backendClient.markNotificationRead(
             registration: registration,
             notificationID: notificationID
         )
@@ -38,13 +38,13 @@ struct NotificationsUseCase {
         registration: RemotePushRegistration,
         notificationID: String
     ) async throws {
-        try await repository.deleteNotification(
+        try await backendClient.deleteNotification(
             registration: registration,
             notificationID: notificationID
         )
     }
 
     func deleteAllNotifications(registration: RemotePushRegistration) async throws {
-        try await repository.deleteAllNotifications(registration: registration)
+        try await backendClient.deleteAllNotifications(registration: registration)
     }
 }
