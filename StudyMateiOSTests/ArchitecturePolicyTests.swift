@@ -573,6 +573,48 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesLocalStudyRecordsThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "localStudyRecordRepository.loadStudyRecords",
+            "localStudyRecordRepository.appendStudyRecord",
+            "localStudyRecordRepository.updateStudyRecordAnswer",
+            "localStudyRecordRepository.saveStudyRecord",
+            "localStudyRecordRepository.deleteStudyRecord",
+            "localStudyRecordRepository.clearStudyRecords",
+            "localStudyRecordRepository.replaceStudyRecords",
+            "localStudyRecordRepository.replaceBackendStudyRecords",
+            "localStudyRecordRepository.loadAnswerDraft",
+            "localStudyRecordRepository.saveAnswerDraft",
+            "localStudyRecordRepository.deleteAnswerDraft",
+            "localStudyRecordRepository.loadQuestionHistory",
+            "localStudyRecordRepository.appendQuestionToHistory",
+            "localStudyRecordRepository.saveQuestionHistory",
+            "localStudyRecordRepository.loadDeletedStudyRecordMarkers",
+            "localStudyRecordRepository.saveDeletedStudyRecordMarkers",
+            "localStudyRecordRepository.loadStudyRecordsClearedAt",
+            "localStudyRecordRepository.saveStudyRecordsClearedAt",
+            "resolvedLocalStudyRecordRepository.loadStudyRecords",
+            "resolvedLocalStudyRecordRepository.appendStudyRecord",
+            "resolvedLocalStudyRecordRepository.updateStudyRecordAnswer",
+            "resolvedLocalStudyRecordRepository.saveStudyRecord",
+            "resolvedLocalStudyRecordRepository.deleteStudyRecord",
+            "resolvedLocalStudyRecordRepository.clearStudyRecords",
+            "resolvedLocalStudyRecordRepository.replaceStudyRecords",
+            "resolvedLocalStudyRecordRepository.replaceBackendStudyRecords",
+            "private let localStudyRecordRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use LocalStudyRecordUseCase for stored records, drafts, history, and delete markers instead of the repository directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)
