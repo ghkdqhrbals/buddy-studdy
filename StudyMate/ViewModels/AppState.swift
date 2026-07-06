@@ -448,6 +448,7 @@ final class AppState: ObservableObject {
     private let remotePushRegistrationRepository: RemotePushRegistrationRepository
     private let communityProfileCacheRepository: CommunityProfileCacheRepository
     private let communitySessionRepository: CommunitySessionRepository
+    private let onboardingStateRepository: OnboardingStateRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -987,6 +988,7 @@ final class AppState: ObservableObject {
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
         communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
         communitySessionRepository: CommunitySessionRepository? = nil,
+        onboardingStateRepository: OnboardingStateRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -996,6 +998,8 @@ final class AppState: ObservableObject {
             ?? SettingsStoreCommunityProfileCacheRepository(settingsStore: settingsStore)
         let resolvedCommunitySessionRepository = communitySessionRepository
             ?? SettingsStoreCommunitySessionRepository(settingsStore: settingsStore)
+        let resolvedOnboardingStateRepository = onboardingStateRepository
+            ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
         let loadedSettings = settingsStore.loadSettings()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
@@ -1012,7 +1016,7 @@ final class AppState: ObservableObject {
         let loadedAPIKeyUpdatedAt = settingsStore.loadOpenAIAPIKeyUpdatedAt()
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
         let loadedLogPage = resolvedAppLogRepository.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
-        let loadedHasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
+        let loadedHasCompletedOnboarding = resolvedOnboardingStateRepository.loadHasCompletedOnboarding()
         let loadedCloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
         let loadedLocalSettingsMutationAt = settingsStore.loadLocalSettingsMutationAt()
         let loadedIsDebuggingEnabled = settingsStore.loadIsDebuggingEnabled()
@@ -1023,6 +1027,7 @@ final class AppState: ObservableObject {
         self.remotePushRegistrationRepository = resolvedRemotePushRegistrationRepository
         self.communityProfileCacheRepository = resolvedCommunityProfileCacheRepository
         self.communitySessionRepository = resolvedCommunitySessionRepository
+        self.onboardingStateRepository = resolvedOnboardingStateRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         self.currentQuestion = settingsStore.loadQuestion()
@@ -2094,7 +2099,7 @@ final class AppState: ObservableObject {
         savedSettings = synchronizedLoadedSettings
         savedAPIKey = loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
-        hasCompletedOnboarding = settingsStore.loadHasCompletedOnboarding()
+        hasCompletedOnboarding = onboardingStateRepository.loadHasCompletedOnboarding()
         isCloudSyncEnabled = settingsStore.loadIsCloudSyncEnabled()
         cloudLastSyncedAt = settingsStore.loadCloudSyncStateUpdatedAt()
         loadAppLogPage(appLogPage)
@@ -3565,7 +3570,7 @@ final class AppState: ObservableObject {
             pendingSettings,
             apiKey: ""
         )
-        settingsStore.saveHasCompletedOnboarding(true)
+        onboardingStateRepository.saveHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         #if os(iOS)
         selectedTab = .home
@@ -3584,7 +3589,7 @@ final class AppState: ObservableObject {
     }
 
     func skipOnboarding() {
-        settingsStore.saveHasCompletedOnboarding(true)
+        onboardingStateRepository.saveHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         selectedTab = .settings
 
@@ -6292,7 +6297,7 @@ final class AppState: ObservableObject {
         settingsStore.saveLastAnswer(appliedLastAnswer)
         settingsStore.saveGradingResult(appliedGradingResult)
         settingsStore.saveIsRunning(state.isRunning)
-        settingsStore.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
+        onboardingStateRepository.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
         settingsStore.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
         settingsStore.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
         settingsStore.saveStudyRecordsClearedAt(mergedRecordsClearedAt)

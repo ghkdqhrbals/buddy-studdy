@@ -31,6 +31,8 @@
 		1100000000000000000001B3 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */; };
 		1100000000000000000001B4 /* CommunitySessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000089 /* CommunitySessionRepository.swift */; };
 		1100000000000000000001B5 /* SettingsStoreCommunitySessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008A /* SettingsStoreCommunitySessionRepository.swift */; };
+		1100000000000000000001B6 /* OnboardingStateRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008C /* OnboardingStateRepository.swift */; };
+		1100000000000000000001B7 /* SettingsStoreOnboardingStateRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008D /* SettingsStoreOnboardingStateRepository.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -116,6 +118,8 @@
 		120000000000000000000164 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */; };
 		120000000000000000000165 /* CommunitySessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000089 /* CommunitySessionRepository.swift */; };
 		120000000000000000000166 /* SettingsStoreCommunitySessionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008A /* SettingsStoreCommunitySessionRepository.swift */; };
+		120000000000000000000167 /* OnboardingStateRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008C /* OnboardingStateRepository.swift */; };
+		120000000000000000000168 /* SettingsStoreOnboardingStateRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000008D /* SettingsStoreOnboardingStateRepository.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000202 /* QuestionSchedulePolicyTests.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
@@ -237,6 +241,8 @@
 		110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreCommunityProfileCacheRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000089 /* CommunitySessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunitySessionRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000008A /* SettingsStoreCommunitySessionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreCommunitySessionRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000008C /* OnboardingStateRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000008D /* SettingsStoreOnboardingStateRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreOnboardingStateRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004F /* StudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000052 /* RemoteStudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000054 /* RecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsRepository.swift; sourceTree = "<group>"; };
@@ -479,6 +485,7 @@
 				1100000000000000000001A0 /* Identity */,
 				1100000000000000000001A3 /* PageAccess */,
 				110000000000000000000084 /* AppLog */,
+				11000000000000000000008B /* Onboarding */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -490,6 +497,15 @@
 				110000000000000000000083 /* SettingsStoreAppLogRepository.swift */,
 			);
 			path = AppLog;
+			sourceTree = "<group>";
+		};
+		11000000000000000000008B /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000008C /* OnboardingStateRepository.swift */,
+				11000000000000000000008D /* SettingsStoreOnboardingStateRepository.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 		110000000000000000000076 /* Auth */ = {
@@ -998,6 +1014,8 @@
 				1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */,
 				1100000000000000000001AE /* AppLogRepository.swift in Sources */,
 				1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */,
+				1100000000000000000001B6 /* OnboardingStateRepository.swift in Sources */,
+				1100000000000000000001B7 /* SettingsStoreOnboardingStateRepository.swift in Sources */,
 				11000000000000000000010B /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1093,6 +1111,8 @@
 				12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */,
 				12000000000000000000015F /* AppLogRepository.swift in Sources */,
 				120000000000000000000160 /* SettingsStoreAppLogRepository.swift in Sources */,
+				120000000000000000000167 /* OnboardingStateRepository.swift in Sources */,
+				120000000000000000000168 /* SettingsStoreOnboardingStateRepository.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
 					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
 					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,
