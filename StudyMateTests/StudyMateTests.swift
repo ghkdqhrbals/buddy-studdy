@@ -294,6 +294,36 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.clearRecordsCallCount, 1)
     }
 
+    @MainActor
+    func testStatsUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = StatsUseCase(backendClient: backendClient)
+        let startAt = Date(timeIntervalSince1970: 100)
+        let endAt = Date(timeIntervalSince1970: 200)
+
+        _ = try await useCase.fetchStats(
+            registration: backendClient.registration,
+            period: .last30,
+            startAt: startAt,
+            endAt: endAt,
+            sort: .recent,
+            limit: 10,
+            offset: 20
+        )
+        _ = try await useCase.fetchStatsActivity(
+            registration: backendClient.registration,
+            startAt: startAt,
+            endAt: endAt
+        )
+
+        XCTAssertEqual(backendClient.fetchStatsRequests.map(\.period), [.last30])
+        XCTAssertEqual(backendClient.fetchStatsRequests.map(\.sort), [.recent])
+        XCTAssertEqual(backendClient.fetchStatsRequests.map(\.limit), [10])
+        XCTAssertEqual(backendClient.fetchStatsRequests.map(\.offset), [20])
+        XCTAssertEqual(backendClient.fetchStatsActivityRequests.map(\.startAt), [startAt])
+        XCTAssertEqual(backendClient.fetchStatsActivityRequests.map(\.endAt), [endAt])
+    }
+
     func testProfileAvatarOptionsUsePixelCharacterSprites() {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
@@ -4280,6 +4310,15 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
     var fetchRecordsRequests: [(limit: Int, offset: Int, query: String, language: AppLanguage)] = []
+    var fetchStatsRequests: [(
+        period: BackendStatsPeriod,
+        startAt: Date?,
+        endAt: Date?,
+        sort: BackendStatsSort,
+        limit: Int,
+        offset: Int
+    )] = []
+    var fetchStatsActivityRequests: [(startAt: Date?, endAt: Date?)] = []
     var gradeRecordCallCount = 0
     var gradedAnswers: [String] = []
     var gradeRecordResult: StudyRecord?
@@ -4506,7 +4545,22 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         limit: Int,
         offset: Int
     ) async throws -> BackendStats {
-        throw RemotePushBackendError.invalidResponse
+        fetchStatsRequests.append((
+            period: period,
+            startAt: startAt,
+            endAt: endAt,
+            sort: sort,
+            limit: limit,
+            offset: offset
+        ))
+        return BackendStats(
+            totalResponses: 0,
+            totalTopics: 0,
+            topics: [],
+            limit: limit,
+            offset: offset,
+            generatedAt: Date()
+        )
     }
 
     func fetchStatsActivity(
@@ -4514,6 +4568,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         startAt: Date?,
         endAt: Date?
     ) async throws -> BackendStatsActivity {
+        fetchStatsActivityRequests.append((startAt: startAt, endAt: endAt))
         BackendStatsActivity(days: [], streakDays: 0, monthAnswerCount: 0, generatedAt: Date())
     }
 

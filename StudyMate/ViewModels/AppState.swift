@@ -477,6 +477,7 @@ final class AppState: ObservableObject {
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase
     private var studyRoomUseCase: StudyRoomUseCase
     private var recordsUseCase: RecordsUseCase
+    private var statsUseCase: StatsUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -872,6 +873,7 @@ final class AppState: ObservableObject {
         refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         recordsUseCase = RecordsUseCase(backendClient: backendClient)
+        statsUseCase = StatsUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1044,6 +1046,7 @@ final class AppState: ObservableObject {
         self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
         self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
         self.recordsUseCase = RecordsUseCase(backendClient: backendClient)
+        self.statsUseCase = StatsUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1811,7 +1814,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let stats = try await remotePushBackendClient.fetchStats(
+            let stats = try await statsUseCase.fetchStats(
                 registration: registration,
                 period: period,
                 startAt: startAt,
@@ -1860,7 +1863,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let activity = try await remotePushBackendClient.fetchStatsActivity(
+            let activity = try await statsUseCase.fetchStatsActivity(
                 registration: registration,
                 startAt: startAt,
                 endAt: endAt
