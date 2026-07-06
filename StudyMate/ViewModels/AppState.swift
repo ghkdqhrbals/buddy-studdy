@@ -5120,25 +5120,16 @@ final class AppState: ObservableObject {
         notificationLandingMessage = nil
         statusMessage = "학습 기록을 삭제했습니다."
         log(.warning, "학습 기록을 모두 삭제했습니다.")
-        if let registration = settingsStore.loadRemotePushRegistration() {
-            Task {
-                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "clear-records") else {
-                    return
-                }
-                do {
-                    try await performWithBackendIdentityRecovery(
-                        registration: tokenRegistration,
-                        reason: "clear-records",
-                        operation: { recoveredRegistration in
-                            try await recordsUseCase.clearRecords(registration: recoveredRegistration)
-                        }
-                    )
-                    await syncRemotePushScheduleIfPossible(reason: "clear-records")
-                } catch {
-                    log(.warning, "백엔드 학습 기록 전체삭제 실패: \(error.localizedDescription)")
-                }
-            }
-        }
+        runBackendRecordMutation(
+            reason: "clear-records",
+            operation: { recoveredRegistration in
+                try await self.recordsUseCase.clearRecords(registration: recoveredRegistration)
+            },
+            onSuccess: { _ in
+                await self.syncRemotePushScheduleIfPossible(reason: "clear-records")
+            },
+            failureMessage: { "백엔드 학습 기록 전체삭제 실패: \($0.localizedDescription)" }
+        )
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
@@ -5160,26 +5151,17 @@ final class AppState: ObservableObject {
 
         statusMessage = "기록을 삭제했습니다."
         log(.info, "학습 기록을 1개 삭제했습니다.")
-        if let registration = settingsStore.loadRemotePushRegistration() {
-            Task {
-                guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "delete-record") else {
-                    return
-                }
-                do {
-                    try await performWithBackendIdentityRecovery(
-                        registration: tokenRegistration,
-                        reason: "delete-record",
-                        operation: { recoveredRegistration in
-                            try await recordsUseCase.deleteRecord(registration: recoveredRegistration, recordID: record.id)
-                        }
-                    )
-                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-                    await syncRemotePushScheduleIfPossible(reason: "delete-record")
-                } catch {
-                    log(.warning, "백엔드 학습 기록 삭제 실패: \(error.localizedDescription)")
-                }
-            }
-        }
+        runBackendRecordMutation(
+            reason: "delete-record",
+            operation: { recoveredRegistration in
+                try await self.recordsUseCase.deleteRecord(registration: recoveredRegistration, recordID: record.id)
+            },
+            onSuccess: { _ in
+                await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
+            },
+            failureMessage: { "백엔드 학습 기록 삭제 실패: \($0.localizedDescription)" }
+        )
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
@@ -5198,31 +5180,53 @@ final class AppState: ObservableObject {
         reloadStudyRecordsFromStore()
         markCloudDataChanged()
 
+        runBackendRecordMutation(
+            reason: "record-publicity",
+            operation: { recoveredRegistration in
+                try await self.recordsUseCase.updateRecordPublicity(
+                    registration: recoveredRegistration,
+                    recordID: record.id,
+                    isPublic: isPublic
+                )
+            },
+            onSuccess: { backendRecord in
+                self.settingsStore.saveStudyRecord(backendRecord)
+                self.reloadStudyRecordsFromStore()
+            },
+            failureMessage: { "기록 공개 상태 변경 실패: \($0.localizedDescription)" }
+        )
+    }
+
+    private func runBackendRecordMutation<Value>(
+        reason: String,
+        operation: @escaping (RemotePushRegistration) async throws -> Value,
+        onSuccess: @escaping (Value) async -> Void = { _ in },
+        failureMessage: @escaping (Error) -> String
+    ) {
         guard let registration = settingsStore.loadRemotePushRegistration() else {
             return
         }
 
-        Task {
-            guard let tokenRegistration = await registrationWithAccessToken(registration, reason: "record-publicity") else {
+        Task { [weak self] in
+            guard let self,
+                  let tokenRegistration = await registrationWithAccessToken(registration, reason: reason) else {
                 return
             }
-            do {
-                let backendRecord = try await performWithBackendIdentityRecovery(
-                    registration: tokenRegistration,
-                    reason: "record-publicity",
-                    operation: { recoveredRegistration in
-                        try await recordsUseCase.updateRecordPublicity(
-                            registration: recoveredRegistration,
-                            recordID: record.id,
-                            isPublic: isPublic
-                        )
-                    }
-                )
-                settingsStore.saveStudyRecord(backendRecord)
-                reloadStudyRecordsFromStore()
-            } catch {
-                log(.warning, "기록 공개 상태 변경 실패: \(error.localizedDescription)")
-            }
+
+            await actionRunner.run(
+                operation: {
+                    try await performWithBackendIdentityRecovery(
+                        registration: tokenRegistration,
+                        reason: reason,
+                        operation: operation
+                    )
+                },
+                onSuccess: onSuccess,
+                onFailure: { error in
+                    handleAppError(error, fallback: "", target: .none)
+                    log(.warning, failureMessage(error))
+                }
+            )
         }
     }
 
