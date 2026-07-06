@@ -364,6 +364,39 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesLocalStudyRecordRepositoryForStoredRecordState() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadStudyRecords(",
+            "settingsStore.replaceBackendStudyRecords(",
+            "settingsStore.replaceStudyRecords(",
+            "settingsStore.updateStudyRecordAnswer(",
+            "settingsStore.deleteStudyRecord(",
+            "settingsStore.saveStudyRecord(",
+            "settingsStore.appendStudyRecord(",
+            "settingsStore.clearStudyRecords(",
+            "settingsStore.loadAnswerDraft(",
+            "settingsStore.saveAnswerDraft(",
+            "settingsStore.deleteAnswerDraft(",
+            "settingsStore.appendQuestionToHistory(",
+            "settingsStore.loadQuestionHistory(",
+            "settingsStore.saveQuestionHistory(",
+            "settingsStore.loadDeletedStudyRecordMarkers(",
+            "settingsStore.saveDeletedStudyRecordMarkers(",
+            "settingsStore.loadStudyRecordsClearedAt(",
+            "settingsStore.saveStudyRecordsClearedAt(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use LocalStudyRecordRepository for stored study records, drafts, history, and delete markers instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)

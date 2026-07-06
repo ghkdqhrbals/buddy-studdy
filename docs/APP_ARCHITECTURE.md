@@ -32,6 +32,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `CurrentStudySessionRepository`: the local repository boundary for the active question, draft answer, grading result, and running state. View models must not call `SettingsStore` current-session APIs directly.
 - `LocalStudySettingsRepository`: the local repository boundary for persisted study settings, OpenAI API key state, and local settings mutation metadata. View models must not call `SettingsStore` settings/API-key APIs directly.
 - `CloudSyncStateRepository`: the local repository boundary for iCloud sync enablement and sync-state timestamps. View models must not call `SettingsStore` cloud-sync state APIs directly.
+- `LocalStudyRecordRepository`: the local repository boundary for persisted study records, answer drafts, question history, and deletion markers. View models must not call `SettingsStore` record/history/draft APIs directly.
 - `Core`: Cross-cutting, deterministic policies such as backend error presentation, page access decisions, route decisions, and formatting rules.
 - `StudyRecordIdentityPolicy`: the shared Core policy for question normalization and study-record identity matching. Views and view models should use this policy instead of reaching into persistence services for comparison rules.
 - `OpenAIAPIKeyExtractionPolicy`: the shared Core policy for deterministic OpenAI API key extraction from text.
@@ -101,6 +102,7 @@ The policy is split into two deterministic steps:
 - Persisted current study session state must go through `CurrentStudySessionRepository`. `AppState` may coordinate the active question workflow, but local storage details for current question, answer, grading result, and running state stay behind a repository adapter.
 - Persisted study settings and OpenAI API key metadata must go through `LocalStudySettingsRepository`. `AppState` may coordinate settings editing and sync conflict resolution, but local storage details for settings, API key, API-key timestamps, and local mutation timestamps stay behind a repository adapter.
 - Persisted cloud sync state must go through `CloudSyncStateRepository`. `AppState` may coordinate sync workflows, but local storage details for sync enablement and sync timestamps stay behind a repository adapter.
+- Persisted study records, answer drafts, question history, deletion markers, and records-cleared timestamps must go through `LocalStudyRecordRepository`. `AppState` may coordinate record workflows and iCloud merge decisions, but local record storage details stay behind a repository adapter.
 
 ## Testing Rules
 

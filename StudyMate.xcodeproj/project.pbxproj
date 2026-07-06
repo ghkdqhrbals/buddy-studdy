@@ -55,6 +55,8 @@
 		110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
 		110000000000000000000196 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
 		110000000000000000000197 /* RemoteRecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000055 /* RemoteRecordsRepository.swift */; };
+		1100000000000000000001C0 /* LocalStudyRecordRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009A /* LocalStudyRecordRepository.swift */; };
+		1100000000000000000001C1 /* SettingsStoreLocalStudyRecordRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009B /* SettingsStoreLocalStudyRecordRepository.swift */; };
 		110000000000000000000198 /* StatsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000057 /* StatsRepository.swift */; };
 		110000000000000000000199 /* RemoteStatsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000058 /* RemoteStatsRepository.swift */; };
 		11000000000000000000019A /* NotificationsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000005A /* NotificationsRepository.swift */; };
@@ -151,6 +153,8 @@
 		120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000052 /* RemoteStudyRoomRepository.swift */; };
 		120000000000000000000137 /* RecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000054 /* RecordsRepository.swift */; };
 		120000000000000000000138 /* RemoteRecordsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000055 /* RemoteRecordsRepository.swift */; };
+		120000000000000000000172 /* LocalStudyRecordRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009A /* LocalStudyRecordRepository.swift */; };
+		120000000000000000000173 /* SettingsStoreLocalStudyRecordRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000009B /* SettingsStoreLocalStudyRecordRepository.swift */; };
 		120000000000000000000139 /* StatsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000057 /* StatsRepository.swift */; };
 		120000000000000000000140 /* RemoteStatsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000058 /* RemoteStatsRepository.swift */; };
 		120000000000000000000141 /* NotificationsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000005A /* NotificationsRepository.swift */; };
@@ -263,6 +267,8 @@
 		110000000000000000000052 /* RemoteStudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000054 /* RecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000055 /* RemoteRecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteRecordsRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000009A /* LocalStudyRecordRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStudyRecordRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000009B /* SettingsStoreLocalStudyRecordRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreLocalStudyRecordRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000057 /* StatsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000058 /* RemoteStatsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStatsRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000005A /* NotificationsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsRepository.swift; sourceTree = "<group>"; };
@@ -588,6 +594,8 @@
 			children = (
 				110000000000000000000054 /* RecordsRepository.swift */,
 				110000000000000000000055 /* RemoteRecordsRepository.swift */,
+				11000000000000000000009A /* LocalStudyRecordRepository.swift */,
+				11000000000000000000009B /* SettingsStoreLocalStudyRecordRepository.swift */,
 			);
 			path = Records;
 			sourceTree = "<group>";
@@ -1015,6 +1023,8 @@
 				110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */,
 				110000000000000000000196 /* RecordsRepository.swift in Sources */,
 				110000000000000000000197 /* RemoteRecordsRepository.swift in Sources */,
+				1100000000000000000001C0 /* LocalStudyRecordRepository.swift in Sources */,
+				1100000000000000000001C1 /* SettingsStoreLocalStudyRecordRepository.swift in Sources */,
 				110000000000000000000198 /* StatsRepository.swift in Sources */,
 				110000000000000000000199 /* RemoteStatsRepository.swift in Sources */,
 				11000000000000000000019A /* NotificationsRepository.swift in Sources */,
@@ -1126,6 +1136,8 @@
 				120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */,
 				120000000000000000000137 /* RecordsRepository.swift in Sources */,
 				120000000000000000000138 /* RemoteRecordsRepository.swift in Sources */,
+				120000000000000000000172 /* LocalStudyRecordRepository.swift in Sources */,
+				120000000000000000000173 /* SettingsStoreLocalStudyRecordRepository.swift in Sources */,
 				120000000000000000000139 /* StatsRepository.swift in Sources */,
 				120000000000000000000140 /* RemoteStatsRepository.swift in Sources */,
 				120000000000000000000141 /* NotificationsRepository.swift in Sources */,

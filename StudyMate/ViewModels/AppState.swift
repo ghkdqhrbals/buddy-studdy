@@ -453,6 +453,7 @@ final class AppState: ObservableObject {
     private let currentStudySessionRepository: CurrentStudySessionRepository
     private let localStudySettingsRepository: LocalStudySettingsRepository
     private let cloudSyncStateRepository: CloudSyncStateRepository
+    private let localStudyRecordRepository: LocalStudyRecordRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -997,6 +998,7 @@ final class AppState: ObservableObject {
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
         localStudySettingsRepository: LocalStudySettingsRepository? = nil,
         cloudSyncStateRepository: CloudSyncStateRepository? = nil,
+        localStudyRecordRepository: LocalStudyRecordRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
@@ -1016,6 +1018,8 @@ final class AppState: ObservableObject {
             ?? SettingsStoreLocalStudySettingsRepository(settingsStore: settingsStore)
         let resolvedCloudSyncStateRepository = cloudSyncStateRepository
             ?? SettingsStoreCloudSyncStateRepository(settingsStore: settingsStore)
+        let resolvedLocalStudyRecordRepository = localStudyRecordRepository
+            ?? SettingsStoreLocalStudyRecordRepository(settingsStore: settingsStore)
         let loadedLocalStudySettings = resolvedLocalStudySettingsRepository.loadLocalStudySettings()
         let loadedCloudSyncState = resolvedCloudSyncStateRepository.loadCloudSyncState()
         let loadedSettings = loadedLocalStudySettings.settings
@@ -1051,6 +1055,7 @@ final class AppState: ObservableObject {
         self.currentStudySessionRepository = resolvedCurrentStudySessionRepository
         self.localStudySettingsRepository = resolvedLocalStudySettingsRepository
         self.cloudSyncStateRepository = resolvedCloudSyncStateRepository
+        self.localStudyRecordRepository = resolvedLocalStudyRecordRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionRepository.loadCurrentStudySession()
@@ -1066,7 +1071,7 @@ final class AppState: ObservableObject {
         if shouldRecoverLegacyRunningState {
             resolvedCurrentStudySessionRepository.saveIsRunning(true)
         }
-        self.recordsState = RecordsStateStore(records: settingsStore.loadStudyRecords())
+        self.recordsState = RecordsStateStore(records: resolvedLocalStudyRecordRepository.loadStudyRecords())
         self.statsState = StatsStateStore()
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
@@ -2075,7 +2080,7 @@ final class AppState: ObservableObject {
         let mergedRecords = pendingRecords.reduce(recordsPage.records) { records, pendingRecord in
             mergeBackendRecord(pendingRecord, into: records)
         }
-        settingsStore.replaceBackendStudyRecords(mergedRecords)
+        localStudyRecordRepository.replaceBackendStudyRecords(mergedRecords)
         reloadStudyRecordsFromStore(refreshRooms: true)
 
         guard updateVisibleQuestion else {
@@ -2155,7 +2160,7 @@ final class AppState: ObservableObject {
     }
 
     private func reloadStudyRecordsFromStore(refreshRooms: Bool = false) {
-        recordsState.replace(with: settingsStore.loadStudyRecords())
+        recordsState.replace(with: localStudyRecordRepository.loadStudyRecords())
         if refreshRooms {
             refreshBackendStudyRoomsFromRecords()
         }
@@ -3305,7 +3310,7 @@ final class AppState: ObservableObject {
             return ""
         }
 
-        let draft = settingsStore.loadAnswerDraft(recordID: record.id)
+        let draft = localStudyRecordRepository.loadAnswerDraft(recordID: record.id)
         return draft.isEmpty
             ? record.answer ?? ""
             : draft
@@ -3339,8 +3344,8 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
-        settingsStore.saveAnswerDraft(submittedAnswer, recordID: record.id)
-        settingsStore.updateStudyRecordAnswer(question: record.question, answer: submittedAnswer, onlyIfUngraded: true)
+        localStudyRecordRepository.saveAnswerDraft(submittedAnswer, recordID: record.id)
+        localStudyRecordRepository.updateStudyRecordAnswer(question: record.question, answer: submittedAnswer, onlyIfUngraded: true)
         reloadStudyRecordsFromStore()
         refreshBackendStudyRoomsFromRecords()
         log(.info, "학습룸 질문 답변 채점 요청을 전송합니다. recordID=\(record.id)")
@@ -3440,7 +3445,7 @@ final class AppState: ObservableObject {
             let remainingRecords = studyRecords.filter { record in
                 !topicKeysToDelete.contains(Self.normalizedCategoryText(for: record.topic))
             }
-            settingsStore.replaceStudyRecords(remainingRecords)
+            localStudyRecordRepository.replaceStudyRecords(remainingRecords)
             reloadStudyRecordsFromStore(refreshRooms: true)
         }
         studyIDsToDelete.forEach { studyRoomState.removeStudy(id: $0) }
@@ -3871,8 +3876,8 @@ final class AppState: ObservableObject {
             },
             onSuccess: { result in
                 let (record, studyID) = result
-                settingsStore.appendQuestionToHistory(record.question)
-                settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+                localStudyRecordRepository.appendQuestionToHistory(record.question)
+                localStudyRecordRepository.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
                 reloadStudyRecordsFromStore()
                 studyRoomState.setPendingQuestion(record, forStudyID: studyID)
 
@@ -4157,7 +4162,7 @@ final class AppState: ObservableObject {
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
         currentStudySessionRepository.saveLastAnswer(answerToGrade)
-        settingsStore.updateStudyRecordAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
+        localStudyRecordRepository.updateStudyRecordAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
         reloadStudyRecordsFromStore()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
 
@@ -4206,7 +4211,7 @@ final class AppState: ObservableObject {
         currentStudySessionRepository.saveQuestion(record.question)
         currentStudySessionRepository.saveLastAnswer(answer)
         currentStudySessionRepository.saveGradingResult(record.gradingResult)
-        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        localStudyRecordRepository.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         notificationService.cancelQuestionNotification(for: record.question)
         reloadStudyRecordsFromStore()
         hasAPIKeyError = false
@@ -4215,8 +4220,8 @@ final class AppState: ObservableObject {
     }
 
     private func applyStudyRoomRecord(_ record: StudyRecord, answer: String) {
-        settingsStore.deleteAnswerDraft(recordID: record.id)
-        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        localStudyRecordRepository.deleteAnswerDraft(recordID: record.id)
+        localStudyRecordRepository.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
         studyRoomState.applyAnsweredRecord(record)
         notificationService.cancelQuestionNotification(for: record.question)
@@ -4301,12 +4306,12 @@ final class AppState: ObservableObject {
         if let storedRecord = studyRecord(matching: record.question),
            storedRecord.gradingResult == nil {
             notificationService.cancelQuestionNotification(for: storedRecord.question)
-            settingsStore.deleteStudyRecord(storedRecord)
+            localStudyRecordRepository.deleteStudyRecord(storedRecord)
         } else if !matchesCurrentQuestion {
             return
         }
 
-        settingsStore.deleteAnswerDraft(recordID: record.id)
+        localStudyRecordRepository.deleteAnswerDraft(recordID: record.id)
         reloadStudyRecordsFromStore()
         studyRoomState.clearPendingQuestion(recordID: record.id)
 
@@ -4416,7 +4421,7 @@ final class AppState: ObservableObject {
 
     private func persistAnswerDraft(_ draft: PendingAnswerDraft) {
         if let recordID = draft.recordID {
-            settingsStore.saveAnswerDraft(draft.answer, recordID: recordID)
+            localStudyRecordRepository.saveAnswerDraft(draft.answer, recordID: recordID)
         }
 
         guard let question = draft.question else {
@@ -4425,7 +4430,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        settingsStore.updateStudyRecordAnswer(question: question, answer: draft.answer, onlyIfUngraded: true)
+        localStudyRecordRepository.updateStudyRecordAnswer(question: question, answer: draft.answer, onlyIfUngraded: true)
         updateLoadedStudyRecordAnswer(question: question, answer: draft.answer)
 
         if let currentQuestion,
@@ -4544,7 +4549,7 @@ final class AppState: ObservableObject {
             )
         }
 
-        settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+        localStudyRecordRepository.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
         let didApplyRecordToStudyRoom = studyRoomState.applyIncomingRecord(record)
         if !didApplyRecordToStudyRoom, record.gradingResult == nil {
@@ -4590,7 +4595,11 @@ final class AppState: ObservableObject {
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedReply.isEmpty {
-            settingsStore.updateStudyRecordAnswer(question: record.question, answer: trimmedReply)
+            localStudyRecordRepository.updateStudyRecordAnswer(
+                question: record.question,
+                answer: trimmedReply,
+                onlyIfUngraded: false
+            )
         }
 
         reloadStudyRecordsFromStore()
@@ -4671,7 +4680,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        settingsStore.updateStudyRecordAnswer(
+        localStudyRecordRepository.updateStudyRecordAnswer(
             question: record.question,
             answer: trimmedReply,
             onlyIfUngraded: true
@@ -4772,7 +4781,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        settingsStore.updateStudyRecordAnswer(
+        localStudyRecordRepository.updateStudyRecordAnswer(
             question: question,
             answer: trimmedReply,
             onlyIfUngraded: true
@@ -4816,7 +4825,7 @@ final class AppState: ObservableObject {
 
     func clearStudyRecords() {
         notificationService.cancelQuestionNotifications(for: studyRecords.map(\.question))
-        settingsStore.clearStudyRecords()
+        localStudyRecordRepository.clearStudyRecords()
         recordsState.clear()
         refreshBackendStudyRoomsFromRecords()
         notificationLandingMessage = nil
@@ -4837,7 +4846,7 @@ final class AppState: ObservableObject {
 
     func deleteStudyRecord(_ record: StudyRecord) {
         notificationService.cancelQuestionNotification(for: record.question)
-        settingsStore.deleteStudyRecord(record)
+        localStudyRecordRepository.deleteStudyRecord(record)
         reloadStudyRecordsFromStore()
         notificationLandingMessage = nil
 
@@ -4877,7 +4886,7 @@ final class AppState: ObservableObject {
             answeredAt: record.answeredAt,
             isPublic: isPublic
         )
-        settingsStore.saveStudyRecord(updatedRecord)
+        localStudyRecordRepository.saveStudyRecord(updatedRecord)
         reloadStudyRecordsFromStore()
         markCloudDataChanged()
 
@@ -4891,7 +4900,7 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { backendRecord in
-                self.settingsStore.saveStudyRecord(backendRecord)
+                self.localStudyRecordRepository.saveStudyRecord(backendRecord)
                 self.reloadStudyRecordsFromStore()
             },
             failureMessage: { "기록 공개 상태 변경 실패: \($0.localizedDescription)" }
@@ -5496,7 +5505,7 @@ final class AppState: ObservableObject {
             topic: push.topic.isEmpty ? settings.topic : push.topic,
             difficulty: push.difficulty
         )
-        if settingsStore.loadDeletedStudyRecordMarkers().contains(where: { $0.matches(pushRecord) }) {
+        if localStudyRecordRepository.loadDeletedStudyRecordMarkers().contains(where: { $0.matches(pushRecord) }) {
             if showStatus {
                 showNotificationQuestionUnavailable(preserveCurrentQuestion: true)
             }
@@ -5530,8 +5539,8 @@ final class AppState: ObservableObject {
             isQuestionPublic: settings.isQuestionPublic
         )
 
-        settingsStore.appendQuestionToHistory(push.question)
-        settingsStore.appendStudyRecord(question: push.question, settings: pushSettings)
+        localStudyRecordRepository.appendQuestionToHistory(push.question)
+        localStudyRecordRepository.appendStudyRecord(question: push.question, settings: pushSettings)
         reloadStudyRecordsFromStore()
         return true
     }
@@ -5584,14 +5593,14 @@ final class AppState: ObservableObject {
             apiKeyUpdatedAt: lastAPIKeyUpdatedAt,
             settings: normalizedSettings(settings),
             currentQuestion: currentQuestion,
-            questionHistory: settingsStore.loadQuestionHistory(),
+            questionHistory: localStudyRecordRepository.loadQuestionHistory(),
             lastAnswer: lastAnswer,
             gradingResult: gradingResult,
             isRunning: isRunning,
             hasCompletedOnboarding: hasCompletedOnboarding,
             studyRecords: studyRecords,
-            deletedStudyRecordMarkers: settingsStore.loadDeletedStudyRecordMarkers(),
-            studyRecordsClearedAt: settingsStore.loadStudyRecordsClearedAt()
+            deletedStudyRecordMarkers: localStudyRecordRepository.loadDeletedStudyRecordMarkers(),
+            studyRecordsClearedAt: localStudyRecordRepository.loadStudyRecordsClearedAt()
         )
     }
 
@@ -5643,11 +5652,11 @@ final class AppState: ObservableObject {
         )
         let deletedMarkers = mergedDeletedStudyRecordMarkers(
             remote: remoteState.deletedStudyRecordMarkers,
-            local: settingsStore.loadDeletedStudyRecordMarkers()
+            local: localStudyRecordRepository.loadDeletedStudyRecordMarkers()
         )
         let recordsClearedAt = mergedStudyRecordsClearedAt(
             remote: remoteState.studyRecordsClearedAt,
-            local: settingsStore.loadStudyRecordsClearedAt()
+            local: localStudyRecordRepository.loadStudyRecordsClearedAt()
         )
         let mergedRecords = mergedStudyRecords(
             remote: remoteState.studyRecords,
@@ -5662,7 +5671,7 @@ final class AppState: ObservableObject {
         mergedState.studyRecords = mergedRecords
         mergedState.questionHistory = mergedQuestionHistory(
             remote: remoteState.questionHistory,
-            local: settingsStore.loadQuestionHistory()
+            local: localStudyRecordRepository.loadQuestionHistory()
         )
 
         if let currentQuestion = preferredCurrentQuestion(
@@ -5943,11 +5952,11 @@ final class AppState: ObservableObject {
         mergedState.hasCompletedOnboarding = remoteState.hasCompletedOnboarding || hasCompletedOnboarding
         mergedState.deletedStudyRecordMarkers = mergedDeletedStudyRecordMarkers(
             remote: remoteState.deletedStudyRecordMarkers,
-            local: settingsStore.loadDeletedStudyRecordMarkers()
+            local: localStudyRecordRepository.loadDeletedStudyRecordMarkers()
         )
         mergedState.studyRecordsClearedAt = mergedStudyRecordsClearedAt(
             remote: remoteState.studyRecordsClearedAt,
-            local: settingsStore.loadStudyRecordsClearedAt()
+            local: localStudyRecordRepository.loadStudyRecordsClearedAt()
         )
         mergedState.studyRecords = mergedStudyRecords(
             remote: remoteState.studyRecords,
@@ -5961,7 +5970,7 @@ final class AppState: ObservableObject {
         )
         mergedState.questionHistory = mergedQuestionHistory(
             remote: remoteState.questionHistory,
-            local: settingsStore.loadQuestionHistory()
+            local: localStudyRecordRepository.loadQuestionHistory()
         )
 
         if mergedState.currentQuestion == nil {
@@ -5979,13 +5988,13 @@ final class AppState: ObservableObject {
 
     private var hasMeaningfulLocalCloudData: Bool {
         !studyRecords.isEmpty ||
-            !settingsStore.loadQuestionHistory().isEmpty ||
+            !localStudyRecordRepository.loadQuestionHistory().isEmpty ||
             currentQuestion != nil ||
             !lastAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             gradingResult != nil ||
             !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !settingsStore.loadDeletedStudyRecordMarkers().isEmpty ||
-            settingsStore.loadStudyRecordsClearedAt() != nil ||
+            !localStudyRecordRepository.loadDeletedStudyRecordMarkers().isEmpty ||
+            localStudyRecordRepository.loadStudyRecordsClearedAt() != nil ||
             normalizedSettings(settings) != .default
     }
 
@@ -6193,7 +6202,7 @@ final class AppState: ObservableObject {
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
         let localStudyRecords = studyRecords
-        let localQuestionHistory = settingsStore.loadQuestionHistory()
+        let localQuestionHistory = localStudyRecordRepository.loadQuestionHistory()
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
@@ -6204,11 +6213,11 @@ final class AppState: ObservableObject {
         let shouldPreserveActiveQuestion = shouldPreserveActiveQuestion(whenApplying: state)
         let mergedDeletedMarkers = mergedDeletedStudyRecordMarkers(
             remote: state.deletedStudyRecordMarkers,
-            local: settingsStore.loadDeletedStudyRecordMarkers()
+            local: localStudyRecordRepository.loadDeletedStudyRecordMarkers()
         )
         let mergedRecordsClearedAt = mergedStudyRecordsClearedAt(
             remote: state.studyRecordsClearedAt,
-            local: settingsStore.loadStudyRecordsClearedAt()
+            local: localStudyRecordRepository.loadStudyRecordsClearedAt()
         )
         let mergedRecords = mergedStudyRecords(
             remote: state.studyRecords,
@@ -6321,15 +6330,15 @@ final class AppState: ObservableObject {
 
         localStudySettingsRepository.saveSettings(effectiveSettings)
         currentStudySessionRepository.saveQuestion(appliedCurrentQuestion)
-        settingsStore.saveQuestionHistory(mergedHistory)
+        localStudyRecordRepository.saveQuestionHistory(mergedHistory)
         currentStudySessionRepository.saveLastAnswer(appliedLastAnswer)
         currentStudySessionRepository.saveGradingResult(appliedGradingResult)
         currentStudySessionRepository.saveIsRunning(state.isRunning)
         onboardingStateRepository.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
         cloudSyncStateRepository.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
-        settingsStore.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
-        settingsStore.saveStudyRecordsClearedAt(mergedRecordsClearedAt)
-        settingsStore.replaceStudyRecords(mergedRecords)
+        localStudyRecordRepository.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
+        localStudyRecordRepository.saveStudyRecordsClearedAt(mergedRecordsClearedAt)
+        localStudyRecordRepository.replaceStudyRecords(mergedRecords)
         let nextCloudSyncTimestamp = max(
             state.updatedAt,
             cloudLastSyncedAt ?? state.updatedAt,
