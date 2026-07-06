@@ -14,6 +14,7 @@
 		110000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		110000000000000000000172 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
+		110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
@@ -55,6 +56,7 @@
 		120000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
 		120000000000000000000113 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
+		120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
@@ -148,6 +150,7 @@
 		110000000000000000000028 /* CommunityProfileStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityProfileStateStore.swift; sourceTree = "<group>"; };
 		110000000000000000000029 /* DeveloperStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperStateStore.swift; sourceTree = "<group>"; };
 		11000000000000000000002C /* BackendErrorPresentationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendErrorPresentationPolicy.swift; sourceTree = "<group>"; };
+		110000000000000000000039 /* AppErrorHandlingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppErrorHandlingPolicy.swift; sourceTree = "<group>"; };
 		11000000000000000000002E /* PageAccessPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000031 /* RefreshPageAccessUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshPageAccessUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000033 /* StudyRoomUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomUseCase.swift; sourceTree = "<group>"; };
@@ -233,6 +236,7 @@
 			isa = PBXGroup;
 			children = (
 				11000000000000000000002C /* BackendErrorPresentationPolicy.swift */,
+				110000000000000000000039 /* AppErrorHandlingPolicy.swift */,
 			);
 			path = ErrorHandling;
 			sourceTree = "<group>";
@@ -546,6 +550,7 @@
 				110000000000000000000181 /* NotificationLandingCoordinator.swift in Sources */,
 				110000000000000000000172 /* RemotePushBackendClient.swift in Sources */,
 				110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */,
+				110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */,
 				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
@@ -595,6 +600,7 @@
 				120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */,
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
+				120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */,
 				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,

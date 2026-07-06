@@ -26,6 +26,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Core/`
   - App-wide pure policies and shared decision rules.
   - `ErrorHandling/BackendErrorPresentationPolicy.swift` converts backend error codes into UI presentation, login, page-access, and identity-reset decisions.
+  - `ErrorHandling/AppErrorHandlingPolicy.swift` maps backend error presentation into app UI behavior so login/device/token errors do not leak as repeated popups or feature banners.
   - `PageAccess/PageAccessPolicy.swift` owns tab/page access mapping and provisional access decisions.
 
 - `UseCases/`

@@ -137,6 +137,43 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(validationPresentation.shouldResetBackendIdentity)
     }
 
+    func testAppErrorHandlingSuppressesLoginErrorsFromFeatureMessages() {
+        let loginError = Self.backendError(
+            code: "DEVICE_NOT_FOUND",
+            status: 404,
+            message: "기기를 찾을 수 없습니다."
+        )
+
+        let resolution = AppErrorHandlingPolicy.resolve(
+            loginError,
+            fallback: "fallback"
+        )
+
+        XCTAssertNil(resolution.featureMessage)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertTrue(resolution.requiresLogin)
+        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertTrue(resolution.shouldClearFeatureMessage)
+    }
+
+    func testAppErrorHandlingUsesServerMessageForValidationErrors() {
+        let validationError = Self.backendError(
+            code: "RECORD_NOT_FOUND",
+            status: 404,
+            message: "기록을 찾을 수 없습니다."
+        )
+
+        let resolution = AppErrorHandlingPolicy.resolve(
+            validationError,
+            fallback: "fallback"
+        )
+
+        XCTAssertEqual(resolution.featureMessage, "기록을 찾을 수 없습니다.")
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldClearFeatureMessage)
+    }
+
     func testPageAccessPolicyCentralizesProtectedTabRules() {
         XCTAssertNil(PageAccessPolicy.protectedPage(for: .home))
         XCTAssertNil(PageAccessPolicy.protectedPage(for: .settings))

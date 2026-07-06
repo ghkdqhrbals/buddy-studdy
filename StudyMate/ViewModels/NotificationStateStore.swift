@@ -34,7 +34,7 @@ struct NotificationStateStore {
         notifications.append(contentsOf: page.notifications.filter { !existing.contains($0.id) })
     }
 
-    mutating func applyError(_ message: String) {
+    mutating func applyError(_ message: String?) {
         errorMessage = message
     }
 

@@ -755,8 +755,8 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            let presentation = backendErrorPresentation(error, fallback: "")
-            if presentation.shouldResetBackendIdentity {
+            let resolution = appErrorResolution(error, fallback: "")
+            if resolution.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 resetCommunitySignInState()
             }
@@ -796,11 +796,15 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
-        let presentation = backendErrorPresentation(error, fallback: "")
-        guard presentation.isPageAccessDenied else {
+        let resolution = appErrorResolution(error, fallback: "")
+        guard resolution.isPageAccessDenied else {
             return false
         }
 
+        if resolution.shouldResetBackendIdentity {
+            clearStoredBackendAccessToken()
+            resetCommunitySignInState()
+        }
         redirectToPageAccessGuide(for: page)
         return true
     }
@@ -1312,10 +1316,19 @@ final class AppState: ObservableObject {
                 state.applyPage(page, reset: reset)
             }
         } catch {
-            let presentation = backendErrorPresentation(error, fallback: error.localizedDescription)
-            let message = presentation.isPageAccessDenied ? strings.myStudyLoginHelp : presentation.message
-            updateNotificationState { state in
-                state.applyError(message)
+            let resolution = appErrorResolution(error, fallback: error.localizedDescription)
+            if resolution.shouldResetBackendIdentity {
+                clearStoredBackendAccessToken()
+                resetCommunitySignInState()
+            }
+            if let message = resolution.featureMessage {
+                updateNotificationState { state in
+                    state.applyError(message)
+                }
+            } else if resolution.shouldClearFeatureMessage {
+                updateNotificationState { state in
+                    state.applyError(nil)
+                }
             }
             log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
         }
@@ -2290,8 +2303,8 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCommunitySignedIn(isCommunitySignedIn)
             reconcileVisiblePageAccessAfterRefresh()
         } catch {
-            let presentation = backendErrorPresentation(error, fallback: "")
-            if presentation.shouldResetBackendIdentity {
+            let resolution = appErrorResolution(error, fallback: "")
+            if resolution.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 resetCommunitySignInState()
             }
@@ -2467,15 +2480,15 @@ final class AppState: ObservableObject {
             let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
             applyCommunityProfile(profile)
         } catch {
-            let presentation = backendErrorPresentation(error, fallback: strings.communityRequestFailed)
-            if presentation.shouldResetBackendIdentity {
+            let resolution = appErrorResolution(error, fallback: strings.communityRequestFailed)
+            if resolution.shouldResetBackendIdentity {
                 clearStoredBackendAccessToken()
                 communityProfile = nil
                 communityErrorMessage = nil
                 return
             }
             log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
-            communityErrorMessage = presentation.inlineMessage
+            communityErrorMessage = resolution.featureMessage
         }
     }
 
@@ -6860,15 +6873,15 @@ final class AppState: ObservableObject {
     }
 
     private func communityErrorMessage(for error: Error) -> String? {
-        backendErrorPresentation(error, fallback: strings.communityRequestFailed).inlineMessage
+        appErrorResolution(error, fallback: strings.communityRequestFailed).featureMessage
     }
 
     private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
-        backendErrorPresentation(error, fallback: fallback).message
+        appErrorResolution(error, fallback: fallback).featureMessage ?? fallback
     }
 
-    private func backendErrorPresentation(_ error: Error, fallback: String) -> BackendErrorPresentation {
-        BackendErrorPresentationPolicy.presentation(for: error, fallback: fallback)
+    private func appErrorResolution(_ error: Error, fallback: String) -> AppErrorHandlingResolution {
+        AppErrorHandlingPolicy.resolve(error, fallback: fallback)
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

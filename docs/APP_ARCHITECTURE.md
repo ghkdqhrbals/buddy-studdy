@@ -54,7 +54,10 @@ Backend errors are normalized once, then consumed by the app:
 - Validation and resource errors may be shown inline using server text.
 - Debug descriptions remain for logs, not end-user UI.
 
-The policy lives in `StudyMate/Core/ErrorHandling/BackendErrorPresentationPolicy.swift`.
+The policy is split into two deterministic steps:
+
+- `StudyMate/Core/ErrorHandling/BackendErrorPresentationPolicy.swift` extracts backend code, server message, auth requirements, and reset decisions.
+- `StudyMate/Core/ErrorHandling/AppErrorHandlingPolicy.swift` converts that presentation into app UI behavior. Auth, device, token, and page-access errors clear feature messages and drive login/access flows instead of repeated popups or inline banners.
 
 ## Testing Rules
 
