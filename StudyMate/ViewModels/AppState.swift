@@ -448,7 +448,7 @@ final class AppState: ObservableObject {
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
     private let communitySessionUseCase: CommunitySessionUseCase
-    private let onboardingStateRepository: OnboardingStateRepository
+    private let onboardingStateUseCase: OnboardingStateUseCase
     private let developerSettingsRepository: DeveloperSettingsRepository
     private let currentStudySessionUseCase: CurrentStudySessionUseCase
     private let localStudySettingsRepository: LocalStudySettingsRepository
@@ -997,6 +997,7 @@ final class AppState: ObservableObject {
         communitySessionRepository: CommunitySessionRepository? = nil,
         communitySessionUseCase: CommunitySessionUseCase? = nil,
         onboardingStateRepository: OnboardingStateRepository? = nil,
+        onboardingStateUseCase: OnboardingStateUseCase? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
         currentStudySessionUseCase: CurrentStudySessionUseCase? = nil,
@@ -1018,6 +1019,8 @@ final class AppState: ObservableObject {
             ?? CommunitySessionUseCase(repository: resolvedCommunitySessionRepository)
         let resolvedOnboardingStateRepository = onboardingStateRepository
             ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
+        let resolvedOnboardingStateUseCase = onboardingStateUseCase
+            ?? OnboardingStateUseCase(repository: resolvedOnboardingStateRepository)
         let resolvedDeveloperSettingsRepository = developerSettingsRepository
             ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
         let resolvedCurrentStudySessionRepository = currentStudySessionRepository
@@ -1046,7 +1049,7 @@ final class AppState: ObservableObject {
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
         let loadedLogPage = resolvedAppLogRepository.loadAppLogs(page: 0, pageSize: Self.developerLogPageSize)
-        let loadedHasCompletedOnboarding = resolvedOnboardingStateRepository.loadHasCompletedOnboarding()
+        let loadedHasCompletedOnboarding = resolvedOnboardingStateUseCase.hasCompletedOnboarding()
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
         let loadedDeveloperSettings = resolvedDeveloperSettingsRepository.loadDeveloperSettings()
@@ -1059,7 +1062,7 @@ final class AppState: ObservableObject {
             ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
         self.communityProfileCacheUseCase = resolvedCommunityProfileCacheUseCase
         self.communitySessionUseCase = resolvedCommunitySessionUseCase
-        self.onboardingStateRepository = resolvedOnboardingStateRepository
+        self.onboardingStateUseCase = resolvedOnboardingStateUseCase
         self.developerSettingsRepository = resolvedDeveloperSettingsRepository
         self.currentStudySessionUseCase = currentStudySessionUseCase
             ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
@@ -2137,7 +2140,7 @@ final class AppState: ObservableObject {
         savedSettings = synchronizedLoadedSettings
         savedAPIKey = loadedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         lastAPIKeyUpdatedAt = effectiveAPIKeyUpdatedAt
-        hasCompletedOnboarding = onboardingStateRepository.loadHasCompletedOnboarding()
+        hasCompletedOnboarding = onboardingStateUseCase.hasCompletedOnboarding()
         isCloudSyncEnabled = loadedCloudSyncState.isEnabled
         cloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         loadAppLogPage(appLogPage)
@@ -3585,7 +3588,7 @@ final class AppState: ObservableObject {
             pendingSettings,
             apiKey: ""
         )
-        onboardingStateRepository.saveHasCompletedOnboarding(true)
+        onboardingStateUseCase.setHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         #if os(iOS)
         selectedTab = .home
@@ -3604,7 +3607,7 @@ final class AppState: ObservableObject {
     }
 
     func skipOnboarding() {
-        onboardingStateRepository.saveHasCompletedOnboarding(true)
+        onboardingStateUseCase.setHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         selectedTab = .settings
 
@@ -6328,7 +6331,7 @@ final class AppState: ObservableObject {
         currentStudySessionUseCase.saveLastAnswer(appliedLastAnswer)
         currentStudySessionUseCase.saveGradingResult(appliedGradingResult)
         currentStudySessionUseCase.saveIsRunning(state.isRunning)
-        onboardingStateRepository.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
+        onboardingStateUseCase.setHasCompletedOnboarding(mergedHasCompletedOnboarding)
         cloudSyncStateRepository.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
         localStudyRecordRepository.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
         localStudyRecordRepository.saveStudyRecordsClearedAt(mergedRecordsClearedAt)

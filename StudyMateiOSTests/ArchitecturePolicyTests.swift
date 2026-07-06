@@ -342,6 +342,26 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesOnboardingStateThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "onboardingStateRepository.loadHasCompletedOnboarding",
+            "onboardingStateRepository.saveHasCompletedOnboarding",
+            "resolvedOnboardingStateRepository.loadHasCompletedOnboarding",
+            "resolvedOnboardingStateRepository.saveHasCompletedOnboarding",
+            "private let onboardingStateRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use OnboardingStateUseCase for onboarding completion state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesDeveloperSettingsRepositoryForStoredDebugSettings() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
