@@ -486,6 +486,7 @@ final class AppState: ObservableObject {
     private var notificationsUseCase: NotificationsUseCase
     private var statsUseCase: StatsUseCase
     private var settingsUseCase: SettingsUseCase
+    private var communityUseCase: CommunityUseCase
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -814,8 +815,8 @@ final class AppState: ObservableObject {
         }
 
         if resolution.isPageAccessDenied || resolution.requiresLogin {
-            if let protectedPage {
-                redirectToPageAccessGuide(for: protectedPage)
+            if let page = protectedPage ?? currentVisibleProtectedPage() {
+                redirectToPageAccessGuide(for: page)
             }
             clearErrorMessage(target)
             return true
@@ -934,6 +935,7 @@ final class AppState: ObservableObject {
         notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
         statsUseCase = StatsUseCase(backendClient: backendClient)
         settingsUseCase = SettingsUseCase(backendClient: backendClient)
+        communityUseCase = CommunityUseCase(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1109,6 +1111,7 @@ final class AppState: ObservableObject {
         self.notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
         self.statsUseCase = StatsUseCase(backendClient: backendClient)
         self.settingsUseCase = SettingsUseCase(backendClient: backendClient)
+        self.communityUseCase = CommunityUseCase(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -1972,7 +1975,7 @@ final class AppState: ObservableObject {
                 return
             }
 
-            let response = try await remotePushBackendClient.fetchPublicQuestions(
+            let response = try await communityUseCase.fetchPublicQuestions(
                 registration: registration,
                 query: trimmedTopic.isEmpty ? nil : trimmedTopic,
                 limit: limit,
@@ -2319,7 +2322,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let result = try await remotePushBackendClient.loginWithGoogle(
+            let result = try await communityUseCase.loginWithGoogle(
                 registration: registration,
                 idToken: idToken
             )
@@ -2381,7 +2384,7 @@ final class AppState: ObservableObject {
 
         do {
             communityErrorMessage = nil
-            _ = try await remotePushBackendClient.requestEmailVerificationCode(
+            _ = try await communityUseCase.requestEmailVerificationCode(
                 registration: registration,
                 email: normalizedEmail
             )
@@ -2402,7 +2405,7 @@ final class AppState: ObservableObject {
 
         do {
             communityErrorMessage = nil
-            let result = try await remotePushBackendClient.loginWithEmail(
+            let result = try await communityUseCase.loginWithEmail(
                 registration: registration,
                 email: normalizedEmail,
                 password: password,
@@ -2446,7 +2449,7 @@ final class AppState: ObservableObject {
         if let registrationForLogout {
             Task {
                 do {
-                    try await remotePushBackendClient.logout(registration: registrationForLogout)
+                    try await communityUseCase.logout(registration: registrationForLogout)
                     log(.info, "백엔드 로그아웃을 완료했습니다. deviceID=\(registrationForLogout.deviceID)")
                 } catch {
                     log(.warning, "백엔드 로그아웃 실패: \(error.localizedDescription)")
@@ -2531,7 +2534,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let profile = try await remotePushBackendClient.fetchMyProfile(registration: registration)
+            let profile = try await communityUseCase.fetchMyProfile(registration: registration)
             applyCommunityProfile(profile)
         } catch {
             let handled = handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
@@ -2559,7 +2562,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let profile = try await remotePushBackendClient.updateMyProfile(
+            let profile = try await communityUseCase.updateMyProfile(
                 registration: registration,
                 displayName: displayName,
                 bio: bio,
@@ -2640,7 +2643,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let updatedRegistration = try await remotePushBackendClient.withdrawMyProfile(registration: registration)
+            let updatedRegistration = try await communityUseCase.withdrawMyProfile(registration: registration)
             settingsStore.saveRemotePushRegistration(updatedRegistration)
             signOutFromCommunity()
             settingsStore.saveCommunityProfileID(nil)
@@ -2659,7 +2662,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await remotePushBackendClient.reportCommunityQuestion(
+            try await communityUseCase.reportQuestion(
                 registration: registration,
                 questionID: question.id,
                 reason: reason,
@@ -2686,7 +2689,7 @@ final class AppState: ObservableObject {
         updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: max(0, question.likeCount + (isLiked ? 1 : -1)))
 
         do {
-            let state = try await remotePushBackendClient.setCommunityQuestionLike(
+            let state = try await communityUseCase.setQuestionLike(
                 registration: registration,
                 questionID: question.id,
                 isLiked: isLiked
@@ -2710,7 +2713,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            return try await remotePushBackendClient.fetchCommunityQuestionComments(
+            return try await communityUseCase.fetchComments(
                 registration: registration,
                 questionID: questionID,
                 limit: limit,
@@ -2730,7 +2733,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let question = try await remotePushBackendClient.fetchPublicQuestion(
+            let question = try await communityUseCase.fetchPublicQuestion(
                 registration: registration,
                 questionID: questionID,
                 language: settings.appLanguage
@@ -2757,7 +2760,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let comment = try await remotePushBackendClient.createCommunityQuestionComment(
+            let comment = try await communityUseCase.createComment(
                 registration: registration,
                 questionID: questionID,
                 body: body
@@ -2784,7 +2787,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try await remotePushBackendClient.deleteCommunityQuestionComment(
+            try await communityUseCase.deleteComment(
                 registration: registration,
                 questionID: questionID,
                 commentID: commentID

@@ -169,9 +169,28 @@ final class StudyMateTests: XCTestCase {
         )
 
         XCTAssertEqual(resolution.featureMessage, "기록을 찾을 수 없습니다.")
+        XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertFalse(resolution.requiresLogin)
         XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
+    }
+
+    func testEmptyBackendPageResponsesDecodeAsEmptyPages() throws {
+        let payload = Data("{}".utf8)
+
+        let studyPage = try JSONDecoder().decode(BackendStudyPage.self, from: payload)
+        let recordsPage = try JSONDecoder().decode(BackendRecordsPage.self, from: payload)
+        let commentsPage = try JSONDecoder().decode(CommunityCommentsResponse.self, from: payload)
+        let notificationsPage = try JSONDecoder().decode(BackendNotificationsPage.self, from: payload)
+
+        XCTAssertTrue(studyPage.studies.isEmpty)
+        XCTAssertEqual(studyPage.totalCount, 0)
+        XCTAssertTrue(recordsPage.records.isEmpty)
+        XCTAssertEqual(recordsPage.totalCount, 0)
+        XCTAssertTrue(commentsPage.comments.isEmpty)
+        XCTAssertEqual(commentsPage.totalCount, 0)
+        XCTAssertTrue(notificationsPage.notifications.isEmpty)
+        XCTAssertEqual(notificationsPage.totalCount, 0)
     }
 
     func testAppErrorHandlingNormalizesDecodingErrorsWithoutPopup() {
@@ -378,6 +397,93 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.markedNotificationIDs, ["notification-1"])
         XCTAssertEqual(backendClient.deletedNotificationIDs, ["notification-2"])
         XCTAssertEqual(backendClient.deleteAllNotificationsCallCount, 1)
+    }
+
+    @MainActor
+    func testCommunityUseCaseCentralizesBackendOperations() async throws {
+        let backendClient = FakeRemotePushBackendClient()
+        let useCase = CommunityUseCase(backendClient: backendClient)
+
+        _ = try await useCase.fetchPublicQuestions(
+            registration: backendClient.registration,
+            query: "redis",
+            limit: 20,
+            offset: 0,
+            excludeDeviceID: nil,
+            language: .korean
+        )
+        _ = try await useCase.loginWithGoogle(
+            registration: backendClient.registration,
+            idToken: "id-token"
+        )
+        _ = try await useCase.requestEmailVerificationCode(
+            registration: backendClient.registration,
+            email: "user@example.com"
+        )
+        _ = try await useCase.loginWithEmail(
+            registration: backendClient.registration,
+            email: "user@example.com",
+            password: "password",
+            verificationCode: "123456"
+        )
+        _ = try await useCase.fetchMyProfile(registration: backendClient.registration)
+        _ = try await useCase.updateMyProfile(
+            registration: backendClient.registration,
+            displayName: "Buddy",
+            bio: "bio",
+            avatarSymbolName: "star",
+            avatarColorSeed: "seed",
+            pageAccess: nil
+        )
+        _ = try await useCase.withdrawMyProfile(registration: backendClient.registration)
+        try await useCase.reportQuestion(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            reason: "spam",
+            message: "message"
+        )
+        _ = try await useCase.setQuestionLike(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            isLiked: true
+        )
+        _ = try await useCase.fetchComments(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            limit: 30,
+            offset: 0
+        )
+        _ = try await useCase.fetchPublicQuestion(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            language: .korean
+        )
+        _ = try await useCase.createComment(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            body: "comment"
+        )
+        try await useCase.deleteComment(
+            registration: backendClient.registration,
+            questionID: "question-1",
+            commentID: "comment-1"
+        )
+        try await useCase.logout(registration: backendClient.registration)
+
+        XCTAssertEqual(backendClient.fetchPublicQuestionsRequests.count, 1)
+        XCTAssertEqual(backendClient.googleLoginIDTokens, ["id-token"])
+        XCTAssertEqual(backendClient.emailVerificationRequests, ["user@example.com"])
+        XCTAssertEqual(backendClient.emailLoginRequests.map(\.email), ["user@example.com"])
+        XCTAssertEqual(backendClient.fetchMyProfileCallCount, 1)
+        XCTAssertEqual(backendClient.updatedProfileDisplayNames, ["Buddy"])
+        XCTAssertEqual(backendClient.withdrawMyProfileCallCount, 1)
+        XCTAssertEqual(backendClient.reportedQuestionIDs, ["question-1"])
+        XCTAssertEqual(backendClient.likedQuestionIDs, ["question-1"])
+        XCTAssertEqual(backendClient.commentFetchQuestionIDs, ["question-1"])
+        XCTAssertEqual(backendClient.fetchPublicQuestionIDs, ["question-1"])
+        XCTAssertEqual(backendClient.createdCommentBodies, ["comment"])
+        XCTAssertEqual(backendClient.deletedCommentIDs, ["comment-1"])
+        XCTAssertEqual(backendClient.logoutCallCount, 1)
     }
 
     @MainActor
@@ -4499,6 +4605,26 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var markedNotificationIDs: [String] = []
     var deletedNotificationIDs: [String] = []
     var deleteAllNotificationsCallCount = 0
+    var fetchPublicQuestionsRequests: [(
+        query: String?,
+        limit: Int,
+        offset: Int,
+        excludeDeviceID: String?,
+        language: AppLanguage
+    )] = []
+    var fetchPublicQuestionIDs: [String] = []
+    var googleLoginIDTokens: [String] = []
+    var emailVerificationRequests: [String] = []
+    var emailLoginRequests: [(email: String, password: String, verificationCode: String?)] = []
+    var fetchMyProfileCallCount = 0
+    var updatedProfileDisplayNames: [String] = []
+    var withdrawMyProfileCallCount = 0
+    var reportedQuestionIDs: [String] = []
+    var likedQuestionIDs: [String] = []
+    var commentFetchQuestionIDs: [String] = []
+    var createdCommentBodies: [String] = []
+    var deletedCommentIDs: [String] = []
+    var logoutCallCount = 0
     var bootstrapAccessTokenCallCount = 0
     var bootstrapAccessTokenError: Error?
     var fetchAccessErrors: [Error] = []
@@ -4568,7 +4694,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         return accessState
     }
 
-    func logout(registration: RemotePushRegistration) async throws {}
+    func logout(registration: RemotePushRegistration) async throws {
+        logoutCallCount += 1
+    }
 
     func fetchNotifications(
         registration: RemotePushRegistration,
@@ -4757,6 +4885,13 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         excludeDeviceID: String?,
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse {
+        fetchPublicQuestionsRequests.append((
+            query: query,
+            limit: limit,
+            offset: offset,
+            excludeDeviceID: excludeDeviceID,
+            language: language
+        ))
         CommunityQuestionsResponse(
             questions: [],
             totalCount: 0,
@@ -4770,6 +4905,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         questionID: String,
         language: AppLanguage
     ) async throws -> CommunityQuestion {
+        fetchPublicQuestionIDs.append(questionID)
         CommunityQuestion(
             id: questionID,
             question: "Question",
@@ -4789,6 +4925,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         idToken: String
     ) async throws -> CommunityLoginResult {
+        googleLoginIDTokens.append(idToken)
         let updatedRegistration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -4806,6 +4943,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         email: String
     ) async throws -> EmailVerificationCodeResult {
+        emailVerificationRequests.append(email)
         EmailVerificationCodeResult(email: email, expiresInSeconds: 180)
     }
 
@@ -4815,6 +4953,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         password: String,
         verificationCode: String?
     ) async throws -> CommunityLoginResult {
+        emailLoginRequests.append((email: email, password: password, verificationCode: verificationCode))
         let updatedRegistration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -4829,6 +4968,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile {
+        fetchMyProfileCallCount += 1
         CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
     }
 
@@ -4840,6 +4980,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         avatarColorSeed: String?,
         pageAccess: CommunityPageAccess?
     ) async throws -> CommunityUserProfile {
+        if let displayName {
+            updatedProfileDisplayNames.append(displayName)
+        }
         CommunityUserProfile(
             id: 1,
             displayName: displayName ?? "Tester",
@@ -4852,6 +4995,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     }
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
+        withdrawMyProfileCallCount += 1
         RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -4866,13 +5010,16 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         questionID: String,
         reason: String,
         message: String
-    ) async throws {}
+    ) async throws {
+        reportedQuestionIDs.append(questionID)
+    }
 
     func setCommunityQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,
         isLiked: Bool
     ) async throws -> CommunityLikeState {
+        likedQuestionIDs.append(questionID)
         CommunityLikeState(questionID: questionID, likeCount: isLiked ? 1 : 0, isLikedByMe: isLiked)
     }
 
@@ -4882,6 +5029,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         limit: Int,
         offset: Int
     ) async throws -> CommunityCommentsResponse {
+        commentFetchQuestionIDs.append(questionID)
         CommunityCommentsResponse(comments: [], totalCount: 0, limit: limit, offset: offset)
     }
 
@@ -4890,6 +5038,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         questionID: String,
         body: String
     ) async throws -> CommunityQuestionComment {
+        createdCommentBodies.append(body)
         CommunityQuestionComment(
             id: "comment-test",
             questionID: questionID,
@@ -4903,7 +5052,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         questionID: String,
         commentID: String
-    ) async throws {}
+    ) async throws {
+        deletedCommentIDs.append(commentID)
+    }
 
     func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
         createQuestionCallCount += 1
@@ -4917,7 +5068,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         }
         let category = StudyCategory(title: "Generated", difficulty: .beginner)
         return StudyRecord(
-            question: QuestionItem(question: "Generated question", hint: nil, category: category),
+            question: QuestionItem(question: "Generated question", expectedAnswerHint: nil, createdAt: Date()),
             topic: category.title,
             difficulty: category.difficulty
         )
@@ -4936,7 +5087,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         let category = StudyCategory(title: "Graded", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
-            question: QuestionItem(question: "Graded question", hint: nil, category: category),
+            question: QuestionItem(question: "Graded question", expectedAnswerHint: nil, createdAt: Date()),
             answer: answer,
             gradingResult: GradingResult(score: 80, feedback: "Good", explanation: "Good"),
             topic: category.title,
@@ -4954,7 +5105,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         let category = StudyCategory(title: "Saved", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
-            question: QuestionItem(question: "Saved question", hint: nil, category: category),
+            question: QuestionItem(question: "Saved question", expectedAnswerHint: nil, createdAt: Date()),
             answer: answer,
             topic: category.title,
             difficulty: category.difficulty
@@ -4969,7 +5120,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         let category = StudyCategory(title: "Skipped", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
-            question: QuestionItem(question: "Skipped question", hint: nil, category: category),
+            question: QuestionItem(question: "Skipped question", expectedAnswerHint: nil, createdAt: Date()),
             topic: category.title,
             difficulty: category.difficulty
         )
@@ -4991,7 +5142,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         let category = StudyCategory(title: "Publicity", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
-            question: QuestionItem(question: "Publicity question", hint: nil, category: category),
+            question: QuestionItem(question: "Publicity question", expectedAnswerHint: nil, createdAt: Date()),
             topic: category.title,
             difficulty: category.difficulty,
             isPublic: isPublic
@@ -5010,7 +5161,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         let category = StudyCategory(title: "Fetched", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
-            question: QuestionItem(question: "Fetched question", hint: nil, category: category),
+            question: QuestionItem(question: "Fetched question", expectedAnswerHint: nil, createdAt: Date()),
             topic: category.title,
             difficulty: category.difficulty
         )

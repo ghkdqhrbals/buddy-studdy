@@ -21,7 +21,7 @@ enum AppErrorHandlingPolicy {
 
         return AppErrorHandlingResolution(
             featureMessage: suppressFeatureMessage ? nil : presentation.inlineMessage,
-            shouldShowPopup: suppressFeatureMessage ? false : presentation.shouldShowPopup,
+            shouldShowPopup: false,
             requiresLogin: presentation.requiresLogin,
             isPageAccessDenied: presentation.isPageAccessDenied,
             requiresEmailVerification: presentation.requiresEmailVerification,

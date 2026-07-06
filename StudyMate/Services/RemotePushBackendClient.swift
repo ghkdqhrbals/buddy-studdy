@@ -1575,6 +1575,28 @@ struct BackendRecordsPage: Decodable, Equatable {
     var totalCount: Int
     var limit: Int
     var offset: Int
+
+    init(records: [StudyRecord] = [], totalCount: Int = 0, limit: Int = 0, offset: Int = 0) {
+        self.records = records
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case records
+        case totalCount
+        case limit
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        records = try container.decodeIfPresent([StudyRecord].self, forKey: .records) ?? []
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? records.count
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? records.count
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
 }
 
 struct BackendAPIStatus: Decodable, Equatable {
@@ -1877,6 +1899,28 @@ struct CommunityCommentsResponse: Decodable, Equatable {
     var totalCount: Int
     var limit: Int
     var offset: Int
+
+    init(comments: [CommunityQuestionComment] = [], totalCount: Int = 0, limit: Int = 0, offset: Int = 0) {
+        self.comments = comments
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case comments
+        case totalCount
+        case limit
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        comments = try container.decodeIfPresent([CommunityQuestionComment].self, forKey: .comments) ?? []
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? comments.count
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? comments.count
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
 }
 
 struct BackendAppNotification: Decodable, Equatable, Identifiable {
@@ -1898,6 +1942,37 @@ struct BackendNotificationsPage: Decodable, Equatable {
     var totalCount: Int
     var limit: Int
     var offset: Int
+
+    init(
+        notifications: [BackendAppNotification] = [],
+        unreadCount: Int = 0,
+        totalCount: Int = 0,
+        limit: Int = 0,
+        offset: Int = 0
+    ) {
+        self.notifications = notifications
+        self.unreadCount = unreadCount
+        self.totalCount = totalCount
+        self.limit = limit
+        self.offset = offset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case notifications
+        case unreadCount
+        case totalCount
+        case limit
+        case offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        notifications = try container.decodeIfPresent([BackendAppNotification].self, forKey: .notifications) ?? []
+        unreadCount = try container.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? notifications.count
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? notifications.count
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
 }
 
 private struct NotificationUnreadCountResponse: Decodable {

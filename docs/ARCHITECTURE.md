@@ -39,6 +39,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - `Settings/SettingsUseCase.swift` centralizes backend settings, model option, API validation, and schedule sync requests.
   - `Stats/StatsUseCase.swift` centralizes backend topic statistics and activity requests.
   - `StudyRoom/StudyRoomUseCase.swift` centralizes study room backend operations such as study fetch/create/delete and backend question creation.
+  - `Community/CommunityUseCase.swift` centralizes public question, sign-in, profile, like, report, and comment backend operations.
   - `AppState` may still orchestrate state application and recovery, but it should not grow new direct backend action logic when a use-case boundary exists.
 
 - `Services/SettingsStore.swift`
