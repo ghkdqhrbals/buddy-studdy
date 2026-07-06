@@ -339,6 +339,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesCurrentStudySessionThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "currentStudySessionRepository.loadCurrentStudySession",
+            "currentStudySessionRepository.saveQuestion",
+            "currentStudySessionRepository.saveLastAnswer",
+            "currentStudySessionRepository.saveGradingResult",
+            "currentStudySessionRepository.saveIsRunning",
+            "currentStudySessionRepository.saveExplicitIsRunning",
+            "currentStudySessionRepository.hasExplicitRunningPreference",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CurrentStudySessionUseCase for current question, answer, grading, and running state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesLocalStudySettingsRepositoryForStoredSettingsState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

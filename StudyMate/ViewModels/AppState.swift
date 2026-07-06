@@ -450,7 +450,7 @@ final class AppState: ObservableObject {
     private let communitySessionRepository: CommunitySessionRepository
     private let onboardingStateRepository: OnboardingStateRepository
     private let developerSettingsRepository: DeveloperSettingsRepository
-    private let currentStudySessionRepository: CurrentStudySessionRepository
+    private let currentStudySessionUseCase: CurrentStudySessionUseCase
     private let localStudySettingsRepository: LocalStudySettingsRepository
     private let cloudSyncStateRepository: CloudSyncStateRepository
     private let localStudyRecordRepository: LocalStudyRecordRepository
@@ -997,6 +997,7 @@ final class AppState: ObservableObject {
         onboardingStateRepository: OnboardingStateRepository? = nil,
         developerSettingsRepository: DeveloperSettingsRepository? = nil,
         currentStudySessionRepository: CurrentStudySessionRepository? = nil,
+        currentStudySessionUseCase: CurrentStudySessionUseCase? = nil,
         localStudySettingsRepository: LocalStudySettingsRepository? = nil,
         cloudSyncStateRepository: CloudSyncStateRepository? = nil,
         localStudyRecordRepository: LocalStudyRecordRepository? = nil,
@@ -1054,7 +1055,8 @@ final class AppState: ObservableObject {
         self.communitySessionRepository = resolvedCommunitySessionRepository
         self.onboardingStateRepository = resolvedOnboardingStateRepository
         self.developerSettingsRepository = resolvedDeveloperSettingsRepository
-        self.currentStudySessionRepository = resolvedCurrentStudySessionRepository
+        self.currentStudySessionUseCase = currentStudySessionUseCase
+            ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
         self.localStudySettingsRepository = resolvedLocalStudySettingsRepository
         self.cloudSyncStateRepository = resolvedCloudSyncStateRepository
         self.localStudyRecordRepository = resolvedLocalStudyRecordRepository
@@ -2090,9 +2092,11 @@ final class AppState: ObservableObject {
                 currentQuestion = localCurrentQuestion
                 lastAnswer = localLastAnswer
                 gradingResult = localGradingResult
-                currentStudySessionRepository.saveQuestion(localCurrentQuestion)
-                currentStudySessionRepository.saveLastAnswer(localLastAnswer)
-                currentStudySessionRepository.saveGradingResult(localGradingResult)
+                currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: localCurrentQuestion,
+                    lastAnswer: localLastAnswer,
+                    gradingResult: localGradingResult
+                )
             }
             restartTimer()
             return
@@ -2107,9 +2111,11 @@ final class AppState: ObservableObject {
         currentQuestion = visibleRecord?.question
         lastAnswer = visibleRecord?.answer ?? ""
         gradingResult = visibleRecord?.gradingResult
-        currentStudySessionRepository.saveQuestion(currentQuestion)
-        currentStudySessionRepository.saveLastAnswer(lastAnswer)
-        currentStudySessionRepository.saveGradingResult(gradingResult)
+        currentStudySessionUseCase.saveCurrentQuestionState(
+            question: currentQuestion,
+            lastAnswer: lastAnswer,
+            gradingResult: gradingResult
+        )
         restartTimer()
     }
 
@@ -2123,7 +2129,7 @@ final class AppState: ObservableObject {
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
 
         settings = synchronizedLoadedSettings
-        let loadedCurrentStudySession = currentStudySessionRepository.loadCurrentStudySession()
+        let loadedCurrentStudySession = currentStudySessionUseCase.loadSession()
         currentQuestion = loadedCurrentStudySession.question
         lastAnswer = loadedCurrentStudySession.lastAnswer
         gradingResult = loadedCurrentStudySession.gradingResult
@@ -2154,7 +2160,7 @@ final class AppState: ObservableObject {
     }
 
     private func refreshStudyProgressFromStore() {
-        let loadedCurrentStudySession = currentStudySessionRepository.loadCurrentStudySession()
+        let loadedCurrentStudySession = currentStudySessionUseCase.loadSession()
         currentQuestion = loadedCurrentStudySession.question
         lastAnswer = loadedCurrentStudySession.lastAnswer
         gradingResult = loadedCurrentStudySession.gradingResult
@@ -2280,7 +2286,7 @@ final class AppState: ObservableObject {
                 didReceiveCloudStateWhileEditing = false
 
                 localStudySettingsRepository.saveSettings(normalizedNextSettings)
-                currentStudySessionRepository.saveIsRunning(backendSettings.enabled)
+                currentStudySessionUseCase.saveIsRunning(backendSettings.enabled)
                 log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
             },
             onFailure: { error in
@@ -3464,9 +3470,11 @@ final class AppState: ObservableObject {
                 currentQuestion = nil
                 lastAnswer = ""
                 gradingResult = nil
-                currentStudySessionRepository.saveQuestion(nil)
-                currentStudySessionRepository.saveLastAnswer("")
-                currentStudySessionRepository.saveGradingResult(nil)
+                currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: nil,
+                    lastAnswer: "",
+                    gradingResult: nil
+                )
             }
         }
     }
@@ -3757,7 +3765,7 @@ final class AppState: ObservableObject {
 
     func setRunning(_ running: Bool) {
         isRunning = running
-        currentStudySessionRepository.saveExplicitIsRunning(running)
+        currentStudySessionUseCase.saveExplicitIsRunning(running)
         statusMessage = running ? "질문 타이머가 실행 중입니다." : "질문 타이머를 일시정지했습니다."
         log(.info, running ? "질문 타이머를 실행했습니다." : "질문 타이머를 중지했습니다.")
         markCloudDataChanged()
@@ -3888,9 +3896,11 @@ final class AppState: ObservableObject {
                     currentQuestion = record.question
                     gradingResult = record.gradingResult
                     lastAnswer = record.answer ?? ""
-                    currentStudySessionRepository.saveQuestion(record.question)
-                    currentStudySessionRepository.saveGradingResult(record.gradingResult)
-                    currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
+                    currentStudySessionUseCase.saveCurrentQuestionState(
+                        question: record.question,
+                        lastAnswer: record.answer ?? "",
+                        gradingResult: record.gradingResult
+                    )
                 }
 
                 hasAPIKeyError = false
@@ -4117,9 +4127,11 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
         gradingResult = record.gradingResult
-        currentStudySessionRepository.saveQuestion(record.question)
-        currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
-        currentStudySessionRepository.saveGradingResult(record.gradingResult)
+        currentStudySessionUseCase.saveCurrentQuestionState(
+            question: record.question,
+            lastAnswer: record.answer ?? "",
+            gradingResult: record.gradingResult
+        )
     }
 
     private func studyCategoryForRoom(_ categoryID: String?) -> StudyCategory? {
@@ -4163,7 +4175,7 @@ final class AppState: ObservableObject {
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
-        currentStudySessionRepository.saveLastAnswer(answerToGrade)
+        currentStudySessionUseCase.saveLastAnswer(answerToGrade)
         localStudyRecordRepository.updateStudyRecordAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
         reloadStudyRecordsFromStore()
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
@@ -4210,9 +4222,11 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = answer
         gradingResult = record.gradingResult
-        currentStudySessionRepository.saveQuestion(record.question)
-        currentStudySessionRepository.saveLastAnswer(answer)
-        currentStudySessionRepository.saveGradingResult(record.gradingResult)
+        currentStudySessionUseCase.saveCurrentQuestionState(
+            question: record.question,
+            lastAnswer: answer,
+            gradingResult: record.gradingResult
+        )
         localStudyRecordRepository.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
         notificationService.cancelQuestionNotification(for: record.question)
         reloadStudyRecordsFromStore()
@@ -4323,9 +4337,11 @@ final class AppState: ObservableObject {
             gradingResult = nil
 
             guard shouldOpenNextQuestion else {
-                currentStudySessionRepository.saveQuestion(nil)
-                currentStudySessionRepository.saveLastAnswer("")
-                currentStudySessionRepository.saveGradingResult(nil)
+                currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: nil,
+                    lastAnswer: "",
+                    gradingResult: nil
+                )
                 statusMessage = "질문을 넘겼습니다."
                 errorMessage = nil
                 log(.info, "미제출 질문을 넘겼습니다.")
@@ -4342,14 +4358,18 @@ final class AppState: ObservableObject {
                 self.currentQuestion = nextRecord.question
                 lastAnswer = nextRecord.answer ?? ""
                 gradingResult = nil
-                currentStudySessionRepository.saveQuestion(nextRecord.question)
-                currentStudySessionRepository.saveLastAnswer(nextRecord.answer ?? "")
-                currentStudySessionRepository.saveGradingResult(nil)
+                currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: nextRecord.question,
+                    lastAnswer: nextRecord.answer ?? "",
+                    gradingResult: nil
+                )
                 statusMessage = "질문을 넘기고 다음 미제출 질문을 열었습니다."
             } else {
-                currentStudySessionRepository.saveQuestion(nil)
-                currentStudySessionRepository.saveLastAnswer("")
-                currentStudySessionRepository.saveGradingResult(nil)
+                currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: nil,
+                    lastAnswer: "",
+                    gradingResult: nil
+                )
                 statusMessage = "질문을 넘겼습니다."
             }
         } else {
@@ -4428,7 +4448,7 @@ final class AppState: ObservableObject {
 
         guard let question = draft.question else {
             lastAnswer = draft.answer
-            currentStudySessionRepository.saveLastAnswer(draft.answer)
+            currentStudySessionUseCase.saveLastAnswer(draft.answer)
             return
         }
 
@@ -4438,7 +4458,7 @@ final class AppState: ObservableObject {
         if let currentQuestion,
            Self.questionsMatch(currentQuestion, question) {
             lastAnswer = draft.answer
-            currentStudySessionRepository.saveLastAnswer(draft.answer)
+            currentStudySessionUseCase.saveLastAnswer(draft.answer)
         }
 
         markCloudDataChanged(syncDelaySeconds: 4)
@@ -4458,9 +4478,9 @@ final class AppState: ObservableObject {
         currentQuestion = record.question
         lastAnswer = record.answer ?? ""
         gradingResult = record.gradingResult
-        currentStudySessionRepository.saveQuestion(record.question)
-        currentStudySessionRepository.saveLastAnswer(record.answer ?? "")
-        currentStudySessionRepository.saveGradingResult(record.gradingResult)
+        currentStudySessionUseCase.saveQuestion(record.question)
+        currentStudySessionUseCase.saveLastAnswer(record.answer ?? "")
+        currentStudySessionUseCase.saveGradingResult(record.gradingResult)
         showStudyScreen(categoryID: categoryID(forTopic: record.topic))
         focusedRecordRequest = nil
         statusMessage = record.gradingResult == nil ? "미제출 질문을 열었습니다." : "학습 기록을 열었습니다."
@@ -4561,8 +4581,8 @@ final class AppState: ObservableObject {
         if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = record.answer ?? lastAnswer
             gradingResult = record.gradingResult
-            currentStudySessionRepository.saveLastAnswer(lastAnswer)
-            currentStudySessionRepository.saveGradingResult(gradingResult)
+            currentStudySessionUseCase.saveLastAnswer(lastAnswer)
+            currentStudySessionUseCase.saveGradingResult(gradingResult)
         }
 
         return record
@@ -4690,7 +4710,7 @@ final class AppState: ObservableObject {
 
         if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = trimmedReply
-            currentStudySessionRepository.saveLastAnswer(trimmedReply)
+            currentStudySessionUseCase.saveLastAnswer(trimmedReply)
         }
 
         reloadStudyRecordsFromStore()
@@ -4791,7 +4811,7 @@ final class AppState: ObservableObject {
 
         if currentQuestion.map({ Self.questionsMatch($0, question) }) == true {
             lastAnswer = trimmedReply
-            currentStudySessionRepository.saveLastAnswer(trimmedReply)
+            currentStudySessionUseCase.saveLastAnswer(trimmedReply)
         }
 
         reloadStudyRecordsFromStore()
@@ -4810,9 +4830,9 @@ final class AppState: ObservableObject {
             currentQuestion = nil
             lastAnswer = ""
             gradingResult = nil
-            currentStudySessionRepository.saveQuestion(nil)
-            currentStudySessionRepository.saveLastAnswer("")
-            currentStudySessionRepository.saveGradingResult(nil)
+            currentStudySessionUseCase.saveQuestion(nil)
+            currentStudySessionUseCase.saveLastAnswer("")
+            currentStudySessionUseCase.saveGradingResult(nil)
         }
 
         notificationLandingMessage = strings.notificationQuestionUnavailable
@@ -4856,9 +4876,9 @@ final class AppState: ObservableObject {
             currentQuestion = nil
             gradingResult = nil
             lastAnswer = ""
-            currentStudySessionRepository.saveQuestion(nil)
-            currentStudySessionRepository.saveGradingResult(nil)
-            currentStudySessionRepository.saveLastAnswer("")
+            currentStudySessionUseCase.saveQuestion(nil)
+            currentStudySessionUseCase.saveGradingResult(nil)
+            currentStudySessionUseCase.saveLastAnswer("")
         }
 
         statusMessage = "기록을 삭제했습니다."
@@ -6331,11 +6351,11 @@ final class AppState: ObservableObject {
         isCloudSyncEnabled = preservedCloudSyncEnabled
 
         localStudySettingsRepository.saveSettings(effectiveSettings)
-        currentStudySessionRepository.saveQuestion(appliedCurrentQuestion)
+        currentStudySessionUseCase.saveQuestion(appliedCurrentQuestion)
         localStudyRecordRepository.saveQuestionHistory(mergedHistory)
-        currentStudySessionRepository.saveLastAnswer(appliedLastAnswer)
-        currentStudySessionRepository.saveGradingResult(appliedGradingResult)
-        currentStudySessionRepository.saveIsRunning(state.isRunning)
+        currentStudySessionUseCase.saveLastAnswer(appliedLastAnswer)
+        currentStudySessionUseCase.saveGradingResult(appliedGradingResult)
+        currentStudySessionUseCase.saveIsRunning(state.isRunning)
         onboardingStateRepository.saveHasCompletedOnboarding(mergedHasCompletedOnboarding)
         cloudSyncStateRepository.saveIsCloudSyncEnabled(preservedCloudSyncEnabled)
         localStudyRecordRepository.saveDeletedStudyRecordMarkers(mergedDeletedMarkers)
@@ -6644,16 +6664,16 @@ final class AppState: ObservableObject {
             currentQuestion = preferredRecord.question
             lastAnswer = preferredRecord.answer ?? ""
             gradingResult = preferredRecord.gradingResult
-            currentStudySessionRepository.saveQuestion(preferredRecord.question)
-            currentStudySessionRepository.saveLastAnswer(preferredRecord.answer ?? "")
-            currentStudySessionRepository.saveGradingResult(preferredRecord.gradingResult)
+            currentStudySessionUseCase.saveQuestion(preferredRecord.question)
+            currentStudySessionUseCase.saveLastAnswer(preferredRecord.answer ?? "")
+            currentStudySessionUseCase.saveGradingResult(preferredRecord.gradingResult)
         } else {
             currentQuestion = nil
             lastAnswer = ""
             gradingResult = nil
-            currentStudySessionRepository.saveQuestion(nil)
-            currentStudySessionRepository.saveLastAnswer("")
-            currentStudySessionRepository.saveGradingResult(nil)
+            currentStudySessionUseCase.saveQuestion(nil)
+            currentStudySessionUseCase.saveLastAnswer("")
+            currentStudySessionUseCase.saveGradingResult(nil)
         }
     }
 
