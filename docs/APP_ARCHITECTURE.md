@@ -51,6 +51,7 @@ Backend errors are normalized once, then consumed by the app:
 
 - Server-provided `message` is the user-facing text when an inline message is appropriate.
 - Auth/device/token errors are identified from string error codes, HTTP 401, or numeric auth-range codes. They are not shown as repeated popups or inline banners. They drive login or re-registration flows.
+- Email verification errors stay in the verification-code flow and must not be collapsed into the generic login-required/page-access-denied flow.
 - Validation and resource errors may be shown inline using server text.
 - Debug descriptions remain for logs, not end-user UI.
 

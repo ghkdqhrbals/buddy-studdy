@@ -39,6 +39,25 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
     }
 
+    func testEmailVerificationRequirementStaysInVerificationFlow() {
+        let apiError = BackendAPIError(
+            code: "AUTH_GOOGLE_REQUIRED",
+            message: "Verification code is required.",
+            status: 403
+        )
+        let error = RemotePushBackendError.httpStatus(403, "", apiError)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "fallback")
+
+        XCTAssertEqual(resolution.featureMessage, "Verification code is required.")
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.isPageAccessDenied)
+        XCTAssertTrue(resolution.requiresEmailVerification)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldClearFeatureMessage)
+    }
+
     func testCancellationClearsFeatureMessageWithoutUserFacingNoise() {
         let resolution = AppErrorHandlingPolicy.resolve(CancellationError(), fallback: "fallback")
 

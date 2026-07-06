@@ -42,15 +42,19 @@ enum BackendErrorPresentationPolicy {
 
     static func presentation(for error: RemotePushBackendError, fallback: String) -> BackendErrorPresentation {
         let message = userFacingMessage(for: error, fallback: fallback)
+        let requiresEmailVerification = requiresEmailVerification(error)
+        let requiresLogin = requiresEmailVerification ? false : requiresLogin(error)
+        let isPageAccessDenied = requiresEmailVerification ? false : isPageAccessDenied(error)
+        let shouldResetBackendIdentity = requiresEmailVerification ? false : shouldResetBackendIdentity(after: error)
         let shouldShowInlineError = shouldShowInlineError(for: error)
         return BackendErrorPresentation(
             message: message,
             inlineMessage: shouldShowInlineError ? message : nil,
             shouldShowPopup: shouldShowPopup(for: error),
-            requiresLogin: requiresLogin(error),
-            isPageAccessDenied: isPageAccessDenied(error),
-            requiresEmailVerification: requiresEmailVerification(error),
-            shouldResetBackendIdentity: shouldResetBackendIdentity(after: error)
+            requiresLogin: requiresLogin,
+            isPageAccessDenied: isPageAccessDenied,
+            requiresEmailVerification: requiresEmailVerification,
+            shouldResetBackendIdentity: shouldResetBackendIdentity
         )
     }
 
