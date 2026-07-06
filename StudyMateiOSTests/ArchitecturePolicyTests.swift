@@ -146,6 +146,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotSubscribeToNotificationCenterDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "NotificationCenter.default.publisher",
+            "APITrafficNotification.userInfoKey",
+            "BackendAuthorizationNotification.didReceiveUnauthorized",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must consume app event streams through AppNotificationEventProvider instead of subscribing to NotificationCenter directly: \(violations)"
+        )
+    }
+
     func testAppStateDoesNotReadClipboardPlatformAPIsDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

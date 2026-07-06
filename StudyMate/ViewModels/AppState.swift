@@ -460,6 +460,7 @@ final class AppState: ObservableObject {
     private let cloudSyncProvider: CloudSyncProviding
     private let platformEffectsProvider: AppPlatformEffectsProviding
     private let clipboardProvider: ClipboardProviding
+    private let appNotificationEventProvider: AppNotificationEventProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -483,8 +484,7 @@ final class AppState: ObservableObject {
         var recordID: String? = nil
         var answer: String
     }
-    private var apiTrafficLogCancellable: AnyCancellable?
-    private var backendUnauthorizedCancellable: AnyCancellable?
+    private var appNotificationEventCancellables: [AnyCancellable] = []
     private var lastAPIKeyUpdatedAt: Date?
     private var lastLocalSettingsMutationAt: Date?
     lazy var notificationLandingCoordinator = NotificationLandingCoordinator(appState: self)
@@ -978,6 +978,7 @@ final class AppState: ObservableObject {
         cloudSyncProvider: CloudSyncProviding = DefaultCloudSyncProvider(),
         platformEffectsProvider: AppPlatformEffectsProviding = DefaultAppPlatformEffectsProvider(),
         clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
+        appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let loadedSettings = settingsStore.loadSettings()
@@ -1061,6 +1062,7 @@ final class AppState: ObservableObject {
         self.cloudSyncProvider = cloudSyncProvider
         self.platformEffectsProvider = platformEffectsProvider
         self.clipboardProvider = clipboardProvider
+        self.appNotificationEventProvider = appNotificationEventProvider
         self.cloudSyncService = cloudSyncService
         let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         self.appUseCasesProvider = appUseCasesProvider
@@ -1069,23 +1071,14 @@ final class AppState: ObservableObject {
             debugBackendBaseURL: loadedDebugBackendBaseURL
         )
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
-            for: APITrafficNotification.didReceiveLog,
-            object: nil
-        )
-        .compactMap { notification -> APITrafficLogEntry? in
-            (notification.userInfo?[APITrafficNotification.userInfoKey] as? APITrafficLogEntry)
-        }
-        .sink { [weak self] entry in
-            self?.appendAPITrafficLog(entry)
-        }
-        self.backendUnauthorizedCancellable = NotificationCenter.default.publisher(
-            for: BackendAuthorizationNotification.didReceiveUnauthorized,
-            object: nil
-        )
-        .sink { [weak self] _ in
-            self?.clearStoredBackendAccessToken()
-        }
+        self.appNotificationEventCancellables = [
+            appNotificationEventProvider.observeAPITrafficLogs { [weak self] entry in
+                self?.appendAPITrafficLog(entry)
+            },
+            appNotificationEventProvider.observeBackendUnauthorized { [weak self] in
+                self?.clearStoredBackendAccessToken()
+            },
+        ]
 
         if shouldRecoverLegacyRunningState {
             log(.info, "백엔드 schedule 상태로 인해 저장된 이전 일시정지 값을 실행 상태로 복구했습니다.")
@@ -1112,13 +1105,13 @@ final class AppState: ObservableObject {
             let cloudSyncTask = cloudSyncTask
             let answerDraftSaveTask = answerDraftSaveTask
             let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
-            let apiTrafficLogCancellable = apiTrafficLogCancellable
+            let appNotificationEventCancellables = appNotificationEventCancellables
 
             timerTask?.cancel()
             cloudSyncTask?.cancel()
             answerDraftSaveTask?.cancel()
             protectedPageAccessRefreshTask?.cancel()
-            apiTrafficLogCancellable?.cancel()
+            appNotificationEventCancellables.forEach { $0.cancel() }
         }
     }
 

@@ -20,6 +20,7 @@
 		1100000000000000000001A8 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
 		1100000000000000000001A9 /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
 		1100000000000000000001AA /* ClipboardProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007B /* ClipboardProvider.swift */; };
+		1100000000000000000001AD /* AppNotificationEventProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007E /* AppNotificationEventProvider.swift */; };
 		1100000000000000000001AB /* OpenAIAPIKeyExtractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */; };
 		1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
@@ -96,6 +97,7 @@
 		120000000000000000000159 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
 		12000000000000000000015A /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
 		12000000000000000000015B /* ClipboardProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007B /* ClipboardProvider.swift */; };
+		12000000000000000000015E /* AppNotificationEventProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007E /* AppNotificationEventProvider.swift */; };
 		12000000000000000000015C /* OpenAIAPIKeyExtractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */; };
 		12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007D /* QuestionSchedulePolicy.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
@@ -233,6 +235,7 @@
 		110000000000000000000079 /* CloudSyncProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncProvider.swift; sourceTree = "<group>"; };
 		11000000000000000000007A /* AppPlatformEffectsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPlatformEffectsProvider.swift; sourceTree = "<group>"; };
 		11000000000000000000007B /* ClipboardProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardProvider.swift; sourceTree = "<group>"; };
+		11000000000000000000007E /* AppNotificationEventProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNotificationEventProvider.swift; sourceTree = "<group>"; };
 		11000000000000000000007C /* OpenAIAPIKeyExtractionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIAPIKeyExtractionPolicy.swift; sourceTree = "<group>"; };
 		11000000000000000000007D /* QuestionSchedulePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionSchedulePolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
@@ -606,6 +609,7 @@
 				110000000000000000000079 /* CloudSyncProvider.swift */,
 				11000000000000000000007A /* AppPlatformEffectsProvider.swift */,
 				11000000000000000000007B /* ClipboardProvider.swift */,
+				11000000000000000000007E /* AppNotificationEventProvider.swift */,
 				110000000000000000000019 /* RemotePushBackendClient.swift */,
 				11000000000000000000001B /* GoogleOAuthService.swift */,
 				11000000000000000000000D /* UpdateService.swift */,
@@ -943,6 +947,7 @@
 				1100000000000000000001A8 /* CloudSyncProvider.swift in Sources */,
 				1100000000000000000001A9 /* AppPlatformEffectsProvider.swift in Sources */,
 				1100000000000000000001AA /* ClipboardProvider.swift in Sources */,
+				1100000000000000000001AD /* AppNotificationEventProvider.swift in Sources */,
 				1100000000000000000001AB /* OpenAIAPIKeyExtractionPolicy.swift in Sources */,
 				1100000000000000000001AC /* QuestionSchedulePolicy.swift in Sources */,
 				11000000000000000000010B /* UpdateService.swift in Sources */,
@@ -1029,6 +1034,7 @@
 				120000000000000000000159 /* CloudSyncProvider.swift in Sources */,
 				12000000000000000000015A /* AppPlatformEffectsProvider.swift in Sources */,
 				12000000000000000000015B /* ClipboardProvider.swift in Sources */,
+				12000000000000000000015E /* AppNotificationEventProvider.swift in Sources */,
 				12000000000000000000015C /* OpenAIAPIKeyExtractionPolicy.swift in Sources */,
 				12000000000000000000015D /* QuestionSchedulePolicy.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
