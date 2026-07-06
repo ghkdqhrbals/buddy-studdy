@@ -6,7 +6,7 @@ import {
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070612";
+} from "./logs.js?v=2026070613";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -192,7 +192,7 @@ function buildApiExchangeQuery() {
     parts.push(`|~ ${quoteLogql(`"status":${statusPrefix}[0-9][0-9]`)}`);
   }
   if (path) {
-    parts.push(`|= ${quoteLogql(`"path":"${path}`)}`);
+    parts.push(`|= ${quoteLogql(path)}`);
   }
   if (requestId) {
     parts.push(`|= ${quoteLogql(requestId)}`);
