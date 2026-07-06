@@ -3634,9 +3634,6 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
-        defer {
-            isGradingAnswer = false
-        }
 
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
@@ -3649,22 +3646,31 @@ final class AppState: ObservableObject {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-study-room-answer") else {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
+            isGradingAnswer = false
             log(.warning, "백엔드 등록이 없어 학습룸 질문 채점을 중단했습니다.")
             return
         }
 
-        do {
-            let updatedRecord = try await recordsUseCase.gradeRecord(
-                registration: registration,
-                recordID: record.id,
-                answer: trimmedAnswer
-            )
-            applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
-            await syncRemotePushScheduleIfPossible(reason: "grade")
-        } catch {
-            handleOpenAIError(error)
-            statusMessage = nil
-        }
+        await actionRunner.run(
+            operation: {
+                try await recordsUseCase.gradeRecord(
+                    registration: registration,
+                    recordID: record.id,
+                    answer: trimmedAnswer
+                )
+            },
+            onSuccess: { updatedRecord in
+                applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
+                await syncRemotePushScheduleIfPossible(reason: "grade")
+            },
+            onFailure: { error in
+                handleOpenAIError(error)
+                statusMessage = nil
+            },
+            onCompletion: {
+                isGradingAnswer = false
+            }
+        )
     }
 
     func skipStudyRoomRecord(_ record: StudyRecord) {
@@ -3778,27 +3784,32 @@ final class AppState: ObservableObject {
 
         var studyIDs = knownStudyIDs
         if !topicKeys.isEmpty {
-            do {
-                let studyPage = try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "delete-study-resolve",
-                    operation: { recoveredRegistration in
-                        try await studyRoomUseCase.fetchStudy(
-                            registration: recoveredRegistration,
-                            limit: 500,
-                            offset: 0,
-                            query: ""
-                        )
-                    }
-                )
-                let resolvedIDs = studyPage.studies
-                    .filter { topicKeys.contains(Self.normalizedCategoryText(for: $0.topic)) }
-                    .map(\.id)
-                studyIDs.formUnion(resolvedIDs)
-                locallyDeletedStudyIDs.formUnion(resolvedIDs)
-            } catch {
-                log(.warning, "백엔드 학습 삭제용 id 조회 실패: topics=\(topicKeys.sorted()), error=\(error.localizedDescription)")
-            }
+            await actionRunner.run(
+                operation: {
+                    try await performWithBackendIdentityRecovery(
+                        registration: registration,
+                        reason: "delete-study-resolve",
+                        operation: { recoveredRegistration in
+                            try await studyRoomUseCase.fetchStudy(
+                                registration: recoveredRegistration,
+                                limit: 500,
+                                offset: 0,
+                                query: ""
+                            )
+                        }
+                    )
+                },
+                onSuccess: { studyPage in
+                    let resolvedIDs = studyPage.studies
+                        .filter { topicKeys.contains(Self.normalizedCategoryText(for: $0.topic)) }
+                        .map(\.id)
+                    studyIDs.formUnion(resolvedIDs)
+                    locallyDeletedStudyIDs.formUnion(resolvedIDs)
+                },
+                onFailure: { error in
+                    log(.warning, "백엔드 학습 삭제용 id 조회 실패: topics=\(topicKeys.sorted()), error=\(error.localizedDescription)")
+                }
+            )
         }
 
         guard !studyIDs.isEmpty else {
@@ -3808,18 +3819,24 @@ final class AppState: ObservableObject {
 
         var deletedStudyIDs = Set<Int>()
         for studyID in studyIDs.sorted() {
-            do {
-                try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "delete-study",
-                    operation: { recoveredRegistration in
-                        try await studyRoomUseCase.deleteStudy(registration: recoveredRegistration, studyID: studyID)
-                    }
-                )
+            let didDelete = await actionRunner.runVoid(
+                operation: {
+                    try await performWithBackendIdentityRecovery(
+                        registration: registration,
+                        reason: "delete-study",
+                        operation: { recoveredRegistration in
+                            try await studyRoomUseCase.deleteStudy(registration: recoveredRegistration, studyID: studyID)
+                        }
+                    )
+                },
+                onFailure: { error in
+                    log(.warning, "백엔드 학습 삭제 실패: id=\(studyID), error=\(error.localizedDescription)")
+                }
+            )
+
+            if didDelete {
                 deletedStudyIDs.insert(studyID)
                 log(.info, "백엔드 학습을 삭제했습니다. id=\(studyID)")
-            } catch {
-                log(.warning, "백엔드 학습 삭제 실패: id=\(studyID), error=\(error.localizedDescription)")
             }
         }
 
@@ -4139,40 +4156,47 @@ final class AppState: ObservableObject {
         statusMessage = manual ? "질문을 생성 중입니다." : "예약된 질문을 확인 중입니다."
         log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
 
-        do {
-            guard let studyID = await backendStudyID(for: studyCategoryID) else {
-                throw AppStateError.backendStudyMissing
-            }
-            let record = try await studyRoomUseCase.createQuestion(
-                registration: registration,
-                studyID: studyID
-            )
-            settingsStore.appendQuestionToHistory(record.question)
-            settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
-            reloadStudyRecordsFromStore()
-            studyRoomState.setPendingQuestion(record, forStudyID: studyID)
+        await actionRunner.run(
+            operation: {
+                guard let studyID = await backendStudyID(for: studyCategoryID) else {
+                    throw AppStateError.backendStudyMissing
+                }
+                let record = try await studyRoomUseCase.createQuestion(
+                    registration: registration,
+                    studyID: studyID
+                )
+                return (record, studyID)
+            },
+            onSuccess: { result in
+                let (record, studyID) = result
+                settingsStore.appendQuestionToHistory(record.question)
+                settingsStore.replaceStudyRecords(mergeBackendRecord(record, into: studyRecords))
+                reloadStudyRecordsFromStore()
+                studyRoomState.setPendingQuestion(record, forStudyID: studyID)
 
-            let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
-            if shouldActivateQuestion {
-                currentQuestion = record.question
-                gradingResult = record.gradingResult
-                lastAnswer = record.answer ?? ""
-                settingsStore.saveQuestion(record.question)
-                settingsStore.saveGradingResult(record.gradingResult)
-                settingsStore.saveLastAnswer(record.answer ?? "")
-            }
+                let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
+                if shouldActivateQuestion {
+                    currentQuestion = record.question
+                    gradingResult = record.gradingResult
+                    lastAnswer = record.answer ?? ""
+                    settingsStore.saveQuestion(record.question)
+                    settingsStore.saveGradingResult(record.gradingResult)
+                    settingsStore.saveLastAnswer(record.answer ?? "")
+                }
 
-            hasAPIKeyError = false
-            statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
-            log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
-        } catch {
-            if handlePageAccessError(error, page: .studyDetail) {
-                return
+                hasAPIKeyError = false
+                statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
+                log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
+            },
+            onFailure: { error in
+                if handlePageAccessError(error, page: .studyDetail) {
+                    return
+                }
+                handleOpenAIError(error)
+                statusMessage = nil
+                log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
             }
-            handleOpenAIError(error)
-            statusMessage = nil
-            log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
-        }
+        )
     }
 
     private func backendStudyID(for categoryID: String?) async -> Int? {
@@ -4427,9 +4451,6 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
-        defer {
-            isGradingAnswer = false
-        }
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
@@ -4441,6 +4462,7 @@ final class AppState: ObservableObject {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-current-answer") else {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
+            isGradingAnswer = false
             log(.warning, "백엔드 등록이 없어 현재 질문 채점을 중단했습니다.")
             return
         }
@@ -4448,22 +4470,31 @@ final class AppState: ObservableObject {
         guard let record = studyRecord(matching: currentQuestion) else {
             errorMessage = "이 질문은 백엔드 기록에 없어 채점할 수 없습니다. 새 질문을 다시 생성하세요."
             statusMessage = nil
+            isGradingAnswer = false
             log(.warning, "현재 질문에 매칭되는 백엔드 기록이 없어 채점을 중단했습니다.")
             return
         }
 
-        do {
-            let updatedRecord = try await recordsUseCase.gradeRecord(
-                registration: registration,
-                recordID: record.id,
-                answer: trimmedAnswer
-            )
-            applyGradedRecord(updatedRecord, answer: trimmedAnswer)
-            await syncRemotePushScheduleIfPossible(reason: "grade")
-        } catch {
-            handleOpenAIError(error)
-            statusMessage = nil
-        }
+        await actionRunner.run(
+            operation: {
+                try await recordsUseCase.gradeRecord(
+                    registration: registration,
+                    recordID: record.id,
+                    answer: trimmedAnswer
+                )
+            },
+            onSuccess: { updatedRecord in
+                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+                await syncRemotePushScheduleIfPossible(reason: "grade")
+            },
+            onFailure: { error in
+                handleOpenAIError(error)
+                statusMessage = nil
+            },
+            onCompletion: {
+                isGradingAnswer = false
+            }
+        )
     }
 
     private func applyGradedRecord(_ record: StudyRecord, answer: String) {
@@ -4500,9 +4531,6 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
-        defer {
-            isGradingAnswer = false
-        }
         errorMessage = nil
         statusMessage = "기록의 답변을 채점 중입니다."
         log(.info, "기록 답변 채점 요청을 전송합니다.")
@@ -4510,23 +4538,32 @@ final class AppState: ObservableObject {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-record") else {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
+            isGradingAnswer = false
             log(.warning, "백엔드 등록이 없어 기록 채점을 중단했습니다.")
             return
         }
 
-        do {
-            let updatedRecord = try await recordsUseCase.gradeRecord(
-                registration: registration,
-                recordID: record.id,
-                answer: trimmedAnswer
-            )
-            applyGradedRecord(updatedRecord, answer: trimmedAnswer)
-            await syncRemotePushScheduleIfPossible(reason: "grade-record")
-            markCloudDataChanged()
-        } catch {
-            handleOpenAIError(error)
-            statusMessage = nil
-        }
+        await actionRunner.run(
+            operation: {
+                try await recordsUseCase.gradeRecord(
+                    registration: registration,
+                    recordID: record.id,
+                    answer: trimmedAnswer
+                )
+            },
+            onSuccess: { updatedRecord in
+                applyGradedRecord(updatedRecord, answer: trimmedAnswer)
+                await syncRemotePushScheduleIfPossible(reason: "grade-record")
+                markCloudDataChanged()
+            },
+            onFailure: { error in
+                handleOpenAIError(error)
+                statusMessage = nil
+            },
+            onCompletion: {
+                isGradingAnswer = false
+            }
+        )
     }
 
     func skipCurrentQuestion() {
