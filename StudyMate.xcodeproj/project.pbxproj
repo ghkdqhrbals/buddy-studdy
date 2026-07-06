@@ -35,6 +35,8 @@
 		11000000000000000000019D /* RemoteSettingsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000005E /* RemoteSettingsRepository.swift */; };
 		11000000000000000000019E /* IdentityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006A /* IdentityRepository.swift */; };
 		11000000000000000000019F /* RemoteIdentityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006C /* RemoteIdentityRepository.swift */; };
+		1100000000000000000001A1 /* PageAccessRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006D /* PageAccessRepository.swift */; };
+		1100000000000000000001A2 /* RemotePageAccessRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006E /* RemotePageAccessRepository.swift */; };
 		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -100,6 +102,8 @@
 		120000000000000000000144 /* RemoteSettingsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000005E /* RemoteSettingsRepository.swift */; };
 		120000000000000000000145 /* IdentityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006A /* IdentityRepository.swift */; };
 		120000000000000000000146 /* RemoteIdentityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006C /* RemoteIdentityRepository.swift */; };
+		120000000000000000000147 /* PageAccessRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006D /* PageAccessRepository.swift */; };
+		120000000000000000000148 /* RemotePageAccessRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006E /* RemotePageAccessRepository.swift */; };
 		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -200,6 +204,8 @@
 		11000000000000000000005E /* RemoteSettingsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSettingsRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000006A /* IdentityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000006C /* RemoteIdentityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteIdentityRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000006D /* PageAccessRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessRepository.swift; sourceTree = "<group>"; };
+		11000000000000000000006E /* RemotePageAccessRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePageAccessRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* CloudSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncService.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
@@ -402,6 +408,7 @@
 				11000000000000000000005C /* Notifications */,
 				11000000000000000000005F /* Settings */,
 				1100000000000000000001A0 /* Identity */,
+				1100000000000000000001A3 /* PageAccess */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -467,6 +474,15 @@
 				11000000000000000000006C /* RemoteIdentityRepository.swift */,
 			);
 			path = Identity;
+			sourceTree = "<group>";
+		};
+		1100000000000000000001A3 /* PageAccess */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000006D /* PageAccessRepository.swift */,
+				11000000000000000000006E /* RemotePageAccessRepository.swift */,
+			);
+			path = PageAccess;
 			sourceTree = "<group>";
 		};
 		110000000000000000000032 /* PageAccess */ = {
@@ -836,6 +852,8 @@
 				11000000000000000000019D /* RemoteSettingsRepository.swift in Sources */,
 				11000000000000000000019E /* IdentityRepository.swift in Sources */,
 				11000000000000000000019F /* RemoteIdentityRepository.swift in Sources */,
+				1100000000000000000001A1 /* PageAccessRepository.swift in Sources */,
+				1100000000000000000001A2 /* RemotePageAccessRepository.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 					110000000000000000000186 /* RecordsUseCase.swift in Sources */,
 					11000000000000000000018A /* NotificationsUseCase.swift in Sources */,
@@ -916,6 +934,8 @@
 				120000000000000000000144 /* RemoteSettingsRepository.swift in Sources */,
 				120000000000000000000145 /* IdentityRepository.swift in Sources */,
 				120000000000000000000146 /* RemoteIdentityRepository.swift in Sources */,
+				120000000000000000000147 /* PageAccessRepository.swift in Sources */,
+				120000000000000000000148 /* RemotePageAccessRepository.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 					120000000000000000000127 /* RecordsUseCase.swift in Sources */,
 					12000000000000000000012B /* NotificationsUseCase.swift in Sources */,

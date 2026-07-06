@@ -2,13 +2,13 @@ import Foundation
 
 @MainActor
 struct RefreshPageAccessUseCase {
-    private let backendClient: RemotePushBackendClientProtocol
+    private let repository: PageAccessRepository
 
-    init(backendClient: RemotePushBackendClientProtocol) {
-        self.backendClient = backendClient
+    init(repository: PageAccessRepository) {
+        self.repository = repository
     }
 
     func execute(registration: RemotePushRegistration) async throws -> BackendAccessState {
-        try await backendClient.fetchAccess(registration: registration)
+        try await repository.fetchAccess(registration: registration)
     }
 }

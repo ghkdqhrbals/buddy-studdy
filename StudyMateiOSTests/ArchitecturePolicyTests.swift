@@ -176,6 +176,21 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testPageAccessUseCaseDependsOnRepositoryBoundary() throws {
+        let root = try repositoryRoot()
+        let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/PageAccess/RefreshPageAccessUseCase.swift")
+        let content = try String(contentsOf: useCaseFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("RemotePushBackendClientProtocol"),
+            "RefreshPageAccessUseCase must depend on PageAccessRepository instead of the backend transport service."
+        )
+        XCTAssertTrue(
+            content.contains("PageAccessRepository"),
+            "RefreshPageAccessUseCase should keep backend transport behind a repository boundary."
+        )
+    }
+
     func testAppStateDoesNotAssignRawLocalizedDescriptionToPrimaryErrorMessage() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
