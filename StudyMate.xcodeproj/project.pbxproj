@@ -15,8 +15,10 @@
 		110000000000000000000172 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
+		11000000000000000000018C /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
+		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -61,8 +63,10 @@
 		120000000000000000000113 /* RemotePushBackendClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* RemotePushBackendClient.swift */; };
 		120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002C /* BackendErrorPresentationPolicy.swift */; };
 		120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000039 /* AppErrorHandlingPolicy.swift */; };
+		12000000000000000000012D /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
+		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -138,6 +142,8 @@
 		11000000000000000000000D /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		11000000000000000000000E /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		11000000000000000000000F /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		110000000000000000000045 /* AppActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActionRunner.swift; sourceTree = "<group>"; };
+		110000000000000000000046 /* AppUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCases.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* CloudSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncService.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
@@ -238,10 +244,19 @@
 		11000000000000000000002A /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				110000000000000000000044 /* AppRuntime */,
 				11000000000000000000002B /* ErrorHandling */,
 				11000000000000000000002D /* PageAccess */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		110000000000000000000044 /* AppRuntime */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000045 /* AppActionRunner.swift */,
+			);
+			path = AppRuntime;
 			sourceTree = "<group>";
 		};
 		11000000000000000000002B /* ErrorHandling */ = {
@@ -264,6 +279,7 @@
 		11000000000000000000002F /* UseCases */ = {
 			isa = PBXGroup;
 			children = (
+				110000000000000000000046 /* AppUseCases.swift */,
 				11000000000000000000003F /* Notifications */,
 				110000000000000000000043 /* Community */,
 				110000000000000000000032 /* PageAccess */,
@@ -599,8 +615,10 @@
 				110000000000000000000172 /* RemotePushBackendClient.swift in Sources */,
 				110000000000000000000182 /* BackendErrorPresentationPolicy.swift in Sources */,
 				110000000000000000000187 /* AppErrorHandlingPolicy.swift in Sources */,
+				11000000000000000000018C /* AppActionRunner.swift in Sources */,
 				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
+				11000000000000000000018D /* AppUseCases.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 					110000000000000000000186 /* RecordsUseCase.swift in Sources */,
 					11000000000000000000018A /* NotificationsUseCase.swift in Sources */,
@@ -653,8 +671,10 @@
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
 				120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */,
+				12000000000000000000012D /* AppActionRunner.swift in Sources */,
 				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
+				12000000000000000000012E /* AppUseCases.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 					120000000000000000000127 /* RecordsUseCase.swift in Sources */,
 					12000000000000000000012B /* NotificationsUseCase.swift in Sources */,

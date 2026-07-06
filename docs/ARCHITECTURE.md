@@ -25,6 +25,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 
 - `Core/`
   - App-wide pure policies and shared decision rules.
+  - `AppRuntime/AppActionRunner.swift` provides the common async action boundary for view-model orchestration: execute a use case, apply success state, route errors through app policy, and clear loading state from one repeatable shape.
   - `ErrorHandling/BackendErrorPresentationPolicy.swift` converts backend error codes into UI presentation, login, page-access, and identity-reset decisions.
   - `ErrorHandling/AppErrorHandlingPolicy.swift` maps backend error presentation into app UI behavior so login/device/token errors do not leak as repeated popups or feature banners.
   - Backend error parsing accepts both string error identifiers and numeric code ranges; auth-range numeric codes are treated as login/identity errors by policy instead of being surfaced as popups.
@@ -33,6 +34,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 
 - `UseCases/`
   - Thin application action boundaries around backend capabilities.
+  - `AppUseCases.swift` is the app composition root for use-case construction. `AppState` should replace this container when the backend client changes instead of constructing individual use cases in multiple places.
   - `PageAccess/RefreshPageAccessUseCase.swift` fetches backend page access state.
   - `Notifications/NotificationsUseCase.swift` centralizes backend notification list, unread count, read, delete, and clear operations.
   - `Records/RecordsUseCase.swift` centralizes backend record operations such as fetch, grading, draft saving, skipping, deletion, publicity, and full clear.

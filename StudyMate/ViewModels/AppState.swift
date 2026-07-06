@@ -480,13 +480,15 @@ final class AppState: ObservableObject {
 
     private let settingsStore: SettingsStore
     private var remotePushBackendClient: RemotePushBackendClientProtocol
-    private var refreshPageAccessUseCase: RefreshPageAccessUseCase
-    private var studyRoomUseCase: StudyRoomUseCase
-    private var recordsUseCase: RecordsUseCase
-    private var notificationsUseCase: NotificationsUseCase
-    private var statsUseCase: StatsUseCase
-    private var settingsUseCase: SettingsUseCase
-    private var communityUseCase: CommunityUseCase
+    private var appUseCases: AppUseCases
+    private var refreshPageAccessUseCase: RefreshPageAccessUseCase { appUseCases.refreshPageAccess }
+    private var studyRoomUseCase: StudyRoomUseCase { appUseCases.studyRoom }
+    private var recordsUseCase: RecordsUseCase { appUseCases.records }
+    private var notificationsUseCase: NotificationsUseCase { appUseCases.notifications }
+    private var statsUseCase: StatsUseCase { appUseCases.stats }
+    private var settingsUseCase: SettingsUseCase { appUseCases.settings }
+    private var communityUseCase: CommunityUseCase { appUseCases.community }
+    private let actionRunner = AppActionRunner()
     private let usesConfigurableRemotePushBackendClient: Bool
     private let notificationService: NotificationServicing
     private var cloudSyncService: CloudSyncServiceProtocol?
@@ -929,13 +931,7 @@ final class AppState: ObservableObject {
             debugBackendBaseURL: debugBackendBaseURL
         )
         remotePushBackendClient = backendClient
-        refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
-        studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
-        recordsUseCase = RecordsUseCase(backendClient: backendClient)
-        notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
-        statsUseCase = StatsUseCase(backendClient: backendClient)
-        settingsUseCase = SettingsUseCase(backendClient: backendClient)
-        communityUseCase = CommunityUseCase(backendClient: backendClient)
+        appUseCases = AppUseCases(backendClient: backendClient)
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1105,13 +1101,7 @@ final class AppState: ObservableObject {
         )
         self.usesConfigurableRemotePushBackendClient = remotePushBackendClient == nil
         self.remotePushBackendClient = backendClient
-        self.refreshPageAccessUseCase = RefreshPageAccessUseCase(backendClient: backendClient)
-        self.studyRoomUseCase = StudyRoomUseCase(backendClient: backendClient)
-        self.recordsUseCase = RecordsUseCase(backendClient: backendClient)
-        self.notificationsUseCase = NotificationsUseCase(backendClient: backendClient)
-        self.statsUseCase = StatsUseCase(backendClient: backendClient)
-        self.settingsUseCase = SettingsUseCase(backendClient: backendClient)
-        self.communityUseCase = CommunityUseCase(backendClient: backendClient)
+        self.appUseCases = AppUseCases(backendClient: backendClient)
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.apiTrafficLogCancellable = NotificationCenter.default.publisher(
             for: APITrafficNotification.didReceiveLog,
@@ -2382,18 +2372,21 @@ final class AppState: ObservableObject {
             return false
         }
 
-        do {
-            communityErrorMessage = nil
-            _ = try await communityUseCase.requestEmailVerificationCode(
-                registration: registration,
-                email: normalizedEmail
-            )
-            return true
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
-            return false
-        }
+        return await actionRunner.runVoid(
+            operation: {
+                _ = try await communityUseCase.requestEmailVerificationCode(
+                    registration: registration,
+                    email: normalizedEmail
+                )
+            },
+            onSuccess: {
+                communityErrorMessage = nil
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
+            }
+        )
     }
 
     func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
@@ -2557,25 +2550,30 @@ final class AppState: ObservableObject {
             return
         }
         isUpdatingCommunityProfile = true
-        defer {
-            isUpdatingCommunityProfile = false
-        }
 
-        do {
-            let profile = try await communityUseCase.updateMyProfile(
-                registration: registration,
-                displayName: displayName,
-                bio: bio,
-                avatarSymbolName: avatarSymbolName,
-                avatarColorSeed: avatarColorSeed,
-                pageAccess: pageAccess
-            )
-            settingsStore.saveCommunityProfileDisplayName(displayName)
-            applyCommunityProfile(profile)
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
-        }
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.updateMyProfile(
+                    registration: registration,
+                    displayName: displayName,
+                    bio: bio,
+                    avatarSymbolName: avatarSymbolName,
+                    avatarColorSeed: avatarColorSeed,
+                    pageAccess: pageAccess
+                )
+            },
+            onSuccess: { profile in
+                settingsStore.saveCommunityProfileDisplayName(displayName)
+                applyCommunityProfile(profile)
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                isUpdatingCommunityProfile = false
+            }
+        )
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {
@@ -2638,21 +2636,26 @@ final class AppState: ObservableObject {
         }
 
         isWithdrawingCommunityAccount = true
-        defer {
-            isWithdrawingCommunityAccount = false
-        }
 
-        do {
-            let updatedRegistration = try await communityUseCase.withdrawMyProfile(registration: registration)
-            settingsStore.saveRemotePushRegistration(updatedRegistration)
-            signOutFromCommunity()
-            settingsStore.saveCommunityProfileID(nil)
-            settingsStore.saveCommunityProfileDisplayName("")
-            statusMessage = strings.accountDeleted
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
-        }
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.withdrawMyProfile(registration: registration)
+            },
+            onSuccess: { updatedRegistration in
+                settingsStore.saveRemotePushRegistration(updatedRegistration)
+                signOutFromCommunity()
+                settingsStore.saveCommunityProfileID(nil)
+                settingsStore.saveCommunityProfileDisplayName("")
+                statusMessage = strings.accountDeleted
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                isWithdrawingCommunityAccount = false
+            }
+        )
     }
 
     func reportCommunityQuestion(_ question: CommunityQuestion, reason: String, message: String = "") async {
@@ -2661,18 +2664,23 @@ final class AppState: ObservableObject {
             return
         }
 
-        do {
-            try await communityUseCase.reportQuestion(
-                registration: registration,
-                questionID: question.id,
-                reason: reason,
-                message: message
-            )
-            statusMessage = strings.reportSubmitted
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
-        }
+        await actionRunner.runVoid(
+            operation: {
+                try await communityUseCase.reportQuestion(
+                    registration: registration,
+                    questionID: question.id,
+                    reason: reason,
+                    message: message
+                )
+            },
+            onSuccess: {
+                statusMessage = strings.reportSubmitted
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
+            }
+        )
     }
 
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
@@ -2688,22 +2696,25 @@ final class AppState: ObservableObject {
         let previous = communityQuestions.first(where: { $0.id == question.id })
         updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: max(0, question.likeCount + (isLiked ? 1 : -1)))
 
-        do {
-            let state = try await communityUseCase.setQuestionLike(
-                registration: registration,
-                questionID: question.id,
-                isLiked: isLiked
-            )
-            updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
-            return state
-        } catch {
-            if let previous {
-                updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
+        return await actionRunner.run(
+            operation: {
+                try await communityUseCase.setQuestionLike(
+                    registration: registration,
+                    questionID: question.id,
+                    isLiked: isLiked
+                )
+            },
+            onSuccess: { state in
+                updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+            },
+            onFailure: { error in
+                if let previous {
+                    updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
+                }
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
             }
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
-            return nil
-        }
+        )
     }
 
     func loadCommunityQuestionComments(questionID: String, limit: Int = 30, offset: Int = 0) async -> CommunityCommentsResponse? {
@@ -2712,18 +2723,20 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        do {
-            return try await communityUseCase.fetchComments(
-                registration: registration,
-                questionID: questionID,
-                limit: limit,
-                offset: offset
-            )
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
-            return nil
-        }
+        return await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchComments(
+                    registration: registration,
+                    questionID: questionID,
+                    limit: limit,
+                    offset: offset
+                )
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
+            }
+        )
     }
 
     func loadCommunityQuestionDetail(questionID: String) async -> CommunityQuestion? {
@@ -2732,21 +2745,24 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        do {
-            let question = try await communityUseCase.fetchPublicQuestion(
-                registration: registration,
-                questionID: questionID,
-                language: settings.appLanguage
-            )
-            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
-                communityQuestions[index] = question
+        return await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchPublicQuestion(
+                    registration: registration,
+                    questionID: questionID,
+                    language: settings.appLanguage
+                )
+            },
+            onSuccess: { question in
+                if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                    communityQuestions[index] = question
+                }
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             }
-            return question
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
-            return nil
-        }
+        )
     }
 
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
@@ -2759,21 +2775,24 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        do {
-            let comment = try await communityUseCase.createComment(
-                registration: registration,
-                questionID: questionID,
-                body: body
-            )
-            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
-                communityQuestions[index].commentCount += 1
+        return await actionRunner.run(
+            operation: {
+                try await communityUseCase.createComment(
+                    registration: registration,
+                    questionID: questionID,
+                    body: body
+                )
+            },
+            onSuccess: { _ in
+                if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                    communityQuestions[index].commentCount += 1
+                }
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
             }
-            return comment
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
-            return nil
-        }
+        )
     }
 
     func deleteCommunityQuestionComment(questionID: String, commentID: String) async -> Bool {
@@ -2786,21 +2805,24 @@ final class AppState: ObservableObject {
             return false
         }
 
-        do {
-            try await communityUseCase.deleteComment(
-                registration: registration,
-                questionID: questionID,
-                commentID: commentID
-            )
-            if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
-                communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
+        return await actionRunner.runVoid(
+            operation: {
+                try await communityUseCase.deleteComment(
+                    registration: registration,
+                    questionID: questionID,
+                    commentID: commentID
+                )
+            },
+            onSuccess: {
+                if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                    communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
+                }
+            },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
             }
-            return true
-        } catch {
-            handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
-            log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
-            return false
-        }
+        )
     }
 
     private func updateCommunityQuestionLike(id: String, isLiked: Bool, likeCount: Int) {
