@@ -462,6 +462,13 @@ final class ArchitecturePolicyTests: XCTestCase {
             "currentStudySessionRepository.saveIsRunning",
             "currentStudySessionRepository.saveExplicitIsRunning",
             "currentStudySessionRepository.hasExplicitRunningPreference",
+            "resolvedCurrentStudySessionRepository.loadCurrentStudySession",
+            "resolvedCurrentStudySessionRepository.saveQuestion",
+            "resolvedCurrentStudySessionRepository.saveLastAnswer",
+            "resolvedCurrentStudySessionRepository.saveGradingResult",
+            "resolvedCurrentStudySessionRepository.saveIsRunning",
+            "resolvedCurrentStudySessionRepository.saveExplicitIsRunning",
+            "resolvedCurrentStudySessionRepository.hasExplicitRunningPreference",
         ]
 
         let violations = forbiddenPatterns.filter { content.contains($0) }

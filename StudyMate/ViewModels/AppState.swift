@@ -1069,6 +1069,8 @@ final class AppState: ObservableObject {
         let loadedDeveloperSettings = resolvedDeveloperSettingsUseCase.loadSettings()
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
+        let resolvedCurrentStudySessionUseCase = currentStudySessionUseCase
+            ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
 
         self.settingsStore = settingsStore
         self.appLogUseCase = resolvedAppLogUseCase
@@ -1078,25 +1080,24 @@ final class AppState: ObservableObject {
         self.communitySessionUseCase = resolvedCommunitySessionUseCase
         self.onboardingStateUseCase = resolvedOnboardingStateUseCase
         self.developerSettingsUseCase = resolvedDeveloperSettingsUseCase
-        self.currentStudySessionUseCase = currentStudySessionUseCase
-            ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
+        self.currentStudySessionUseCase = resolvedCurrentStudySessionUseCase
         self.localStudySettingsUseCase = resolvedLocalStudySettingsUseCase
         self.cloudSyncStateUseCase = resolvedCloudSyncStateUseCase
         self.localStudyRecordUseCase = resolvedLocalStudyRecordUseCase
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
-        let loadedCurrentStudySession = resolvedCurrentStudySessionRepository.loadCurrentStudySession()
+        let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
         self.currentQuestion = loadedCurrentStudySession.question
         self.lastAnswer = loadedCurrentStudySession.lastAnswer
         self.gradingResult = loadedCurrentStudySession.gradingResult
         let loadedIsRunning = loadedCurrentStudySession.isRunning
         let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
             && !loadedIsRunning
-            && !resolvedCurrentStudySessionRepository.hasExplicitRunningPreference()
+            && !resolvedCurrentStudySessionUseCase.hasExplicitRunningPreference()
             && !loadedAPIKey.isEmpty
         self.isRunning = shouldRecoverLegacyRunningState ? true : loadedIsRunning
         if shouldRecoverLegacyRunningState {
-            resolvedCurrentStudySessionRepository.saveIsRunning(true)
+            resolvedCurrentStudySessionUseCase.saveIsRunning(true)
         }
         self.recordsState = RecordsStateStore(records: resolvedLocalStudyRecordUseCase.loadRecords())
         self.statsState = StatsStateStore()
