@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy API Logs</title>
-    <link rel="stylesheet" href="/styles.css?v=2026070616" />
+    <link rel="stylesheet" href="/styles.css?v=2026070711" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -136,7 +136,9 @@
 
         <div class="request-table" role="table" aria-label="API request logs">
           <div class="request-row table-head" role="row">
-            <div role="columnheader">Time</div>
+            <div role="columnheader">
+              <button id="timeSortButton" class="time-sort-button" type="button">Time ↓</button>
+            </div>
             <div role="columnheader">Method</div>
             <div role="columnheader">Path</div>
             <div role="columnheader">Status</div>
@@ -145,12 +147,6 @@
             <div role="columnheader">Request ID</div>
           </div>
           <div id="requestRows" class="request-rows"></div>
-          <div id="requestLoadingOverlay" class="table-loading-overlay" hidden>
-            <div>
-              <span class="loading-spinner" aria-hidden="true"></span>
-              <strong>Loading API requests</strong>
-            </div>
-          </div>
         </div>
       </main>
       </div>
@@ -163,6 +159,6 @@
       </div>
     </template>
 
-    <script type="module" src="/app.js?v=2026070615"></script>
+    <script type="module" src="/app.js?v=2026070711"></script>
   </body>
 </html>

@@ -27,6 +27,7 @@ Read these first:
 - When changing deployment behavior, update `docs/deploy-repo-template/deployment-modules.md` and the matching deploy workflow template. Backend deploy changes belong in `deploy-backend.yml`; admin frontend changes belong in `deploy-admin-frontend.yml`; API Logs/Grafana/Loki changes belong in `deploy-macbookair-monitoring.yml`.
 - GitHub Actions must not perform runtime health checks or smoke checks against backend, Grafana, local containers, or public health endpoints. This includes indirect container health gates such as `docker compose up --wait` and `docker compose wait`. Runtime monitoring belongs to the Cloudflare Health Monitor Worker and its Cron trigger.
 - Production monitoring on the backend host is PLG only: Promtail, Loki, and Grafana. Do not reintroduce Prometheus or Redis exporter containers on the small EC2 host unless explicitly requested.
+- When Slack asks Codex to investigate API logs, use `docs/observability/slack-codex-log-search.md` and the `monitoring/api-dashboard` `codex:log-search` command. Do not add Slack tokens or webhooks to browser-side dashboard code.
 
 ## Backend Architecture Rules
 

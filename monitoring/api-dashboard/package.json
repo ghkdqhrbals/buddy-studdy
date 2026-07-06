@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "codex:log-search": "node scripts/codex-log-search.mjs",
     "test": "node --test"
   }
 }

@@ -29,6 +29,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - API rows expand inline to show request, response, optional stack trace, and related logs.
   - `/performance.html` shows p50, p90, p95, and p99 latency grouped by API endpoint.
   - Timestamps are rendered in KST with millisecond precision.
+- Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
+  - See `docs/observability/slack-codex-log-search.md`.
 - `monitoring/grafana/dashboards/buddystudy-logs.json`
   - Timeline graph uses the selected Grafana time range and `$__interval`.
   - Drag on the timeline to zoom into a time range.

@@ -22,6 +22,8 @@ The performance dashboard combines Datadog/Sentry-style traffic summaries with g
 
 The p50, p95, and p99 panels remain separate table panels. Each percentile panel groups endpoints for that percentile together and calculates values over the selected dashboard time range.
 
+Slack에서 Codex에게 API 로그 조사를 요청하는 흐름은 대시보드 공유 버튼이 아니라 전용 Codex 검색 명령을 사용한다. 요청/응답 템플릿은 `docs/observability/slack-codex-log-search.md`를 따른다.
+
 ## Query Controls
 
 - `Label selector`: raw LogQL stream selector, for example `{job="buddystudy-backend"}` or `{container="buddystudy-nginx"}`. Loki labels are the indexed fields, so narrow this first.

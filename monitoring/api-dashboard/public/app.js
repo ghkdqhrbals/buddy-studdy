@@ -6,7 +6,7 @@ import {
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070614";
+} from "./logs.js?v=2026070711";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
@@ -18,12 +18,14 @@ const state = {
   loadingDetails: new Set(),
   selectedRange: null,
   timeline: [],
+  timelineStepMs: 60_000,
   drag: null,
   loadingRequests: false,
   pageSize: 100,
   pageIndex: 0,
   pageCursors: [null],
   hasNextPage: false,
+  sortDirection: "desc",
 };
 
 const els = {
@@ -41,7 +43,6 @@ const els = {
   logSearchInput: document.querySelector("#logSearchInput"),
   refreshButton: document.querySelector("#refreshButton"),
   requestRows: document.querySelector("#requestRows"),
-  requestLoadingOverlay: document.querySelector("#requestLoadingOverlay"),
   statusMessage: document.querySelector("#statusMessage"),
   rangeLabel: document.querySelector("#rangeLabel"),
   emptyTemplate: document.querySelector("#emptyTemplate"),
@@ -54,6 +55,7 @@ const els = {
   prevPageButton: document.querySelector("#prevPageButton"),
   nextPageButton: document.querySelector("#nextPageButton"),
   pageInfo: document.querySelector("#pageInfo"),
+  timeSortButton: document.querySelector("#timeSortButton"),
 };
 
 const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
@@ -108,15 +110,17 @@ async function loadRequests() {
 
 async function loadRequestPage({ refreshTimeline = false } = {}) {
   state.loadingRequests = true;
+  state.expandedRequestId = "";
   renderLoadingState();
-  setStatus("Loading", "loading");
+  renderRows();
   const range = timeRange();
   try {
-    const pageEndNs = state.pageCursors[state.pageIndex] ?? range.endNs;
+    const pageCursorNs = state.pageCursors[state.pageIndex];
+    const pageRange = pageQueryRange(range, pageCursorNs);
     const pageQuery = lokiQueryRange(buildApiExchangeQuery(), {
-      ...range,
-      endNs: pageEndNs,
+      ...pageRange,
       limit: state.pageSize + 1,
+      direction: state.sortDirection === "desc" ? "backward" : "forward",
     });
     const [timelineValues, values] = await Promise.all([
       refreshTimeline ? loadTimeline(range) : Promise.resolve(state.timeline),
@@ -133,22 +137,26 @@ async function loadRequestPage({ refreshTimeline = false } = {}) {
         }
       })
       .filter(Boolean)
-      .sort((a, b) => Number(BigInt(b.nanoseconds) - BigInt(a.nanoseconds)));
+      .sort(compareRequestsByTime);
     state.hasNextPage = parsed.length > state.pageSize;
     state.requests = parsed.slice(0, state.pageSize);
-    const oldest = state.requests[state.requests.length - 1];
-    if (oldest && state.hasNextPage) {
-      state.pageCursors[state.pageIndex + 1] = (BigInt(oldest.nanoseconds) - 1n).toString();
+    const edge = state.requests[state.requests.length - 1];
+    if (edge && state.hasNextPage) {
+      state.pageCursors[state.pageIndex + 1] = nextPageCursor(edge.nanoseconds);
     } else {
       state.pageCursors.length = state.pageIndex + 1;
     }
     state.detailCache.clear();
     state.expandedRequestId = "";
     applyFilters();
+    state.loadingRequests = false;
     render();
     setStatus("Ready", "ready");
   } finally {
-    state.loadingRequests = false;
+    if (state.loadingRequests) {
+      state.loadingRequests = false;
+      renderRows();
+    }
     renderLoadingState();
   }
 }
@@ -161,6 +169,7 @@ function resetPagination() {
 
 async function loadTimeline(range) {
   const stepMs = chooseTimelineStepMs(range.endMs - range.startMs);
+  state.timelineStepMs = stepMs;
   const query = TIMELINE_QUERY.replace("$__range", formatLogqlDuration(stepMs));
   const values = await lokiQueryRange(query, {
     ...range,
@@ -177,6 +186,24 @@ async function loadTimeline(range) {
 
 function applyFilters() {
   state.filtered = state.requests;
+}
+
+function pageQueryRange(range, cursorNs) {
+  if (!cursorNs) return range;
+  if (state.sortDirection === "desc") {
+    return { ...range, endNs: cursorNs };
+  }
+  return { ...range, startNs: cursorNs };
+}
+
+function compareRequestsByTime(a, b) {
+  const delta = Number(BigInt(a.nanoseconds) - BigInt(b.nanoseconds));
+  return state.sortDirection === "desc" ? -delta : delta;
+}
+
+function nextPageCursor(nanoseconds) {
+  const offset = state.sortDirection === "desc" ? -1n : 1n;
+  return (BigInt(nanoseconds) + offset).toString();
 }
 
 function buildApiExchangeQuery() {
@@ -218,12 +245,15 @@ function render() {
 function renderRangeLabel() {
   const count = state.filtered.length;
   const range = timeRange();
-  const suffix = state.hasNextPage ? `page ${state.pageIndex + 1}, ${state.pageSize} per page` : `page ${state.pageIndex + 1}`;
+  const orderLabel = state.sortDirection === "desc" ? "newest first" : "oldest first";
+  const suffix = state.hasNextPage ? `page ${state.pageIndex + 1}, ${state.pageSize} rows, ${orderLabel}` : `page ${state.pageIndex + 1}, ${orderLabel}`;
   els.rangeLabel.textContent = `${count} visible requests, ${suffix}`;
   els.timelineRangeLabel.textContent = `${formatKstShort(range.startMs)} - ${formatKstShort(range.endMs)} · drag to zoom`;
   els.resetTimelineButton.disabled = !state.selectedRange;
   syncCustomRangeControls(range);
-  els.pageInfo.textContent = `Page ${state.pageIndex + 1}`;
+  els.pageInfo.textContent = `Page ${state.pageIndex + 1} · ${state.sortDirection === "desc" ? "Newest" : "Oldest"}`;
+  els.timeSortButton.textContent = state.sortDirection === "desc" ? "Time ↓" : "Time ↑";
+  els.timeSortButton.title = state.sortDirection === "desc" ? "Newest first" : "Oldest first";
   els.prevPageButton.disabled = state.pageIndex === 0;
   els.nextPageButton.disabled = !state.hasNextPage;
   els.pageSizeSelect.value = String(state.pageSize);
@@ -231,6 +261,10 @@ function renderRangeLabel() {
 
 function renderRows() {
   els.requestRows.innerHTML = "";
+  if (state.loadingRequests) {
+    els.requestRows.append(renderLoadingRow());
+    return;
+  }
   if (state.filtered.length === 0 && !state.loadingRequests) {
     els.requestRows.append(els.emptyTemplate.content.cloneNode(true));
     return;
@@ -244,8 +278,6 @@ function renderRows() {
 }
 
 function renderLoadingState() {
-  els.requestLoadingOverlay.hidden = !state.loadingRequests;
-  els.requestRows.classList.toggle("is-loading", state.loadingRequests);
   els.refreshButton.disabled = state.loadingRequests;
   els.prevPageButton.disabled = state.loadingRequests || state.pageIndex === 0;
   els.nextPageButton.disabled = state.loadingRequests || !state.hasNextPage;
@@ -255,6 +287,17 @@ function renderLoadingState() {
   els.customEndDateInput.disabled = state.loadingRequests;
   els.customEndTimeInput.disabled = state.loadingRequests;
   els.applyCustomRangeButton.disabled = state.loadingRequests;
+}
+
+function renderLoadingRow() {
+  const row = document.createElement("div");
+  row.className = "request-loading-row";
+  row.setAttribute("role", "row");
+  row.innerHTML = `
+    <span class="loading-emoji" aria-hidden="true">↻</span>
+    <strong>Loading requests</strong>
+  `;
+  return row;
 }
 
 function renderRequestRow(request) {
@@ -431,7 +474,7 @@ function renderTimeline() {
   }
 
   if (visiblePoints.length > 0) {
-    const barWidth = Math.min(18, Math.max(4, width / Math.max(1, points.length) - 1));
+    const barWidth = timelineBarWidth(range, width);
     const plotStart = padding.left;
     const plotEnd = padding.left + width;
     for (const point of visiblePoints) {
@@ -529,9 +572,17 @@ function updateSelectionOverlay() {
 }
 
 function chooseTimelineStepMs(durationMs) {
-  const target = durationMs / 120;
-  const steps = [1_000, 5_000, 10_000, 30_000, 60_000, 300_000, 900_000, 1_800_000, 3_600_000];
+  const target = durationMs / 220;
+  const steps = [1_000, 5_000, 10_000, 30_000, 60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000];
   return steps.find((step) => step >= target) ?? steps[steps.length - 1];
+}
+
+function timelineBarWidth(range, plotWidth) {
+  const durationMs = Math.max(1, range.endMs - range.startMs);
+  const bucketWidth = (state.timelineStepMs / durationMs) * plotWidth;
+  const durationHours = durationMs / 3_600_000;
+  const durationScale = Math.max(0.45, Math.min(1, 1 / Math.sqrt(Math.max(1, durationHours))));
+  return Math.max(2, Math.min(16, bucketWidth * durationScale));
 }
 
 function formatLogqlDuration(ms) {
@@ -640,6 +691,10 @@ function bindEvents() {
     state.pageSize = Number(els.pageSizeSelect.value);
     loadRequests().catch((error) => setStatus(error.message, "error"));
   });
+  els.timeSortButton.addEventListener("click", () => {
+    state.sortDirection = state.sortDirection === "desc" ? "asc" : "desc";
+    loadRequests().catch((error) => setStatus(error.message, "error"));
+  });
   els.prevPageButton.addEventListener("click", () => {
     if (state.pageIndex === 0) return;
     state.pageIndex -= 1;
@@ -707,6 +762,11 @@ function applyInitialQueryParams() {
   const path = params.get("path");
   const requestId = params.get("requestId");
   const logSearch = params.get("q");
+  const method = params.get("method");
+  const status = params.get("status");
+  const sort = params.get("sort");
+  const from = Number(params.get("from"));
+  const to = Number(params.get("to"));
   if (path) {
     els.pathInput.value = path;
   }
@@ -715,6 +775,20 @@ function applyInitialQueryParams() {
   }
   if (logSearch) {
     els.logSearchInput.value = logSearch;
+  }
+  if (method) {
+    els.methodSelect.value = method;
+  }
+  if (status) {
+    els.statusSelect.value = status;
+  }
+  if (sort === "asc" || sort === "desc") {
+    state.sortDirection = sort;
+  }
+  if (Number.isFinite(from) && Number.isFinite(to) && from < to) {
+    state.selectedRange = { startMs: from, endMs: to };
+    els.rangeSelect.value = "custom";
+    syncCustomRangeControls(state.selectedRange, { force: true });
   }
 }
 
