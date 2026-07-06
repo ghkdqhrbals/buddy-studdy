@@ -219,6 +219,31 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesCommunityProfileCacheRepositoryForStoredProfileState() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "settingsStore.loadProfileAvatarSymbolName",
+            "settingsStore.saveProfileAvatarSymbolName",
+            "settingsStore.loadProfileAvatarImageData",
+            "settingsStore.saveProfileAvatarImageData",
+            "settingsStore.loadProfileAvatarColorSeed",
+            "settingsStore.saveProfileAvatarColorSeed",
+            "settingsStore.loadCommunityProfileDisplayName",
+            "settingsStore.saveCommunityProfileDisplayName",
+            "settingsStore.loadCommunityProfileID",
+            "settingsStore.saveCommunityProfileID",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use CommunityProfileCacheRepository for stored profile state instead of SettingsStore directly: \(violations)"
+        )
+    }
+
     func testViewsDoNotDependOnSettingsStore() throws {
         let root = try repositoryRoot()
         let views = root.appendingPathComponent("StudyMate/Views", isDirectory: true)

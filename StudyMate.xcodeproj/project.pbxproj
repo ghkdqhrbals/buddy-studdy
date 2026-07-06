@@ -27,6 +27,8 @@
 		1100000000000000000001AF /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
 		1100000000000000000001B0 /* RemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000085 /* RemotePushRegistrationRepository.swift */; };
 		1100000000000000000001B1 /* SettingsStoreRemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000086 /* SettingsStoreRemotePushRegistrationRepository.swift */; };
+		1100000000000000000001B2 /* CommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000087 /* CommunityProfileCacheRepository.swift */; };
+		1100000000000000000001B3 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -108,6 +110,8 @@
 		120000000000000000000160 /* SettingsStoreAppLogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000083 /* SettingsStoreAppLogRepository.swift */; };
 		120000000000000000000161 /* RemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000085 /* RemotePushRegistrationRepository.swift */; };
 		120000000000000000000162 /* SettingsStoreRemotePushRegistrationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000086 /* SettingsStoreRemotePushRegistrationRepository.swift */; };
+		120000000000000000000163 /* CommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000087 /* CommunityProfileCacheRepository.swift */; };
+		120000000000000000000164 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000202 /* QuestionSchedulePolicyTests.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
@@ -225,6 +229,8 @@
 		110000000000000000000075 /* OAuthGoogleSignInRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthGoogleSignInRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004B /* CommunityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004C /* RemoteCommunityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCommunityRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000087 /* CommunityProfileCacheRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityProfileCacheRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreCommunityProfileCacheRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004F /* StudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000052 /* RemoteStudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteStudyRoomRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000054 /* RecordsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsRepository.swift; sourceTree = "<group>"; };
@@ -494,6 +500,8 @@
 			children = (
 				11000000000000000000004B /* CommunityRepository.swift */,
 				11000000000000000000004C /* RemoteCommunityRepository.swift */,
+				110000000000000000000087 /* CommunityProfileCacheRepository.swift */,
+				110000000000000000000088 /* SettingsStoreCommunityProfileCacheRepository.swift */,
 			);
 			path = Community;
 			sourceTree = "<group>";
@@ -927,6 +935,8 @@
 				1100000000000000000001A6 /* OAuthGoogleSignInRepository.swift in Sources */,
 				110000000000000000000192 /* CommunityRepository.swift in Sources */,
 				110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */,
+				1100000000000000000001B2 /* CommunityProfileCacheRepository.swift in Sources */,
+				1100000000000000000001B3 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */,
 				110000000000000000000194 /* StudyRoomRepository.swift in Sources */,
 				110000000000000000000195 /* RemoteStudyRoomRepository.swift in Sources */,
 				110000000000000000000196 /* RecordsRepository.swift in Sources */,
@@ -1024,6 +1034,8 @@
 				120000000000000000000157 /* OAuthGoogleSignInRepository.swift in Sources */,
 				120000000000000000000133 /* CommunityRepository.swift in Sources */,
 				120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */,
+				120000000000000000000163 /* CommunityProfileCacheRepository.swift in Sources */,
+				120000000000000000000164 /* SettingsStoreCommunityProfileCacheRepository.swift in Sources */,
 				120000000000000000000135 /* StudyRoomRepository.swift in Sources */,
 				120000000000000000000136 /* RemoteStudyRoomRepository.swift in Sources */,
 				120000000000000000000137 /* RecordsRepository.swift in Sources */,

@@ -446,6 +446,7 @@ final class AppState: ObservableObject {
     private let settingsStore: SettingsStore
     private let appLogRepository: AppLogRepository
     private let remotePushRegistrationRepository: RemotePushRegistrationRepository
+    private let communityProfileCacheRepository: CommunityProfileCacheRepository
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
@@ -983,11 +984,14 @@ final class AppState: ObservableObject {
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         appLogRepository: AppLogRepository? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
+        communityProfileCacheRepository: CommunityProfileCacheRepository? = nil,
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
         let resolvedRemotePushRegistrationRepository = remotePushRegistrationRepository
             ?? SettingsStoreRemotePushRegistrationRepository(settingsStore: settingsStore)
+        let resolvedCommunityProfileCacheRepository = communityProfileCacheRepository
+            ?? SettingsStoreCommunityProfileCacheRepository(settingsStore: settingsStore)
         let loadedSettings = settingsStore.loadSettings()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
@@ -1013,6 +1017,7 @@ final class AppState: ObservableObject {
         self.settingsStore = settingsStore
         self.appLogRepository = resolvedAppLogRepository
         self.remotePushRegistrationRepository = resolvedRemotePushRegistrationRepository
+        self.communityProfileCacheRepository = resolvedCommunityProfileCacheRepository
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         self.currentQuestion = settingsStore.loadQuestion()
@@ -1049,16 +1054,16 @@ final class AppState: ObservableObject {
             settingsStore.saveIsCloudSyncEnabled(false)
         }
         self.isCommunitySignedIn = loadedIsCommunitySignedIn
-        let loadedAvatarSymbolName = settingsStore.loadProfileAvatarSymbolName()
-        let loadedAvatarImageData = settingsStore.loadProfileAvatarImageData()
+        let loadedAvatarSymbolName = resolvedCommunityProfileCacheRepository.loadProfileAvatarSymbolName()
+        let loadedAvatarImageData = resolvedCommunityProfileCacheRepository.loadProfileAvatarImageData()
         let effectiveAvatarColorSeed: String
-        if let loadedAvatarColorSeed = settingsStore.loadProfileAvatarColorSeed(),
+        if let loadedAvatarColorSeed = resolvedCommunityProfileCacheRepository.loadProfileAvatarColorSeed(),
            !loadedAvatarColorSeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             effectiveAvatarColorSeed = loadedAvatarColorSeed
         } else {
             let generatedSeed = UUID().uuidString
             effectiveAvatarColorSeed = generatedSeed
-            settingsStore.saveProfileAvatarColorSeed(generatedSeed)
+            resolvedCommunityProfileCacheRepository.saveProfileAvatarColorSeed(generatedSeed)
         }
         self.communityProfileState = CommunityProfileStateStore(
             avatarSymbolName: loadedAvatarSymbolName,
@@ -2482,31 +2487,31 @@ final class AppState: ObservableObject {
         communityProfileState = nextState
         backendAccessState = .signedOut
         settingsStore.saveIsCommunitySignedIn(false)
-        settingsStore.saveProfileAvatarSymbolName(profileAvatarSymbolName)
-        settingsStore.saveProfileAvatarImageData(nil)
-        settingsStore.saveCommunityProfileID(nil)
-        settingsStore.saveCommunityProfileDisplayName("")
+        communityProfileCacheRepository.saveProfileAvatarSymbolName(profileAvatarSymbolName)
+        communityProfileCacheRepository.saveProfileAvatarImageData(nil)
+        communityProfileCacheRepository.saveCommunityProfileID(nil)
+        communityProfileCacheRepository.saveCommunityProfileDisplayName("")
     }
 
     func updateProfileAvatarSymbolName(_ symbolName: String) {
         var nextState = communityProfileState
         nextState.updateAvatar(symbolName: symbolName)
         communityProfileState = nextState
-        settingsStore.saveProfileAvatarSymbolName(symbolName)
+        communityProfileCacheRepository.saveProfileAvatarSymbolName(symbolName)
     }
 
     func updateProfileAvatarColorSeed(_ seed: String) {
         var nextState = communityProfileState
         nextState.updateAvatar(colorSeed: seed)
         communityProfileState = nextState
-        settingsStore.saveProfileAvatarColorSeed(seed)
+        communityProfileCacheRepository.saveProfileAvatarColorSeed(seed)
     }
 
     func updateProfileAvatarImageData(_ data: Data?) {
         var nextState = communityProfileState
         nextState.setAvatarImageData(data)
         communityProfileState = nextState
-        settingsStore.saveProfileAvatarImageData(data)
+        communityProfileCacheRepository.saveProfileAvatarImageData(data)
     }
 
     func updateCommunityProfileAvatar(symbolName: String? = nil, colorSeed: String? = nil) {
@@ -2581,7 +2586,7 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { profile in
-                settingsStore.saveCommunityProfileDisplayName(displayName)
+                communityProfileCacheRepository.saveCommunityProfileDisplayName(displayName)
                 applyCommunityProfile(profile)
             },
             onFailure: { error in
@@ -2595,9 +2600,9 @@ final class AppState: ObservableObject {
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {
-        let cachedDisplayName = settingsStore.loadCommunityProfileDisplayName()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cachedDisplayName = communityProfileCacheRepository.loadCommunityProfileDisplayName()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let incomingDisplayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cachedProfileID = settingsStore.loadCommunityProfileID()
+        let cachedProfileID = communityProfileCacheRepository.loadCommunityProfileID()
         let shouldPreserveCachedName = cachedProfileID == profile.id
             && !cachedDisplayName.isEmpty
             && cachedDisplayName != incomingDisplayName
@@ -2617,10 +2622,10 @@ final class AppState: ObservableObject {
         var nextState = communityProfileState
         nextState.applyProfile(resolvedProfile)
         communityProfileState = nextState
-        settingsStore.saveCommunityProfileID(resolvedProfile.id)
-        settingsStore.saveCommunityProfileDisplayName(resolvedProfile.displayName)
-        settingsStore.saveProfileAvatarSymbolName(resolvedProfile.avatarSymbolName)
-        settingsStore.saveProfileAvatarColorSeed(resolvedProfile.avatarColorSeed)
+        communityProfileCacheRepository.saveCommunityProfileID(resolvedProfile.id)
+        communityProfileCacheRepository.saveCommunityProfileDisplayName(resolvedProfile.displayName)
+        communityProfileCacheRepository.saveProfileAvatarSymbolName(resolvedProfile.avatarSymbolName)
+        communityProfileCacheRepository.saveProfileAvatarColorSeed(resolvedProfile.avatarColorSeed)
         applyProfilePageAccess(resolvedProfile)
     }
 
@@ -2662,8 +2667,8 @@ final class AppState: ObservableObject {
             onSuccess: { updatedRegistration in
                 remotePushRegistrationRepository.saveRemotePushRegistration(updatedRegistration)
                 signOutFromCommunity()
-                settingsStore.saveCommunityProfileID(nil)
-                settingsStore.saveCommunityProfileDisplayName("")
+                communityProfileCacheRepository.saveCommunityProfileID(nil)
+                communityProfileCacheRepository.saveCommunityProfileDisplayName("")
                 statusMessage = strings.accountDeleted
             },
             onFailure: { error in
