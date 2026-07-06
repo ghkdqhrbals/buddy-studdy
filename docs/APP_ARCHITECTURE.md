@@ -67,6 +67,7 @@ The policy is split into two deterministic steps:
 - Login-required flows should route to the simple login page for the current protected page, preserve the selected tab/screen, and return by dismissing the login page after successful sign-in.
 - Backend identity transport calls such as device registration, access-token bootstrap, and APNs token updates must go through `BackendIdentityUseCase`, not direct `AppState` calls to `RemotePushBackendClientProtocol`.
 - Backend identity operations must go through `IdentityRepository`. `BackendIdentityUseCase` owns device registration, access-token bootstrap, and APNs token update workflows and must not depend directly on backend transport protocols.
+- Google sign-in provider operations must go through `GoogleSignInRepository`. `GoogleSignInUseCase` owns the app sign-in action and must not construct or depend directly on OAuth provider services.
 - Page-access refresh must go through `PageAccessRepository`. `RefreshPageAccessUseCase` owns the page-access backend action and must not depend directly on backend transport protocols.
 - OAuth provider services such as Google sign-in must be owned by auth use cases. ViewModels should request a sign-in result from `GoogleSignInUseCase` instead of constructing provider services directly.
 - Community backend operations must go through `CommunityRepository`. `CommunityUseCase` owns the app workflow contract and must not depend directly on backend transport protocols.

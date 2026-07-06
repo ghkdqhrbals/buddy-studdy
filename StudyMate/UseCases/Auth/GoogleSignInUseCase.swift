@@ -2,11 +2,13 @@ import Foundation
 
 @MainActor
 struct GoogleSignInUseCase {
+    private let repository: GoogleSignInRepository
+
+    init(repository: GoogleSignInRepository) {
+        self.repository = repository
+    }
+
     func signIn() async throws -> String {
-        #if os(iOS)
-        try await GoogleOAuthService().signIn()
-        #else
-        throw GoogleOAuthError.notConfigured
-        #endif
+        try await repository.signIn()
     }
 }

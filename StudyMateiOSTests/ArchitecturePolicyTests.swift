@@ -90,6 +90,21 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testGoogleSignInUseCaseDependsOnAuthRepositoryBoundary() throws {
+        let root = try repositoryRoot()
+        let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Auth/GoogleSignInUseCase.swift")
+        let content = try String(contentsOf: useCaseFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("GoogleOAuthService"),
+            "GoogleSignInUseCase must depend on an auth repository boundary instead of the OAuth provider service."
+        )
+        XCTAssertTrue(
+            content.contains("GoogleSignInRepository"),
+            "GoogleSignInUseCase should keep OAuth provider details behind a repository boundary."
+        )
+    }
+
     func testCommunityUseCaseDependsOnRepositoryBoundary() throws {
         let root = try repositoryRoot()
         let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Community/CommunityUseCase.swift")

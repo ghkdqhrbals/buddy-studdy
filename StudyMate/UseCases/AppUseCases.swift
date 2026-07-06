@@ -13,6 +13,7 @@ struct AppUseCases {
     let community: CommunityUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
+        let googleSignInRepository = OAuthGoogleSignInRepository()
         let identityRepository = RemoteIdentityRepository(backendClient: backendClient)
         let communityRepository = RemoteCommunityRepository(backendClient: backendClient)
         let studyRoomRepository = RemoteStudyRoomRepository(backendClient: backendClient)
@@ -22,7 +23,7 @@ struct AppUseCases {
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let pageAccessRepository = RemotePageAccessRepository(backendClient: backendClient)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
-        googleSignIn = GoogleSignInUseCase()
+        googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
         refreshPageAccess = RefreshPageAccessUseCase(repository: pageAccessRepository)
         studyRoom = StudyRoomUseCase(repository: studyRoomRepository)
         records = RecordsUseCase(repository: recordsRepository)

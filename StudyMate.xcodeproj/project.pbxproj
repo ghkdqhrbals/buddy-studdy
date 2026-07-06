@@ -22,6 +22,8 @@
 		1100000000000000000001A4 /* AppUseCasesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006F /* AppUseCasesProvider.swift */; };
 		11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
 		110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
+		1100000000000000000001A5 /* GoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000074 /* GoogleSignInRepository.swift */; };
+		1100000000000000000001A6 /* OAuthGoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000075 /* OAuthGoogleSignInRepository.swift */; };
 		110000000000000000000192 /* CommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004B /* CommunityRepository.swift */; };
 		110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		110000000000000000000194 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
@@ -90,6 +92,8 @@
 		120000000000000000000149 /* AppUseCasesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000006F /* AppUseCasesProvider.swift */; };
 		12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
 		120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
+		120000000000000000000156 /* GoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000074 /* GoogleSignInRepository.swift */; };
+		120000000000000000000157 /* OAuthGoogleSignInRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000075 /* OAuthGoogleSignInRepository.swift */; };
 		120000000000000000000133 /* CommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004B /* CommunityRepository.swift */; };
 		120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004C /* RemoteCommunityRepository.swift */; };
 		120000000000000000000135 /* StudyRoomRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000004F /* StudyRoomRepository.swift */; };
@@ -193,6 +197,8 @@
 		11000000000000000000006F /* AppUseCasesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCasesProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000047 /* BackendIdentityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendIdentityUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000049 /* GoogleSignInUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInUseCase.swift; sourceTree = "<group>"; };
+		110000000000000000000074 /* GoogleSignInRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInRepository.swift; sourceTree = "<group>"; };
+		110000000000000000000075 /* OAuthGoogleSignInRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthGoogleSignInRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004B /* CommunityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004C /* RemoteCommunityRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCommunityRepository.swift; sourceTree = "<group>"; };
 		11000000000000000000004F /* StudyRoomRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRoomRepository.swift; sourceTree = "<group>"; };
@@ -405,6 +411,7 @@
 		11000000000000000000004D /* Repositories */ = {
 			isa = PBXGroup;
 			children = (
+				110000000000000000000076 /* Auth */,
 				11000000000000000000004E /* Community */,
 				110000000000000000000053 /* StudyRoom */,
 				110000000000000000000056 /* Records */,
@@ -415,6 +422,15 @@
 				1100000000000000000001A3 /* PageAccess */,
 			);
 			path = Repositories;
+			sourceTree = "<group>";
+		};
+		110000000000000000000076 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000074 /* GoogleSignInRepository.swift */,
+				110000000000000000000075 /* OAuthGoogleSignInRepository.swift */,
+			);
+			path = Auth;
 			sourceTree = "<group>";
 		};
 		11000000000000000000004E /* Community */ = {
@@ -843,6 +859,8 @@
 				1100000000000000000001A4 /* AppUseCasesProvider.swift in Sources */,
 				11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */,
 				110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */,
+				1100000000000000000001A5 /* GoogleSignInRepository.swift in Sources */,
+				1100000000000000000001A6 /* OAuthGoogleSignInRepository.swift in Sources */,
 				110000000000000000000192 /* CommunityRepository.swift in Sources */,
 				110000000000000000000193 /* RemoteCommunityRepository.swift in Sources */,
 				110000000000000000000194 /* StudyRoomRepository.swift in Sources */,
@@ -926,6 +944,8 @@
 				120000000000000000000149 /* AppUseCasesProvider.swift in Sources */,
 				12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */,
 				120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */,
+				120000000000000000000156 /* GoogleSignInRepository.swift in Sources */,
+				120000000000000000000157 /* OAuthGoogleSignInRepository.swift in Sources */,
 				120000000000000000000133 /* CommunityRepository.swift in Sources */,
 				120000000000000000000134 /* RemoteCommunityRepository.swift in Sources */,
 				120000000000000000000135 /* StudyRoomRepository.swift in Sources */,
