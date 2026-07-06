@@ -872,6 +872,16 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
+    private func handleCommunityError(_ error: Error, fallback: String? = nil) -> Bool {
+        handleAppError(error, fallback: fallback ?? strings.communityRequestFailed, target: .community)
+    }
+
+    private func clearCommunityErrorForMissingRegistration(reason: String) {
+        communityErrorMessage = nil
+        log(.warning, "백엔드 등록을 확보하지 못해 커뮤니티 요청을 중단했습니다. reason=\(reason)")
+    }
+
+    @discardableResult
     private func handlePageAccessError(_ error: Error, page: ProtectedAppPage) -> Bool {
         handleAppError(error, fallback: "", target: .none, protectedPage: page)
     }
@@ -1415,51 +1425,28 @@ final class AppState: ObservableObject {
             state.markRead(notificationID: notificationID, at: Date())
         }
 
-        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-read") else {
-            return
-        }
-
-        await actionRunner.runVoid(
-            operation: {
-                try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "notification-read",
-                    operation: { recoveredRegistration in
-                        try await notificationsUseCase.markRead(
-                            registration: recoveredRegistration,
-                            notificationID: notificationID
-                        )
-                    }
+        await runBackendNotificationMutation(
+            reason: "notification-read",
+            operation: { recoveredRegistration in
+                try await self.notificationsUseCase.markRead(
+                    registration: recoveredRegistration,
+                    notificationID: notificationID
                 )
             },
             onSuccess: {
                 await refreshNotificationUnreadCount()
             },
-            onFailure: { error in
-                handleAppError(error, fallback: "", target: .notification)
-                log(.warning, "알림 읽음 처리 실패: \(error.localizedDescription)")
-            }
+            failureMessage: { "알림 읽음 처리 실패: \($0.localizedDescription)" }
         )
     }
 
     func deleteNotification(_ notification: BackendAppNotification) async {
-        guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-delete") else {
-            return
-        }
-
-        await actionRunner.runVoid(
-            operation: {
-                try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "notification-delete",
-                    operation: { recoveredRegistration in
-                        try await notificationsUseCase.deleteNotification(
-                            registration: recoveredRegistration,
-                            notificationID: notification.id
-                        )
-                    }
+        await runBackendNotificationMutation(
+            reason: "notification-delete",
+            operation: { recoveredRegistration in
+                try await self.notificationsUseCase.deleteNotification(
+                    registration: recoveredRegistration,
+                    notificationID: notification.id
                 )
             },
             onSuccess: {
@@ -1467,16 +1454,33 @@ final class AppState: ObservableObject {
                     state.delete(notificationID: notification.id)
                 }
             },
-            onFailure: { error in
-                handleAppError(error, fallback: "", target: .notification)
-                log(.warning, "알림 삭제 실패: \(error.localizedDescription)")
-            }
+            failureMessage: { "알림 삭제 실패: \($0.localizedDescription)" }
         )
     }
 
     func deleteAllNotifications() async {
+        await runBackendNotificationMutation(
+            reason: "notifications-delete-all",
+            operation: { recoveredRegistration in
+                try await self.notificationsUseCase.deleteAllNotifications(registration: recoveredRegistration)
+            },
+            onSuccess: {
+                updateNotificationState { state in
+                    state.deleteAll()
+                }
+            },
+            failureMessage: { "알림 전체삭제 실패: \($0.localizedDescription)" }
+        )
+    }
+
+    private func runBackendNotificationMutation(
+        reason: String,
+        operation: (RemotePushRegistration) async throws -> Void,
+        onSuccess: () async -> Void = {},
+        failureMessage: (Error) -> String
+    ) async {
         guard let storedRegistration = settingsStore.loadRemotePushRegistration(),
-              let registration = await registrationWithAccessToken(storedRegistration, reason: "notifications-delete-all") else {
+              let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
             return
         }
 
@@ -1484,20 +1488,14 @@ final class AppState: ObservableObject {
             operation: {
                 try await performWithBackendIdentityRecovery(
                     registration: registration,
-                    reason: "notifications-delete-all",
-                    operation: { recoveredRegistration in
-                        try await notificationsUseCase.deleteAllNotifications(registration: recoveredRegistration)
-                    }
+                    reason: reason,
+                    operation: operation
                 )
             },
-            onSuccess: {
-                updateNotificationState { state in
-                    state.deleteAll()
-                }
-            },
+            onSuccess: onSuccess,
             onFailure: { error in
                 handleAppError(error, fallback: "", target: .notification)
-                log(.warning, "알림 전체삭제 실패: \(error.localizedDescription)")
+                log(.warning, failureMessage(error))
             }
         )
     }
@@ -2013,7 +2011,7 @@ final class AppState: ObservableObject {
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-feed") else {
             if userInitiated {
-                communityErrorMessage = strings.communityRequestFailed
+                clearCommunityErrorForMissingRegistration(reason: "community-feed")
             }
             finishCommunityFeedLoad(requestID)
             return
@@ -2046,7 +2044,7 @@ final class AppState: ObservableObject {
                     clearCommunityFeedPage()
                 }
                 if userInitiated {
-                    handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                    handleCommunityError(error)
                 } else {
                     communityErrorMessage = nil
                 }
@@ -2363,7 +2361,7 @@ final class AppState: ObservableObject {
                 statusMessage = strings.googleLoginSetupRequired
                 log(.warning, "Google Login 설정이 없습니다.")
             } catch {
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "Google Login 실패: \(error.localizedDescription)")
             }
             #else
@@ -2374,7 +2372,7 @@ final class AppState: ObservableObject {
 
     func signInToCommunity(idToken: String) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "google-login") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "google-login")
             return
         }
 
@@ -2394,7 +2392,7 @@ final class AppState: ObservableObject {
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
             }
         )
@@ -2445,7 +2443,7 @@ final class AppState: ObservableObject {
     func requestEmailVerificationCode(email: String) async -> Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-code") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "email-code")
             return false
         }
 
@@ -2460,7 +2458,7 @@ final class AppState: ObservableObject {
                 communityErrorMessage = nil
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
             }
         )
@@ -2469,7 +2467,7 @@ final class AppState: ObservableObject {
     func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "email-login")
             return .failed
         }
 
@@ -2496,7 +2494,7 @@ final class AppState: ObservableObject {
                     log(.info, "Email 로그인에 인증코드가 필요합니다.")
                     return
                 }
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
             }
         )
@@ -2620,7 +2618,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(profile)
             },
             onFailure: { error in
-                let handled = handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                let handled = handleCommunityError(error)
                 if handled {
                     communityProfile = nil
                     return
@@ -2658,7 +2656,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(profile)
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
             },
             onCompletion: {
@@ -2722,7 +2720,7 @@ final class AppState: ObservableObject {
 
     func withdrawCommunityAccount() async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-withdraw") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-withdraw")
             return
         }
 
@@ -2740,7 +2738,7 @@ final class AppState: ObservableObject {
                 statusMessage = strings.accountDeleted
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "커뮤니티 탈퇴 실패: \(error.localizedDescription)")
             },
             onCompletion: {
@@ -2751,7 +2749,7 @@ final class AppState: ObservableObject {
 
     func reportCommunityQuestion(_ question: CommunityQuestion, reason: String, message: String = "") async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-report") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-report")
             return
         }
 
@@ -2768,7 +2766,7 @@ final class AppState: ObservableObject {
                 statusMessage = strings.reportSubmitted
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 신고 실패: \(error.localizedDescription)")
             }
         )
@@ -2780,7 +2778,7 @@ final class AppState: ObservableObject {
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-like")
             return nil
         }
 
@@ -2802,7 +2800,7 @@ final class AppState: ObservableObject {
                 if let previous {
                     updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
                 }
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
             }
         )
@@ -2810,7 +2808,7 @@ final class AppState: ObservableObject {
 
     func loadCommunityQuestionComments(questionID: String, limit: Int = 30, offset: Int = 0) async -> CommunityCommentsResponse? {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comments") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-comments")
             return nil
         }
 
@@ -2824,7 +2822,7 @@ final class AppState: ObservableObject {
                 )
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 로드 실패: \(error.localizedDescription)")
             }
         )
@@ -2832,7 +2830,7 @@ final class AppState: ObservableObject {
 
     func loadCommunityQuestionDetail(questionID: String) async -> CommunityQuestion? {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-question-detail") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-question-detail")
             return nil
         }
 
@@ -2850,7 +2848,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             }
         )
@@ -2862,7 +2860,7 @@ final class AppState: ObservableObject {
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-create") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-comment-create")
             return nil
         }
 
@@ -2880,7 +2878,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 작성 실패: \(error.localizedDescription)")
             }
         )
@@ -2892,7 +2890,7 @@ final class AppState: ObservableObject {
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comment-delete") else {
-            communityErrorMessage = strings.communityRequestFailed
+            clearCommunityErrorForMissingRegistration(reason: "community-comment-delete")
             return false
         }
 
@@ -2910,7 +2908,7 @@ final class AppState: ObservableObject {
                 }
             },
             onFailure: { error in
-                handleAppError(error, fallback: strings.communityRequestFailed, target: .community)
+                handleCommunityError(error)
                 log(.warning, "공개 질문 댓글 삭제 실패: \(error.localizedDescription)")
             }
         )
@@ -5641,8 +5639,8 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
-            if Self.isBackendDeviceNotFound(error) {
-                log(.warning, "저장된 백엔드 기기를 찾을 수 없어 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID)")
+            if Self.shouldResetBackendIdentity(after: error) {
+                log(.warning, "저장된 백엔드 identity가 유효하지 않아 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID), error=\(error.localizedDescription)")
                 return await resetBackendIdentityAndRegisterFresh(
                     previousRegistration: registration,
                     reason: "\(reason)-device-recovery"
