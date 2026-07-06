@@ -473,6 +473,32 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateRoutesLocalStudySettingsThroughUseCase() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "localStudySettingsRepository.loadLocalStudySettings",
+            "localStudySettingsRepository.saveSettings",
+            "localStudySettingsRepository.saveAPIKey",
+            "localStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt",
+            "localStudySettingsRepository.saveLocalSettingsMutationAt",
+            "resolvedLocalStudySettingsRepository.loadLocalStudySettings",
+            "resolvedLocalStudySettingsRepository.saveSettings",
+            "resolvedLocalStudySettingsRepository.saveAPIKey",
+            "resolvedLocalStudySettingsRepository.saveOpenAIAPIKeyUpdatedAt",
+            "resolvedLocalStudySettingsRepository.saveLocalSettingsMutationAt",
+            "private let localStudySettingsRepository",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use LocalStudySettingsUseCase for stored settings and API key state instead of the repository directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesCloudSyncStateRepositoryForStoredCloudSyncState() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
