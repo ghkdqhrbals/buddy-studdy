@@ -18,6 +18,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePo
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionSearchTranslationPort
@@ -344,7 +345,8 @@ class StudyServiceTest {
             status = "ACTIVE",
             appLanguage = "en",
         )
-        memberships.usedCount = 30
+        memberships.activePlan = QuestionMembershipPlan(tierCode = "TIER1", monthlyQuestionLimit = 7)
+        memberships.usedCount = 7
         serviceStudies.rows += StudyEntity(
             id = 79,
             deviceId = principal.deviceId,
@@ -585,11 +587,11 @@ class StudyServiceTest {
     }
 
     private class FakeQuestionMembershipPort : QuestionMembershipPort {
-        var tier: String? = null
+        var activePlan = QuestionMembershipPlan(tierCode = "TIER1", monthlyQuestionLimit = 30)
         var usedCount = 0
         var consumeCalls = 0
         var refundCalls = 0
-        override fun activeTierCodeForUser(userId: Long): String? = tier
+        override fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
         override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false

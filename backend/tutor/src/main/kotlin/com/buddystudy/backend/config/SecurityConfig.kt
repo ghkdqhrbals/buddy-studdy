@@ -237,7 +237,19 @@ private fun writeSecurityError(
     response.contentType = "application/json"
     objectMapper.writeValue(
         response.outputStream,
-        ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), requiredPermissions = requiredPermissions, loginRequired = loginRequired)),
+        ApiErrorEnvelope(
+            ApiError(
+                errorCode = code.name,
+                code = code.code(),
+                description = code.description(),
+                message = message,
+                requestId = requestId,
+                status = status.value(),
+                showPopup = code.showPopup,
+                requiredPermissions = requiredPermissions,
+                loginRequired = loginRequired,
+            )
+        ),
     )
 }
 

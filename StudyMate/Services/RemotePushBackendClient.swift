@@ -2061,19 +2061,64 @@ struct BackendPageAccess: Codable, Equatable {
 
 struct BackendAPIError: Decodable, Equatable {
     var code: String
+    var numericCode: Int?
+    var description: String?
     var message: String
     var requestID: String?
     var status: Int?
+    var showPopup: Bool?
     var requiredPermissions: [String]?
     var loginRequired: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case code
+        case errorCode
+        case description
         case message
         case requestID = "requestId"
         case status
+        case showPopup
         case requiredPermissions
         case loginRequired
+    }
+
+    init(
+        code: String,
+        numericCode: Int? = nil,
+        description: String? = nil,
+        message: String,
+        requestID: String? = nil,
+        status: Int? = nil,
+        showPopup: Bool? = nil,
+        requiredPermissions: [String]? = nil,
+        loginRequired: Bool? = nil
+    ) {
+        self.code = code
+        self.numericCode = numericCode
+        self.description = description
+        self.message = message
+        self.requestID = requestID
+        self.status = status
+        self.showPopup = showPopup
+        self.requiredPermissions = requiredPermissions
+        self.loginRequired = loginRequired
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let errorCode = try container.decodeIfPresent(String.self, forKey: .errorCode) {
+            code = errorCode
+        } else {
+            code = try container.decode(String.self, forKey: .code)
+        }
+        numericCode = try? container.decodeIfPresent(Int.self, forKey: .code)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        message = try container.decode(String.self, forKey: .message)
+        requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
+        status = try container.decodeIfPresent(Int.self, forKey: .status)
+        showPopup = try container.decodeIfPresent(Bool.self, forKey: .showPopup)
+        requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)
+        loginRequired = try container.decodeIfPresent(Bool.self, forKey: .loginRequired)
     }
 }
 
@@ -2116,6 +2161,15 @@ enum RemotePushBackendError: LocalizedError {
             return apiError?.message
         case .invalidResponse:
             return nil
+        }
+    }
+
+    var shouldShowPopup: Bool {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.showPopup ?? true
+        case .invalidResponse:
+            return true
         }
     }
 

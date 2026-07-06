@@ -6998,6 +6998,11 @@ final class AppState: ObservableObject {
 
     private func backendErrorDisplayMessage(_ error: Error, fallback: String) -> String {
         if let backendError = error as? RemotePushBackendError,
+           !backendError.shouldShowPopup {
+            return ""
+        }
+
+        if let backendError = error as? RemotePushBackendError,
            let message = backendError.backendMessage,
            !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return message
@@ -7017,6 +7022,14 @@ final class AppState: ObservableObject {
         }
 
         globalErrorPopup = AppErrorPopup(message: trimmedMessage)
+    }
+
+    private func presentGlobalErrorPopupIfNeeded(_ error: Error, fallback: String) {
+        if let backendError = error as? RemotePushBackendError,
+           !backendError.shouldShowPopup {
+            return
+        }
+        presentGlobalErrorPopupIfNeeded(backendErrorDisplayMessage(error, fallback: fallback))
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

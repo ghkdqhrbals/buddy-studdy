@@ -108,8 +108,13 @@ interface QuestionCoveragePort {
     fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant)
 }
 
+data class QuestionMembershipPlan(
+    val tierCode: String,
+    val monthlyQuestionLimit: Int,
+)
+
 interface QuestionMembershipPort {
-    fun activeTierCodeForUser(userId: Long): String?
+    fun activePlanForUser(userId: Long): QuestionMembershipPlan?
     fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
     fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
 }

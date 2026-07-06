@@ -24,19 +24,6 @@ data class SystemQuestionQuotaReservation(
     val yearMonth: YearMonth,
 )
 
-enum class QuestionMembershipTier(val monthlyQuestionLimit: Int) {
-    TIER0(0),
-    TIER1(30),
-    TIER2(1000),
-    TIER3(3000),
-    ;
-
-    companion object {
-        fun fromDb(code: String?): QuestionMembershipTier =
-            entries.firstOrNull { it.name == code } ?: TIER1
-    }
-}
-
 @Component
 class OpenAIQuestionKeyProvider(
     private val properties: BuddyStudyProperties,
@@ -50,12 +37,13 @@ class OpenAIQuestionKeyProvider(
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached.")
         }
 
-        val tier = QuestionMembershipTier.fromDb(memberships.activeTierCodeForUser(user.id))
+        val plan = memberships.activePlanForUser(user.id)
+            ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached.")
         val yearMonth = YearMonth.now(ZoneOffset.UTC)
         val consumed = memberships.tryConsumeMonthlySystemQuestion(
             userId = user.id,
             yearMonth = yearMonth,
-            limit = tier.monthlyQuestionLimit,
+            limit = plan.monthlyQuestionLimit,
             now = Instant.now(),
         )
         if (!consumed) {

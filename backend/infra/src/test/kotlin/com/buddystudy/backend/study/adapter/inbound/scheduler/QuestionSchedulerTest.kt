@@ -22,6 +22,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingC
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCreatedPublishPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -236,14 +237,15 @@ class QuestionSchedulerTest {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val user = UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         users.rows += user
-        memberships.usedCount = 29
+        memberships.activePlan = QuestionMembershipPlan(tierCode = "TIER1", monthlyQuestionLimit = 1)
+        memberships.usedCount = 0
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
         studies.rows += study(id = 102, userId = 7, topic = "Kotlin", now = now)
 
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101)
-        assertThat(memberships.usedCount).isEqualTo(30)
+        assertThat(memberships.usedCount).isEqualTo(1)
         assertThat(studies.rows.single { it.id == 102L }.lastError)
             .isEqualTo("Monthly question limit reached.")
     }
@@ -373,11 +375,11 @@ class QuestionSchedulerTest {
     }
 
     private class FakeQuestionMembershipPort : QuestionMembershipPort {
-        var tier: String? = null
+        var activePlan = QuestionMembershipPlan(tierCode = "TIER1", monthlyQuestionLimit = 30)
         var usedCount = 0
         var consumeCalls = 0
         var refundCalls = 0
-        override fun activeTierCodeForUser(userId: Long): String? = tier
+        override fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
         override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false

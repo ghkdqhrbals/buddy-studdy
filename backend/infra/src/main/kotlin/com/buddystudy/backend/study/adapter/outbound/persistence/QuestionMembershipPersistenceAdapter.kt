@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.account.domain.entity.UserMonthlyQuestionUsageEntity
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import jakarta.persistence.EntityManager
 import jakarta.persistence.NoResultException
@@ -22,19 +23,30 @@ interface UserMonthlyQuestionUsageRepository : JpaRepository<UserMonthlyQuestion
 @Repository
 class QuestionMembershipPersistenceAdapter(
     private val memberships: UserMembershipRepository,
+    private val tiers: UserMembershipTierRepository,
     private val usages: UserMonthlyQuestionUsageRepository,
     private val entityManager: EntityManager,
     private val dataSource: DataSource,
 ) : QuestionMembershipPort {
     private val postgresDatabase: Boolean by lazy { detectPostgres() }
 
-    override fun activeTierCodeForUser(userId: Long): String? {
+    override fun activePlanForUser(userId: Long): QuestionMembershipPlan? {
         val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, "ACTIVE")
-            ?: return null
         val now = Instant.now()
-        if (membership.startedAt.isAfter(now)) return null
-        if (membership.expiresAt?.isAfter(now) == false) return null
-        return membership.tier
+        val tierCode = if (
+            membership == null ||
+            membership.startedAt.isAfter(now) ||
+            membership.expiresAt?.isAfter(now) == false
+        ) {
+            DEFAULT_TIER
+        } else {
+            membership.tier
+        }
+        val tier = tiers.findByTierCode(tierCode) ?: tiers.findByTierCode(DEFAULT_TIER) ?: return null
+        return QuestionMembershipPlan(
+            tierCode = tier.tierCode,
+            monthlyQuestionLimit = tier.monthlyQuestionLimit,
+        )
     }
 
     @Transactional
@@ -131,4 +143,8 @@ class QuestionMembershipPersistenceAdapter(
         dataSource.connection.use { connection ->
             connection.metaData.databaseProductName.equals("PostgreSQL", ignoreCase = true)
         }
+
+    private companion object {
+        const val DEFAULT_TIER = "TIER1"
+    }
 }

@@ -18,10 +18,13 @@ import java.util.UUID
 data class ApiErrorEnvelope(val error: ApiError)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ApiError(
-    val code: String,
+    val errorCode: String,
+    val code: Int,
+    val description: String,
     val message: String,
     val requestId: String,
     val status: Int,
+    val showPopup: Boolean,
     val reason: String? = null,
     val requiredPermissions: List<String>? = null,
     val loginRequired: Boolean? = null,
@@ -106,7 +109,20 @@ class ErrorHandler {
         loginRequired: Boolean? = null,
     ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
-        return ApiErrorEnvelope(ApiError(code.name, message, requestId, status.value(), reason, requiredPermissions, loginRequired))
+        return ApiErrorEnvelope(
+            ApiError(
+                errorCode = code.name,
+                code = code.code(),
+                description = code.description(),
+                message = message,
+                requestId = requestId,
+                status = status.value(),
+                showPopup = code.showPopup,
+                reason = reason,
+                requiredPermissions = requiredPermissions,
+                loginRequired = loginRequired,
+            )
+        )
     }
 
     private fun Exception.toReason(): String {
