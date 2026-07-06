@@ -3,7 +3,7 @@ import {
   parseApiExchange,
   percentile,
   statusTone,
-} from "./logs.js?v=2026070607";
+} from "./logs.js?v=2026070612";
 
 const state = {
   requests: [],

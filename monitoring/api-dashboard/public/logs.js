@@ -37,21 +37,23 @@ export function parseApiExchange(value) {
   if (markerIndex < 0) return null;
   const rawJson = line.slice(markerIndex + API_EXCHANGE_MARKER.length).trim();
   const payload = JSON.parse(rawJson);
+  const request = normalizeRequest(payload);
+  const response = normalizeResponse(payload);
   return {
     nanoseconds,
     time: formatKstFromNs(nanoseconds),
     level: extractLevel(line),
     requestId: payload.requestId,
     clientIp: payload.clientIp,
-    method: payload.request?.method ?? "-",
-    path: payload.request?.path ?? "-",
-    query: payload.request?.query ?? "",
-    status: Number(payload.response?.status ?? 0),
-    durationMs: Number(payload.response?.durationMs ?? 0),
-    errorCode: payload.response?.body?.error?.code ?? "",
-    errorReason: payload.response?.body?.error?.reason ?? "",
-    request: payload.request ?? {},
-    response: payload.response ?? {},
+    method: request.method ?? "-",
+    path: request.path ?? "-",
+    query: request.query ?? "",
+    status: Number(response.status ?? 0),
+    durationMs: Number(response.durationMs ?? 0),
+    errorCode: response.body?.error?.code ?? "",
+    errorReason: response.body?.error?.reason ?? "",
+    request,
+    response,
     raw: payload,
     rawLine: line,
   };
@@ -121,8 +123,50 @@ function extractLevel(line) {
 function compactLogLine(line) {
   const apiExchangeIndex = line.indexOf(API_EXCHANGE_MARKER);
   if (apiExchangeIndex >= 0) {
-    return line.slice(0, apiExchangeIndex).trim() + " api_exchange";
+    const prefix = line.slice(0, apiExchangeIndex).trim();
+    const rawJson = line.slice(apiExchangeIndex + API_EXCHANGE_MARKER.length).trim();
+    if (!rawJson) return `${prefix} api_exchange`;
+    try {
+      const payload = JSON.parse(rawJson);
+      const request = normalizeRequest(payload);
+      const response = normalizeResponse(payload);
+      return [
+        `${prefix} api_exchange`,
+        request.method,
+        request.path,
+        `status=${response.status ?? "-"}`,
+        `durationMs=${response.durationMs ?? "-"}`,
+        `requestId=${payload.requestId ?? "-"}`,
+      ].filter(Boolean).join(" ");
+    } catch {
+      return `${prefix} api_exchange ${rawJson}`;
+    }
   }
   const firstLine = line.split("\n")[0];
   return firstLine.replace(/\s+/g, " ").trim();
+}
+
+function normalizeRequest(payload) {
+  if (payload.request && typeof payload.request === "object") {
+    return payload.request;
+  }
+  return {
+    method: payload.method,
+    path: payload.path,
+    query: payload.query ?? "",
+    headers: payload.requestHeaders ?? {},
+    body: payload.requestBody ?? "",
+  };
+}
+
+function normalizeResponse(payload) {
+  if (payload.response && typeof payload.response === "object") {
+    return payload.response;
+  }
+  return {
+    status: payload.status,
+    durationMs: payload.durationMs,
+    headers: payload.responseHeaders ?? {},
+    body: payload.responseBody ?? "",
+  };
 }

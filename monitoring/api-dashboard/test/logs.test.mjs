@@ -34,6 +34,22 @@ test("parseApiExchange extracts request row fields", () => {
   assert.equal(parsed.errorCode, "INTERNAL_SERVER_ERROR");
 });
 
+test("parseApiExchange extracts flat backend request logging fields", () => {
+  const line = [
+    "2026-07-06T13:16:18.261Z INFO [63c5eecb-66f1-49d1-b98e-8d20bae64b4b] 1 --- [buddystudy-backend]",
+    'c.b.RequestLoggingFilter : api_exchange {"requestId":"63c5eecb-66f1-49d1-b98e-8d20bae64b4b","clientIp":"2a06:98c0:3600::103","method":"GET","path":"/api/v1/health/readiness","query":"","requestHeaders":{"accept":"application/json"},"requestBody":"","status":200,"durationMs":"3.12","responseHeaders":{"Content-Type":"application/json"},"responseBody":{"ok":true}}',
+  ].join(" ");
+
+  const parsed = parseApiExchange(["1783255799514000000", line]);
+
+  assert.equal(parsed.method, "GET");
+  assert.equal(parsed.path, "/api/v1/health/readiness");
+  assert.equal(parsed.status, 200);
+  assert.equal(parsed.durationMs, 3.12);
+  assert.deepEqual(parsed.request.body, "");
+  assert.deepEqual(parsed.response.body, { ok: true });
+});
+
 test("parseApiError keeps stack trace when present", () => {
   const line = [
     "2026-07-05T15:12:28.927Z ERROR [7dc19fed-31b7-43cd-be6d-b37862cf01c0] 1 --- [buddystudy-backend]",

@@ -6,7 +6,7 @@ import {
   parseRelatedLog,
   safeJson,
   statusTone,
-} from "./logs.js?v=2026070611";
+} from "./logs.js?v=2026070612";
 
 const DEFAULT_RANGE_MS = 3_600_000;
 
