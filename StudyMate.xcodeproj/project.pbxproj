@@ -18,6 +18,7 @@
 		11000000000000000000018C /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		1100000000000000000001A7 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		1100000000000000000001A8 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
+		1100000000000000000001A9 /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
 		110000000000000000000183 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -90,6 +91,7 @@
 		12000000000000000000012D /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		120000000000000000000158 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		120000000000000000000159 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
+		12000000000000000000015A /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
 		120000000000000000000124 /* PageAccessPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000002E /* PageAccessPolicy.swift */; };
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
@@ -222,6 +224,7 @@
 		11000000000000000000006E /* RemotePageAccessRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePageAccessRepository.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* CloudSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncService.swift; sourceTree = "<group>"; };
 		110000000000000000000079 /* CloudSyncProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncProvider.swift; sourceTree = "<group>"; };
+		11000000000000000000007A /* AppPlatformEffectsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPlatformEffectsProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
@@ -588,6 +591,7 @@
 				110000000000000000000180 /* NotificationLandingCoordinator.swift */,
 				110000000000000000000016 /* CloudSyncService.swift */,
 				110000000000000000000079 /* CloudSyncProvider.swift */,
+				11000000000000000000007A /* AppPlatformEffectsProvider.swift */,
 				110000000000000000000019 /* RemotePushBackendClient.swift */,
 				11000000000000000000001B /* GoogleOAuthService.swift */,
 				11000000000000000000000D /* UpdateService.swift */,
@@ -922,6 +926,7 @@
 				11000000000000000000010A /* SettingsView.swift in Sources */,
 				110000000000000000000170 /* CloudSyncService.swift in Sources */,
 				1100000000000000000001A8 /* CloudSyncProvider.swift in Sources */,
+				1100000000000000000001A9 /* AppPlatformEffectsProvider.swift in Sources */,
 				11000000000000000000010B /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1003,6 +1008,7 @@
 				12000000000000000000010F /* StatisticsView.swift in Sources */,
 				120000000000000000000110 /* CloudSyncService.swift in Sources */,
 				120000000000000000000159 /* CloudSyncProvider.swift in Sources */,
+				12000000000000000000015A /* AppPlatformEffectsProvider.swift in Sources */,
 				120000000000000000000111 /* MobileRootView.swift in Sources */,
 					120000000000000000000112 /* SwipeRevealRow.swift in Sources */,
 					120000000000000000000114 /* KeyboardDoneToolbar.swift in Sources */,

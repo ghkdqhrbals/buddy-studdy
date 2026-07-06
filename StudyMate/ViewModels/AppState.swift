@@ -4,7 +4,6 @@ import Combine
 import AppKit
 #elseif os(iOS)
 import UIKit
-import UserNotifications
 import UniformTypeIdentifiers
 #endif
 
@@ -38,28 +37,6 @@ enum EmailCommunitySignInResult: Equatable {
     case verificationRequired
     case failed
 }
-
-#if os(iOS)
-private final class BackgroundTaskExpiration: @unchecked Sendable {
-    private let lock = NSLock()
-    private var expired = false
-
-    var isExpired: Bool {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-
-        return expired
-    }
-
-    func expire() {
-        lock.lock()
-        expired = true
-        lock.unlock()
-    }
-}
-#endif
 
 @MainActor
 final class AppState: ObservableObject {
@@ -487,6 +464,7 @@ final class AppState: ObservableObject {
     private let actionRunner = AppActionRunner()
     private let notificationService: NotificationServicing
     private let cloudSyncProvider: CloudSyncProviding
+    private let platformEffectsProvider: AppPlatformEffectsProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -1003,6 +981,7 @@ final class AppState: ObservableObject {
         remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
         notificationService: NotificationServicing = NotificationService(),
         cloudSyncProvider: CloudSyncProviding = DefaultCloudSyncProvider(),
+        platformEffectsProvider: AppPlatformEffectsProviding = DefaultAppPlatformEffectsProvider(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
         let loadedSettings = settingsStore.loadSettings()
@@ -1084,6 +1063,7 @@ final class AppState: ObservableObject {
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
         self.notificationService = notificationService
         self.cloudSyncProvider = cloudSyncProvider
+        self.platformEffectsProvider = platformEffectsProvider
         self.cloudSyncService = cloudSyncService
         let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         self.appUseCasesProvider = appUseCasesProvider
@@ -1211,23 +1191,9 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func prepareBackgroundQuestionNotifications() async -> Int {
-        #if os(iOS)
-        let expiration = BackgroundTaskExpiration()
-        let taskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "StudyMate.prepareQuestions") {
-            expiration.expire()
+        await platformEffectsProvider.runExpiringBackgroundTask(named: "StudyMate.prepareQuestions") { isExpired in
+            await self.prepareScheduledQuestionsForLockedDevice(isExpired: isExpired)
         }
-        defer {
-            if taskIdentifier != .invalid {
-                UIApplication.shared.endBackgroundTask(taskIdentifier)
-            }
-        }
-
-        return await prepareScheduledQuestionsForLockedDevice {
-            expiration.isExpired
-        }
-        #else
-        return 0
-        #endif
     }
 
     func backgroundRefreshEarliestBeginDate(now: Date = Date()) -> Date {
@@ -1486,16 +1452,7 @@ final class AppState: ObservableObject {
     }
 
     private func updateApplicationIconBadge(_ count: Int) {
-        #if os(iOS)
-        Task { @MainActor in
-            let badgeCount = max(0, count)
-            if #available(iOS 17.0, *) {
-                try? await UNUserNotificationCenter.current().setBadgeCount(badgeCount)
-            } else {
-                UIApplication.shared.applicationIconBadgeNumber = badgeCount
-            }
-        }
-        #endif
+        platformEffectsProvider.setApplicationIconBadge(count)
     }
 
     private func loadOpenAIModelOptions() async {
@@ -6832,11 +6789,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        #if os(macOS)
-        NSWorkspace.shared.open(url)
-        #elseif os(iOS)
-        UIApplication.shared.open(url)
-        #endif
+        platformEffectsProvider.open(url)
     }
 
     private func normalizedSettings(_ settings: StudySettings) -> StudySettings {

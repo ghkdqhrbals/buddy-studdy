@@ -20,6 +20,7 @@ Core policies can be used by ViewModels, UseCases, and Services.
 - `Repositories`: Protocol-backed interfaces that expose app concepts and hide backend/local persistence details.
 - `Services`: Infrastructure adapters such as HTTP clients, settings persistence, OAuth, APNs, CloudKit compatibility, and logging sinks.
 - `CloudSyncProvider`: the service boundary for CloudKit availability and cloud-sync service construction. View models request cloud sync through this provider instead of instantiating CloudKit infrastructure directly.
+- `AppPlatformEffectsProvider`: the service boundary for app lifecycle side effects such as background tasks, app badges, and opening external URLs. View models request the effect instead of calling UIKit/AppKit directly.
 - `Core`: Cross-cutting, deterministic policies such as backend error presentation, page access decisions, route decisions, and formatting rules.
 - `StudyRecordIdentityPolicy`: the shared Core policy for question normalization and study-record identity matching. Views and view models should use this policy instead of reaching into persistence services for comparison rules.
 
