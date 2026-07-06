@@ -55,6 +55,33 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotInstantiateOAuthServicesDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "GoogleOAuthService(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must use an auth use case instead of constructing OAuth services directly: \(violations)"
+        )
+    }
+
+    func testAppStateDoesNotAssignRawLocalizedDescriptionToPrimaryErrorMessage() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("errorMessage = error.localizedDescription"),
+            "AppState must route raw errors through AppErrorHandlingPolicy before writing user-visible errorMessage."
+        )
+    }
+
     func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopup() {
         let apiError = BackendAPIError(
             code: "101",
@@ -121,6 +148,23 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
     }
 
+    func testDecodingErrorsUseFriendlyInlineMessageWithoutPopup() {
+        let context = DecodingError.Context(
+            codingPath: [],
+            debugDescription: "No value associated with key CodingKeys(stringValue: \"questions\", intValue: nil)."
+        )
+        let error = DecodingError.keyNotFound(TestCodingKey(stringValue: "questions"), context)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "fallback")
+
+        XCTAssertEqual(resolution.featureMessage, "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요.")
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.isPageAccessDenied)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldClearFeatureMessage)
+    }
+
     private func repositoryRoot() throws -> URL {
         var current = URL(fileURLWithPath: #filePath)
         while current.path != "/" {
@@ -151,5 +195,19 @@ final class ArchitecturePolicyTests: XCTestCase {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey])
             return values.isRegularFile == true ? url : nil
         }
+    }
+}
+
+private struct TestCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init(intValue: Int) {
+        stringValue = "\(intValue)"
+        self.intValue = intValue
     }
 }

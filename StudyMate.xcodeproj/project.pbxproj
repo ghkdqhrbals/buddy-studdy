@@ -20,6 +20,7 @@
 		110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		11000000000000000000018D /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
+		110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
 		110000000000000000000185 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		110000000000000000000186 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		110000000000000000000188 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -70,6 +71,7 @@
 		120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* RefreshPageAccessUseCase.swift */; };
 		12000000000000000000012E /* AppUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000046 /* AppUseCases.swift */; };
 		12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000047 /* BackendIdentityUseCase.swift */; };
+		120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000049 /* GoogleSignInUseCase.swift */; };
 		120000000000000000000126 /* StudyRoomUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* StudyRoomUseCase.swift */; };
 		120000000000000000000127 /* RecordsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* RecordsUseCase.swift */; };
 		120000000000000000000129 /* StatsUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000003A /* StatsUseCase.swift */; };
@@ -155,6 +157,7 @@
 		110000000000000000000045 /* AppActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActionRunner.swift; sourceTree = "<group>"; };
 		110000000000000000000046 /* AppUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCases.swift; sourceTree = "<group>"; };
 		110000000000000000000047 /* BackendIdentityUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendIdentityUseCase.swift; sourceTree = "<group>"; };
+		110000000000000000000049 /* GoogleSignInUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInUseCase.swift; sourceTree = "<group>"; };
 		110000000000000000000016 /* CloudSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncService.swift; sourceTree = "<group>"; };
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
@@ -301,6 +304,7 @@
 			isa = PBXGroup;
 			children = (
 				110000000000000000000046 /* AppUseCases.swift */,
+				11000000000000000000004A /* Auth */,
 				110000000000000000000048 /* Identity */,
 				11000000000000000000003F /* Notifications */,
 				110000000000000000000043 /* Community */,
@@ -327,6 +331,14 @@
 				110000000000000000000047 /* BackendIdentityUseCase.swift */,
 			);
 			path = Identity;
+			sourceTree = "<group>";
+		};
+		11000000000000000000004A /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000049 /* GoogleSignInUseCase.swift */,
+			);
+			path = Auth;
 			sourceTree = "<group>";
 		};
 		110000000000000000000043 /* Community */ = {
@@ -689,6 +701,7 @@
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
 				11000000000000000000018D /* AppUseCases.swift in Sources */,
 				11000000000000000000018E /* BackendIdentityUseCase.swift in Sources */,
+				110000000000000000000191 /* GoogleSignInUseCase.swift in Sources */,
 				110000000000000000000185 /* StudyRoomUseCase.swift in Sources */,
 					110000000000000000000186 /* RecordsUseCase.swift in Sources */,
 					11000000000000000000018A /* NotificationsUseCase.swift in Sources */,
@@ -754,6 +767,7 @@
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,
 				12000000000000000000012E /* AppUseCases.swift in Sources */,
 				12000000000000000000012F /* BackendIdentityUseCase.swift in Sources */,
+				120000000000000000000132 /* GoogleSignInUseCase.swift in Sources */,
 				120000000000000000000126 /* StudyRoomUseCase.swift in Sources */,
 					120000000000000000000127 /* RecordsUseCase.swift in Sources */,
 					12000000000000000000012B /* NotificationsUseCase.swift in Sources */,

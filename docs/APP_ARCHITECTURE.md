@@ -53,6 +53,7 @@ Backend errors are normalized once, then consumed by the app:
 - Auth/device/token errors are identified from string error codes, HTTP 401, or numeric auth-range codes. They are not shown as repeated popups or inline banners. They drive login or re-registration flows.
 - Email verification errors stay in the verification-code flow and must not be collapsed into the generic login-required/page-access-denied flow.
 - Validation and resource errors may be shown inline using server text.
+- Client decoding failures must never show raw system strings such as missing coding-key messages. They are normalized into one friendly inline retry message and logged for diagnostics.
 - Debug descriptions remain for logs, not end-user UI.
 
 The policy is split into two deterministic steps:
@@ -60,7 +61,9 @@ The policy is split into two deterministic steps:
 - `StudyMate/Core/ErrorHandling/BackendErrorPresentationPolicy.swift` extracts backend code, server message, auth requirements, and reset decisions.
 - `StudyMate/Core/ErrorHandling/AppErrorHandlingPolicy.swift` converts that presentation into app UI behavior. Auth, device, token, and page-access errors clear feature messages and drive login/access flows instead of repeated popups or inline banners.
 - ViewModels must consume `AppErrorHandlingPolicy`; `RemotePushBackendError` must not expose UI presentation convenience properties.
+- `AppState` must not write raw `error.localizedDescription` into primary user-visible error state. Use the common policy so backend, decoding, cancellation, and auth errors behave consistently.
 - Backend identity transport calls such as device registration, access-token bootstrap, and APNs token updates must go through `BackendIdentityUseCase`, not direct `AppState` calls to `RemotePushBackendClientProtocol`.
+- OAuth provider services such as Google sign-in must be owned by auth use cases. ViewModels should request a sign-in result from `GoogleSignInUseCase` instead of constructing provider services directly.
 
 ## Testing Rules
 

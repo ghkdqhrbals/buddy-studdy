@@ -142,6 +142,7 @@ final class GoogleOAuthService: NSObject, ASWebAuthenticationPresentationContext
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
+#endif
 
 enum GoogleOAuthError: LocalizedError {
     case notConfigured
@@ -160,6 +161,7 @@ enum GoogleOAuthError: LocalizedError {
     }
 }
 
+#if os(iOS)
 private extension Data {
     func base64URLEncodedString() -> String {
         base64EncodedString()

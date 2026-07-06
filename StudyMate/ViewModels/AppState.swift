@@ -27,11 +27,6 @@ private enum AppStateError: LocalizedError {
     }
 }
 
-struct AppErrorPopup: Identifiable, Equatable {
-    let id = UUID()
-    var message: String
-}
-
 private enum AppErrorMessageTarget: Equatable {
     case none
     case community
@@ -98,7 +93,6 @@ final class AppState: ObservableObject {
     @Published private var developerState = DeveloperStateStore()
     @Published var statusMessage: String?
     @Published var errorMessage: String?
-    @Published var globalErrorPopup: AppErrorPopup?
     @Published var notificationLandingMessage: String?
     @Published var selectedTab: AppTab = .study
     @Published var homeStudyRoute: HomeStudyRoute?
@@ -482,6 +476,7 @@ final class AppState: ObservableObject {
     private var remotePushBackendClient: RemotePushBackendClientProtocol
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
+    private var googleSignInUseCase: GoogleSignInUseCase { appUseCases.googleSignIn }
     private var refreshPageAccessUseCase: RefreshPageAccessUseCase { appUseCases.refreshPageAccess }
     private var studyRoomUseCase: StudyRoomUseCase { appUseCases.studyRoom }
     private var recordsUseCase: RecordsUseCase { appUseCases.records }
@@ -736,10 +731,6 @@ final class AppState: ObservableObject {
         pageAccessPrompt = nil
     }
 
-    func dismissGlobalErrorPopup() {
-        globalErrorPopup = nil
-    }
-
     func isCurrentCommunityUser(id userID: Int) -> Bool {
         if let profile = communityProfile,
            profile.id == userID {
@@ -834,13 +825,6 @@ final class AppState: ObservableObject {
             applyErrorMessage(message, target: target)
         } else if resolution.shouldClearFeatureMessage {
             clearErrorMessage(target)
-        }
-
-        if target == .none,
-           resolution.shouldShowPopup,
-           let message = resolution.featureMessage,
-           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            globalErrorPopup = AppErrorPopup(message: message)
         }
 
         return false
@@ -2353,7 +2337,7 @@ final class AppState: ObservableObject {
             #if os(iOS)
             do {
                 communityErrorMessage = nil
-                let idToken = try await GoogleOAuthService().signIn()
+                let idToken = try await googleSignInUseCase.signIn()
                 await signInToCommunity(idToken: idToken)
             } catch GoogleOAuthError.cancelled {
                 communityErrorMessage = nil
@@ -6848,8 +6832,9 @@ final class AppState: ObservableObject {
             log(.error, errorMessage ?? "OpenAI API 키 오류가 발생했습니다.")
         } else {
             hasAPIKeyError = true
-            errorMessage = error.localizedDescription
-            log(.error, error.localizedDescription)
+            let message = backendErrorDisplayMessage(error, fallback: strings.openAIAPIKeyMissing)
+            errorMessage = message
+            log(.error, message)
         }
     }
 

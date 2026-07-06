@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 struct AppUseCases {
     let backendIdentity: BackendIdentityUseCase
+    let googleSignIn: GoogleSignInUseCase
     let refreshPageAccess: RefreshPageAccessUseCase
     let studyRoom: StudyRoomUseCase
     let records: RecordsUseCase
@@ -13,6 +14,7 @@ struct AppUseCases {
 
     init(backendClient: RemotePushBackendClientProtocol) {
         backendIdentity = BackendIdentityUseCase(backendClient: backendClient)
+        googleSignIn = GoogleSignInUseCase()
         refreshPageAccess = RefreshPageAccessUseCase(backendClient: backendClient)
         studyRoom = StudyRoomUseCase(backendClient: backendClient)
         records = RecordsUseCase(backendClient: backendClient)
