@@ -118,9 +118,10 @@ class NotificationStreamListener(
             )
             return
         }
-        val currentSession = userDevices.findActiveByUserId(command.userId).firstOrNull()
-        val targetDevice = currentSession
-            ?.let { devices.findByDeviceId(it.deviceId) }
+        val currentSession = command.userId?.let { userDevices.findActiveByUserId(it).firstOrNull() }
+        val targetDeviceId = currentSession?.deviceId ?: command.deviceId
+        val targetDevice = targetDeviceId
+            ?.let { devices.findByDeviceId(it) }
             ?.takeIf { it.apnsToken.isNotBlank() }
         logger.info(
             "notification_push_targets_resolved notificationId={} eventId={} userId={} currentDeviceId={} hasApnsToken={}",
@@ -148,7 +149,7 @@ class NotificationStreamListener(
                     notificationId = notificationId,
                     studyId = metadata.studyId,
                     deviceId = targetDevice.deviceId,
-                    userId = command.userId,
+                    userId = command.userId ?: targetDevice.userId ?: 0,
                     question = command.body,
                     expectedAnswerHint = null,
                     topic = metadata.topic ?: command.threadType ?: "notification",
@@ -221,6 +222,7 @@ internal object NotificationPayloadParser {
             return NotificationRequestCommand(
                 eventId = payload.eventId,
                 userId = payload.userId,
+                deviceId = payload.deviceId,
                 actorUserId = payload.actorUserId,
                 type = payload.type,
                 title = payload.title,
@@ -234,7 +236,8 @@ internal object NotificationPayloadParser {
         }
         return NotificationRequestCommand(
             eventId = fields["eventId"] ?: throw IllegalArgumentException("eventId is required."),
-            userId = fields["userId"]?.toLongOrNull() ?: throw IllegalArgumentException("userId is required."),
+            userId = fields["userId"]?.toLongOrNull(),
+            deviceId = fields["deviceId"],
             actorUserId = fields["actorUserId"]?.toLongOrNull(),
             type = fields["type"] ?: "ACTIVITY",
             title = fields["title"] ?: "BuddyStudy",

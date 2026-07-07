@@ -7,7 +7,8 @@ import com.buddystudy.backend.notification.application.model.NotificationUnreadC
 
 data class NotificationRequestCommand(
     val eventId: String,
-    val userId: Long,
+    val userId: Long? = null,
+    val deviceId: String? = null,
     val actorUserId: Long? = null,
     val type: String = "ACTIVITY",
     val title: String,

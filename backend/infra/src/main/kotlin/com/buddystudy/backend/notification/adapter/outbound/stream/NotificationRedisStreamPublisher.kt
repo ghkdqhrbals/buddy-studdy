@@ -22,6 +22,7 @@ class NotificationRedisStreamPublisher(
         val event = NotificationRequestedEvent(
             eventId = command.eventId,
             userId = command.userId,
+            deviceId = command.deviceId,
             actorUserId = command.actorUserId,
             type = command.type,
             title = command.title,

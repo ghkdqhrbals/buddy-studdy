@@ -7,6 +7,7 @@ import com.buddystudy.backend.notification.application.port.outbound.Notificatio
 import com.buddystudy.backend.notification.application.service.NotificationService
 import com.buddystudy.notification.domain.entity.AppNotificationEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -54,6 +55,58 @@ class NotificationServiceTest {
     }
 
     @Test
+    fun `anonymous device can list device notifications without user scoped notifications`() {
+        val anonymous = Principal(userId = 20, deviceId = "dev-anon", sessionId = 2, anonymous = true)
+        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-anon", title = "Device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "other-device", userId = null, deviceId = "dev-other", title = "Other device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "user", userId = 20, title = "User", body = "Body"))
+
+        val page = service.notifications(anonymous, limit = 30, offset = 0)
+
+        assertThat(page.notifications.map { it.title }).containsExactly("Device")
+        assertThat(page.unreadCount).isEqualTo(1)
+        assertThat(page.totalCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `signed in principal lists user notifications before device notifications`() {
+        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-1", title = "Device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "user", userId = 10, title = "User", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "other-device", userId = null, deviceId = "dev-other", title = "Other device", body = "Body"))
+
+        val page = service.notifications(principal, limit = 30, offset = 0)
+
+        assertThat(page.notifications.map { it.title }).containsExactly("User", "Device")
+        assertThat(page.unreadCount).isEqualTo(2)
+        assertThat(page.totalCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `mark read for user notification marks all user devices by thread`() {
+        val first = store.save(AppNotificationEntity(eventId = "u1", userId = 10, deviceId = "dev-1", threadType = "comment", threadId = "100", title = "First", body = "Body"))
+        val second = store.save(AppNotificationEntity(eventId = "u2", userId = 10, deviceId = "dev-2", threadType = "comment", threadId = "100", title = "Second", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-1", threadType = "comment", threadId = "100", title = "Device", body = "Body"))
+
+        service.markRead(principal, first.id)
+
+        assertThat(first.readAt).isNotNull()
+        assertThat(second.readAt).isNotNull()
+        assertThat(store.rows.single { it.eventId == "device" }.readAt).isNull()
+    }
+
+    @Test
+    fun `mark read for device notification only marks current device notification`() {
+        val anonymous = Principal(userId = 20, deviceId = "dev-anon", sessionId = 2, anonymous = true)
+        val currentDevice = store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-anon", threadType = "question", threadId = "200", title = "Device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "other-device", userId = null, deviceId = "dev-other", threadType = "question", threadId = "200", title = "Other", body = "Body"))
+
+        service.markRead(anonymous, currentDevice.id)
+
+        assertThat(currentDevice.readAt).isNotNull()
+        assertThat(store.rows.single { it.eventId == "other-device" }.readAt).isNull()
+    }
+
+    @Test
     fun `mark read and delete mutate only owner notification`() {
         val notification = store.save(AppNotificationEntity(eventId = "n1", userId = 10, title = "Title", body = "Body"))
 
@@ -73,6 +126,13 @@ class NotificationServiceTest {
         assertThat(publisher.commands).containsExactly(command)
     }
 
+    @Test
+    fun `process rejects notification without user or device owner`() {
+        assertThatThrownBy {
+            service.process(NotificationRequestCommand(eventId = "orphan", title = "Title", body = "Body"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private class FakeNotificationStore : NotificationPersistencePort {
         val rows = mutableListOf<AppNotificationEntity>()
         private var nextId = 1L
@@ -90,6 +150,9 @@ class NotificationServiceTest {
         override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): AppNotificationEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId && it.deletedAt == null }
 
+        override fun findByIdAndDeviceIdAndUserIdIsNullAndDeletedAtIsNull(id: Long, deviceId: String): AppNotificationEntity? =
+            rows.firstOrNull { it.id == id && it.deviceId == deviceId && it.userId == null && it.deletedAt == null }
+
         override fun findByUserIdAndDeletedAtIsNull(userId: Long, pageable: Pageable): Page<AppNotificationEntity> {
             val filtered = rows
                 .filter { it.userId == userId && it.deletedAt == null }
@@ -97,13 +160,61 @@ class NotificationServiceTest {
             return PageImpl(filtered.drop(pageable.offset.toInt()).take(pageable.pageSize), pageable, filtered.size.toLong())
         }
 
+        override fun findVisible(userId: Long?, deviceId: String, pageable: Pageable): Page<AppNotificationEntity> {
+            val filtered = rows
+                .filter {
+                    it.deletedAt == null &&
+                        ((userId != null && it.userId == userId) || (it.userId == null && it.deviceId == deviceId))
+                }
+                .sortedWith(
+                    compareBy<AppNotificationEntity> { if (it.userId != null) 0 else 1 }
+                        .thenByDescending { it.createdAt }
+                        .thenByDescending { it.id }
+                )
+            return PageImpl(filtered.drop(pageable.offset.toInt()).take(pageable.pageSize), pageable, filtered.size.toLong())
+        }
+
         override fun countByUserIdAndReadAtIsNullAndDeletedAtIsNull(userId: Long): Long =
             rows.count { it.userId == userId && it.readAt == null && it.deletedAt == null }.toLong()
+
+        override fun countVisibleUnread(userId: Long?, deviceId: String): Long =
+            rows.count {
+                it.readAt == null &&
+                    it.deletedAt == null &&
+                    ((userId != null && it.userId == userId) || (it.userId == null && it.deviceId == deviceId))
+            }.toLong()
 
         override fun markAllDeleted(userId: Long, deletedAt: Instant): Int {
             var count = 0
             rows.filter { it.userId == userId && it.deletedAt == null }.forEach {
                 it.deletedAt = deletedAt
+                count += 1
+            }
+            return count
+        }
+
+        override fun markVisibleDeleted(userId: Long?, deviceId: String, deletedAt: Instant): Int {
+            var count = 0
+            rows.filter {
+                it.deletedAt == null &&
+                    ((userId != null && it.userId == userId) || (it.userId == null && it.deviceId == deviceId))
+            }.forEach {
+                it.deletedAt = deletedAt
+                count += 1
+            }
+            return count
+        }
+
+        override fun markUserThreadRead(userId: Long, threadType: String, threadId: String, readAt: Instant): Int {
+            var count = 0
+            rows.filter {
+                it.userId == userId &&
+                    it.threadType == threadType &&
+                    it.threadId == threadId &&
+                    it.readAt == null &&
+                    it.deletedAt == null
+            }.forEach {
+                it.readAt = readAt
                 count += 1
             }
             return count

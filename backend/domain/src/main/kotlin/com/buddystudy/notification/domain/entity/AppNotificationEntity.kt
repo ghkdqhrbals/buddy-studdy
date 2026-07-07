@@ -17,6 +17,8 @@ import java.time.Instant
     indexes = [
         Index(name = "idx_app_notifications_user_visible_created", columnList = "user_id,deleted_at,created_at,id"),
         Index(name = "idx_app_notifications_user_unread", columnList = "user_id,read_at,deleted_at"),
+        Index(name = "idx_app_notifications_device_visible_created", columnList = "device_id,deleted_at,created_at,id"),
+        Index(name = "idx_app_notifications_device_unread", columnList = "device_id,read_at,deleted_at"),
         Index(name = "idx_app_notifications_thread", columnList = "thread_type,thread_id"),
     ],
 )
@@ -25,8 +27,10 @@ class AppNotificationEntity(
     var id: Long = 0,
     @Column(name = "event_id", nullable = false, length = 80)
     var eventId: String = "",
-    @Column(name = "user_id", nullable = false)
-    var userId: Long = 0,
+    @Column(name = "user_id")
+    var userId: Long? = null,
+    @Column(name = "device_id", length = 191)
+    var deviceId: String? = null,
     @Column(name = "actor_user_id")
     var actorUserId: Long? = null,
     @Column(nullable = false, length = 64)

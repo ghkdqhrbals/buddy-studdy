@@ -9,7 +9,8 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.util.UUID
 
 data class NotificationRequestedEvent(
-    val userId: Long,
+    val userId: Long? = null,
+    val deviceId: String? = null,
     val actorUserId: Long? = null,
     val type: String = "ACTIVITY",
     val title: String,
@@ -25,8 +26,9 @@ data class NotificationRequestedEvent(
 
 data class NotificationRequestedPayload(
     val eventId: String,
-    val userId: Long,
-    val actorUserId: Long?,
+    val userId: Long? = null,
+    val deviceId: String? = null,
+    val actorUserId: Long? = null,
     val type: String,
     val title: String,
     val body: String,
@@ -53,6 +55,7 @@ fun NotificationRequestedEvent.toCommand(): NotificationRequestCommand =
     NotificationRequestCommand(
         eventId = eventId,
         userId = userId,
+        deviceId = deviceId,
         actorUserId = actorUserId,
         type = type,
         title = title,
@@ -68,6 +71,7 @@ private fun NotificationRequestedEvent.toPayload(): NotificationRequestedPayload
     NotificationRequestedPayload(
         eventId = eventId,
         userId = userId,
+        deviceId = deviceId,
         actorUserId = actorUserId,
         type = type,
         title = title,

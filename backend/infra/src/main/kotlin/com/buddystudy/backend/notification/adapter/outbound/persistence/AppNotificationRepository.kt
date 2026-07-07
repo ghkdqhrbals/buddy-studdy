@@ -14,8 +14,52 @@ import java.time.Instant
 interface AppNotificationRepository : JpaRepository<AppNotificationEntity, Long>, NotificationPersistencePort {
     override fun findByEventId(eventId: String): AppNotificationEntity?
     override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): AppNotificationEntity?
+    override fun findByIdAndDeviceIdAndUserIdIsNullAndDeletedAtIsNull(id: Long, deviceId: String): AppNotificationEntity?
     override fun findByUserIdAndDeletedAtIsNull(userId: Long, pageable: Pageable): Page<AppNotificationEntity>
     override fun countByUserIdAndReadAtIsNullAndDeletedAtIsNull(userId: Long): Long
+
+    @Query(
+        value = """
+        select n
+          from AppNotificationEntity n
+         where n.deletedAt is null
+           and (
+                (:userId is not null and n.userId = :userId)
+                or (n.userId is null and n.deviceId = :deviceId)
+           )
+         order by case when n.userId is not null then 0 else 1 end,
+                  n.createdAt desc,
+                  n.id desc
+        """,
+        countQuery = """
+        select count(n)
+          from AppNotificationEntity n
+         where n.deletedAt is null
+           and (
+                (:userId is not null and n.userId = :userId)
+                or (n.userId is null and n.deviceId = :deviceId)
+           )
+        """,
+    )
+    override fun findVisible(
+        @Param("userId") userId: Long?,
+        @Param("deviceId") deviceId: String,
+        pageable: Pageable,
+    ): Page<AppNotificationEntity>
+
+    @Query(
+        """
+        select count(n)
+          from AppNotificationEntity n
+         where n.readAt is null
+           and n.deletedAt is null
+           and (
+                (:userId is not null and n.userId = :userId)
+                or (n.userId is null and n.deviceId = :deviceId)
+           )
+        """
+    )
+    override fun countVisibleUnread(@Param("userId") userId: Long?, @Param("deviceId") deviceId: String): Long
 
     @Modifying
     @Transactional
@@ -29,6 +73,47 @@ interface AppNotificationRepository : JpaRepository<AppNotificationEntity, Long>
         """
     )
     override fun markAllDeleted(@Param("userId") userId: Long, @Param("deletedAt") deletedAt: Instant): Int
+
+    @Modifying
+    @Transactional
+    @Query(
+        """
+        update AppNotificationEntity n
+           set n.deletedAt = :deletedAt,
+               n.updatedAt = :deletedAt
+         where n.deletedAt is null
+           and (
+                (:userId is not null and n.userId = :userId)
+                or (n.userId is null and n.deviceId = :deviceId)
+           )
+        """
+    )
+    override fun markVisibleDeleted(
+        @Param("userId") userId: Long?,
+        @Param("deviceId") deviceId: String,
+        @Param("deletedAt") deletedAt: Instant,
+    ): Int
+
+    @Modifying
+    @Transactional
+    @Query(
+        """
+        update AppNotificationEntity n
+           set n.readAt = :readAt,
+               n.updatedAt = :readAt
+         where n.userId = :userId
+           and n.threadType = :threadType
+           and n.threadId = :threadId
+           and n.readAt is null
+           and n.deletedAt is null
+        """
+    )
+    override fun markUserThreadRead(
+        @Param("userId") userId: Long,
+        @Param("threadType") threadType: String,
+        @Param("threadId") threadId: String,
+        @Param("readAt") readAt: Instant,
+    ): Int
 
     @Modifying
     @Transactional
