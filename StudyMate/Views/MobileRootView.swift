@@ -251,11 +251,10 @@ private struct MobileLoginLogo: View {
     var size: CGFloat
 
     var body: some View {
-        Image("LaunchLogo")
+        Image("BuddyStudyBrandLogo")
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.25, style: .continuous))
             .accessibilityHidden(true)
     }
 }
