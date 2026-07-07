@@ -1,6 +1,7 @@
 package com.buddystudy.backend.auth
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
@@ -80,12 +81,49 @@ class PermissionPolicyServiceTest {
         )
     }
 
+    @Test
+    fun `question notification preference can be saved`() {
+        val principal = Principal(
+            userId = 7,
+            deviceId = "dev-1",
+            sessionId = 11,
+            anonymous = false,
+            status = "ACTIVE",
+        )
+
+        val result = service.saveNotificationPreference(
+            principal,
+            NotificationPreferenceCommand(
+                key = "question_notification",
+                enabled = true,
+            ),
+        )
+
+        assertThat(result.key).isEqualTo("question_notification")
+        assertThat(result.enabled).isTrue()
+        assertThat(notificationPreferences.saved).containsExactly(
+            SavedNotificationPreference(
+                userId = 7,
+                deviceId = "dev-1",
+                key = "question_notification",
+                enabled = true,
+            ),
+        )
+    }
+
     private data class SavedAgreement(
         val userId: Long?,
         val deviceId: String?,
         val termsId: Long,
         val action: String,
         val source: String,
+    )
+
+    private data class SavedNotificationPreference(
+        val userId: Long?,
+        val deviceId: String,
+        val key: String,
+        val enabled: Boolean,
     )
 
     private class FakeTermsAgreementQueryPort : TermsAgreementQueryPort {
@@ -132,9 +170,18 @@ class PermissionPolicyServiceTest {
     }
 
     private class FakeNotificationPreferencePort : NotificationPreferenceQueryPort, NotificationPreferenceCommandPort {
+        val saved = mutableListOf<SavedNotificationPreference>()
+
         override fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean = false
 
-        override fun savePreference(userId: Long?, deviceId: String, key: String, enabled: Boolean, now: Instant) = Unit
+        override fun savePreference(userId: Long?, deviceId: String, key: String, enabled: Boolean, now: Instant) {
+            saved += SavedNotificationPreference(
+                userId = userId,
+                deviceId = deviceId,
+                key = key,
+                enabled = enabled,
+            )
+        }
     }
 
     private class FakeUserPort : UserPort {

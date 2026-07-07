@@ -150,7 +150,7 @@ class PermissionPolicyService(
         }
         val key = command.key.trim().lowercase()
         if (key !in ALLOWED_NOTIFICATION_PREFERENCES) {
-            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid notification preference key.")
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid notification preference key. $key")
         }
         notificationPreferenceCommands.savePreference(
             userId = principal.userId,
