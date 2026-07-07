@@ -947,6 +947,48 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testLegalDocsUseSingleBuddyStudyIconAsset() throws {
+        let root = try repositoryRoot()
+        let docsRoot = root.appendingPathComponent("docs", isDirectory: true)
+        let documentPaths: [(root: URL, path: String, iconPath: String)] = [
+            (root, "terms.html", "docs/assets/buddystudy-icon.png"),
+            (root, "privacy.html", "docs/assets/buddystudy-icon.png"),
+            (docsRoot, "index.html", "assets/buddystudy-icon.png"),
+            (docsRoot, "terms.html", "assets/buddystudy-icon.png"),
+            (docsRoot, "privacy.html", "assets/buddystudy-icon.png"),
+            (docsRoot, "en/index.html", "../assets/buddystudy-icon.png"),
+            (docsRoot, "en/privacy.html", "../assets/buddystudy-icon.png"),
+        ]
+
+        let violations = try documentPaths.flatMap { document -> [String] in
+            let content = try String(
+                contentsOf: document.root.appendingPathComponent(document.path),
+                encoding: .utf8
+            )
+            var fileViolations: [String] = []
+
+            if !content.contains(#"<link rel="icon" href="\#(document.iconPath)" type="image/png">"#) {
+                fileViolations.append("\(document.path): favicon must use \(document.iconPath)")
+            }
+            if !content.contains(#"<link rel="apple-touch-icon" href="\#(document.iconPath)">"#) {
+                fileViolations.append("\(document.path): apple-touch-icon must use \(document.iconPath)")
+            }
+            if content.contains("favicon-16.png")
+                || content.contains("favicon-32.png")
+                || content.contains("apple-touch-icon.png")
+                || content.contains("studymate-icon") {
+                fileViolations.append("\(document.path): legal/site docs must not reference alternate BuddyStudy icon assets")
+            }
+
+            return fileViolations
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "BuddyStudy site and legal documents should render one shared icon asset: \(violations)"
+        )
+    }
+
     func testMobileLoginButtonsUseRoundedRectangleShape() throws {
         let root = try repositoryRoot()
         let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
