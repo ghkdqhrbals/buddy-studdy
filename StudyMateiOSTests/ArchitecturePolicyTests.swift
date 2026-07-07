@@ -194,6 +194,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testProtectedTabRefreshBranchSelectsTabBeforeNetworkRefresh() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        guard let refreshBranchRange = content.range(of: "if shouldRefreshPageAccessBeforeDenying() {"),
+              let branchReturnRange = content[refreshBranchRange.lowerBound...].range(of: "return") else {
+            XCTFail("AppState.setSelectedTab must keep an explicit protected-tab refresh branch.")
+            return
+        }
+
+        let refreshBranch = content[refreshBranchRange.lowerBound..<branchReturnRange.lowerBound]
+
+        XCTAssertTrue(
+            refreshBranch.contains("selectedTab = nextTab"),
+            "Protected tab selection must update selectedTab before async page-access refresh so the tab bar does not bounce back."
+        )
+    }
+
     func testAppStateUsesClockProviderForCurrentTime() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

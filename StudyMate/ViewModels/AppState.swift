@@ -564,6 +564,7 @@ final class AppState: ObservableObject {
         if let protectedPage = protectedPage(for: nextTab),
            !canAccess(protectedPage) {
             if shouldRefreshPageAccessBeforeDenying() {
+                selectedTab = nextTab
                 refreshPageAccessThenOpen(nextTab, protectedPage: protectedPage)
                 return
             }
