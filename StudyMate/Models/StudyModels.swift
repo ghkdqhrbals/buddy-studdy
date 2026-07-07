@@ -1390,8 +1390,23 @@ extension Difficulty {
 }
 
 enum AppLegalLinks {
-    static let termsOfServiceURL = URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html")!
-    static let privacyPolicyURL = URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html")!
+    static func termsOfServiceURL(language: AppLanguage) -> URL {
+        switch language {
+        case .korean:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html")!
+        case .english:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html")!
+        }
+    }
+
+    static func privacyPolicyURL(language: AppLanguage) -> URL {
+        switch language {
+        case .korean:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html")!
+        case .english:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy.html")!
+        }
+    }
 }
 
 struct AppStrings {

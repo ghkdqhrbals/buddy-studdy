@@ -230,11 +230,11 @@ private struct MobileLoginPage: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 4) {
-                Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL)
+                Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage))
                     .tint(.accentColor)
                 Text(strings.loginAgreementConjunction)
                     .foregroundStyle(.secondary)
-                Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL)
+                Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage))
                     .tint(.accentColor)
             }
 
