@@ -78,32 +78,7 @@ class PermissionPolicyPersistenceAdapter(
         )
 
     override fun activeTerms(code: String, now: Instant): ActiveTermsProjection? =
-        nullableQuery {
-            jdbc.queryForObject(
-                """
-                select id, code, version, title, url, content_hash
-                  from terms
-                 where code = ?
-                   and effective_at <= ?
-                   and (retired_at is null or retired_at > ?)
-                 order by effective_at desc, id desc
-                 limit 1
-                """.trimIndent(),
-                { rs, _ ->
-                    ActiveTermsProjection(
-                        id = rs.getLong("id"),
-                        code = rs.getString("code"),
-                        version = rs.getString("version"),
-                        title = rs.getString("title"),
-                        url = rs.getString("url"),
-                        contentHash = rs.getString("content_hash"),
-                    )
-                },
-                code,
-                Timestamp.from(now),
-                Timestamp.from(now),
-            )
-        }
+        activeTerms(now).firstOrNull { it.code == code.trim().uppercase() }
 
     override fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean {
         val action = nullableQuery {
