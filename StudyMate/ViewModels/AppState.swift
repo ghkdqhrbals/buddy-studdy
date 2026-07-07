@@ -475,6 +475,7 @@ final class AppState: ObservableObject {
     private let appClock: AppClockProviding
     private let appIdentifierProvider: AppIdentifierProviding
     private let appTimeZoneProvider: AppTimeZoneProviding
+    private let appSleepProvider: AppSleepProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -996,6 +997,7 @@ final class AppState: ObservableObject {
         appClock: AppClockProviding = SystemAppClockProvider(),
         appIdentifierProvider: AppIdentifierProviding = UUIDAppIdentifierProvider(),
         appTimeZoneProvider: AppTimeZoneProviding = SystemAppTimeZoneProvider(),
+        appSleepProvider: AppSleepProviding = TaskAppSleepProvider(),
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1096,6 +1098,7 @@ final class AppState: ObservableObject {
         self.appClock = appClock
         self.appIdentifierProvider = appIdentifierProvider
         self.appTimeZoneProvider = appTimeZoneProvider
+        self.appSleepProvider = appSleepProvider
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
@@ -3123,7 +3126,7 @@ final class AppState: ObservableObject {
                         baseInterval * UInt64(attempt + 1),
                         40
                     )
-                    try? await Task.sleep(nanoseconds: shortInterval * 1_000_000)
+                    try? await appSleepProvider.sleep(nanoseconds: shortInterval * 1_000_000)
                     continue
                 }
             }
@@ -3132,7 +3135,7 @@ final class AppState: ObservableObject {
                 intervalMilliseconds * UInt64(attempt + 1),
                 160
             )
-            try? await Task.sleep(nanoseconds: max(pollingInterval, 6) * 1_000_000)
+            try? await appSleepProvider.sleep(nanoseconds: max(pollingInterval, 6) * 1_000_000)
         }
 
         return nil
@@ -3329,9 +3332,10 @@ final class AppState: ObservableObject {
     func updateAnswer(_ answer: String, for record: StudyRecord) {
         pendingAnswerDraft = PendingAnswerDraft(question: record.question, recordID: record.id, answer: answer)
         answerDraftSaveTask?.cancel()
+        let sleepProvider = appSleepProvider
         answerDraftSaveTask = Task { [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 450_000_000)
+                try await sleepProvider.sleep(nanoseconds: 450_000_000)
             } catch {
                 return
             }
@@ -4034,7 +4038,7 @@ final class AppState: ObservableObject {
         }
 
         for _ in 0..<20 {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            try? await appSleepProvider.sleep(nanoseconds: 100_000_000)
             if !isCloudSyncing {
                 return
             }
@@ -4415,9 +4419,10 @@ final class AppState: ObservableObject {
     func updateAnswer(_ answer: String) {
         pendingAnswerDraft = PendingAnswerDraft(question: currentQuestion, answer: answer)
         answerDraftSaveTask?.cancel()
+        let sleepProvider = appSleepProvider
         answerDraftSaveTask = Task { [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 450_000_000)
+                try await sleepProvider.sleep(nanoseconds: 450_000_000)
             } catch {
                 return
             }
@@ -5172,10 +5177,11 @@ final class AppState: ObservableObject {
             return
         }
 
+        let sleepProvider = appSleepProvider
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 let seconds = self?.timerPollIntervalSeconds() ?? 60
-                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                try? await sleepProvider.sleep(nanoseconds: seconds * 1_000_000_000)
 
                 guard !Task.isCancelled else {
                     return
@@ -5594,9 +5600,10 @@ final class AppState: ObservableObject {
         }
 
         cloudSyncTask?.cancel()
+        let sleepProvider = appSleepProvider
         cloudSyncTask = Task { [weak self] in
             if delaySeconds > 0 {
-                try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
+                try? await sleepProvider.sleep(nanoseconds: delaySeconds * 1_000_000_000)
                 guard !Task.isCancelled else {
                     return
                 }

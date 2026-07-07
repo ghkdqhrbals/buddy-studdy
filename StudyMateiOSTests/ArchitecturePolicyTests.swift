@@ -175,6 +175,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesSleepProviderForRuntimeDelays() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("Task.sleep"),
+            "AppState must use AppSleepProviding for runtime delays instead of sleeping tasks directly."
+        )
+    }
+
     func testAppStateDoesNotOwnApplicationUninstallInfrastructure() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
