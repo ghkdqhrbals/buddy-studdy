@@ -61,7 +61,6 @@ struct StudyMateiOSApp: App {
 private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
-    @State private var isShowingStartupSplash = true
 
     var body: some View {
         ZStack {
@@ -72,14 +71,6 @@ private struct StudyMateiOSBootstrapView: View {
                 Color(.systemBackground)
             }
 
-            if isShowingStartupSplash {
-                StartupPixelFoxSplashView {
-                    isShowingStartupSplash = false
-                }
-                .transition(.opacity)
-                .zIndex(1)
-            }
-
             #if DEBUG
             if let appState {
                 FloatingAPIDebugOverlay()
@@ -88,7 +79,6 @@ private struct StudyMateiOSBootstrapView: View {
             }
             #endif
         }
-        .animation(.easeOut(duration: 0.25), value: isShowingStartupSplash)
         .background(Color(.systemBackground))
         .task {
             guard !didBootstrap else {
@@ -102,39 +92,6 @@ private struct StudyMateiOSBootstrapView: View {
             StudyMateBackgroundRefreshBridge.shared.configure(appState: state)
             appState = state
             await state.start()
-        }
-    }
-}
-
-private struct StartupPixelFoxSplashView: View {
-    var onFinished: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color(red: 0.02, green: 0.35, blue: 0.95)
-                .ignoresSafeArea()
-
-            VStack(spacing: 18) {
-                Image("PixelFoxBackpackMascot")
-                    .resizable()
-                    .interpolation(.none)
-                    .scaledToFit()
-                    .frame(width: 220, height: 220)
-                    .accessibilityHidden(true)
-
-                Text("BuddyStudy @ghkdqhrbals")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .monospaced()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .accessibilityLabel("BuddyStudy by ghkdqhrbals")
-            }
-            .padding(.horizontal, 24)
-        }
-        .task {
-            try? await Task.sleep(for: .seconds(1))
-            onFinished()
         }
     }
 }
