@@ -483,6 +483,7 @@ final class AppState: ObservableObject {
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
+    private var pendingTermsRequirementRetry: (() async -> Void)?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -813,7 +814,8 @@ final class AppState: ObservableObject {
         _ error: Error,
         fallback: String,
         target: AppErrorMessageTarget,
-        protectedPage: ProtectedAppPage? = nil
+        protectedPage: ProtectedAppPage? = nil,
+        termsRetry: (() async -> Void)? = nil
     ) -> Bool {
         let resolution = appErrorResolution(error, fallback: fallback)
 
@@ -825,6 +827,7 @@ final class AppState: ObservableObject {
         if resolution.requiresTermsAgreement {
             clearErrorMessage(target)
             pageAccessPrompt = nil
+            pendingTermsRequirementRetry = termsRetry
             setSelectedTab(.settings)
             Task { [weak self] in
                 await self?.refreshPermissionEvaluations(reason: "terms-required")
@@ -3947,7 +3950,15 @@ final class AppState: ObservableObject {
                 log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
             },
             onFailure: { error in
-                if handlePageAccessError(error, page: .studyDetail) {
+                if handleAppError(
+                    error,
+                    fallback: "",
+                    target: .none,
+                    protectedPage: .studyDetail,
+                    termsRetry: { [weak self] in
+                        await self?.generateQuestion(manual: manual, studyCategoryID: studyCategoryID)
+                    }
+                ) {
                     return
                 }
                 handleOpenAIError(error)
@@ -5077,6 +5088,10 @@ final class AppState: ObservableObject {
             )
             await refreshPageAccess(reason: "terms-agreement")
             await refreshPermissionEvaluations(reason: "terms-agreement")
+            if isAgreed, let retry = pendingTermsRequirementRetry {
+                pendingTermsRequirementRetry = nil
+                await retry()
+            }
             log(.info, "약관 동의 상태를 저장했습니다. code=\(code), agreed=\(isAgreed)")
             return true
         } catch {
