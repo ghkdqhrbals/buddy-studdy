@@ -117,18 +117,13 @@ enum PageAccessPolicy {
     }
 
     static func shouldShowLoginGate(
-        for page: ProtectedAppPage,
+        for _: ProtectedAppPage,
         in accessState: BackendAccessState,
         hasRegisteredAccessToken: Bool
     ) -> Bool {
-        if canAccess(page, in: accessState.pageAccess) {
-            return false
-        }
-
-        return !shouldAllowProvisionalAccess(
-            to: page,
-            hasRegisteredAccessToken: hasRegisteredAccessToken,
-            userStatus: accessState.user.status
+        !isCommunitySessionActive(
+            accessState: accessState,
+            hasRegisteredAccessToken: hasRegisteredAccessToken
         )
     }
 

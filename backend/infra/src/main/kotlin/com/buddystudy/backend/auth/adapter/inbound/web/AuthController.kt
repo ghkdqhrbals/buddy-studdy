@@ -1,8 +1,6 @@
 package com.buddystudy.backend.auth.adapter.inbound.web
 
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.auth.application.permission.Permissions
-import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystudy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystudy.backend.auth.application.port.inbound.LoginUseCase
@@ -95,7 +93,6 @@ class AuthController(
 
     @Operation(summary = "List logged-in devices", description = "Returns active device sessions for the authenticated user.")
     @GetMapping("/me/devices")
-    @RequirePermission(Permissions.PROFILE_READ)
     fun loggedInDevices(authentication: Authentication) =
         auth.loggedInDevices(authentication)
 

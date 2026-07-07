@@ -31,7 +31,6 @@ class AdminController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/api")
-    @RequirePermission(Permissions.PROFILE_READ)
     fun api(authentication: Authentication) = admin.api(authentication)
 
     @Operation(summary = "Validate saved OpenAI API key", description = "Tests the authenticated user's saved OpenAI API key and returns the current validation result.")

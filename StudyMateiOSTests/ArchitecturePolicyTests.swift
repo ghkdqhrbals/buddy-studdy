@@ -194,21 +194,18 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testProtectedTabRefreshBranchSelectsTabBeforeNetworkRefresh() throws {
+    func testProtectedTabsDoNotUsePageAccessPreflight() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
         let content = try String(contentsOf: appStateFile, encoding: .utf8)
-        guard let refreshBranchRange = content.range(of: "if shouldRefreshPageAccessBeforeDenying() {"),
-              let branchReturnRange = content[refreshBranchRange.lowerBound...].range(of: "return") else {
-            XCTFail("AppState.setSelectedTab must keep an explicit protected-tab refresh branch.")
-            return
-        }
 
-        let refreshBranch = content[refreshBranchRange.lowerBound..<branchReturnRange.lowerBound]
-
-        XCTAssertTrue(
-            refreshBranch.contains("selectedTab = nextTab"),
-            "Protected tab selection must update selectedTab before async page-access refresh so the tab bar does not bounce back."
+        XCTAssertFalse(
+            content.contains("refreshPageAccessThenOpen"),
+            "Protected tab selection must not preflight backend page access before showing the destination."
+        )
+        XCTAssertFalse(
+            content.contains("shouldRefreshPageAccessBeforeDenying"),
+            "Protected tab access should be resolved from actual API errors, not a separate page-access branch."
         )
     }
 
@@ -893,9 +890,9 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains("MobileRootLargeTitle(page.title(strings: strings))"),
             "Protected mobile gates should render the tab title instead of replacing the screen chrome with a login prompt."
         )
-        XCTAssertTrue(
-            content.contains("MobileProtectedLoginPreview(page: page, strings: strings)"),
-            "Protected mobile gates should show a page-specific preview instead of a blank login wall."
+        XCTAssertFalse(
+            content.contains("MobileProtectedLoginPreview"),
+            "Protected mobile gates should not render fake previews; they should use concise copy and a login action."
         )
         XCTAssertTrue(
             content.contains("MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))"),
@@ -922,8 +919,12 @@ final class ArchitecturePolicyTests: XCTestCase {
             "The dedicated login page should not echo page-access prompt text such as sign-in-required."
         )
         XCTAssertTrue(
-            content.contains("Button {\n                isHomeLoginPagePresented = true"),
-            "The My Study login action should be a plain button so list rows do not show a navigation chevron."
+            content.contains("MobileProtectedLoginPrompt(\n                page: .myStudy"),
+            "The My Study login action should use the shared plain login prompt so list rows do not show a navigation chevron."
+        )
+        XCTAssertTrue(
+            content.contains("onLogin: { isHomeLoginPagePresented = true }"),
+            "The My Study login prompt should open the dedicated login page."
         )
         XCTAssertFalse(
             content.contains("NavigationLink {\n                    MobileLoginPage()"),
@@ -974,8 +975,8 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Login UI should keep the app logo in a reusable component."
         )
         XCTAssertTrue(
-            viewContent.contains("Image(\"LaunchLogo\")"),
-            "Login UI should use the app's LaunchLogo asset."
+            viewContent.contains("Image(\"BuddyStudyLoginLogo\")"),
+            "Login UI should use the shared BuddyStudy login logo asset."
         )
         XCTAssertFalse(
             viewContent.contains("MobileLoginLogo(size: 72)"),
@@ -1187,18 +1188,18 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testPageAccessUseCaseDependsOnRepositoryBoundary() throws {
+    func testBackendDoesNotExposePageAccessPreflightEndpoint() throws {
         let root = try repositoryRoot()
-        let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/PageAccess/RefreshPageAccessUseCase.swift")
-        let content = try String(contentsOf: useCaseFile, encoding: .utf8)
+        let backendClientFile = root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift")
+        let content = try String(contentsOf: backendClientFile, encoding: .utf8)
 
         XCTAssertFalse(
-            content.contains("RemotePushBackendClientProtocol"),
-            "RefreshPageAccessUseCase must depend on PageAccessRepository instead of the backend transport service."
+            content.contains("\"access\""),
+            "The app must not call /api/v1/me/access as a page-access preflight."
         )
-        XCTAssertTrue(
-            content.contains("PageAccessRepository"),
-            "RefreshPageAccessUseCase should keep backend transport behind a repository boundary."
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("StudyMate/UseCases/PageAccess/RefreshPageAccessUseCase.swift").path),
+            "Page access preflight use cases should be removed; normal API errors drive auth and permission UI."
         )
     }
 

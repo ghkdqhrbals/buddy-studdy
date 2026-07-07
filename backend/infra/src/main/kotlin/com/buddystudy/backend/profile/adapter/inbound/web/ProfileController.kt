@@ -56,5 +56,4 @@ private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
     bio = bio,
     avatarSymbolName = avatarSymbolName,
     avatarColorSeed = avatarColorSeed,
-    pageAccess = pageAccess,
 )

@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
+import com.buddystudy.backend.settings.adapter.inbound.web.SettingsWebPort
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.model.StatsActivityResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
@@ -34,10 +35,23 @@ import java.time.Instant
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Study", description = "Authenticated study-room, question, record, and topic-stat APIs.")
-@RequirePermission(Permissions.STUDY_READ)
 class StudyController(
     private val study: StudyWebPort,
+    private val settings: SettingsWebPort,
 ) {
+
+    @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings state when editing one study.")
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study settings returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Study settings not found."),
+    )
+    @GetMapping("/studies/{studyId}/settings")
+    fun studySettings(
+        @PathVariable studyId: Long,
+        authentication: Authentication,
+    ) = settings.studySettings(studyId, authentication)
+
     @Operation(
         summary = "Fetch my studies",
         description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion for the current unanswered study-room question. Record history is intentionally split into /api/v1/records.",
@@ -96,7 +110,6 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/records")
-    @RequirePermission(Permissions.RECORD_READ)
     fun records(
         @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
         @RequestParam(defaultValue = "100") limit: Int,
@@ -126,7 +139,6 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @GetMapping("/records/{id}")
-    @RequirePermission(Permissions.RECORD_READ)
     fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
@@ -198,7 +210,6 @@ class StudyController(
 
     @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
     @GetMapping("/stats")
-    @RequirePermission(Permissions.STATS_READ)
     fun stats(
         @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
         @RequestParam(defaultValue = "8") limit: Int,
@@ -218,7 +229,6 @@ class StudyController(
 
     @Operation(summary = "Fetch daily study activity", description = "Returns compact daily activity for the authenticated user. The app uses this to render a one-year contribution-style activity graph.")
     @GetMapping("/stats/activity")
-    @RequirePermission(Permissions.STATS_READ)
     fun statsActivity(
         @Parameter(description = "Optional inclusive UTC start timestamp. Defaults to 365 days including today.", example = "2025-06-18T00:00:00Z")
         @RequestParam(required = false) startAt: Instant?,

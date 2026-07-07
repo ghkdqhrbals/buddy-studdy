@@ -117,6 +117,14 @@ struct MobileRootView: View {
                 .onAppear {
                     appState.normalizeSelectedTabForMobile()
                 }
+                #if DEBUG
+                .background {
+                    AppDebugSettingsTabLongPressBridge {
+                        appState.requestDebugPanelIfEnabledOrEnableOnDemand()
+                    }
+                    .frame(width: 0, height: 0)
+                }
+                #endif
             }
         }
     }
@@ -2396,13 +2404,7 @@ private struct MobileProfileSettingsSheet: View {
                             await appState.updateCommunityProfile(
                                 displayName: trimmedProfileDisplayName,
                                 avatarSymbolName: draftAvatarSymbolName,
-                                avatarColorSeed: draftAvatarColorSeed,
-                                pageAccess: CommunityPageAccess(
-                                    publicQuestions: allowPublicQuestionsAccess,
-                                    statistics: true,
-                                    studyDetail: true,
-                                    records: true
-                                )
+                                avatarColorSeed: draftAvatarColorSeed
                             )
                             dismiss()
                         }
@@ -4156,14 +4158,6 @@ private struct MobileSettingsView: View {
                             set: { appState.setDebuggingEnabled($0) }
                         )
                     )
-
-                    #if DEBUG
-                    Button {
-                        appState.requestDebugPanelIfEnabledOrEnableOnDemand()
-                    } label: {
-                        Label("앱/API 로그 보기", systemImage: "doc.text.magnifyingglass")
-                    }
-                    #endif
 
                     if appState.isDebuggingEnabled {
                         VStack(alignment: .leading, spacing: 6) {

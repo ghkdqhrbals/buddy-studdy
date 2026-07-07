@@ -47,18 +47,6 @@ class SettingsController(
     @GetMapping("/settings")
     fun settings(authentication: Authentication) = settings.settings(authentication)
 
-    @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings state when editing one study.")
-    @ApiResponses(
-        ApiResponse(responseCode = "200", description = "Study settings returned."),
-        ApiResponse(responseCode = "401", description = "Authentication required."),
-        ApiResponse(responseCode = "404", description = "Study settings not found."),
-    )
-    @GetMapping("/studies/{studyId}/settings")
-    fun studySettings(
-        @PathVariable studyId: Long,
-        authentication: Authentication,
-    ) = settings.studySettings(studyId, authentication)
-
     @Operation(summary = "Save one study room settings", description = "Updates settings for a single study room. Global interval and OpenAI key fields are accepted for compatibility but the route is scoped to one study room.")
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Study settings saved."),

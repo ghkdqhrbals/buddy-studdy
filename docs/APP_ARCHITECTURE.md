@@ -95,7 +95,7 @@ The policy is split into two deterministic steps:
 - Backend identity transport calls such as device registration, access-token bootstrap, and APNs token updates must go through `BackendIdentityUseCase`, not direct `AppState` calls to `RemotePushBackendClientProtocol`.
 - Backend identity operations must go through `IdentityRepository`. `BackendIdentityUseCase` owns device registration, access-token bootstrap, and APNs token update workflows and must not depend directly on backend transport protocols.
 - Google sign-in provider operations must go through `GoogleSignInRepository`. `GoogleSignInUseCase` owns the app sign-in action and must not construct or depend directly on OAuth provider services.
-- Page-access refresh must go through `PageAccessRepository`. `RefreshPageAccessUseCase` owns the page-access backend action and must not depend directly on backend transport protocols.
+- Protected page access must not be checked by a preflight endpoint. ViewModels should render the target page and let the page's normal backend request surface auth, permission, or terms errors through `AppErrorHandlingPolicy`.
 - OAuth provider services such as Google sign-in must be owned by auth use cases. ViewModels should request a sign-in result from `GoogleSignInUseCase` instead of constructing provider services directly.
 - Community backend operations must go through `CommunityRepository`. `CommunityUseCase` owns the app workflow contract and must not depend directly on backend transport protocols.
 - Study room backend operations must go through `StudyRoomRepository`. `StudyRoomUseCase` owns study list/create/delete/question workflows and must not depend directly on backend transport protocols.

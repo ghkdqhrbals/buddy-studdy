@@ -43,8 +43,7 @@ protocol CommunityRepository {
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?,
-        pageAccess: CommunityPageAccess?
+        avatarColorSeed: String?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration

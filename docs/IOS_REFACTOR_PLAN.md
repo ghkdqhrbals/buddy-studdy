@@ -68,7 +68,8 @@ StudyMate/
    - Move period/query/sort request state and backend stats cache.
    - Statistics views should no longer scan all records for source-of-truth stats.
 4. Extract `AccessStateStore`.
-   - Own `/api/v1/me/access`, 401 cleanup, 403 prompts, and page gate decisions.
+   - Own shared auth/session state, 401 cleanup, and 403 prompts from real API failures.
+   - Do not add page-access preflight endpoints; protected screens should render first and react to endpoint-level errors.
 5. Reduce `MobileRootView`.
    - Move profile sheet, auth sheets, community detail, notification list, and settings screen into separate files.
 6. Remove legacy `currentQuestion` dependencies from iOS study-room paths.
@@ -81,4 +82,3 @@ StudyMate/
 - Local ungraded record cache does not revive a cleared backend pending question.
 - Study room shows the backend pending question after entering from Home.
 - Draft is preserved by `record.id` across refresh and push sync.
-

@@ -27,7 +27,6 @@ class ProfileService(
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
-        command.pageAccess?.let { user.allowPublicQuestions = it.publicQuestions }
         user.updatedAt = Instant.now()
         return user.toProfile()
     }

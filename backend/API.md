@@ -312,13 +312,7 @@ Response:
     "bio": "",
     "avatarUrl": null,
     "avatarSymbolName": "pixel-buddy",
-    "avatarColorSeed": "avatar-color-mint",
-    "pageAccess": {
-      "publicQuestions": true,
-      "statistics": false,
-      "studyDetail": false,
-      "records": false
-    }
+    "avatarColorSeed": "avatar-color-mint"
   },
   "accessToken": "jwt",
   "accessTokenExpiresAt": "2026-09-05T00:00:00+00:00"
@@ -348,9 +342,9 @@ Patch request:
 ```json
 {
   "displayName": "Buddy",
-  "pageAccess": {
-    "publicQuestions": true
-  }
+  "bio": "Backend learner",
+  "avatarSymbolName": "pixel-fox",
+  "avatarColorSeed": "avatar-color-mint"
 }
 ```
 
@@ -535,7 +529,7 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
 
 ### Statistics
-
+ㅅ
 ```http
 GET /api/v1/stats?period=all&sort=level&limit=8&offset=0
 GET /api/v1/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z

@@ -463,7 +463,6 @@ final class AppState: ObservableObject {
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
     private var googleSignInUseCase: GoogleSignInUseCase { appUseCases.googleSignIn }
-    private var refreshPageAccessUseCase: RefreshPageAccessUseCase { appUseCases.refreshPageAccess }
     private var studyRoomUseCase: StudyRoomUseCase { appUseCases.studyRoom }
     private var recordsUseCase: RecordsUseCase { appUseCases.records }
     private var notificationsUseCase: NotificationsUseCase { appUseCases.notifications }
@@ -557,7 +556,7 @@ final class AppState: ObservableObject {
     }
 
     var shouldShowRecordsLoginPage: Bool {
-        let shouldShow = shouldShowLoginGate(for: .records)
+        let shouldShow = !isCommunitySessionActive
         logAuthTrace(
             "mobile_login_gate",
             page: .records,
@@ -568,7 +567,7 @@ final class AppState: ObservableObject {
     }
 
     var shouldShowStatisticsLoginPage: Bool {
-        let shouldShow = shouldShowLoginGate(for: .statistics)
+        let shouldShow = !isCommunitySessionActive
         logAuthTrace(
             "mobile_login_gate",
             page: .statistics,
@@ -598,30 +597,6 @@ final class AppState: ObservableObject {
             cancelSettingsEditing()
         }
 
-        if let protectedPage = protectedPage(for: nextTab),
-           !canAccess(protectedPage) {
-            if shouldRefreshPageAccessBeforeDenying() {
-                selectedTab = nextTab
-                logAuthTrace(
-                    "mobile_tab_page_access_refresh",
-                    page: protectedPage,
-                    reason: "setSelectedTab",
-                    extra: ["nextTab=\(String(describing: nextTab))"]
-                )
-                refreshPageAccessThenOpen(nextTab, protectedPage: protectedPage)
-                return
-            }
-            selectedTab = nextTab
-            logAuthTrace(
-                "mobile_tab_denied_login_gate",
-                page: protectedPage,
-                reason: "setSelectedTab",
-                extra: ["nextTab=\(String(describing: nextTab))"]
-            )
-            redirectToPageAccessGuide(for: protectedPage)
-            return
-        }
-
         logAuthTrace(
             "mobile_tab_allowed",
             page: protectedPage(for: nextTab),
@@ -642,78 +617,6 @@ final class AppState: ObservableObject {
             reason: "applySelectedTab",
             extra: ["nextTab=\(String(describing: nextTab))"]
         )
-    }
-
-    private func shouldRefreshPageAccessBeforeDenying() -> Bool {
-        let shouldRefresh = isCommunitySessionActive || storedBackendIdentityUseCase.hasAccessToken()
-        logAuthTrace(
-            "page_access_refresh_decision",
-            reason: "shouldRefreshPageAccessBeforeDenying",
-            extra: ["shouldRefresh=\(shouldRefresh)"]
-        )
-        return shouldRefresh
-    }
-
-    private func shouldAllowProvisionalAccessWhileRefreshing(_ page: ProtectedAppPage) -> Bool {
-        let shouldAllow = PageAccessPolicy.shouldAllowProvisionalAccess(
-            to: page,
-            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken(),
-            userStatus: backendAccessState.user.status
-        )
-        logAuthTrace(
-            "page_access_provisional_decision",
-            page: page,
-            reason: "shouldAllowProvisionalAccessWhileRefreshing",
-            extra: ["allow=\(shouldAllow)"]
-        )
-        return shouldAllow
-    }
-
-    private func refreshPageAccessInBackground(reason: String) {
-        protectedPageAccessRefreshTask?.cancel()
-        logAuthTrace("page_access_background_refresh_schedule", reason: reason)
-        protectedPageAccessRefreshTask = Task { [weak self] in
-            await self?.refreshPageAccess(reason: reason)
-        }
-    }
-
-    private func refreshPageAccessThenOpen(_ nextTab: AppTab, protectedPage: ProtectedAppPage) {
-        protectedPageAccessRefreshTask?.cancel()
-        logAuthTrace(
-            "page_access_refresh_then_open_schedule",
-            page: protectedPage,
-            reason: "refreshPageAccessThenOpen",
-            extra: ["nextTab=\(String(describing: nextTab))"]
-        )
-        protectedPageAccessRefreshTask = Task { [weak self] in
-            guard let self else {
-                return
-            }
-
-            await refreshPageAccess(reason: "protected-tab-\(protectedPage.accessLogName)")
-            guard !Task.isCancelled else {
-                return
-            }
-
-            if canAccess(protectedPage) {
-                logAuthTrace(
-                    "page_access_refresh_then_open_allowed",
-                    page: protectedPage,
-                    reason: "refreshPageAccessThenOpen",
-                    extra: ["nextTab=\(String(describing: nextTab))"]
-                )
-                applySelectedTab(nextTab)
-            } else {
-                selectedTab = nextTab
-                logAuthTrace(
-                    "page_access_refresh_then_open_denied",
-                    page: protectedPage,
-                    reason: "refreshPageAccessThenOpen",
-                    extra: ["nextTab=\(String(describing: nextTab))"]
-                )
-                redirectToPageAccessGuide(for: protectedPage)
-            }
-        }
     }
 
     func openDeepLink(_ url: URL) {
@@ -779,7 +682,7 @@ final class AppState: ObservableObject {
     }
 
     private func canAccess(_ page: ProtectedAppPage) -> Bool {
-        PageAccessPolicy.canAccess(page, in: backendAccessState.pageAccess)
+        isCommunitySessionActive || page == .studyDetail
     }
 
     private func shouldShowLoginGate(for page: ProtectedAppPage) -> Bool {
@@ -799,18 +702,12 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func requirePageAccess(_ page: ProtectedAppPage) -> Bool {
-        guard canAccess(page) else {
-            if shouldAllowProvisionalAccessWhileRefreshing(page) {
-                refreshPageAccessInBackground(reason: "provisional-\(page.accessLogName)")
-                log(.info, "저장된 registered access token이 있어 pageAccess 갱신 전 임시 진입을 허용합니다. page=\(page.accessLogName)")
-                return true
-            }
-
-            redirectToPageAccessGuide(for: page)
-            return false
-        }
-
-        logAuthTrace("page_access_required_allowed", page: page, reason: "requirePageAccess")
+        logAuthTrace(
+            "page_access_required_bypassed_to_api_policy",
+            page: page,
+            reason: "requirePageAccess",
+            extra: ["sessionActive=\(isCommunitySessionActive)"]
+        )
         return true
     }
 
@@ -845,52 +742,11 @@ final class AppState: ObservableObject {
     }
 
     func refreshPageAccess(reason: String = "manual") async {
-        logAuthTrace("page_access_refresh_start", reason: reason, deduplicate: false)
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "page-access-\(reason)") else {
-            logAuthTrace("page_access_refresh_missing_registration", reason: reason, deduplicate: false)
-            resetCommunitySignInState()
-            return
-        }
-
-        await actionRunner.run(
-            operation: {
-                try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "page-access-\(reason)",
-                    operation: { recoveredRegistration in
-                        try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
-                    }
-                )
-            },
-            onSuccess: { state in
-                backendAccessState = state
-                isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                communitySessionUseCase.setSignedIn(isCommunitySignedIn)
-                logAuthTrace("page_access_refresh_success", reason: reason, deduplicate: false)
-                reconcileVisiblePageAccessAfterRefresh()
-            },
-            onFailure: { error in
-                handleAppError(error, fallback: "", target: .none)
-                logAuthTrace(
-                    "page_access_refresh_failure",
-                    reason: reason,
-                    extra: ["error=\(error.localizedDescription)"],
-                    deduplicate: false
-                )
-                log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
-            }
-        )
+        logAuthTrace("page_access_refresh_skipped", reason: reason, deduplicate: false)
     }
 
     private func reconcileVisiblePageAccessAfterRefresh() {
-        guard let visibleProtectedPage = currentVisibleProtectedPage(),
-              !canAccess(visibleProtectedPage) else {
-            logAuthTrace("page_access_reconcile_allowed", page: currentVisibleProtectedPage(), reason: "reconcileVisiblePageAccessAfterRefresh")
-            return
-        }
-
-        logAuthTrace("page_access_reconcile_denied", page: visibleProtectedPage, reason: "reconcileVisiblePageAccessAfterRefresh")
-        redirectToPageAccessGuide(for: visibleProtectedPage)
+        logAuthTrace("page_access_reconcile_skipped", page: currentVisibleProtectedPage(), reason: "reconcileVisiblePageAccessAfterRefresh")
     }
 
     private func currentVisibleProtectedPage() -> ProtectedAppPage? {
@@ -1392,7 +1248,6 @@ final class AppState: ObservableObject {
         }
 
         await loadOpenAIModelOptions()
-        await refreshPageAccess(reason: "startup")
         await refreshPermissionEvaluations(reason: "startup")
         await refreshNotificationUnreadCount()
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -1411,7 +1266,6 @@ final class AppState: ObservableObject {
 
         reloadPersistedState()
         await loadOpenAIModelOptions()
-        await refreshPageAccess(reason: "foreground")
         await refreshPermissionEvaluations(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
@@ -2626,18 +2480,17 @@ final class AppState: ObservableObject {
             operation: {
                 try await performWithBackendIdentityRecovery(
                     registration: registration,
-                    reason: "page-access-\(reason)",
+                    reason: "community-profile-\(reason)",
                     operation: { recoveredRegistration in
-                        try await refreshPageAccessUseCase.execute(registration: recoveredRegistration)
+                        try await communityUseCase.fetchMyProfile(registration: recoveredRegistration)
                     }
                 )
             },
-            onSuccess: { state in
-                backendAccessState = state
-                isCommunitySignedIn = state.user.status != "ANONYMOUS"
-                communitySessionUseCase.setSignedIn(isCommunitySignedIn)
+            onSuccess: { profile in
+                applyCommunityProfile(profile)
+                isCommunitySignedIn = true
+                communitySessionUseCase.setSignedIn(true)
                 logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
-                reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
                 handleAppError(error, fallback: "", target: .community)
@@ -2647,7 +2500,7 @@ final class AppState: ObservableObject {
                     extra: ["error=\(error.localizedDescription)"],
                     deduplicate: false
                 )
-                log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
+                log(.warning, "로그인 후 프로필 조회 실패: \(error.localizedDescription), reason=\(reason)")
             }
         )
 
@@ -2731,7 +2584,6 @@ final class AppState: ObservableObject {
             return communityErrorMessage == strings.emailVerificationRequired ? .verificationRequired : .failed
         }
 
-        await refreshPageAccess(reason: "email-login")
         await refreshBackendStudyIfPossible(
             updateVisibleQuestion: true,
             preserveLocalSettings: false
@@ -2769,7 +2621,6 @@ final class AppState: ObservableObject {
             savedSettings = normalizedSettings(settings)
             Task {
                 await syncRemotePushScheduleIfPossible(reason: "community-logout")
-                await refreshPageAccess(reason: "community-logout")
             }
         }
         statusMessage = strings.communitySignedOut
@@ -2827,8 +2678,7 @@ final class AppState: ObservableObject {
                 displayName: communityProfile?.displayName ?? "",
                 bio: communityProfile?.bio ?? "",
                 avatarSymbolName: nextSymbolName,
-                avatarColorSeed: nextColorSeed,
-                pageAccess: communityProfile?.pageAccess
+                avatarColorSeed: nextColorSeed
             )
         }
     }
@@ -2878,8 +2728,7 @@ final class AppState: ObservableObject {
         displayName: String,
         bio: String = "",
         avatarSymbolName: String? = nil,
-        avatarColorSeed: String? = nil,
-        pageAccess: CommunityPageAccess? = nil
+        avatarColorSeed: String? = nil
     ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
@@ -2893,8 +2742,7 @@ final class AppState: ObservableObject {
                     displayName: displayName,
                     bio: bio,
                     avatarSymbolName: avatarSymbolName,
-                    avatarColorSeed: avatarColorSeed,
-                    pageAccess: pageAccess
+                    avatarColorSeed: avatarColorSeed
                 )
             },
             onSuccess: { profile in
@@ -2934,7 +2782,6 @@ final class AppState: ObservableObject {
     }
 
     private func applyProfilePageAccess(_ profile: CommunityUserProfile) {
-        let access = profile.pageAccess
         backendAccessState = BackendAccessState(
             user: BackendAccessUser(
                 id: Int64(profile.id),
@@ -2942,18 +2789,10 @@ final class AppState: ObservableObject {
                 displayName: profile.displayName,
                 createdAt: nil
             ),
-            pageAccess: BackendPageAccess(
-                home: true,
-                publicQuestions: access.publicQuestions,
-                myStudies: access.studyDetail,
-                studyRoom: access.studyDetail,
-                records: access.records,
-                stats: access.statistics,
-                profile: true,
-                developer: false,
-                admin: false
-            )
+            pageAccess: backendAccessState.pageAccess
         )
+        isCommunitySignedIn = true
+        communitySessionUseCase.setSignedIn(true)
     }
 
     func withdrawCommunityAccount() async {
@@ -5306,7 +5145,6 @@ final class AppState: ObservableObject {
                     )
                 }
             )
-            await refreshPageAccess(reason: "terms-agreement")
             await refreshPermissionEvaluations(reason: "terms-agreement")
             if isAgreed, let retry = pendingTermsRequirementRetry {
                 pendingTermsRequirementRetry = nil
@@ -6809,6 +6647,7 @@ final class AppState: ObservableObject {
 
     private func writeSystemLog(_ level: LogLevel, _ message: String) {
         let logger = message.contains("auth_trace") ? appAuthLogger : appStateLogger
+        print("[StudyMate][\(level.rawValue)] \(message)")
 
         switch level {
         case .info:

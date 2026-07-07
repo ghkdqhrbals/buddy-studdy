@@ -80,7 +80,6 @@ struct TermsUseCase {
 struct AppUseCases {
     let backendIdentity: BackendIdentityUseCase
     let googleSignIn: GoogleSignInUseCase
-    let refreshPageAccess: RefreshPageAccessUseCase
     let studyRoom: StudyRoomUseCase
     let records: RecordsUseCase
     let notifications: NotificationsUseCase
@@ -98,11 +97,9 @@ struct AppUseCases {
         let statsRepository = RemoteStatsRepository(backendClient: backendClient)
         let notificationsRepository = RemoteNotificationsRepository(backendClient: backendClient)
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
-        let pageAccessRepository = RemotePageAccessRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
         googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
-        refreshPageAccess = RefreshPageAccessUseCase(repository: pageAccessRepository)
         studyRoom = StudyRoomUseCase(repository: studyRoomRepository)
         records = RecordsUseCase(repository: recordsRepository)
         notifications = NotificationsUseCase(repository: notificationsRepository)

@@ -85,16 +85,14 @@ struct CommunityUseCase {
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?,
-        pageAccess: CommunityPageAccess?
+        avatarColorSeed: String?
     ) async throws -> CommunityUserProfile {
         try await repository.updateMyProfile(
             registration: registration,
             displayName: displayName,
             bio: bio,
             avatarSymbolName: avatarSymbolName,
-            avatarColorSeed: avatarColorSeed,
-            pageAccess: pageAccess
+            avatarColorSeed: avatarColorSeed
         )
     }
 

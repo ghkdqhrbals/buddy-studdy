@@ -334,17 +334,6 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testRefreshPageAccessUseCaseUsesBackendClientBoundary() async throws {
-        let backendClient = FakeRemotePushBackendClient()
-        let useCase = RefreshPageAccessUseCase(backendClient: backendClient)
-
-        let accessState = try await useCase.execute(registration: backendClient.registration)
-
-        XCTAssertEqual(backendClient.fetchAccessCallCount, 1)
-        XCTAssertEqual(accessState, backendClient.accessState)
-    }
-
-    @MainActor
     func testStudyRoomUseCaseCentralizesBackendOperations() async throws {
         let backendClient = FakeRemotePushBackendClient()
         let useCase = StudyRoomUseCase(backendClient: backendClient)
@@ -435,8 +424,7 @@ final class StudyMateTests: XCTestCase {
             displayName: "Buddy",
             bio: "bio",
             avatarSymbolName: "star",
-            avatarColorSeed: "seed",
-            pageAccess: nil
+            avatarColorSeed: "seed"
         )
         _ = try await useCase.withdrawMyProfile(registration: backendClient.registration)
         try await useCase.reportQuestion(
@@ -833,59 +821,6 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testProvisionalStudyRoomAccessIsRevokedWhenBackendAccessDenies() async throws {
-        let suiteName = "StudyMateTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
-
-        let store = SettingsStore(defaults: defaults)
-        let backend = FakeRemotePushBackendClient()
-        let accessToken = Self.jwt(
-            payload: [
-                "device_id": backend.registration.deviceID,
-                "is_anonymous": false,
-                "status": "ACTIVE"
-            ]
-        )
-        store.saveRemotePushRegistration(
-            RemotePushRegistration(
-                deviceID: backend.registration.deviceID,
-                clientSecret: backend.registration.clientSecret,
-                apnsToken: "",
-                accessToken: accessToken,
-                accessTokenExpiresAt: Date().addingTimeInterval(3600)
-            )
-        )
-        backend.accessState = BackendAccessState(
-            user: BackendAccessUser(id: 4, status: "ACTIVE", displayName: "Tester"),
-            pageAccess: BackendPageAccess(
-                home: true,
-                publicQuestions: true,
-                myStudies: true,
-                studyRoom: false,
-                records: true,
-                stats: true,
-                profile: true,
-                developer: false,
-                admin: false
-            )
-        )
-        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
-
-        XCTAssertTrue(appState.openRoute(.studyRoom(categoryID: "swift")))
-        XCTAssertEqual(appState.homeStudyRoute?.categoryID, "swift")
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-
-        XCTAssertEqual(backend.fetchAccessCallCount, 1)
-        XCTAssertNil(appState.homeStudyRoute)
-        XCTAssertNotNil(appState.pageAccessPrompt)
-        XCTAssertEqual(appState.selectedTab, .home)
-    }
-
-    @MainActor
     func testDebuggingModeStaysEnabledWithoutDeveloperAccess() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -912,20 +847,6 @@ final class StudyMateTests: XCTestCase {
             )
         )
         store.saveIsDebuggingEnabled(true)
-        backend.accessState = BackendAccessState(
-            user: BackendAccessUser(id: 4, status: "ACTIVE", displayName: "Tester"),
-            pageAccess: BackendPageAccess(
-                home: true,
-                publicQuestions: true,
-                myStudies: true,
-                studyRoom: true,
-                records: true,
-                stats: true,
-                profile: true,
-                developer: false,
-                admin: false
-            )
-        )
         let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
         XCTAssertTrue(appState.isDebuggingEnabled)
@@ -934,72 +855,6 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertTrue(appState.isDebuggingEnabled)
         XCTAssertTrue(store.loadIsDebuggingEnabled())
-    }
-
-    @MainActor
-    func testDeviceNotFoundDuringAccessTokenBootstrapReRegistersDevice() async throws {
-        let suiteName = "StudyMateTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
-
-        let store = SettingsStore(defaults: defaults)
-        store.saveRemotePushRegistration(
-            RemotePushRegistration(
-                deviceID: "missing-device",
-                clientSecret: "missing-secret",
-                apnsToken: "apns-old"
-            )
-        )
-        let backend = FakeRemotePushBackendClient()
-        backend.bootstrapAccessTokenError = Self.backendError(code: "DEVICE_NOT_FOUND", status: 404)
-        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
-
-        await appState.refreshPageAccess(reason: "test")
-
-        XCTAssertEqual(backend.bootstrapAccessTokenCallCount, 1)
-        XCTAssertEqual(backend.registeredAPNSTokens, ["apns-old"])
-        XCTAssertEqual(backend.fetchAccessCallCount, 1)
-        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, backend.registration.deviceID)
-        XCTAssertEqual(appState.backendAccessState.user.status, "ACTIVE")
-    }
-
-    @MainActor
-    func testDeviceNotFoundAfterExistingAccessTokenReRegistersAndRetriesRequest() async throws {
-        let suiteName = "StudyMateTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
-
-        let store = SettingsStore(defaults: defaults)
-        let backend = FakeRemotePushBackendClient()
-        let accessToken = Self.jwt(
-            payload: [
-                "device_id": "stale-device",
-                "is_anonymous": false,
-                "status": "ACTIVE"
-            ]
-        )
-        store.saveRemotePushRegistration(
-            RemotePushRegistration(
-                deviceID: "stale-device",
-                clientSecret: "stale-secret",
-                apnsToken: "apns-old",
-                accessToken: accessToken,
-                accessTokenExpiresAt: Date().addingTimeInterval(3600)
-            )
-        )
-        backend.fetchAccessErrors = [Self.backendError(code: "DEVICE_NOT_FOUND", status: 404)]
-        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
-
-        await appState.refreshPageAccess(reason: "test")
-
-        XCTAssertEqual(backend.registeredAPNSTokens, ["apns-old"])
-        XCTAssertEqual(backend.fetchAccessCallCount, 2)
-        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, backend.registration.deviceID)
-        XCTAssertEqual(appState.backendAccessState.user.status, "ACTIVE")
     }
 
     @MainActor
@@ -4698,7 +4553,6 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var validateCallCount = 0
     var fetchSettingsCallCount = 0
     var fetchOpenAIModelOptionsCallCount = 0
-    var fetchAccessCallCount = 0
     var savedTermsAgreements: [(code: String, action: BackendTermsAgreementAction)] = []
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
@@ -4730,22 +4584,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var logoutCallCount = 0
     var bootstrapAccessTokenCallCount = 0
     var bootstrapAccessTokenError: Error?
-    var fetchAccessErrors: [Error] = []
     var fetchedSettings: BackendStudySettings?
-    var accessState = BackendAccessState(
-        user: BackendAccessUser(id: 1, status: "ACTIVE", displayName: "Tester"),
-        pageAccess: BackendPageAccess(
-            home: true,
-            publicQuestions: true,
-            myStudies: true,
-            studyRoom: true,
-            records: true,
-            stats: true,
-            profile: true,
-            developer: false,
-            admin: false
-        )
-    )
     func registerDevice(
         apnsToken: String?,
         language: AppLanguage,
@@ -4787,14 +4626,6 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             accessTokenExpiresAt: Date().addingTimeInterval(3600)
         )
         return self.registration
-    }
-
-    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
-        fetchAccessCallCount += 1
-        if !fetchAccessErrors.isEmpty {
-            throw fetchAccessErrors.removeFirst()
-        }
-        return accessState
     }
 
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms] {
@@ -5107,8 +4938,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?,
-        pageAccess: CommunityPageAccess?
+        avatarColorSeed: String?
     ) async throws -> CommunityUserProfile {
         if let displayName {
             updatedProfileDisplayNames.append(displayName)
@@ -5119,8 +4949,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             bio: bio ?? "",
             avatarURL: nil,
             avatarSymbolName: avatarSymbolName ?? "pixel-buddy",
-            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
-            pageAccess: pageAccess ?? .restricted
+            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint"
         )
     }
 

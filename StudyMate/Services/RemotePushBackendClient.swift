@@ -167,8 +167,6 @@ protocol RemotePushBackendClientProtocol {
 
     func logout(registration: RemotePushRegistration) async throws
 
-    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState
-
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms]
 
     func saveTermsAgreement(
@@ -290,8 +288,7 @@ protocol RemotePushBackendClientProtocol {
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?,
-        pageAccess: CommunityPageAccess?
+        avatarColorSeed: String?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
@@ -470,15 +467,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         _ = try await perform(request)
-    }
-
-    func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState {
-        let request = authenticatedRequest(
-            registration: registration,
-            url: endpoint("api", "v1", "me", "access")
-        )
-        let data = try await perform(request)
-        return try decoder.decode(BackendAccessState.self, from: data)
     }
 
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms] {
@@ -974,8 +962,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         displayName: String?,
         bio: String?,
         avatarSymbolName: String? = nil,
-        avatarColorSeed: String? = nil,
-        pageAccess: CommunityPageAccess? = nil
+        avatarColorSeed: String? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
@@ -988,8 +975,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 displayName: displayName,
                 bio: bio,
                 avatarSymbolName: avatarSymbolName,
-                avatarColorSeed: avatarColorSeed,
-                pageAccess: pageAccess
+                avatarColorSeed: avatarColorSeed
             )
         )
         let data = try await perform(request)
@@ -1544,7 +1530,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var bio: String?
         var avatarSymbolName: String?
         var avatarColorSeed: String?
-        var pageAccess: CommunityPageAccess?
     }
 
     private struct CommunityLoginResponse: Decodable {
