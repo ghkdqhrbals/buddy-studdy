@@ -315,6 +315,7 @@ private struct FloatingAPIDebugOverlay: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(maxHeight: 140)
+                        .frame(height: apiLogListHeight)
 
                         if let selectedLog {
                             Divider()
@@ -393,6 +394,18 @@ private struct FloatingAPIDebugOverlay: View {
                 .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
+    }
+
+    private var apiLogListHeight: CGFloat {
+        guard !recentLogs.isEmpty else {
+            return 0
+        }
+
+        let rowHeight: CGFloat = 45
+        let rowSpacing: CGFloat = 5
+        let visibleRows = min(recentLogs.count, 3)
+        let contentHeight = (CGFloat(visibleRows) * rowHeight) + (CGFloat(max(0, visibleRows - 1)) * rowSpacing)
+        return min(140, contentHeight)
     }
 
     private func panelWidth(for size: CGSize) -> CGFloat {
