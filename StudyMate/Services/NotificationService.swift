@@ -415,7 +415,14 @@ final class NotificationService: NotificationServicing {
 
         NSWorkspace.shared.open(url)
         #elseif os(iOS)
-        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+        let settingsURLString: String
+        if #available(iOS 16.0, *) {
+            settingsURLString = UIApplication.openNotificationSettingsURLString
+        } else {
+            settingsURLString = UIApplication.openSettingsURLString
+        }
+
+        guard let url = URL(string: settingsURLString) else {
             return
         }
 
