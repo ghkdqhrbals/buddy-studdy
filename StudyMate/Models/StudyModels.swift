@@ -1393,45 +1393,45 @@ enum AppLegalLinks {
     static func termsOfServiceURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html")!
         }
     }
 
     static func privacyPolicyURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-07-07.html")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-07-07.html")!
         }
     }
 
     static func infoNotificationURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#info-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#info-notification")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#info-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#info-notification")!
         }
     }
 
     static func marketingNotificationURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#marketing-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#marketing-notification")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#marketing-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#marketing-notification")!
         }
     }
 
     static func nightMarketingNotificationURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#night-marketing-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#night-marketing-notification")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#night-marketing-notification")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#night-marketing-notification")!
         }
     }
 }

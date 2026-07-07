@@ -304,23 +304,20 @@ private struct MobileRequiredTermsGateSheet: View {
 
                 VStack(spacing: 0) {
                     requiredGateRow(
-                        title: strings.termsOfService,
-                        badge: strings.requiredTermsBadge,
+                        title: termsTitle(strings.termsOfService, required: true),
                         isChecked: true,
                         url: termsOfService?.url ?? AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
                     )
                     Divider().padding(.leading, 34)
                     requiredGateRow(
-                        title: strings.privacyPolicy,
-                        badge: strings.requiredTermsBadge,
+                        title: termsTitle(strings.privacyPolicy, required: true),
                         isChecked: true,
                         url: privacyPolicy?.url ?? AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
                     )
                     if let marketingTerms {
                         Divider().padding(.leading, 34)
                         requiredGateRow(
-                            title: strings.marketingNotifications,
-                            badge: strings.optionalTermsBadge,
+                            title: termsTitle(strings.marketingNotifications, required: false),
                             isChecked: marketingAgreed,
                             url: marketingTerms.url,
                             togglesSelection: true
@@ -384,7 +381,6 @@ private struct MobileRequiredTermsGateSheet: View {
 
     private func requiredGateRow(
         title: String,
-        badge: String,
         isChecked: Bool,
         url: URL,
         togglesSelection: Bool = false
@@ -402,9 +398,6 @@ private struct MobileRequiredTermsGateSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.body.weight(.semibold))
-                    Text("[\(badge)]")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
@@ -419,6 +412,11 @@ private struct MobileRequiredTermsGateSheet: View {
             .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
+    }
+
+    private func termsTitle(_ title: String, required: Bool) -> String {
+        let suffix = required ? strings.requiredTermsBadge : strings.optionalTermsBadge
+        return "\(title) [\(suffix)]"
     }
 
     private func agreeRequiredTerms() async {
@@ -2816,19 +2814,8 @@ private struct MobileTermsSettingsView: View {
     private func termsRow(_ term: BackendTerms) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(title(for: term))
-                        .font(.body.weight(.semibold))
-                    Text("[\(term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge)]")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(term.required ? Color.secondary : Color.accentColor)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            (term.required ? Color.secondary.opacity(0.12) : Color.accentColor.opacity(0.12)),
-                            in: Capsule()
-                        )
-                }
+                Text(title(for: term))
+                    .font(.body.weight(.semibold))
                 Text(term.version)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2912,16 +2899,19 @@ private struct MobileTermsSettingsView: View {
     }
 
     private func title(for term: BackendTerms) -> String {
+        let baseTitle: String
         switch term.code {
         case "TERMS_OF_SERVICE":
-            return strings.termsOfService
+            baseTitle = strings.termsOfService
         case "PRIVACY_POLICY":
-            return strings.privacyPolicy
+            baseTitle = strings.privacyPolicy
         case "MARKETING_NOTIFICATION":
-            return strings.marketingNotifications
+            baseTitle = strings.marketingNotifications
         default:
-            return term.title
+            baseTitle = term.title
         }
+        let suffix = term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge
+        return "\(baseTitle) [\(suffix)]"
     }
 }
 
