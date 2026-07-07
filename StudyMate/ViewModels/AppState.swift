@@ -443,7 +443,6 @@ final class AppState: ObservableObject {
     @Published private var notificationState = NotificationStateStore()
     @Published var pageAccessPrompt: PageAccessPrompt?
 
-    private let settingsStore: SettingsStore
     private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
@@ -1082,7 +1081,6 @@ final class AppState: ObservableObject {
         let resolvedCurrentStudySessionUseCase = currentStudySessionUseCase
             ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
 
-        self.settingsStore = settingsStore
         self.appLogUseCase = resolvedAppLogUseCase
         self.storedBackendIdentityUseCase = storedBackendIdentityUseCase
             ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
