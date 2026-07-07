@@ -146,7 +146,21 @@ private struct FloatingAPIDebugOverlay: View {
     @State private var isExpanded = false
     @State private var committedOffset = CGSize(width: 12, height: 74)
     @State private var suppressTapAction = false
+    @State private var selectedLogID: APITrafficLogEntry.ID?
     @GestureState private var dragTranslation: CGSize = .zero
+
+    private var recentLogs: [APITrafficLogEntry] {
+        Array(appState.apiTrafficLogs.prefix(100))
+    }
+
+    private var selectedLog: APITrafficLogEntry? {
+        if let selectedLogID,
+           let selectedLog = recentLogs.first(where: { $0.id == selectedLogID }) {
+            return selectedLog
+        }
+
+        return recentLogs.first
+    }
 
     private var latestLog: APITrafficLogEntry? {
         appState.apiTrafficLogs.first
@@ -268,24 +282,57 @@ private struct FloatingAPIDebugOverlay: View {
             if isExpanded {
                 Divider()
 
-                if let latestLog {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            debugSection(title: "Request", value: requestText(for: latestLog))
-                            debugSection(title: "Response", value: responseText(for: latestLog))
-
-                            if let error = latestLog.error, !error.isEmpty {
-                                debugSection(title: "Error", value: error, isError: true)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 280)
-                } else {
+                if recentLogs.isEmpty {
                     Text("아직 API 요청이 없습니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Recent API")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Text("\(recentLogs.count)/100")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 5) {
+                                ForEach(recentLogs) { log in
+                                    Button {
+                                        selectedLogID = log.id
+                                    } label: {
+                                        apiLogRow(log, isSelected: selectedLog?.id == log.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 140)
+
+                        if let selectedLog {
+                            Divider()
+
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    debugSection(title: "Request", value: requestText(for: selectedLog))
+                                    debugSection(title: "Response", value: responseText(for: selectedLog))
+
+                                    if let error = selectedLog.error, !error.isEmpty {
+                                        debugSection(title: "Error", value: error, isError: true)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 220)
+                        }
+                    }
                 }
             }
         }
@@ -312,6 +359,42 @@ private struct FloatingAPIDebugOverlay: View {
         }
     }
 
+    private func apiLogRow(_ entry: APITrafficLogEntry, isSelected: Bool) -> some View {
+        HStack(spacing: 7) {
+            Text(entry.method)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(statusColor(for: entry), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(shortURL(entry.url))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text("\(entry.statusCode.map(String.init) ?? "pending") · \(entry.durationText) · \(entry.createdAt.formatted(date: .omitted, time: .standard))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.04))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+    }
+
     private func panelWidth(for size: CGSize) -> CGFloat {
         guard isVisible else {
             return 64
@@ -323,14 +406,14 @@ private struct FloatingAPIDebugOverlay: View {
         guard isVisible else {
             return 36
         }
-        return min(isExpanded ? 360 : 64, max(80, size.height - 24))
+        return min(isExpanded ? 430 : 64, max(80, size.height - 24))
     }
 
     private func panelEstimatedHeight(for size: CGSize) -> CGFloat {
         guard isVisible else {
             return 36
         }
-        return min(isExpanded ? 360 : 64, panelMaxHeight(for: size))
+        return min(isExpanded ? 430 : 64, panelMaxHeight(for: size))
     }
 
     private func boundedOffset(for size: CGSize, proposed proposedOffset: CGSize? = nil) -> CGSize {
@@ -399,32 +482,36 @@ private struct FloatingAPIDebugOverlay: View {
     }
 
     private var latestTitle: String {
-        guard let latestLog else {
+        guard let selectedLog = selectedLog ?? latestLog else {
             return "대기 중"
         }
 
-        return "\(latestLog.method) \(shortURL(latestLog.url))"
+        return "\(selectedLog.method) \(shortURL(selectedLog.url))"
     }
 
     private var latestSubtitle: String {
-        guard let latestLog else {
+        guard let selectedLog = selectedLog ?? latestLog else {
             return "최근 요청/응답 없음"
         }
 
-        let status = latestLog.statusCode.map(String.init) ?? "pending"
-        return "\(status) · \(latestLog.durationText)"
+        let status = selectedLog.statusCode.map(String.init) ?? "pending"
+        return "\(status) · \(selectedLog.durationText) · \(recentLogs.count) logs"
     }
 
     private var statusColor: Color {
-        guard let latestLog else {
+        guard let selectedLog = selectedLog ?? latestLog else {
             return .secondary
         }
 
-        if latestLog.isError {
+        return statusColor(for: selectedLog)
+    }
+
+    private func statusColor(for entry: APITrafficLogEntry) -> Color {
+        if entry.isError {
             return .red
         }
 
-        guard let statusCode = latestLog.statusCode else {
+        guard let statusCode = entry.statusCode else {
             return .orange
         }
 
