@@ -988,15 +988,16 @@ final class AppState: ObservableObject {
     init(
         settingsStore: SettingsStore = SettingsStore(),
         remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
-        notificationService: NotificationServicing = NotificationService(),
-        cloudSyncProvider: CloudSyncProviding = DefaultCloudSyncProvider(),
-        platformEffectsProvider: AppPlatformEffectsProviding = DefaultAppPlatformEffectsProvider(),
-        clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
-        appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
-        appClock: AppClockProviding = SystemAppClockProvider(),
-        appIdentifierProvider: AppIdentifierProviding = UUIDAppIdentifierProvider(),
-        appTimeZoneProvider: AppTimeZoneProviding = SystemAppTimeZoneProvider(),
-        appSleepProvider: AppSleepProviding = TaskAppSleepProvider(),
+        runtimeDependencies: AppRuntimeDependencies = .live,
+        notificationService: NotificationServicing? = nil,
+        cloudSyncProvider: CloudSyncProviding? = nil,
+        platformEffectsProvider: AppPlatformEffectsProviding? = nil,
+        clipboardProvider: ClipboardProviding? = nil,
+        appNotificationEventProvider: AppNotificationEventProviding? = nil,
+        appClock: AppClockProviding? = nil,
+        appIdentifierProvider: AppIdentifierProviding? = nil,
+        appTimeZoneProvider: AppTimeZoneProviding? = nil,
+        appSleepProvider: AppSleepProviding? = nil,
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1020,6 +1021,15 @@ final class AppState: ObservableObject {
         appErrorHandlingUseCase: AppErrorHandlingUseCase = AppErrorHandlingUseCase(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
+        let notificationService = notificationService ?? runtimeDependencies.notificationService
+        let cloudSyncProvider = cloudSyncProvider ?? runtimeDependencies.cloudSyncProvider
+        let platformEffectsProvider = platformEffectsProvider ?? runtimeDependencies.platformEffectsProvider
+        let clipboardProvider = clipboardProvider ?? runtimeDependencies.clipboardProvider
+        let appNotificationEventProvider = appNotificationEventProvider ?? runtimeDependencies.appNotificationEventProvider
+        let appClock = appClock ?? runtimeDependencies.appClock
+        let appIdentifierProvider = appIdentifierProvider ?? runtimeDependencies.appIdentifierProvider
+        let appTimeZoneProvider = appTimeZoneProvider ?? runtimeDependencies.appTimeZoneProvider
+        let appSleepProvider = appSleepProvider ?? runtimeDependencies.appSleepProvider
         let localUseCases = AppLocalUseCases(
             settingsStore: settingsStore,
             appLogRepository: appLogRepository,

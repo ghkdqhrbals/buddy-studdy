@@ -153,6 +153,30 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotConstructDefaultRuntimeImplementationsDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "NotificationService()",
+            "DefaultCloudSyncProvider()",
+            "DefaultAppPlatformEffectsProvider()",
+            "DefaultClipboardProvider()",
+            "DefaultAppNotificationEventProvider()",
+            "SystemAppClockProvider()",
+            "UUIDAppIdentifierProvider()",
+            "SystemAppTimeZoneProvider()",
+            "TaskAppSleepProvider()",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must receive default runtime implementations from AppRuntimeDependencies instead of constructing them directly: \(violations)"
+        )
+    }
+
     func testAppStateUsesClockProviderForCurrentTime() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
