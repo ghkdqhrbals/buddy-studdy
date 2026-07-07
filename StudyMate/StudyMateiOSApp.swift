@@ -145,6 +145,7 @@ private struct FloatingAPIDebugOverlay: View {
     @State private var isVisible = true
     @State private var isExpanded = false
     @State private var committedOffset = CGSize(width: 12, height: 74)
+    @State private var suppressTapAction = false
     @GestureState private var dragTranslation: CGSize = .zero
 
     private var latestLog: APITrafficLogEntry? {
@@ -153,14 +154,13 @@ private struct FloatingAPIDebugOverlay: View {
 
     var body: some View {
         GeometryReader { geometry in
-            content
+            content(for: geometry.size)
                 .frame(width: panelWidth(for: geometry.size), alignment: .leading)
                 .frame(maxHeight: panelMaxHeight(for: geometry.size))
                 .offset(
                     x: displayOffset(for: geometry.size).width,
                     y: displayOffset(for: geometry.size).height
                 )
-                .simultaneousGesture(dragGesture(in: geometry.size))
                 .animation(.smooth(duration: 0.18), value: isExpanded)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(true)
@@ -177,12 +177,14 @@ private struct FloatingAPIDebugOverlay: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(for size: CGSize) -> some View {
         if isVisible {
-            panel
+            panel(in: size)
         } else {
             Button {
-                isVisible = true
+                runTapAction {
+                    isVisible = true
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text("API")
@@ -197,14 +199,17 @@ private struct FloatingAPIDebugOverlay: View {
                 .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(dragGesture(in: size))
         }
     }
 
-    private var panel: some View {
+    private func panel(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Button {
-                    isExpanded.toggle()
+                    runTapAction {
+                        isExpanded.toggle()
+                    }
                 } label: {
                     Text("API")
                         .font(.caption.weight(.bold))
@@ -216,7 +221,9 @@ private struct FloatingAPIDebugOverlay: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    isExpanded.toggle()
+                    runTapAction {
+                        isExpanded.toggle()
+                    }
                 } label: {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -242,8 +249,10 @@ private struct FloatingAPIDebugOverlay: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    isExpanded = false
-                    isVisible = false
+                    runTapAction {
+                        isExpanded = false
+                        isVisible = false
+                    }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.caption.weight(.bold))
@@ -253,6 +262,8 @@ private struct FloatingAPIDebugOverlay: View {
                 }
                 .buttonStyle(.plain)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(dragGesture(in: size))
 
             if isExpanded {
                 Divider()
@@ -351,6 +362,11 @@ private struct FloatingAPIDebugOverlay: View {
                 transaction.disablesAnimations = true
                 state = value.translation
             }
+            .onChanged { value in
+                if dragDistance(value.translation) > 6 {
+                    suppressTapAction = true
+                }
+            }
             .onEnded { value in
                 let startOffset = boundedOffset(for: size)
                 let proposedOffset = CGSize(
@@ -363,7 +379,23 @@ private struct FloatingAPIDebugOverlay: View {
                 withTransaction(transaction) {
                     committedOffset = boundedOffset(for: size, proposed: proposedOffset)
                 }
+                if suppressTapAction {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        suppressTapAction = false
+                    }
+                }
             }
+    }
+
+    private func runTapAction(_ action: () -> Void) {
+        guard !suppressTapAction else {
+            return
+        }
+        action()
+    }
+
+    private func dragDistance(_ translation: CGSize) -> CGFloat {
+        hypot(translation.width, translation.height)
     }
 
     private var latestTitle: String {
