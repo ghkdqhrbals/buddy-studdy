@@ -6,6 +6,9 @@ data class TermsResponse(
     val title: String,
     val url: String,
     val contentHash: String,
+    val required: Boolean = true,
+    val mutable: Boolean = false,
+    val agreed: Boolean = false,
 )
 
 data class TermsAgreementCommand(
@@ -29,4 +32,14 @@ data class PermissionEvaluationResponse(
 
 data class PermissionEvaluationsResponse(
     val permissions: List<PermissionEvaluationResponse>,
+)
+
+data class NotificationPreferenceResponse(
+    val key: String,
+    val enabled: Boolean,
+)
+
+data class NotificationPreferenceCommand(
+    val key: String,
+    val enabled: Boolean,
 )

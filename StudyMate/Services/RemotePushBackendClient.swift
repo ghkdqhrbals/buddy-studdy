@@ -178,6 +178,14 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations
 
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference]
+
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference
+
     func fetchNotifications(
         registration: RemotePushRegistration,
         limit: Int,
@@ -510,6 +518,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendPermissionEvaluations.self, from: data)
+    }
+
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference] {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notification-preferences")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode([BackendNotificationPreference].self, from: data)
+    }
+
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notification-preferences")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(NotificationPreferenceRequest(key: key, enabled: enabled))
+        let data = try await perform(request)
+        return try decoder.decode(BackendNotificationPreference.self, from: data)
     }
 
     func updateSchedule(
@@ -1438,6 +1472,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var source: String
     }
 
+    private struct NotificationPreferenceRequest: Encodable {
+        var key: String
+        var enabled: Bool
+    }
+
     private struct ScheduleRequest: Encodable {
         var topic: String
         var difficultyLevel: Int
@@ -1851,6 +1890,7 @@ struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
 struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var id: Int
     var displayName: String
+    var status: String
     var provider: String
     var email: String
     var bio: String
@@ -1862,6 +1902,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case displayName
+        case status
         case provider
         case email
         case bio
@@ -1874,6 +1915,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     init(
         id: Int,
         displayName: String,
+        status: String = "ANONYMOUS",
         provider: String = "ANONYMOUS",
         email: String = "",
         bio: String,
@@ -1884,6 +1926,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     ) {
         self.id = id
         self.displayName = displayName
+        self.status = status
         self.provider = provider
         self.email = email
         self.bio = bio
@@ -1897,6 +1940,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         displayName = try container.decode(String.self, forKey: .displayName)
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "ACTIVE"
         provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "ANONYMOUS"
         email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
         bio = try container.decodeIfPresent(String.self, forKey: .bio) ?? ""
@@ -2349,8 +2393,18 @@ struct BackendTerms: Codable, Equatable, Identifiable {
     var title: String
     var url: URL
     var contentHash: String
+    var required: Bool = true
+    var mutable: Bool = false
+    var agreed: Bool = false
 
     var id: String { "\(code):\(version):\(contentHash)" }
+}
+
+struct BackendNotificationPreference: Codable, Equatable, Identifiable {
+    var key: String
+    var enabled: Bool
+
+    var id: String { key }
 }
 
 struct BackendPermissionEvaluation: Decodable, Equatable, Identifiable {

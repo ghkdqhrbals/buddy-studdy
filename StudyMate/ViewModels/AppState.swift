@@ -79,6 +79,10 @@ final class AppState: ObservableObject {
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var isCommunitySignedIn: Bool
+    @Published var activeTerms: [BackendTerms] = []
+    @Published var notificationPreferences: [BackendNotificationPreference] = []
+    @Published var isLoadingTermsAndPreferences = false
+    @Published var isRequiredTermsGatePresented = false
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var searchState = SearchStateStore()
 
@@ -2505,6 +2509,7 @@ final class AppState: ObservableObject {
         )
 
         await refreshPermissionEvaluations(reason: reason)
+        await refreshTermsAndNotificationPreferences(reason: reason)
         await refreshBackendStudyIfPossible(
             updateVisibleQuestion: true,
             preserveLocalSettings: false
@@ -2771,6 +2776,7 @@ final class AppState: ObservableObject {
         var nextState = communityProfileState
         nextState.applyProfile(resolvedProfile)
         communityProfileState = nextState
+        isRequiredTermsGatePresented = resolvedProfile.status == "PENDING_TERMS"
         applyProfilePageAccess(resolvedProfile)
         logAuthTrace(
             "community_profile_apply_end",
@@ -5146,6 +5152,10 @@ final class AppState: ObservableObject {
                 }
             )
             await refreshPermissionEvaluations(reason: "terms-agreement")
+            await refreshTermsAndNotificationPreferences(reason: "terms-agreement")
+            if activeTerms.filter(\.required).allSatisfy(\.agreed) {
+                isRequiredTermsGatePresented = false
+            }
             if isAgreed, let retry = pendingTermsRequirementRetry {
                 pendingTermsRequirementRetry = nil
                 await retry()
@@ -5155,6 +5165,66 @@ final class AppState: ObservableObject {
         } catch {
             handleAppError(error, fallback: "", target: .none)
             log(.warning, "약관 동의 상태 저장 실패: code=\(code), error=\(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func refreshTermsAndNotificationPreferences(reason: String) async {
+        guard isCommunitySessionActive else {
+            activeTerms = []
+            notificationPreferences = []
+            return
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "terms-preferences-\(reason)") else {
+            log(.warning, "약관/알림 설정 조회를 위한 백엔드 등록이 없습니다. reason=\(reason)")
+            return
+        }
+
+        isLoadingTermsAndPreferences = true
+        defer { isLoadingTermsAndPreferences = false }
+
+        do {
+            let terms = try await termsUseCase.fetchActiveTerms(registration: registration)
+            let preferences = try await termsUseCase.fetchNotificationPreferences(registration: registration)
+            activeTerms = terms
+            notificationPreferences = preferences
+            log(.info, "약관/알림 설정을 갱신했습니다. terms=\(terms.count), preferences=\(preferences.count), reason=\(reason)")
+        } catch {
+            handleAppError(error, fallback: "", target: .none)
+            log(.warning, "약관/알림 설정 갱신 실패: \(error.localizedDescription), reason=\(reason)")
+        }
+    }
+
+    func saveNotificationPreference(key: String, enabled: Bool) async -> Bool {
+        guard isCommunitySessionActive else {
+            log(.warning, "알림 설정은 로그인 후 저장할 수 있습니다. key=\(key)")
+            return false
+        }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "notification-preference") else {
+            log(.warning, "알림 설정 저장을 위한 백엔드 등록이 없습니다. key=\(key)")
+            return false
+        }
+
+        do {
+            let preference = try await termsUseCase.saveNotificationPreference(
+                registration: registration,
+                key: key,
+                enabled: enabled
+            )
+            var nextPreferences = notificationPreferences
+            if let index = nextPreferences.firstIndex(where: { $0.key == preference.key }) {
+                nextPreferences[index] = preference
+            } else {
+                nextPreferences.append(preference)
+            }
+            notificationPreferences = nextPreferences
+            log(.info, "알림 설정을 저장했습니다. key=\(key), enabled=\(enabled)")
+            return true
+        } catch {
+            handleAppError(error, fallback: "", target: .none)
+            log(.warning, "알림 설정 저장 실패: key=\(key), error=\(error.localizedDescription)")
             return false
         }
     }

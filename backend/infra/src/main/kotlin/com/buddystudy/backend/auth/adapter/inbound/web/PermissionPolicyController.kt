@@ -1,9 +1,12 @@
 package com.buddystudy.backend.auth.adapter.inbound.web
 
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceResponse
 import com.buddystudy.backend.auth.application.model.PermissionEvaluationsResponse
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
 import com.buddystudy.backend.auth.application.model.TermsResponse
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
+import com.buddystudy.backend.auth.application.port.inbound.NotificationPreferenceUseCase
 import com.buddystudy.backend.auth.application.port.inbound.PermissionEvaluationUseCase
 import com.buddystudy.backend.auth.application.port.inbound.TermsUseCase
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
@@ -23,10 +26,11 @@ import java.time.Instant
 class PermissionPolicyController(
     private val terms: TermsUseCase,
     private val permissions: PermissionEvaluationUseCase,
+    private val notificationPreferences: NotificationPreferenceUseCase,
 ) {
     @GetMapping("/terms/active")
-    fun activeTerms(): List<TermsResponse> =
-        terms.activeTerms()
+    fun activeTerms(authentication: Authentication): List<TermsResponse> =
+        terms.activeTerms(authentication.principalOrThrow())
 
     @PostMapping("/terms/agreements")
     fun agreements(
@@ -65,10 +69,32 @@ class PermissionPolicyController(
             ),
         )
     }
+
+    @GetMapping("/notification-preferences")
+    fun notificationPreferences(authentication: Authentication): List<NotificationPreferenceResponse> =
+        notificationPreferences.notificationPreferences(authentication.principalOrThrow())
+
+    @PostMapping("/notification-preferences")
+    fun saveNotificationPreference(
+        authentication: Authentication,
+        @RequestBody body: NotificationPreferenceRequest,
+    ): NotificationPreferenceResponse =
+        notificationPreferences.saveNotificationPreference(
+            authentication.principalOrThrow(),
+            NotificationPreferenceCommand(
+                key = body.key,
+                enabled = body.enabled,
+            )
+        )
 }
 
 data class TermsAgreementRequest(
     val code: String = "",
     val action: String = "AGREED",
     val source: String = "SETTINGS",
+)
+
+data class NotificationPreferenceRequest(
+    val key: String = "",
+    val enabled: Boolean = false,
 )

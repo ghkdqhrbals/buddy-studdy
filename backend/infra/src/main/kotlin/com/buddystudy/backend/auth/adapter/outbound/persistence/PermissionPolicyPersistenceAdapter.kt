@@ -4,6 +4,7 @@ import com.buddystudy.backend.auth.application.permission.PermissionRequirementO
 import com.buddystudy.backend.auth.application.permission.PermissionRequirementType
 import com.buddystudy.backend.auth.application.port.outbound.ActiveTermsProjection
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationQueryPort
+import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceCommandPort
 import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQuotaQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionRequirementProjection
@@ -28,6 +29,7 @@ class PermissionPolicyPersistenceAdapter(
     TermsAgreementQueryPort,
     TermsAgreementCommandPort,
     NotificationPreferenceQueryPort,
+    NotificationPreferenceCommandPort,
     PermissionQuotaQueryPort,
     EmailVerificationQueryPort,
     UserStatusQueryPort {
@@ -57,28 +59,31 @@ class PermissionPolicyPersistenceAdapter(
     override fun activeTerms(now: Instant): List<ActiveTermsProjection> =
         jdbc.query(
             """
-            select distinct on (code) id, code, version, title, url, content_hash
+            select distinct on (code) id, code, version, title, url, content_hash, required, mutable
               from terms
              where effective_at <= ?
                and (retired_at is null or retired_at > ?)
              order by code, effective_at desc, id desc
             """.trimIndent(),
             { rs, _ ->
-                ActiveTermsProjection(
-                    id = rs.getLong("id"),
-                    code = rs.getString("code"),
-                    version = rs.getString("version"),
-                    title = rs.getString("title"),
-                    url = rs.getString("url"),
-                    contentHash = rs.getString("content_hash"),
-                )
+                rs.toActiveTermsProjection()
             },
             Timestamp.from(now),
             Timestamp.from(now),
         )
 
+    override fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> =
+        activeTerms(now).map { term ->
+            term.copy(agreed = hasAgreement(userId, deviceId, term.id))
+        }
+
     override fun activeTerms(code: String, now: Instant): ActiveTermsProjection? =
         activeTerms(now).firstOrNull { it.code == code.trim().uppercase() }
+
+    override fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean =
+        activeTerms(now)
+            .filter { it.required }
+            .all { hasAgreement(userId, deviceId, it.id) }
 
     override fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean {
         val action = nullableQuery {
@@ -141,6 +146,48 @@ class PermissionPolicyPersistenceAdapter(
             appVersion,
             Timestamp.from(now),
         )
+    }
+
+    override fun savePreference(
+        userId: Long?,
+        deviceId: String,
+        key: String,
+        enabled: Boolean,
+        now: Instant,
+    ) {
+        if (userId != null) {
+            jdbc.update(
+                """
+                insert into notification_preferences (user_id, device_id, preference_key, enabled, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?)
+                on conflict (user_id, preference_key) where user_id is not null
+                do update set enabled = excluded.enabled,
+                              device_id = excluded.device_id,
+                              updated_at = excluded.updated_at
+                """.trimIndent(),
+                userId,
+                deviceId,
+                key,
+                enabled,
+                Timestamp.from(now),
+                Timestamp.from(now),
+            )
+        } else {
+            jdbc.update(
+                """
+                insert into notification_preferences (user_id, device_id, preference_key, enabled, created_at, updated_at)
+                values (null, ?, ?, ?, ?, ?)
+                on conflict (device_id, preference_key) where user_id is null
+                do update set enabled = excluded.enabled,
+                              updated_at = excluded.updated_at
+                """.trimIndent(),
+                deviceId,
+                key,
+                enabled,
+                Timestamp.from(now),
+                Timestamp.from(now),
+            )
+        }
     }
 
     override fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean {
@@ -230,6 +277,18 @@ class PermissionPolicyPersistenceAdapter(
             operator = PermissionRequirementOperator.valueOf(getString("operator")),
             value = getString("requirement_value"),
             failureCode = ApiErrorCode.valueOf(getString("failure_code")),
+        )
+
+    private fun ResultSet.toActiveTermsProjection(): ActiveTermsProjection =
+        ActiveTermsProjection(
+            id = getLong("id"),
+            code = getString("code"),
+            version = getString("version"),
+            title = getString("title"),
+            url = getString("url"),
+            contentHash = getString("content_hash"),
+            required = getBoolean("required"),
+            mutable = getBoolean("mutable"),
         )
 
     private fun <T> nullableQuery(block: () -> T): T? =

@@ -12,6 +12,12 @@ protocol TermsRepository {
     ) async throws -> BackendPermissionEvaluations
 
     func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference]
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference
 }
 
 @MainActor
@@ -43,6 +49,22 @@ struct RemoteTermsRepository: TermsRepository {
     func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations {
         try await backendClient.fetchPermissionEvaluations(registration: registration)
     }
+
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference] {
+        try await backendClient.fetchNotificationPreferences(registration: registration)
+    }
+
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference {
+        try await backendClient.saveNotificationPreference(
+            registration: registration,
+            key: key,
+            enabled: enabled
+        )
+    }
 }
 
 @MainActor
@@ -73,6 +95,22 @@ struct TermsUseCase {
 
     func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations {
         try await repository.fetchPermissionEvaluations(registration: registration)
+    }
+
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference] {
+        try await repository.fetchNotificationPreferences(registration: registration)
+    }
+
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference {
+        try await repository.saveNotificationPreference(
+            registration: registration,
+            key: key,
+            enabled: enabled
+        )
     }
 }
 

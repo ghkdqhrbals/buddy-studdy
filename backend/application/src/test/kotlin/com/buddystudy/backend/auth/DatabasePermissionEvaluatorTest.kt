@@ -80,6 +80,8 @@ class DatabasePermissionEvaluatorTest {
             title = "서비스 이용약관",
             url = "https://example.com/terms",
             contentHash = "sha256:test",
+            required = true,
+            mutable = false,
         )
 
         val result = evaluator.evaluate(principal(status = "ACTIVE"), Permissions.STUDY_CREATE)
@@ -145,6 +147,8 @@ class DatabasePermissionEvaluatorTest {
             title = "서비스 이용약관",
             url = "https://example.com/terms",
             contentHash = "sha256:new",
+            required = true,
+            mutable = false,
         )
         val sameTokenPrincipal = principal(status = "ACTIVE")
 
@@ -172,6 +176,8 @@ class DatabasePermissionEvaluatorTest {
             title = "서비스 이용약관",
             url = "https://example.com/terms",
             contentHash = "sha256:new",
+            required = true,
+            mutable = false,
         )
         terms.agreedTermIds += 21
 
@@ -307,8 +313,12 @@ class DatabasePermissionEvaluatorTest {
         val activeByCode = mutableMapOf<String, ActiveTermsProjection>()
         val agreedTermIds = mutableSetOf<Long>()
         override fun activeTerms(now: Instant): List<ActiveTermsProjection> = activeByCode.values.toList()
+        override fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> =
+            activeTerms(now).map { it.copy(agreed = hasAgreement(userId, deviceId, it.id)) }
         override fun activeTerms(code: String, now: Instant): ActiveTermsProjection? = activeByCode[code]
         override fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean = termsId in agreedTermIds
+        override fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean =
+            activeTerms(now).filter { it.required }.all { it.id in agreedTermIds }
     }
 
     private class FakeNotificationPreferenceQueryPort : NotificationPreferenceQueryPort {

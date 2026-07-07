@@ -27,6 +27,9 @@ data class ActiveTermsProjection(
     val title: String,
     val url: String,
     val contentHash: String,
+    val required: Boolean,
+    val mutable: Boolean,
+    val agreed: Boolean = false,
 )
 
 interface PermissionQueryPort {
@@ -39,8 +42,10 @@ interface PermissionRequirementQueryPort {
 
 interface TermsAgreementQueryPort {
     fun activeTerms(now: Instant): List<ActiveTermsProjection>
+    fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection>
     fun activeTerms(code: String, now: Instant): ActiveTermsProjection?
     fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean
+    fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean
 }
 
 interface TermsAgreementCommandPort {
@@ -53,6 +58,16 @@ interface TermsAgreementCommandPort {
         ipAddress: String?,
         userAgent: String?,
         appVersion: String?,
+        now: Instant,
+    )
+}
+
+interface NotificationPreferenceCommandPort {
+    fun savePreference(
+        userId: Long?,
+        deviceId: String,
+        key: String,
+        enabled: Boolean,
         now: Instant,
     )
 }

@@ -1957,9 +1957,43 @@ struct AppStrings {
     var loginAgreementPrefix: String { text("로그인하면", "By signing in, you agree to") }
     var loginAgreementConjunction: String { text("및", "and") }
     var loginAgreementSuffix: String { text("에 동의하게됩니다.", ".") }
-    var termsOfService: String { text("사용 약관", "Terms of Service") }
-    var privacyPolicy: String { text("개인정보 취급 방침", "Privacy Policy") }
+    var termsOfService: String { text("서비스 이용약관", "Terms of Service") }
+    var privacyPolicy: String { text("개인정보 처리 방침", "Privacy Policy") }
     var termsAndConsents: String { text("약관 및 수신 동의", "Terms and Consents") }
+    var operatingTerms: String { text("운영 약관", "Terms") }
+    var notificationSettings: String { text("알림 설정", "Notification Settings") }
+    var appVersion: String { text("버전", "Version") }
+    var requiredTermsBadge: String { text("필수", "Required") }
+    var optionalTermsBadge: String { text("선택", "Optional") }
+    var agreeAndStart: String { text("동의하고 시작하기", "Agree and Start") }
+    var agreeAllAndStart: String { text("모두 동의하고 시작하기", "Agree All and Start") }
+    var nextTime: String { text("다음에", "Later") }
+    var requiredTermsGateTitle: String {
+        text(
+            "BuddyStudy 사용을 위해 꼭 필요한 동의만 추렸어요",
+            "Only the required BuddyStudy agreements are shown"
+        )
+    }
+    var requiredTermsGateSubtitle: String {
+        text(
+            "필수 약관은 서비스 이용에 필요하며, 마케팅 정보 수신 동의는 선택입니다.",
+            "Required terms are needed to use the service. Marketing consent is optional."
+        )
+    }
+    var marketingNotifications: String { text("마케팅 정보 수신 동의", "Marketing communications") }
+    var marketingNotificationsHelp: String {
+        text(
+            "이벤트, 기능 업데이트 등 마케팅성 안내 수신 여부를 관리합니다.",
+            "Manage marketing updates such as events and feature announcements."
+        )
+    }
+    var questionNotifications: String { text("질문 알림", "Question notifications") }
+    var questionNotificationsHelp: String {
+        text(
+            "학습 질문 알림은 시스템 알림 권한과 학습 설정에 따라 전송됩니다.",
+            "Study question notifications depend on system permission and study settings."
+        )
+    }
     var infoNotificationConsent: String { text("정보성 알림 수신 동의", "Informational notifications") }
     var marketingNotificationConsent: String { text("마케팅 알림 수신 동의", "Marketing notifications") }
     var nightMarketingNotificationConsent: String { text("야간 마케팅 알림 수신 동의", "Night marketing notifications") }

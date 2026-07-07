@@ -4554,6 +4554,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchSettingsCallCount = 0
     var fetchOpenAIModelOptionsCallCount = 0
     var savedTermsAgreements: [(code: String, action: BackendTermsAgreementAction)] = []
+    var savedNotificationPreferences: [(key: String, enabled: Bool)] = []
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
     var markedNotificationIDs: [String] = []
@@ -4630,6 +4631,19 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms] {
         []
+    }
+
+    func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference] {
+        []
+    }
+
+    func saveNotificationPreference(
+        registration: RemotePushRegistration,
+        key: String,
+        enabled: Bool
+    ) async throws -> BackendNotificationPreference {
+        savedNotificationPreferences.append((key: key, enabled: enabled))
+        return BackendNotificationPreference(key: key, enabled: enabled)
     }
 
     func saveTermsAgreement(

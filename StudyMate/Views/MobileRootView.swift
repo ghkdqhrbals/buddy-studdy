@@ -125,6 +125,10 @@ struct MobileRootView: View {
                     .frame(width: 0, height: 0)
                 }
                 #endif
+                .sheet(isPresented: $appState.isRequiredTermsGatePresented) {
+                    MobileRequiredTermsGateSheet()
+                        .environmentObject(appState)
+                }
             }
         }
     }
@@ -261,6 +265,178 @@ private struct MobileInlineLoginButtonLabel: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct MobileRequiredTermsGateSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var marketingAgreed = false
+    @State private var isSaving = false
+    @State private var legalWebRoute: MobileLegalWebRoute?
+
+    private var strings: AppStrings { appState.strings }
+
+    private var termsOfService: BackendTerms? {
+        appState.activeTerms.first { $0.code == "TERMS_OF_SERVICE" }
+    }
+
+    private var privacyPolicy: BackendTerms? {
+        appState.activeTerms.first { $0.code == "PRIVACY_POLICY" }
+    }
+
+    private var marketingTerms: BackendTerms? {
+        appState.activeTerms.first { $0.code == "MARKETING_NOTIFICATION" }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(strings.requiredTermsGateTitle)
+                        .font(.title2.weight(.bold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(strings.requiredTermsGateSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 0) {
+                    requiredGateRow(
+                        title: strings.termsOfService,
+                        badge: strings.requiredTermsBadge,
+                        isChecked: true,
+                        url: termsOfService?.url ?? AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                    )
+                    Divider().padding(.leading, 34)
+                    requiredGateRow(
+                        title: strings.privacyPolicy,
+                        badge: strings.requiredTermsBadge,
+                        isChecked: true,
+                        url: privacyPolicy?.url ?? AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                    )
+                    if let marketingTerms {
+                        Divider().padding(.leading, 34)
+                        requiredGateRow(
+                            title: strings.marketingNotifications,
+                            badge: strings.optionalTermsBadge,
+                            isChecked: marketingAgreed,
+                            url: marketingTerms.url,
+                            togglesSelection: true
+                        )
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Task { await agreeRequiredTerms() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if isSaving {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text(strings.agreeAllAndStart)
+                                .font(.headline.weight(.bold))
+                        }
+                        Spacer()
+                    }
+                    .frame(minHeight: 54)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+
+                Button(strings.nextTime) {
+                    appState.isRequiredTermsGatePresented = false
+                    dismiss()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .disabled(isSaving)
+            }
+            .padding(24)
+            .navigationTitle(strings.operatingTerms)
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                await appState.refreshTermsAndNotificationPreferences(reason: "required-terms-gate")
+                marketingAgreed = marketingTerms?.agreed == true
+            }
+            .sheet(item: $legalWebRoute) { route in
+                #if os(iOS)
+                MobileLegalWebView(url: route.url)
+                    .ignoresSafeArea()
+                #else
+                Link(route.url.absoluteString, destination: route.url)
+                    .padding()
+                #endif
+            }
+        }
+    }
+
+    private func requiredGateRow(
+        title: String,
+        badge: String,
+        isChecked: Bool,
+        url: URL,
+        togglesSelection: Bool = false
+    ) -> some View {
+        Button {
+            if togglesSelection {
+                marketingAgreed.toggle()
+            } else {
+                legalWebRoute = MobileLegalWebRoute(url: url)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isChecked ? Color.accentColor : Color.secondary.opacity(0.45))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                    Text("[\(badge)]")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    legalWebRoute = MobileLegalWebRoute(url: url)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func agreeRequiredTerms() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        let requiredCodes = ["TERMS_OF_SERVICE", "PRIVACY_POLICY"]
+        for code in requiredCodes {
+            guard await appState.saveTermsAgreement(code: code, isAgreed: true, source: .requiredGate) else {
+                return
+            }
+        }
+        if marketingAgreed {
+            _ = await appState.saveTermsAgreement(code: "MARKETING_NOTIFICATION", isAgreed: true, source: .requiredGate)
+        }
+        await appState.refreshTermsAndNotificationPreferences(reason: "required-terms-complete")
+        appState.isRequiredTermsGatePresented = false
+        dismiss()
     }
 }
 
@@ -2081,11 +2257,6 @@ private struct MobileProfileSettingsSheet: View {
     @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
     @State private var draftAvatarColorSeed = ""
     @State private var allowPublicQuestionsAccess = true
-    @State private var hasAgreedTermsOfService = false
-    @State private var hasAgreedPrivacyPolicy = false
-    @State private var hasAgreedInfoNotification = false
-    @State private var hasAgreedMarketingNotification = false
-    @State private var hasAgreedNightMarketingNotification = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
     @State private var isShowingAvatarCustomization = false
@@ -2139,6 +2310,22 @@ private struct MobileProfileSettingsSheet: View {
         default:
             let provider = profile.provider.trimmingCharacters(in: .whitespacesAndNewlines)
             return provider.isEmpty ? profile.displayName : provider.capitalized
+        }
+    }
+
+    private var appVersionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        switch (version?.isEmpty == false ? version : nil, build?.isEmpty == false ? build : nil) {
+        case let (.some(version), .some(build)):
+            return "\(version) (\(build))"
+        case let (.some(version), .none):
+            return version
+        case let (.none, .some(build)):
+            return build
+        case (.none, .none):
+            return "-"
         }
     }
 
@@ -2315,45 +2502,38 @@ private struct MobileProfileSettingsSheet: View {
                     }
 
                     Section {
-                        termsConsentRow(
-                            title: strings.termsOfService,
-                            code: "TERMS_OF_SERVICE",
-                            isOn: $hasAgreedTermsOfService,
-                            url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage),
-                            strings: strings
-                        )
-                        termsConsentRow(
-                            title: strings.privacyPolicy,
-                            code: "PRIVACY_POLICY",
-                            isOn: $hasAgreedPrivacyPolicy,
-                            url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage),
-                            strings: strings
-                        )
-                        termsConsentRow(
-                            title: strings.infoNotificationConsent,
-                            code: "INFO_NOTIFICATION",
-                            isOn: $hasAgreedInfoNotification,
-                            url: AppLegalLinks.infoNotificationURL(language: appState.settings.appLanguage),
-                            strings: strings
-                        )
-                        termsConsentRow(
-                            title: strings.marketingNotificationConsent,
-                            code: "MARKETING_NOTIFICATION",
-                            isOn: $hasAgreedMarketingNotification,
-                            url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
-                            strings: strings
-                        )
-                        termsConsentRow(
-                            title: strings.nightMarketingNotificationConsent,
-                            code: "NIGHT_MARKETING_NOTIFICATION",
-                            isOn: $hasAgreedNightMarketingNotification,
-                            url: AppLegalLinks.nightMarketingNotificationURL(language: appState.settings.appLanguage),
-                            strings: strings
-                        )
-                    } header: {
-                        Text(strings.termsAndConsents)
-                    } footer: {
-                        Text(strings.termsConsentHelp)
+                        NavigationLink {
+                            MobileTermsSettingsView()
+                        } label: {
+                            Text(strings.operatingTerms)
+                        }
+
+                        Button {
+                            legalWebRoute = MobileLegalWebRoute(url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage))
+                        } label: {
+                            HStack {
+                                Text(strings.privacyPolicy)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            MobileNotificationSettingsView()
+                        } label: {
+                            Text(strings.notificationSettings)
+                        }
+
+                        HStack {
+                            Text(strings.appVersion)
+                            Spacer()
+                            Text(appVersionText)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Section {
@@ -2428,12 +2608,11 @@ private struct MobileProfileSettingsSheet: View {
                     extra: ["hasProfile=\(appState.communityProfile != nil)"]
                 )
                 resetDraftProfile()
-                resetTermsAgreementDraft()
                 Task {
                     isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
+                    await appState.refreshTermsAndNotificationPreferences(reason: "profile-settings")
                     resetDraftProfile()
-                    resetTermsAgreementDraft()
                     isLoadingProfileDraft = false
                 }
             }
@@ -2450,7 +2629,6 @@ private struct MobileProfileSettingsSheet: View {
 
                 guard let profile else {
                     resetDraftProfile()
-                    resetTermsAgreementDraft()
                     return
                 }
 
@@ -2458,7 +2636,6 @@ private struct MobileProfileSettingsSheet: View {
                 draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
                 draftAvatarColorSeed = profile.avatarColorSeed
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
-                resetTermsAgreementDraft()
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
                 appState.logMobileAuthView(
@@ -2505,82 +2682,12 @@ private struct MobileProfileSettingsSheet: View {
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
     }
 
-    private func resetTermsAgreementDraft() {
-        hasAgreedTermsOfService = loadTermsAgreement(code: "TERMS_OF_SERVICE")
-        hasAgreedPrivacyPolicy = loadTermsAgreement(code: "PRIVACY_POLICY")
-        hasAgreedInfoNotification = loadTermsAgreement(code: "INFO_NOTIFICATION")
-        hasAgreedMarketingNotification = loadTermsAgreement(code: "MARKETING_NOTIFICATION")
-        hasAgreedNightMarketingNotification = loadTermsAgreement(code: "NIGHT_MARKETING_NOTIFICATION")
-    }
-
-    private func loadTermsAgreement(code: String) -> Bool {
-        guard let key = termsAgreementCacheKey(code: code) else {
-            return false
-        }
-
-        return UserDefaults.standard.bool(forKey: key)
-    }
-
-    private func saveTermsAgreementCache(code: String, isAgreed: Bool) {
-        guard let key = termsAgreementCacheKey(code: code) else {
-            return
-        }
-
-        UserDefaults.standard.set(isAgreed, forKey: key)
-    }
-
-    private func termsAgreementCacheKey(code: String) -> String? {
-        guard let profileID = appState.communityProfile?.id else {
-            return nil
-        }
-
-        return "termsAgreement.user.\(profileID).\(code)"
-    }
-
     private func profileConfirmationTitle(strings: AppStrings) -> String {
         guard appState.isCommunitySessionActive else {
             return strings.done
         }
 
         return strings.save
-    }
-
-    private func termsConsentRow(
-        title: String,
-        code: String,
-        isOn: Binding<Bool>,
-        url: URL,
-        strings: AppStrings
-    ) -> some View {
-        HStack(spacing: 12) {
-            Toggle(
-                title,
-                isOn: Binding(
-                    get: { isOn.wrappedValue },
-                    set: { newValue in
-                        let previousValue = isOn.wrappedValue
-                        isOn.wrappedValue = newValue
-                        Task {
-                            let didSave = await appState.saveTermsAgreement(
-                                code: code,
-                                isAgreed: newValue,
-                                source: .profile
-                            )
-                            if !didSave {
-                                isOn.wrappedValue = previousValue
-                            } else {
-                                saveTermsAgreementCache(code: code, isAgreed: newValue)
-                            }
-                        }
-                    }
-                )
-            )
-
-            Button(strings.details) {
-                legalWebRoute = MobileLegalWebRoute(url: url)
-            }
-            .buttonStyle(.borderless)
-        }
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
@@ -2660,6 +2767,236 @@ private struct MobileProfileSettingsSheet: View {
                 .stroke(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
         }
         .accessibilityLabel(strings.customProfileColor)
+    }
+}
+
+private struct MobileTermsSettingsView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var savingCode: String?
+    @State private var legalWebRoute: MobileLegalWebRoute?
+
+    private var strings: AppStrings { appState.strings }
+
+    private var visibleTerms: [BackendTerms] {
+        let order = ["TERMS_OF_SERVICE", "PRIVACY_POLICY", "MARKETING_NOTIFICATION"]
+        return order.compactMap { code in
+            appState.activeTerms.first { $0.code == code } ?? fallbackTerms(code: code)
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(visibleTerms) { term in
+                    termsRow(term)
+                }
+            } footer: {
+                Text(strings.termsConsentHelp)
+            }
+        }
+        .navigationTitle(strings.operatingTerms)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshTermsAndNotificationPreferences(reason: "terms-settings")
+        }
+        .refreshable {
+            await appState.refreshTermsAndNotificationPreferences(reason: "terms-settings-refresh")
+        }
+        .sheet(item: $legalWebRoute) { route in
+            #if os(iOS)
+            MobileLegalWebView(url: route.url)
+                .ignoresSafeArea()
+            #else
+            Link(route.url.absoluteString, destination: route.url)
+                .padding()
+            #endif
+        }
+    }
+
+    private func termsRow(_ term: BackendTerms) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(title(for: term))
+                        .font(.body.weight(.semibold))
+                    Text(term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(term.required ? Color.secondary : Color.accentColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            (term.required ? Color.secondary.opacity(0.12) : Color.accentColor.opacity(0.12)),
+                            in: Capsule()
+                        )
+                }
+                Text(term.version)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(strings.details) {
+                legalWebRoute = MobileLegalWebRoute(url: term.url)
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.borderless)
+
+            if savingCode == term.code {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { term.required || term.agreed },
+                        set: { nextValue in
+                            guard term.mutable else {
+                                return
+                            }
+                            Task { await saveAgreement(term: term, isAgreed: nextValue) }
+                        }
+                    )
+                )
+                .labelsHidden()
+                .disabled(!term.mutable)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func saveAgreement(term: BackendTerms, isAgreed: Bool) async {
+        savingCode = term.code
+        defer { savingCode = nil }
+        _ = await appState.saveTermsAgreement(code: term.code, isAgreed: isAgreed, source: .profile)
+    }
+
+    private func fallbackTerms(code: String) -> BackendTerms? {
+        switch code {
+        case "TERMS_OF_SERVICE":
+            return BackendTerms(
+                code: code,
+                version: "-",
+                title: strings.termsOfService,
+                url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage),
+                contentHash: "-",
+                required: true,
+                mutable: false,
+                agreed: true
+            )
+        case "PRIVACY_POLICY":
+            return BackendTerms(
+                code: code,
+                version: "-",
+                title: strings.privacyPolicy,
+                url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage),
+                contentHash: "-",
+                required: true,
+                mutable: false,
+                agreed: true
+            )
+        case "MARKETING_NOTIFICATION":
+            return BackendTerms(
+                code: code,
+                version: "-",
+                title: strings.marketingNotifications,
+                url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
+                contentHash: "-",
+                required: false,
+                mutable: true,
+                agreed: false
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func title(for term: BackendTerms) -> String {
+        switch term.code {
+        case "TERMS_OF_SERVICE":
+            return strings.termsOfService
+        case "PRIVACY_POLICY":
+            return strings.privacyPolicy
+        case "MARKETING_NOTIFICATION":
+            return strings.marketingNotifications
+        default:
+            return term.title
+        }
+    }
+}
+
+private struct MobileNotificationSettingsView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var isSavingMarketingPreference = false
+
+    private var strings: AppStrings { appState.strings }
+
+    private var isMarketingEnabled: Bool {
+        appState.notificationPreferences.first { $0.key == "marketing_notification" }?.enabled ?? false
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Button {
+                    appState.openSystemNotificationSettings()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(strings.questionNotifications)
+                                .foregroundStyle(.primary)
+                            Text(strings.questionNotificationsHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(strings.marketingNotifications)
+                        Text(strings.marketingNotificationsHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if isSavingMarketingPreference {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { isMarketingEnabled },
+                                set: { enabled in
+                                    Task { await saveMarketingPreference(enabled: enabled) }
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                    }
+                }
+            }
+        }
+        .navigationTitle(strings.notificationSettings)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshTermsAndNotificationPreferences(reason: "notification-settings")
+        }
+        .refreshable {
+            await appState.refreshTermsAndNotificationPreferences(reason: "notification-settings-refresh")
+        }
+    }
+
+    private func saveMarketingPreference(enabled: Bool) async {
+        isSavingMarketingPreference = true
+        defer { isSavingMarketingPreference = false }
+        _ = await appState.saveNotificationPreference(key: "marketing_notification", enabled: enabled)
     }
 }
 
