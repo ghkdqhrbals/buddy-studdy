@@ -1157,6 +1157,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             requestHeaders: Self.safeHeaderLog(for: request),
             requestBody: Self.safeBodyLog(data: request.httpBody)
         )
+        var didPostTrafficLog = false
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -1178,6 +1179,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     object: self,
                     userInfo: [APITrafficNotification.userInfoKey: errorEntry]
                 )
+                didPostTrafficLog = true
                 throw RemotePushBackendError.invalidResponse
             }
 
@@ -1209,6 +1211,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     object: self,
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
+                didPostTrafficLog = true
                 throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 
@@ -1228,9 +1231,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 object: self,
                 userInfo: [APITrafficNotification.userInfoKey: entry]
             )
+            didPostTrafficLog = true
 
             return data
         } catch {
+            guard !didPostTrafficLog else {
+                throw error
+            }
+
             let durationMS = Date().timeIntervalSince(startedAt) * 1000
             let entry = APITrafficLogEntry(
                 id: requestLog.id,

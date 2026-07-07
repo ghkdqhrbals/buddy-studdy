@@ -44,6 +44,10 @@ struct DeveloperStateStore {
     }
 
     mutating func appendAPITrafficLog(_ entry: APITrafficLogEntry, limit: Int) {
+        if let existingIndex = apiTrafficLogs.firstIndex(where: { $0.id == entry.id }) {
+            apiTrafficLogs.remove(at: existingIndex)
+        }
+
         apiTrafficLogs.insert(entry, at: 0)
         if apiTrafficLogs.count > limit {
             apiTrafficLogs.removeLast(apiTrafficLogs.count - limit)
