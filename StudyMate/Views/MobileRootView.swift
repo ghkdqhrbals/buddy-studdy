@@ -287,23 +287,21 @@ private struct MobileLoginPage: View {
     }
 
     private var loginAgreement: some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 4) {
             Text(strings.loginAgreementPrefix)
                 .foregroundStyle(.secondary)
-
-            HStack(spacing: 4) {
-                Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage))
-                    .tint(.accentColor)
-                Text(strings.loginAgreementConjunction)
-                    .foregroundStyle(.secondary)
-                Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage))
-                    .tint(.accentColor)
-            }
-
+            Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage))
+                .tint(.accentColor)
+            Text(strings.loginAgreementConjunction)
+                .foregroundStyle(.secondary)
+            Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage))
+                .tint(.accentColor)
             Text(strings.loginAgreementSuffix)
                 .foregroundStyle(.secondary)
         }
         .font(.footnote)
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
     }
