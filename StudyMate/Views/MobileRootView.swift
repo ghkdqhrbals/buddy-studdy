@@ -34,7 +34,6 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowRecordsLoginPage {
                                 MobileProtectedLoginGate(
-                                    prompt: appState.pageAccessPrompt,
                                     onLogin: { isRecordsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -44,7 +43,7 @@ struct MobileRootView: View {
                             }
                         }
                         .navigationDestination(isPresented: $isRecordsLoginPagePresented) {
-                            MobileLoginPage(prompt: appState.pageAccessPrompt)
+                            MobileLoginPage()
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -57,7 +56,6 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowStatisticsLoginPage {
                                 MobileProtectedLoginGate(
-                                    prompt: appState.pageAccessPrompt,
                                     onLogin: { isStatisticsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -67,7 +65,7 @@ struct MobileRootView: View {
                             }
                         }
                         .navigationDestination(isPresented: $isStatisticsLoginPagePresented) {
-                            MobileLoginPage(prompt: appState.pageAccessPrompt)
+                            MobileLoginPage()
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -113,7 +111,6 @@ struct MobileRootView: View {
 
 private struct MobileProtectedLoginGate: View {
     @EnvironmentObject private var appState: AppState
-    var prompt: PageAccessPrompt?
     var onLogin: () -> Void
 
     private var strings: AppStrings {
@@ -124,15 +121,6 @@ private struct MobileProtectedLoginGate: View {
         VStack(alignment: .center, spacing: 16) {
             MobileLoginLogo(size: 72)
                 .padding(.bottom, 8)
-
-            Text(prompt?.title ?? strings.pageAccessRequiresLogin)
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-
-            Text(strings.protectedPageLoginHelp)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
 
             Button(action: onLogin) {
                 SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
@@ -151,7 +139,6 @@ private struct MobileLoginPage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var isShowingEmailSignIn = false
-    var prompt: PageAccessPrompt?
 
     private var strings: AppStrings {
         appState.strings
@@ -172,13 +159,8 @@ private struct MobileLoginPage: View {
                     SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
                 }
                 .buttonStyle(.plain)
-
-                Text(prompt?.title ?? strings.loginPageHelp)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.bottom, 18)
             }
+            .padding(.bottom, 18)
 
             Button {
                 isShowingEmailSignIn = true
@@ -582,12 +564,7 @@ private struct MobileHomeView: View {
                     .foregroundStyle(.secondary)
 
                 NavigationLink {
-                    MobileLoginPage(
-                        prompt: PageAccessPrompt(
-                            title: strings.pageAccessRequiresLogin,
-                            message: ""
-                        )
-                    )
+                    MobileLoginPage()
                 } label: {
                     SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
                 }

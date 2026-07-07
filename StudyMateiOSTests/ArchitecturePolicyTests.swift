@@ -889,6 +889,18 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains(".navigationDestination(isPresented: $isStatisticsLoginPagePresented)"),
             "Statistics login action should push a dedicated login page in the tab navigation stack."
         )
+        XCTAssertFalse(
+            content.contains("strings.pageAccessRequiresLogin"),
+            "Protected mobile access surfaces should not render a redundant sign-in-required title."
+        )
+        XCTAssertFalse(
+            content.contains("strings.protectedPageLoginHelp"),
+            "Protected mobile access surfaces should not render a redundant after-sign-in explanation."
+        )
+        XCTAssertFalse(
+            content.contains("prompt?.title"),
+            "The dedicated login page should not echo page-access prompt text such as sign-in-required."
+        )
     }
 
     func testMobileLoginPageIncludesLegalAgreementLinks() throws {
