@@ -915,6 +915,10 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Login page should use the shared legal URL constants."
         )
         XCTAssertTrue(
+            viewContent.contains(".tint(.accentColor)"),
+            "Legal links must keep visible link styling instead of inheriting secondary body text color."
+        )
+        XCTAssertTrue(
             stringsContent.contains("loginAgreementPrefix"),
             "Legal agreement copy must be localized through AppStrings."
         )

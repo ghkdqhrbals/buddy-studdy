@@ -211,17 +211,21 @@ private struct MobileLoginPage: View {
     private var loginAgreement: some View {
         VStack(spacing: 4) {
             Text(strings.loginAgreementPrefix)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 4) {
                 Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL)
+                    .tint(.accentColor)
                 Text(strings.loginAgreementConjunction)
+                    .foregroundStyle(.secondary)
                 Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL)
+                    .tint(.accentColor)
             }
 
             Text(strings.loginAgreementSuffix)
+                .foregroundStyle(.secondary)
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
     }
