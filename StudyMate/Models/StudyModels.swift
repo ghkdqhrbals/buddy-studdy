@@ -1452,8 +1452,15 @@ struct AppStrings {
     var tabSettings: String { text("설정", "Settings") }
     var tabRecords: String { text("기록", "Records") }
     var tabStatistics: String { text("통계", "Stats") }
+    var myStudyLoginPreviewTitle: String { text("내 학습 설정 미리보기", "My Study preview") }
     var recordsLoginPreviewTitle: String { text("최근 학습 기록 미리보기", "Recent record preview") }
     var statisticsLoginPreviewTitle: String { text("주제별 학습 흐름 미리보기", "Topic progress preview") }
+    var myStudyLoginBenefit: String {
+        text(
+            "로그인하면 학습 주제와 질문 설정을 기기 간에 이어서 관리할 수 있습니다.",
+            "Sign in to keep study topics and question settings synced across devices."
+        )
+    }
     var recordsLoginBenefit: String {
         text(
             "로그인하면 학습 기록을 기기 간에 이어서 확인할 수 있습니다.",
@@ -1466,6 +1473,7 @@ struct AppStrings {
             "Sign in to see topic accuracy and difficulty trends."
         )
     }
+    var myStudyLoginAction: String { text("로그인", "Sign In") }
     var recordsLoginAction: String { text("로그인하고 기록 보기", "Sign in to view records") }
     var statisticsLoginAction: String { text("로그인하고 통계 보기", "Sign in to view stats") }
     var sampleMessageQueue: String { text("메세지큐", "Message Queue") }
@@ -1473,6 +1481,9 @@ struct AppStrings {
     var sampleOperatingSystem: String { text("운영체제", "Operating System") }
     func recordPreviewDetail(questionCount: Int, accuracy: Int) -> String {
         text("최근 질문 \(questionCount)개 · 정답률 \(accuracy)%", "\(questionCount) recent · \(accuracy)% correct")
+    }
+    func myStudyPreviewDetail(model: String, difficulty: Int) -> String {
+        text("\(model) · 난이도 \(difficulty)", "\(model) · difficulty \(difficulty)")
     }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }

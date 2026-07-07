@@ -128,21 +128,11 @@ private struct MobileProtectedLoginGate: View {
                 .padding(.bottom, 8)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    MobileProtectedLoginPreview(page: page, strings: strings)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(page.benefitText(strings: strings))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Button(action: onLogin) {
-                            MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                MobileProtectedLoginPrompt(
+                    page: page,
+                    strings: strings,
+                    onLogin: onLogin
+                )
                 .padding(.top, 12)
                 .padding(.bottom, 24)
             }
@@ -158,11 +148,14 @@ private struct MobileProtectedLoginGate: View {
 }
 
 private enum MobileProtectedLoginPage {
+    case myStudy
     case records
     case statistics
 
     func title(strings: AppStrings) -> String {
         switch self {
+        case .myStudy:
+            return HomeFeedScope.my.title(strings: strings)
         case .records:
             return strings.tabRecords
         case .statistics:
@@ -172,6 +165,8 @@ private enum MobileProtectedLoginPage {
 
     func previewTitle(strings: AppStrings) -> String {
         switch self {
+        case .myStudy:
+            return strings.myStudyLoginPreviewTitle
         case .records:
             return strings.recordsLoginPreviewTitle
         case .statistics:
@@ -181,6 +176,8 @@ private enum MobileProtectedLoginPage {
 
     func benefitText(strings: AppStrings) -> String {
         switch self {
+        case .myStudy:
+            return strings.myStudyLoginBenefit
         case .records:
             return strings.recordsLoginBenefit
         case .statistics:
@@ -190,10 +187,38 @@ private enum MobileProtectedLoginPage {
 
     func loginActionTitle(strings: AppStrings) -> String {
         switch self {
+        case .myStudy:
+            return strings.myStudyLoginAction
         case .records:
             return strings.recordsLoginAction
         case .statistics:
             return strings.statisticsLoginAction
+        }
+    }
+}
+
+private struct MobileProtectedLoginPrompt: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+    var onLogin: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            MobileProtectedLoginPreview(page: page, strings: strings)
+
+            HStack(alignment: .center, spacing: 12) {
+                Text(page.benefitText(strings: strings))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Button(action: onLogin) {
+                    MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
@@ -209,6 +234,17 @@ private struct MobileProtectedLoginPreview: View {
                 .foregroundStyle(.secondary)
 
             switch page {
+            case .myStudy:
+                VStack(spacing: 10) {
+                    MobileProtectedStudyPreviewRow(
+                        title: strings.sampleMessageQueue,
+                        detail: strings.myStudyPreviewDetail(model: "gpt-4.1", difficulty: 6)
+                    )
+                    MobileProtectedStudyPreviewRow(
+                        title: strings.sampleNetwork,
+                        detail: strings.myStudyPreviewDetail(model: "gpt-4.1", difficulty: 5)
+                    )
+                }
             case .records:
                 VStack(spacing: 10) {
                     MobileProtectedRecordPreviewRow(
@@ -241,6 +277,38 @@ private struct MobileProtectedLoginPreview: View {
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MobileProtectedStudyPreviewRow: View {
+    var title: String
+    var detail: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.82))
+        }
     }
 }
 
@@ -766,14 +834,13 @@ private struct MobileHomeView: View {
 
     private var myStudyLoginSection: some View {
         Section {
-            Button {
-                isHomeLoginPagePresented = true
-            } label: {
-                MobileInlineLoginButtonLabel(title: strings.communityLogin)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
+            MobileProtectedLoginPrompt(
+                page: .myStudy,
+                strings: strings,
+                onLogin: { isHomeLoginPagePresented = true }
+            )
+            .padding(.vertical, 8)
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
             .listRowSeparator(.hidden)
         }
     }
