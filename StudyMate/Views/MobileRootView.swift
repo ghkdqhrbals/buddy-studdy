@@ -122,6 +122,9 @@ private struct MobileProtectedLoginGate: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            MobileLoginLogo(size: 58)
+                .padding(.bottom, 4)
+
             Text(prompt?.title ?? strings.pageAccessRequiresLogin)
                 .font(.title3.weight(.semibold))
 
@@ -154,11 +157,7 @@ private struct MobileLoginPage: View {
         VStack(spacing: 18) {
             Spacer(minLength: 18)
 
-            Image("LaunchLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 72, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            MobileLoginLogo(size: 72)
 
             VStack(spacing: 8) {
                 Text(strings.communityLogin)
@@ -228,6 +227,19 @@ private struct MobileLoginPage: View {
         .font(.footnote)
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct MobileLoginLogo: View {
+    var size: CGFloat
+
+    var body: some View {
+        Image("LaunchLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.25, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
