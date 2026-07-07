@@ -1994,6 +1994,12 @@ struct AppStrings {
             "Study question notifications depend on system permission and study settings."
         )
     }
+    var notificationSystemPermissionRequired: String {
+        text(
+            "iPhone 설정에서 BuddyStudy 알림을 켜야 알림을 받을 수 있습니다.",
+            "Turn on BuddyStudy notifications in iPhone Settings to receive notifications."
+        )
+    }
     var infoNotificationConsent: String { text("정보성 알림 수신 동의", "Informational notifications") }
     var marketingNotificationConsent: String { text("마케팅 알림 수신 동의", "Marketing notifications") }
     var nightMarketingNotificationConsent: String { text("야간 마케팅 알림 수신 동의", "Night marketing notifications") }

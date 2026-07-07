@@ -3912,6 +3912,16 @@ final class AppState: ObservableObject {
         notificationService.openSystemNotificationSettings()
     }
 
+    func ensureSystemNotificationPermissionForPreferenceEnable(reason: String) async -> Bool {
+        let isAuthorized = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
+        if !isAuthorized {
+            statusMessage = strings.notificationSystemPermissionRequired
+            notificationService.openSystemNotificationSettings()
+            log(.info, "시스템 알림 권한이 꺼져 있어 설정으로 이동합니다. reason=\(reason)")
+        }
+        return isAuthorized
+    }
+
     func setAppLanguage(_ language: AppLanguage) {
         updateAppLanguage(language)
         localStudySettingsUseCase.saveSettings(settings)

@@ -2927,9 +2927,14 @@ private struct MobileTermsSettingsView: View {
 
 private struct MobileNotificationSettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var isSavingQuestionPreference = false
     @State private var isSavingMarketingPreference = false
 
     private var strings: AppStrings { appState.strings }
+
+    private var isQuestionEnabled: Bool {
+        appState.notificationPreferences.first { $0.key == "question_notification" }?.enabled ?? false
+    }
 
     private var isMarketingEnabled: Bool {
         appState.notificationPreferences.first { $0.key == "marketing_notification" }?.enabled ?? false
@@ -2938,24 +2943,30 @@ private struct MobileNotificationSettingsView: View {
     var body: some View {
         List {
             Section {
-                Button {
-                    appState.openSystemNotificationSettings()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(strings.questionNotifications)
-                                .foregroundStyle(.primary)
-                            Text(strings.questionNotificationsHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(strings.questionNotifications)
+                        Text(strings.questionNotificationsHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if isSavingQuestionPreference {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { isQuestionEnabled },
+                                set: { enabled in
+                                    Task { await saveQuestionPreference(enabled: enabled) }
+                                }
+                            )
+                        )
+                        .labelsHidden()
                     }
                 }
-                .buttonStyle(.plain)
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -2993,9 +3004,25 @@ private struct MobileNotificationSettingsView: View {
         }
     }
 
+    private func saveQuestionPreference(enabled: Bool) async {
+        isSavingQuestionPreference = true
+        defer { isSavingQuestionPreference = false }
+        if enabled {
+            guard await appState.ensureSystemNotificationPermissionForPreferenceEnable(reason: "question-notification") else {
+                return
+            }
+        }
+        _ = await appState.saveNotificationPreference(key: "question_notification", enabled: enabled)
+    }
+
     private func saveMarketingPreference(enabled: Bool) async {
         isSavingMarketingPreference = true
         defer { isSavingMarketingPreference = false }
+        if enabled {
+            guard await appState.ensureSystemNotificationPermissionForPreferenceEnable(reason: "marketing-notification") else {
+                return
+            }
+        }
         _ = await appState.saveNotificationPreference(key: "marketing_notification", enabled: enabled)
     }
 }

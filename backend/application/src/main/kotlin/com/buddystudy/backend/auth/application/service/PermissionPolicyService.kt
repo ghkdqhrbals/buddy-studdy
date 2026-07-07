@@ -123,6 +123,14 @@ class PermissionPolicyService(
     override fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse> =
         listOf(
             NotificationPreferenceResponse(
+                key = QUESTION_NOTIFICATION_PREFERENCE,
+                enabled = notificationPreferences.isEnabled(
+                    principal.userId.takeUnless { principal.anonymous },
+                    principal.deviceId,
+                    QUESTION_NOTIFICATION_PREFERENCE,
+                )
+            ),
+            NotificationPreferenceResponse(
                 key = MARKETING_NOTIFICATION_PREFERENCE,
                 enabled = notificationPreferences.isEnabled(
                     principal.userId.takeUnless { principal.anonymous },
@@ -141,7 +149,7 @@ class PermissionPolicyService(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Notification preferences require login.")
         }
         val key = command.key.trim().lowercase()
-        if (key != MARKETING_NOTIFICATION_PREFERENCE) {
+        if (key !in ALLOWED_NOTIFICATION_PREFERENCES) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid notification preference key.")
         }
         notificationPreferenceCommands.savePreference(
@@ -167,6 +175,11 @@ class PermissionPolicyService(
     private companion object {
         private val AGREEMENT_ACTIONS = setOf("AGREED", "WITHDRAWN")
         private val AGREEMENT_SOURCES = setOf("SIGNUP", "SETTINGS", "PROFILE", "REQUIRED_GATE", "MIGRATION")
+        private const val QUESTION_NOTIFICATION_PREFERENCE = "question_notification"
         private const val MARKETING_NOTIFICATION_PREFERENCE = "marketing_notification"
+        private val ALLOWED_NOTIFICATION_PREFERENCES = setOf(
+            QUESTION_NOTIFICATION_PREFERENCE,
+            MARKETING_NOTIFICATION_PREFERENCE,
+        )
     }
 }
