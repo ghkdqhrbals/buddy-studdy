@@ -34,7 +34,7 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowRecordsLoginPage {
                                 MobileProtectedLoginGate(
-                                    title: strings.tabRecords,
+                                    page: .records,
                                     onLogin: { isRecordsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -57,7 +57,7 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowStatisticsLoginPage {
                                 MobileProtectedLoginGate(
-                                    title: strings.tabStatistics,
+                                    page: .statistics,
                                     onLogin: { isStatisticsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -113,7 +113,7 @@ struct MobileRootView: View {
 
 private struct MobileProtectedLoginGate: View {
     @EnvironmentObject private var appState: AppState
-    var title: String
+    var page: MobileProtectedLoginPage
     var onLogin: () -> Void
 
     private var strings: AppStrings {
@@ -122,16 +122,28 @@ private struct MobileProtectedLoginGate: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            MobileRootLargeTitle(title)
+            MobileRootLargeTitle(page.title(strings: strings))
                 .padding(.top, 6)
                 .padding(.bottom, 8)
 
             ScrollView {
-                Button(action: onLogin) {
-                    MobileInlineLoginButtonLabel(title: strings.communityLogin)
+                VStack(alignment: .leading, spacing: 18) {
+                    MobileProtectedLoginPreview(page: page, strings: strings)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(page.benefitText(strings: strings))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button(action: onLogin) {
+                            MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 12)
+                .padding(.bottom, 24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -141,6 +153,166 @@ private struct MobileProtectedLoginGate: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+}
+
+private enum MobileProtectedLoginPage {
+    case records
+    case statistics
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.tabRecords
+        case .statistics:
+            return strings.tabStatistics
+        }
+    }
+
+    func previewTitle(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.recordsLoginPreviewTitle
+        case .statistics:
+            return strings.statisticsLoginPreviewTitle
+        }
+    }
+
+    func benefitText(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.recordsLoginBenefit
+        case .statistics:
+            return strings.statisticsLoginBenefit
+        }
+    }
+
+    func loginActionTitle(strings: AppStrings) -> String {
+        switch self {
+        case .records:
+            return strings.recordsLoginAction
+        case .statistics:
+            return strings.statisticsLoginAction
+        }
+    }
+}
+
+private struct MobileProtectedLoginPreview: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(page.previewTitle(strings: strings))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            switch page {
+            case .records:
+                VStack(spacing: 10) {
+                    MobileProtectedRecordPreviewRow(
+                        title: strings.sampleMessageQueue,
+                        detail: strings.recordPreviewDetail(questionCount: 3, accuracy: 72),
+                        progress: 0.72
+                    )
+                    MobileProtectedRecordPreviewRow(
+                        title: strings.sampleNetwork,
+                        detail: strings.recordPreviewDetail(questionCount: 5, accuracy: 80),
+                        progress: 0.8
+                    )
+                }
+            case .statistics:
+                VStack(spacing: 10) {
+                    MobileProtectedStatisticPreviewRow(title: strings.sampleMessageQueue, percent: 72)
+                    MobileProtectedStatisticPreviewRow(title: strings.sampleNetwork, percent: 80)
+                    MobileProtectedStatisticPreviewRow(title: strings.sampleOperatingSystem, percent: 65)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground).opacity(0.75))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MobileProtectedRecordPreviewRow: View {
+    var title: String
+    var detail: String
+    var progress: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            MobileProtectedPreviewProgress(value: progress)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.82))
+        }
+    }
+}
+
+private struct MobileProtectedStatisticPreviewRow: View {
+    var title: String
+    var percent: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                Text("\(percent)%")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            MobileProtectedPreviewProgress(value: Double(percent) / 100.0)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.82))
+        }
+    }
+}
+
+private struct MobileProtectedPreviewProgress: View {
+    var value: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(0, min(1, value)) * proxy.size.width
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.5))
+                    .frame(width: width)
+            }
+        }
+        .frame(height: 6)
     }
 }
 

@@ -1425,6 +1425,28 @@ struct AppStrings {
     var tabSettings: String { text("설정", "Settings") }
     var tabRecords: String { text("기록", "Records") }
     var tabStatistics: String { text("통계", "Stats") }
+    var recordsLoginPreviewTitle: String { text("최근 학습 기록 미리보기", "Recent record preview") }
+    var statisticsLoginPreviewTitle: String { text("주제별 학습 흐름 미리보기", "Topic progress preview") }
+    var recordsLoginBenefit: String {
+        text(
+            "로그인하면 학습 기록을 기기 간에 이어서 확인할 수 있습니다.",
+            "Sign in to keep your study records available across devices."
+        )
+    }
+    var statisticsLoginBenefit: String {
+        text(
+            "로그인하면 주제별 정답률과 난이도 변화를 확인할 수 있습니다.",
+            "Sign in to see topic accuracy and difficulty trends."
+        )
+    }
+    var recordsLoginAction: String { text("로그인하고 기록 보기", "Sign in to view records") }
+    var statisticsLoginAction: String { text("로그인하고 통계 보기", "Sign in to view stats") }
+    var sampleMessageQueue: String { text("메세지큐", "Message Queue") }
+    var sampleNetwork: String { text("네트워크", "Network") }
+    var sampleOperatingSystem: String { text("운영체제", "Operating System") }
+    func recordPreviewDetail(questionCount: Int, accuracy: Int) -> String {
+        text("최근 질문 \(questionCount)개 · 정답률 \(accuracy)%", "\(questionCount) recent · \(accuracy)% correct")
+    }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }
     func homePath(_ category: String) -> String {

@@ -882,19 +882,23 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Protected mobile tabs should use a reusable gate view before pushing the login page."
         )
         XCTAssertTrue(
-            content.contains("MobileProtectedLoginGate(\n                                    title: strings.tabRecords"),
+            content.contains("MobileProtectedLoginGate(\n                                    page: .records"),
             "Records login gate should keep the same root title position as the records screen."
         )
         XCTAssertTrue(
-            content.contains("MobileProtectedLoginGate(\n                                    title: strings.tabStatistics"),
+            content.contains("MobileProtectedLoginGate(\n                                    page: .statistics"),
             "Statistics login gate should keep the same root title position as the statistics screen."
         )
         XCTAssertTrue(
-            content.contains("MobileRootLargeTitle(title)"),
+            content.contains("MobileRootLargeTitle(page.title(strings: strings))"),
             "Protected mobile gates should render the tab title instead of replacing the screen chrome with a login prompt."
         )
         XCTAssertTrue(
-            content.contains("MobileInlineLoginButtonLabel(title: strings.communityLogin)"),
+            content.contains("MobileProtectedLoginPreview(page: page, strings: strings)"),
+            "Protected mobile gates should show a page-specific preview instead of a blank login wall."
+        )
+        XCTAssertTrue(
+            content.contains("MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))"),
             "Protected mobile gates should use a subdued inline login action."
         )
         XCTAssertTrue(
