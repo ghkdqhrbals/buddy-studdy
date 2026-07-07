@@ -524,12 +524,12 @@ final class AppState: ObservableObject {
         }
 
         return comparableActiveSettings != comparableSavedSettings ||
-            Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing) != Self.normalizedDebugBackendBaseURL(savedDebugBackendBaseURL)
+            normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing) != normalizedDebugBackendBaseURL(savedDebugBackendBaseURL)
     }
 
     var isDraftDebugBackendBaseURLValid: Bool {
-        let normalizedURL = Self.normalizedDebugBackendBaseURL(draftDebugBackendBaseURL)
-        return normalizedURL.isEmpty || Self.resolvedDebugBackendURL(from: normalizedURL) != nil
+        let normalizedURL = normalizedDebugBackendBaseURL(draftDebugBackendBaseURL)
+        return normalizedURL.isEmpty || resolvedDebugBackendURL(from: normalizedURL) != nil
     }
 
     var mobileVisibleTab: AppTab {
@@ -883,19 +883,19 @@ final class AppState: ObservableObject {
         isEditingSettings ? draftDebugBackendBaseURL : debugBackendBaseURL
     }
 
-    private static func normalizedDebugBackendBaseURL(_ value: String) -> String {
-        BackendBaseURLConfiguration.normalizedDebugBackendBaseURL(value)
+    private func normalizedDebugBackendBaseURL(_ value: String) -> String {
+        appUseCasesProvider.normalizedDebugBackendBaseURL(value)
     }
 
-    private static func resolvedDebugBackendURL(from value: String) -> URL? {
-        BackendBaseURLConfiguration.resolvedDebugBackendURL(from: value)
+    private func resolvedDebugBackendURL(from value: String) -> URL? {
+        appUseCasesProvider.resolvedDebugBackendURL(from: value)
     }
 
     private var activeBackendBaseURLDescription: String {
-        BackendBaseURLConfiguration(
+        appUseCasesProvider.displayBaseURL(
             isDebuggingEnabled: isDebuggingEnabled,
             debugBackendBaseURL: debugBackendBaseURL
-        ).displayBaseURL
+        )
     }
 
     private func refreshRemotePushBackendClient(reason: String) {
@@ -1044,6 +1044,7 @@ final class AppState: ObservableObject {
             localStudyRecordUseCase: localStudyRecordUseCase,
             appErrorHandlingUseCase: appErrorHandlingUseCase
         )
+        let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         let loadedLocalStudySettings = localUseCases.localStudySettings.loadSettings()
         let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
@@ -1067,7 +1068,7 @@ final class AppState: ObservableObject {
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
         let loadedDeveloperSettings = localUseCases.developerSettings.loadSettings()
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
-        let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
+        let loadedDebugBackendBaseURL = appUseCasesProvider.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
         self.appLogUseCase = localUseCases.appLog
         self.storedBackendIdentityUseCase = localUseCases.storedBackendIdentity
@@ -1137,7 +1138,6 @@ final class AppState: ObservableObject {
         self.clipboardProvider = clipboardProvider
         self.appNotificationEventProvider = appNotificationEventProvider
         self.cloudSyncService = cloudSyncService
-        let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
         self.appUseCasesProvider = appUseCasesProvider
         self.appUseCases = appUseCasesProvider.makeUseCases(
             isDebuggingEnabled: loadedIsDebuggingEnabled,
@@ -3650,7 +3650,7 @@ final class AppState: ObservableObject {
             sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
         }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing)
+        let normalizedDebugBackendURL = normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing)
         let now = appClock.now
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
         if didAPIKeyChange {
@@ -3665,18 +3665,18 @@ final class AppState: ObservableObject {
 
         settings = sanitizedSettings
         apiKey = trimmedAPIKey
-        debugBackendBaseURL = normalizedDebugBackendBaseURL
+        debugBackendBaseURL = normalizedDebugBackendURL
         draftSettings = sanitizedSettings
         draftAPIKey = trimmedAPIKey
-        draftDebugBackendBaseURL = normalizedDebugBackendBaseURL
+        draftDebugBackendBaseURL = normalizedDebugBackendURL
         didReceiveCloudStateWhileEditing = false
 
         localStudySettingsUseCase.saveSettings(sanitizedSettings)
         localStudySettingsUseCase.saveAPIKey(trimmedAPIKey)
-        developerSettingsUseCase.saveDebugBackendBaseURL(normalizedDebugBackendBaseURL)
+        developerSettingsUseCase.saveDebugBackendBaseURL(normalizedDebugBackendURL)
         savedSettings = sanitizedSettings
         savedAPIKey = trimmedAPIKey
-        savedDebugBackendBaseURL = normalizedDebugBackendBaseURL
+        savedDebugBackendBaseURL = normalizedDebugBackendURL
         reloadStudyRecordsFromStore()
         if trimmedAPIKey.isEmpty {
             hasAPIKeyError = false

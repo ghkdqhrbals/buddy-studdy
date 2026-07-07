@@ -91,6 +91,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotReadBackendBaseURLConfigurationDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("BackendBaseURLConfiguration"),
+            "AppState must use AppUseCasesProvider for backend URL normalization and display instead of reading BackendBaseURLConfiguration directly."
+        )
+    }
+
     func testAppStateDoesNotInstantiateOAuthServicesDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
