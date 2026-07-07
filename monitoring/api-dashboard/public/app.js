@@ -482,8 +482,8 @@ function renderTimeline() {
       const safeX = Math.min(Math.max(x - barWidth / 2, plotStart), plotEnd - barWidth);
       const barHeight = Math.max(4, (point.count / max) * height);
       const gradient = context.createLinearGradient(0, padding.top, 0, padding.top + height);
-      gradient.addColorStop(0, "#93c5fd");
-      gradient.addColorStop(1, "#2563eb");
+      gradient.addColorStop(0, "#7ee787");
+      gradient.addColorStop(1, "#238636");
       context.fillStyle = gradient;
       context.fillRect(safeX, padding.top + height - barHeight, barWidth, barHeight);
     }
