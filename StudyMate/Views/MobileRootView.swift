@@ -2819,7 +2819,7 @@ private struct MobileTermsSettingsView: View {
                 HStack(spacing: 7) {
                     Text(title(for: term))
                         .font(.body.weight(.semibold))
-                    Text(term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge)
+                    Text("[\(term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge)]")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(term.required ? Color.secondary : Color.accentColor)
                         .padding(.horizontal, 7)

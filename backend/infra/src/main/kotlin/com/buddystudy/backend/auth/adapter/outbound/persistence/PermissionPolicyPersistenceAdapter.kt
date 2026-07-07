@@ -59,15 +59,34 @@ class PermissionPolicyPersistenceAdapter(
     override fun activeTerms(now: Instant): List<ActiveTermsProjection> =
         jdbc.query(
             """
-            select distinct on (code) id, code, version, title, url, content_hash, required, mutable
-              from terms
-             where effective_at <= ?
-               and (retired_at is null or retired_at > ?)
-             order by code, effective_at desc, id desc
+            select id, code, version, title, url, content_hash, required, mutable
+              from (
+                    select distinct on (t.code)
+                           t.id,
+                           t.code,
+                           t.version,
+                           t.title,
+                           t.url,
+                           t.content_hash,
+                           tcr.required,
+                           tcr.mutable,
+                           tcr.display_order
+                      from term_context_requirements tcr
+                      join terms t on t.code = tcr.terms_code
+                     where tcr.context = 'SIGNUP'
+                       and tcr.effective_at <= ?
+                       and (tcr.retired_at is null or tcr.retired_at > ?)
+                       and t.effective_at <= ?
+                       and (t.retired_at is null or t.retired_at > ?)
+                     order by t.code, t.effective_at desc, t.id desc
+                   ) active_terms
+             order by display_order, id
             """.trimIndent(),
             { rs, _ ->
                 rs.toActiveTermsProjection()
             },
+            Timestamp.from(now),
+            Timestamp.from(now),
             Timestamp.from(now),
             Timestamp.from(now),
         )
