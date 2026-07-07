@@ -517,6 +517,8 @@ button {
   width: 100%;
   min-height: 84px;
   background: #fff;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .detail-loading {
@@ -568,6 +570,7 @@ button {
   gap: 12px;
   align-items: center;
   width: 100%;
+  min-width: 1340px;
 }
 
 .performance-row {
@@ -576,6 +579,7 @@ button {
   gap: 12px;
   align-items: center;
   width: 100%;
+  min-width: 1120px;
 }
 
 .table-head {
@@ -586,18 +590,25 @@ button {
   background: var(--surface-soft);
   font-size: 11px;
   font-weight: 780;
+  line-height: 1.35;
   text-transform: uppercase;
 }
 
 .data-row {
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: 48px;
+  padding: 8px 16px;
   border: 0;
   border-bottom: 1px solid var(--line-soft);
   color: var(--text);
   background: #fff;
   cursor: pointer;
+  line-height: 1.35;
   text-align: left;
+}
+
+.request-row > *,
+.performance-row > * {
+  min-width: 0;
 }
 
 .performance-link {
@@ -635,6 +646,7 @@ button {
   border-radius: 7px;
   font-size: 12px;
   font-weight: 780;
+  line-height: 1.2;
 }
 
 .method-get {
