@@ -103,6 +103,6 @@ data class TermsAgreementRequest(
 )
 
 data class NotificationPreferenceRequest(
-    val key: String = "",
-    val enabled: Boolean = false,
+    var key: String = "",
+    var enabled: Boolean = false,
 )
