@@ -101,6 +101,22 @@ enum PageAccessPolicy {
         }
     }
 
+    static func shouldShowLoginGate(
+        for page: ProtectedAppPage,
+        in accessState: BackendAccessState,
+        hasRegisteredAccessToken: Bool
+    ) -> Bool {
+        if canAccess(page, in: accessState.pageAccess) {
+            return false
+        }
+
+        return !shouldAllowProvisionalAccess(
+            to: page,
+            hasRegisteredAccessToken: hasRegisteredAccessToken,
+            userStatus: accessState.user.status
+        )
+    }
+
     static func prompt(for page: ProtectedAppPage, strings: AppStrings) -> PageAccessPrompt {
         PageAccessPrompt(
             title: strings.communityLogin,

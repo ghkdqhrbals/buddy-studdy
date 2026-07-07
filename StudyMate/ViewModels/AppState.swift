@@ -545,11 +545,11 @@ final class AppState: ObservableObject {
     }
 
     var shouldShowRecordsLoginPage: Bool {
-        !canAccess(.records)
+        shouldShowLoginGate(for: .records)
     }
 
     var shouldShowStatisticsLoginPage: Bool {
-        !canAccess(.statistics)
+        shouldShowLoginGate(for: .statistics)
     }
 
     func normalizeSelectedTabForMobile() {
@@ -694,6 +694,14 @@ final class AppState: ObservableObject {
 
     private func canAccess(_ page: ProtectedAppPage) -> Bool {
         PageAccessPolicy.canAccess(page, in: backendAccessState.pageAccess)
+    }
+
+    private func shouldShowLoginGate(for page: ProtectedAppPage) -> Bool {
+        PageAccessPolicy.shouldShowLoginGate(
+            for: page,
+            in: backendAccessState,
+            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken()
+        )
     }
 
     @discardableResult
