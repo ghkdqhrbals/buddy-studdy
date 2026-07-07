@@ -473,6 +473,7 @@ final class AppState: ObservableObject {
     private let clipboardProvider: ClipboardProviding
     private let appNotificationEventProvider: AppNotificationEventProviding
     private let appClock: AppClockProviding
+    private let appIdentifierProvider: AppIdentifierProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -992,6 +993,7 @@ final class AppState: ObservableObject {
         clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         appClock: AppClockProviding = SystemAppClockProvider(),
+        appIdentifierProvider: AppIdentifierProviding = UUIDAppIdentifierProvider(),
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1090,6 +1092,7 @@ final class AppState: ObservableObject {
         self.localStudyRecordUseCase = resolvedLocalStudyRecordUseCase
         self.appErrorHandlingUseCase = appErrorHandlingUseCase
         self.appClock = appClock
+        self.appIdentifierProvider = appIdentifierProvider
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
@@ -1128,7 +1131,7 @@ final class AppState: ObservableObject {
         }
         self.isCommunitySignedIn = loadedIsCommunitySignedIn
         let loadedAvatarCache = resolvedCommunityProfileCacheUseCase.loadAvatarCache {
-            UUID().uuidString
+            appIdentifierProvider.makeIdentifier()
         }
         self.communityProfileState = CommunityProfileStateStore(
             avatarSymbolName: loadedAvatarCache.symbolName,

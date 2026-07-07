@@ -153,6 +153,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesIdentifierProviderForGeneratedIdentifiers() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("UUID()"),
+            "AppState must use AppIdentifierProviding for generated identifiers instead of constructing UUID values directly."
+        )
+    }
+
     func testAppStateDoesNotOwnApplicationUninstallInfrastructure() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
