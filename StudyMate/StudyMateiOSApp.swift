@@ -107,7 +107,7 @@ private struct StartupPixelFoxSplashView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Image("PixelFoxBackpackWalkFrame1")
+                Image("PixelFoxBackpackMascot")
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
