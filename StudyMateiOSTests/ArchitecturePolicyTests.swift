@@ -938,12 +938,12 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Login UI should use the app's LaunchLogo asset."
         )
         XCTAssertTrue(
-            viewContent.contains("MobileLoginLogo(size: 58)"),
-            "The protected login gate should show the app logo before the login action."
+            viewContent.contains("MobileLoginLogo(size: 72)"),
+            "The protected login gate should show a centered app logo before the login action."
         )
         XCTAssertTrue(
-            viewContent.contains("MobileLoginLogo(size: 72)"),
-            "The dedicated login page should show the app logo above sign-in actions."
+            viewContent.contains("MobileLoginLogo(size: 96)"),
+            "The dedicated login page should show a prominent centered app logo above sign-in actions."
         )
     }
 
@@ -953,8 +953,12 @@ final class ArchitecturePolicyTests: XCTestCase {
         let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
 
         XCTAssertTrue(
-            viewContent.contains("let buttonShape = RoundedRectangle(cornerRadius: 10, style: .continuous)"),
-            "Login buttons should use a subtle rounded rectangle shape."
+            viewContent.contains("let buttonShape = RoundedRectangle(cornerRadius: 24, style: .continuous)"),
+            "Login buttons should use an open rounded rectangle shape."
+        )
+        XCTAssertTrue(
+            viewContent.contains(".frame(minHeight: 58)"),
+            "Login buttons should have enough vertical space to avoid feeling cramped."
         )
         XCTAssertTrue(
             viewContent.contains(".background {\n                buttonShape"),

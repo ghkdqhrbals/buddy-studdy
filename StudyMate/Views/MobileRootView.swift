@@ -121,25 +121,29 @@ private struct MobileProtectedLoginGate: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            MobileLoginLogo(size: 58)
-                .padding(.bottom, 4)
+        VStack(alignment: .center, spacing: 16) {
+            MobileLoginLogo(size: 72)
+                .padding(.bottom, 8)
 
             Text(prompt?.title ?? strings.pageAccessRequiresLogin)
                 .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
 
             Text(strings.protectedPageLoginHelp)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
 
             Button(action: onLogin) {
                 SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
             }
             .buttonStyle(.plain)
+            .padding(.top, 8)
 
             Spacer(minLength: 0)
         }
-        .padding(.top, 24)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 36)
     }
 }
 
@@ -154,27 +158,27 @@ private struct MobileLoginPage: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 18)
+        VStack(spacing: 0) {
+            Spacer(minLength: 72)
 
-            MobileLoginLogo(size: 72)
+            MobileLoginLogo(size: 96)
 
-            VStack(spacing: 8) {
-                Text(strings.communityLogin)
-                    .font(.title2.weight(.bold))
+            Spacer(minLength: 0)
+
+            VStack(spacing: 10) {
+                Button {
+                    appState.signInToCommunity()
+                } label: {
+                    SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
+                }
+                .buttonStyle(.plain)
 
                 Text(prompt?.title ?? strings.loginPageHelp)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .padding(.bottom, 18)
             }
-
-            Button {
-                appState.signInToCommunity()
-            } label: {
-                SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
-            }
-            .buttonStyle(.plain)
 
             Button {
                 isShowingEmailSignIn = true
@@ -182,12 +186,12 @@ private struct MobileLoginPage: View {
                 SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
             }
             .buttonStyle(.plain)
-
-            Spacer(minLength: 0)
+            .padding(.bottom, 34)
 
             loginAgreement
         }
-        .padding(20)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
         .navigationTitle(strings.communityLogin)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
@@ -2921,24 +2925,24 @@ private struct SignInButtonLabel: View {
     var isPrimary: Bool
 
     var body: some View {
-        let buttonShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let buttonShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 
         Text(title)
-            .font(.subheadline.weight(.semibold))
+            .font(.body.weight(.semibold))
             .lineLimit(1)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
-            .padding(.horizontal, 12)
+            .frame(minHeight: 58)
+            .padding(.horizontal, 18)
             .background {
                 buttonShape
-                    .fill(isPrimary ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.06))
+                    .fill(isPrimary ? Color.primary : Color.secondary.opacity(0.14))
             }
             .overlay {
                 buttonShape
-                    .stroke(isPrimary ? Color.accentColor.opacity(0.28) : Color.secondary.opacity(0.18), lineWidth: 1)
+                    .stroke(isPrimary ? Color.clear : Color.secondary.opacity(0.12), lineWidth: 1)
             }
             .contentShape(buttonShape)
-            .foregroundStyle(.primary)
+            .foregroundStyle(isPrimary ? Color(UIColor.systemBackground) : Color.primary)
     }
 }
 
