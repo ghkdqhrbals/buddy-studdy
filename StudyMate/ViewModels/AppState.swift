@@ -472,6 +472,7 @@ final class AppState: ObservableObject {
     private let platformEffectsProvider: AppPlatformEffectsProviding
     private let clipboardProvider: ClipboardProviding
     private let appNotificationEventProvider: AppNotificationEventProviding
+    private let appClock: AppClockProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -990,6 +991,7 @@ final class AppState: ObservableObject {
         platformEffectsProvider: AppPlatformEffectsProviding = DefaultAppPlatformEffectsProvider(),
         clipboardProvider: ClipboardProviding = DefaultClipboardProvider(),
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
+        appClock: AppClockProviding = SystemAppClockProvider(),
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1062,7 +1064,7 @@ final class AppState: ObservableObject {
         }
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
-        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
+        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : appClock.now)
         let resolvedAppLogUseCase = appLogUseCase ?? AppLogUseCase(repository: resolvedAppLogRepository)
         let loadedLogPage = resolvedAppLogUseCase.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedHasCompletedOnboarding = resolvedOnboardingStateUseCase.hasCompletedOnboarding()
@@ -1087,6 +1089,7 @@ final class AppState: ObservableObject {
         self.cloudSyncStateUseCase = resolvedCloudSyncStateUseCase
         self.localStudyRecordUseCase = resolvedLocalStudyRecordUseCase
         self.appErrorHandlingUseCase = appErrorHandlingUseCase
+        self.appClock = appClock
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
@@ -1262,9 +1265,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    func backgroundRefreshEarliestBeginDate(now: Date = Date()) -> Date {
+    func backgroundRefreshEarliestBeginDate(now: Date? = nil) -> Date {
         refreshStudyProgressFromStore()
-        return nextQuestionDueDate(now: now)
+        return nextQuestionDueDate(now: now ?? appClock.now)
     }
 
     func refreshVisibleData() async {
@@ -1428,7 +1431,7 @@ final class AppState: ObservableObject {
 
     func markNotificationRead(notificationID: String) async {
         updateNotificationState { state in
-            state.markRead(notificationID: notificationID, at: Date())
+            state.markRead(notificationID: notificationID, at: appClock.now)
         }
 
         await runBackendNotificationMutation(
@@ -2145,7 +2148,7 @@ final class AppState: ObservableObject {
         let synchronizedLoadedSettings = synchronizedTopicCategories(for: loadedSettings)
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
-        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : Date())
+        let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : appClock.now)
 
         settings = synchronizedLoadedSettings
         let loadedCurrentStudySession = currentStudySessionUseCase.loadSession()
@@ -3653,7 +3656,7 @@ final class AppState: ObservableObject {
         }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(activeDebugBackendBaseURLForEditing)
-        let now = Date()
+        let now = appClock.now
         let didAPIKeyChange = trimmedAPIKey != savedAPIKey
         if didAPIKeyChange {
             lastAPIKeyUpdatedAt = now
@@ -4036,7 +4039,7 @@ final class AppState: ObservableObject {
         let question = QuestionItem(
             question: strings.testNotificationBody,
             expectedAnswerHint: nil,
-            createdAt: Date()
+            createdAt: appClock.now
         )
 
         let didSend = await notificationService.showQuestionNotification(
@@ -5084,7 +5087,7 @@ final class AppState: ObservableObject {
                         cloudStateContentDiffers(mergedRemoteState, remoteState)
 
                     if shouldPushMergedRemote {
-                        mergedRemoteState.updatedAt = max(Date(), remoteState.updatedAt, localUpdatedAt)
+                        mergedRemoteState.updatedAt = max(appClock.now, remoteState.updatedAt, localUpdatedAt)
                         try await cloudSyncService.saveState(mergedRemoteState)
                         applyCloudState(mergedRemoteState, updateVisibleQuestion: updateVisibleQuestion)
                         cloudSyncStateUseCase.saveStateUpdatedAt(mergedRemoteState.updatedAt)
@@ -5103,7 +5106,7 @@ final class AppState: ObservableObject {
                     )
                     if cloudStateContentDiffers(mergedState, remoteState) {
                         var state = mergedState
-                        state.updatedAt = max(localUpdatedAt, remoteState.updatedAt, Date())
+                        state.updatedAt = max(localUpdatedAt, remoteState.updatedAt, appClock.now)
                         try await cloudSyncService.saveState(state)
                         applyCloudState(state, updateVisibleQuestion: updateVisibleQuestion)
                         cloudSyncMessage = strings.syncPushedLocal
@@ -5114,7 +5117,7 @@ final class AppState: ObservableObject {
                     }
                 }
             } else {
-                let updatedAt = max(localUpdatedAt, Date())
+                let updatedAt = max(localUpdatedAt, appClock.now)
                 let state = makeCloudState(updatedAt: updatedAt)
                 try await cloudSyncService.saveState(state)
                 applyCloudState(state, updateVisibleQuestion: updateVisibleQuestion)
@@ -5574,7 +5577,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        let updatedAt = Date()
+        let updatedAt = appClock.now
         cloudSyncStateUseCase.saveStateUpdatedAt(updatedAt)
         cloudLastSyncedAt = updatedAt
     }
@@ -5636,7 +5639,7 @@ final class AppState: ObservableObject {
         var mergedState = state
         mergedState.apiKey = resolvedAPIKey.key
         mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
-        mergedState.updatedAt = max(state.updatedAt, Date())
+        mergedState.updatedAt = max(state.updatedAt, appClock.now)
 
         if resolvedAPIKey.updatedAt == nil {
             mergedState.apiKeyUpdatedAt = lastAPIKeyUpdatedAt
@@ -5853,7 +5856,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        return Date().timeIntervalSince(localMutationAt) <= Self.recentLocalSettingsMutationWindow
+        return appClock.now.timeIntervalSince(localMutationAt) <= Self.recentLocalSettingsMutationWindow
     }
 
     private func resolvedAPIKeyForCloudSync(
@@ -5938,7 +5941,7 @@ final class AppState: ObservableObject {
         }
 
         var mergedState = remoteState
-        mergedState.updatedAt = Date()
+        mergedState.updatedAt = appClock.now
         let resolvedAPIKey = resolvedAPIKeyForCloudSync(
             localAPIKey: apiKey,
             localAPIKeyUpdatedAt: lastAPIKeyUpdatedAt,
@@ -6384,7 +6387,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        let now = Date()
+        let now = appClock.now
         if now.timeIntervalSince(lastLocalSettingsMutationAt) <= Self.recentLocalSettingsMutationWindow {
             return true
         }

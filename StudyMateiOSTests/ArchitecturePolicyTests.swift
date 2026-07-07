@@ -142,6 +142,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesClockProviderForCurrentTime() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("Date()"),
+            "AppState must use AppClockProviding for current time instead of constructing Date() directly."
+        )
+    }
+
     func testAppStateDoesNotOwnApplicationUninstallInfrastructure() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
