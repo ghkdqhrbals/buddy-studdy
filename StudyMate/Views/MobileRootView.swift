@@ -163,17 +163,6 @@ private enum MobileProtectedLoginPage {
         }
     }
 
-    func previewTitle(strings: AppStrings) -> String {
-        switch self {
-        case .myStudy:
-            return strings.myStudyLoginPreviewTitle
-        case .records:
-            return strings.recordsLoginPreviewTitle
-        case .statistics:
-            return strings.statisticsLoginPreviewTitle
-        }
-    }
-
     func benefitText(strings: AppStrings) -> String {
         switch self {
         case .myStudy:
@@ -203,185 +192,17 @@ private struct MobileProtectedLoginPrompt: View {
     var onLogin: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            MobileProtectedLoginPreview(page: page, strings: strings)
-
-            HStack(alignment: .center, spacing: 12) {
-                Text(page.benefitText(strings: strings))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 8)
-
-                Button(action: onLogin) {
-                    MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-private struct MobileProtectedLoginPreview: View {
-    var page: MobileProtectedLoginPage
-    var strings: AppStrings
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(page.previewTitle(strings: strings))
-                .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 16) {
+            Text(page.benefitText(strings: strings))
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            switch page {
-            case .myStudy:
-                VStack(spacing: 10) {
-                    MobileProtectedStudyPreviewRow(
-                        title: strings.sampleMessageQueue,
-                        detail: strings.myStudyPreviewDetail(model: "gpt-4.1", difficulty: 6)
-                    )
-                    MobileProtectedStudyPreviewRow(
-                        title: strings.sampleNetwork,
-                        detail: strings.myStudyPreviewDetail(model: "gpt-4.1", difficulty: 5)
-                    )
-                }
-            case .records:
-                VStack(spacing: 10) {
-                    MobileProtectedRecordPreviewRow(
-                        title: strings.sampleMessageQueue,
-                        detail: strings.recordPreviewDetail(questionCount: 3, accuracy: 72),
-                        progress: 0.72
-                    )
-                    MobileProtectedRecordPreviewRow(
-                        title: strings.sampleNetwork,
-                        detail: strings.recordPreviewDetail(questionCount: 5, accuracy: 80),
-                        progress: 0.8
-                    )
-                }
-            case .statistics:
-                VStack(spacing: 10) {
-                    MobileProtectedStatisticPreviewRow(title: strings.sampleMessageQueue, percent: 72)
-                    MobileProtectedStatisticPreviewRow(title: strings.sampleNetwork, percent: 80)
-                    MobileProtectedStatisticPreviewRow(title: strings.sampleOperatingSystem, percent: 65)
-                }
+            Button(action: onLogin) {
+                MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
             }
+            .buttonStyle(.plain)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground).opacity(0.75))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct MobileProtectedStudyPreviewRow: View {
-    var title: String
-    var detail: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "slider.horizontal.3")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.82))
-        }
-    }
-}
-
-private struct MobileProtectedRecordPreviewRow: View {
-    var title: String
-    var detail: String
-    var progress: Double
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer(minLength: 8)
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            MobileProtectedPreviewProgress(value: progress)
-        }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.82))
-        }
-    }
-}
-
-private struct MobileProtectedStatisticPreviewRow: View {
-    var title: String
-    var percent: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                Text("\(percent)%")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            MobileProtectedPreviewProgress(value: Double(percent) / 100.0)
-        }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.82))
-        }
-    }
-}
-
-private struct MobileProtectedPreviewProgress: View {
-    var value: Double
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = max(0, min(1, value)) * proxy.size.width
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.primary.opacity(0.08))
-                Capsule()
-                    .fill(Color.accentColor.opacity(0.5))
-                    .frame(width: width)
-            }
-        }
-        .frame(height: 6)
     }
 }
 
