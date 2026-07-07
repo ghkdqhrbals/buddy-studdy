@@ -11,8 +11,11 @@ import com.buddystudy.backend.auth.application.port.inbound.PermissionEvaluation
 import com.buddystudy.backend.auth.application.port.inbound.TermsUseCase
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.Authentication
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -78,14 +81,19 @@ class PermissionPolicyController(
     fun saveNotificationPreference(
         authentication: Authentication,
         @RequestBody body: NotificationPreferenceRequest,
-    ): NotificationPreferenceResponse =
-        notificationPreferences.saveNotificationPreference(
+    ): NotificationPreferenceResponse {
+        val key = body.key.trim()
+        if (key.isBlank()) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Notification preference key is required.")
+        }
+        return notificationPreferences.saveNotificationPreference(
             authentication.principalOrThrow(),
             NotificationPreferenceCommand(
-                key = body.key,
+                key = key,
                 enabled = body.enabled,
             )
         )
+    }
 }
 
 data class TermsAgreementRequest(
