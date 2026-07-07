@@ -1020,99 +1020,86 @@ final class AppState: ObservableObject {
         appErrorHandlingUseCase: AppErrorHandlingUseCase = AppErrorHandlingUseCase(),
         cloudSyncService: CloudSyncServiceProtocol? = nil
     ) {
-        let resolvedAppLogRepository = appLogRepository ?? SettingsStoreAppLogRepository(settingsStore: settingsStore)
-        let resolvedRemotePushRegistrationRepository = remotePushRegistrationRepository
-            ?? SettingsStoreRemotePushRegistrationRepository(settingsStore: settingsStore)
-        let resolvedCommunityProfileCacheRepository = communityProfileCacheRepository
-            ?? SettingsStoreCommunityProfileCacheRepository(settingsStore: settingsStore)
-        let resolvedCommunityProfileCacheUseCase = communityProfileCacheUseCase
-            ?? CommunityProfileCacheUseCase(repository: resolvedCommunityProfileCacheRepository)
-        let resolvedCommunitySessionRepository = communitySessionRepository
-            ?? SettingsStoreCommunitySessionRepository(settingsStore: settingsStore)
-        let resolvedCommunitySessionUseCase = communitySessionUseCase
-            ?? CommunitySessionUseCase(repository: resolvedCommunitySessionRepository)
-        let resolvedOnboardingStateRepository = onboardingStateRepository
-            ?? SettingsStoreOnboardingStateRepository(settingsStore: settingsStore)
-        let resolvedOnboardingStateUseCase = onboardingStateUseCase
-            ?? OnboardingStateUseCase(repository: resolvedOnboardingStateRepository)
-        let resolvedDeveloperSettingsRepository = developerSettingsRepository
-            ?? SettingsStoreDeveloperSettingsRepository(settingsStore: settingsStore)
-        let resolvedDeveloperSettingsUseCase = developerSettingsUseCase
-            ?? DeveloperSettingsUseCase(repository: resolvedDeveloperSettingsRepository)
-        let resolvedCurrentStudySessionRepository = currentStudySessionRepository
-            ?? SettingsStoreCurrentStudySessionRepository(settingsStore: settingsStore)
-        let resolvedLocalStudySettingsRepository = localStudySettingsRepository
-            ?? SettingsStoreLocalStudySettingsRepository(settingsStore: settingsStore)
-        let resolvedCloudSyncStateRepository = cloudSyncStateRepository
-            ?? SettingsStoreCloudSyncStateRepository(settingsStore: settingsStore)
-        let resolvedCloudSyncStateUseCase = cloudSyncStateUseCase
-            ?? CloudSyncStateUseCase(repository: resolvedCloudSyncStateRepository)
-        let resolvedLocalStudyRecordRepository = localStudyRecordRepository
-            ?? SettingsStoreLocalStudyRecordRepository(settingsStore: settingsStore)
-        let resolvedLocalStudyRecordUseCase = localStudyRecordUseCase
-            ?? LocalStudyRecordUseCase(repository: resolvedLocalStudyRecordRepository)
-        let resolvedLocalStudySettingsUseCase = localStudySettingsUseCase
-            ?? LocalStudySettingsUseCase(repository: resolvedLocalStudySettingsRepository)
-        let loadedLocalStudySettings = resolvedLocalStudySettingsUseCase.loadSettings()
-        let loadedCloudSyncState = resolvedCloudSyncStateUseCase.loadState()
+        let localUseCases = AppLocalUseCases(
+            settingsStore: settingsStore,
+            appLogRepository: appLogRepository,
+            appLogUseCase: appLogUseCase,
+            remotePushRegistrationRepository: remotePushRegistrationRepository,
+            storedBackendIdentityUseCase: storedBackendIdentityUseCase,
+            communityProfileCacheRepository: communityProfileCacheRepository,
+            communityProfileCacheUseCase: communityProfileCacheUseCase,
+            communitySessionRepository: communitySessionRepository,
+            communitySessionUseCase: communitySessionUseCase,
+            onboardingStateRepository: onboardingStateRepository,
+            onboardingStateUseCase: onboardingStateUseCase,
+            developerSettingsRepository: developerSettingsRepository,
+            developerSettingsUseCase: developerSettingsUseCase,
+            currentStudySessionRepository: currentStudySessionRepository,
+            currentStudySessionUseCase: currentStudySessionUseCase,
+            localStudySettingsRepository: localStudySettingsRepository,
+            localStudySettingsUseCase: localStudySettingsUseCase,
+            cloudSyncStateRepository: cloudSyncStateRepository,
+            cloudSyncStateUseCase: cloudSyncStateUseCase,
+            localStudyRecordRepository: localStudyRecordRepository,
+            localStudyRecordUseCase: localStudyRecordUseCase,
+            appErrorHandlingUseCase: appErrorHandlingUseCase
+        )
+        let loadedLocalStudySettings = localUseCases.localStudySettings.loadSettings()
+        let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
         )
-        let loadedIsCommunitySignedIn = resolvedCommunitySessionUseCase.isSignedIn()
+        let loadedIsCommunitySignedIn = localUseCases.communitySession.isSignedIn()
         let effectiveLoadedSettings = loadedIsCommunitySignedIn
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
         if effectiveLoadedSettings != loadedSettings {
-            resolvedLocalStudySettingsUseCase.saveSettings(effectiveLoadedSettings)
+            localUseCases.localStudySettings.saveSettings(effectiveLoadedSettings)
         }
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : appClock.now)
-        let resolvedAppLogUseCase = appLogUseCase ?? AppLogUseCase(repository: resolvedAppLogRepository)
-        let loadedLogPage = resolvedAppLogUseCase.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
-        let loadedHasCompletedOnboarding = resolvedOnboardingStateUseCase.hasCompletedOnboarding()
+        let loadedLogPage = localUseCases.appLog.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
+        let loadedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
-        let loadedDeveloperSettings = resolvedDeveloperSettingsUseCase.loadSettings()
+        let loadedDeveloperSettings = localUseCases.developerSettings.loadSettings()
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = Self.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
-        let resolvedCurrentStudySessionUseCase = currentStudySessionUseCase
-            ?? CurrentStudySessionUseCase(repository: resolvedCurrentStudySessionRepository)
 
-        self.appLogUseCase = resolvedAppLogUseCase
-        self.storedBackendIdentityUseCase = storedBackendIdentityUseCase
-            ?? StoredBackendIdentityUseCase(repository: resolvedRemotePushRegistrationRepository)
-        self.communityProfileCacheUseCase = resolvedCommunityProfileCacheUseCase
-        self.communitySessionUseCase = resolvedCommunitySessionUseCase
-        self.onboardingStateUseCase = resolvedOnboardingStateUseCase
-        self.developerSettingsUseCase = resolvedDeveloperSettingsUseCase
-        self.currentStudySessionUseCase = resolvedCurrentStudySessionUseCase
-        self.localStudySettingsUseCase = resolvedLocalStudySettingsUseCase
-        self.cloudSyncStateUseCase = resolvedCloudSyncStateUseCase
-        self.localStudyRecordUseCase = resolvedLocalStudyRecordUseCase
-        self.appErrorHandlingUseCase = appErrorHandlingUseCase
+        self.appLogUseCase = localUseCases.appLog
+        self.storedBackendIdentityUseCase = localUseCases.storedBackendIdentity
+        self.communityProfileCacheUseCase = localUseCases.communityProfileCache
+        self.communitySessionUseCase = localUseCases.communitySession
+        self.onboardingStateUseCase = localUseCases.onboardingState
+        self.developerSettingsUseCase = localUseCases.developerSettings
+        self.currentStudySessionUseCase = localUseCases.currentStudySession
+        self.localStudySettingsUseCase = localUseCases.localStudySettings
+        self.cloudSyncStateUseCase = localUseCases.cloudSyncState
+        self.localStudyRecordUseCase = localUseCases.localStudyRecord
+        self.appErrorHandlingUseCase = localUseCases.appErrorHandling
         self.appClock = appClock
         self.appIdentifierProvider = appIdentifierProvider
         self.appTimeZoneProvider = appTimeZoneProvider
         self.appSleepProvider = appSleepProvider
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
-        let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
+        let loadedCurrentStudySession = localUseCases.currentStudySession.loadSession()
         self.currentQuestion = loadedCurrentStudySession.question
         self.lastAnswer = loadedCurrentStudySession.lastAnswer
         self.gradingResult = loadedCurrentStudySession.gradingResult
         let loadedIsRunning = loadedCurrentStudySession.isRunning
         let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
             && !loadedIsRunning
-            && !resolvedCurrentStudySessionUseCase.hasExplicitRunningPreference()
+            && !localUseCases.currentStudySession.hasExplicitRunningPreference()
             && !loadedAPIKey.isEmpty
         self.isRunning = shouldRecoverLegacyRunningState ? true : loadedIsRunning
         if shouldRecoverLegacyRunningState {
-            resolvedCurrentStudySessionUseCase.saveIsRunning(true)
+            localUseCases.currentStudySession.saveIsRunning(true)
         }
-        self.recordsState = RecordsStateStore(records: resolvedLocalStudyRecordUseCase.loadRecords())
+        self.recordsState = RecordsStateStore(records: localUseCases.localStudyRecord.loadRecords())
         self.statsState = StatsStateStore()
         self.apiKey = loadedAPIKey
         self.draftAPIKey = loadedAPIKey
@@ -1131,10 +1118,10 @@ final class AppState: ObservableObject {
         self.hasCompletedOnboarding = loadedHasCompletedOnboarding
         self.isCloudSyncEnabled = cloudSyncService == nil ? false : loadedCloudSyncState.isEnabled
         if cloudSyncService == nil {
-            resolvedCloudSyncStateUseCase.saveIsEnabled(false)
+            localUseCases.cloudSyncState.saveIsEnabled(false)
         }
         self.isCommunitySignedIn = loadedIsCommunitySignedIn
-        let loadedAvatarCache = resolvedCommunityProfileCacheUseCase.loadAvatarCache {
+        let loadedAvatarCache = localUseCases.communityProfileCache.loadAvatarCache {
             appIdentifierProvider.makeIdentifier()
         }
         self.communityProfileState = CommunityProfileStateStore(
@@ -1171,7 +1158,7 @@ final class AppState: ObservableObject {
         }
 
         if loadedAPIKeyUpdatedAt == nil, !loadedAPIKey.isEmpty {
-            resolvedLocalStudySettingsUseCase.saveAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
+            localUseCases.localStudySettings.saveAPIKeyUpdatedAt(effectiveAPIKeyUpdatedAt)
         }
 
         if !hasCompletedOnboarding {

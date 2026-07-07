@@ -280,6 +280,31 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotComposeSettingsStoreRepositoriesDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let forbiddenPatterns = [
+            "SettingsStoreAppLogRepository(",
+            "SettingsStoreRemotePushRegistrationRepository(",
+            "SettingsStoreCommunityProfileCacheRepository(",
+            "SettingsStoreCommunitySessionRepository(",
+            "SettingsStoreOnboardingStateRepository(",
+            "SettingsStoreDeveloperSettingsRepository(",
+            "SettingsStoreCurrentStudySessionRepository(",
+            "SettingsStoreLocalStudySettingsRepository(",
+            "SettingsStoreCloudSyncStateRepository(",
+            "SettingsStoreLocalStudyRecordRepository(",
+        ]
+
+        let violations = forbiddenPatterns.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "AppState must delegate SettingsStore repository composition to a local use-case composition boundary: \(violations)"
+        )
+    }
+
     func testAppStateRoutesAppLogsThroughUseCase() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
