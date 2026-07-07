@@ -79,6 +79,14 @@ private struct StudyMateiOSBootstrapView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+
+            #if DEBUG
+            if let appState {
+                FloatingAPIDebugOverlay()
+                    .environmentObject(appState)
+                    .zIndex(2)
+            }
+            #endif
         }
         .animation(.easeOut(duration: 0.25), value: isShowingStartupSplash)
         .background(Color(.systemBackground))
@@ -130,6 +138,204 @@ private struct StartupPixelFoxSplashView: View {
         }
     }
 }
+
+#if DEBUG
+private struct FloatingAPIDebugOverlay: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var isExpanded = false
+    @State private var dragOffset: CGSize = .zero
+    @State private var committedOffset = CGSize(width: 12, height: 74)
+
+    private var latestLog: APITrafficLogEntry? {
+        appState.apiTrafficLogs.first
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            panel
+                .frame(width: panelWidth(for: geometry.size), alignment: .leading)
+                .offset(
+                    x: committedOffset.width + dragOffset.width,
+                    y: committedOffset.height + dragOffset.height
+                )
+                .gesture(dragGesture)
+                .animation(.smooth(duration: 0.18), value: isExpanded)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(true)
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Text("API")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(statusColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(latestTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Text(latestSubtitle)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Divider()
+
+                if let latestLog {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            debugSection(title: "Request", value: requestText(for: latestLog))
+                            debugSection(title: "Response", value: responseText(for: latestLog))
+
+                            if let error = latestLog.error, !error.isEmpty {
+                                debugSection(title: "Error", value: error, isError: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 280)
+                } else {
+                    Text("아직 API 요청이 없습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+    }
+
+    private func debugSection(title: String, value: String, isError: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            Text(value.isEmpty ? "-" : value)
+                .font(.caption2.monospaced())
+                .foregroundStyle(isError ? .red : .primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func panelWidth(for size: CGSize) -> CGFloat {
+        min(max(size.width - 24, 220), isExpanded ? 380 : 300)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                committedOffset.width += value.translation.width
+                committedOffset.height += value.translation.height
+                dragOffset = .zero
+            }
+    }
+
+    private var latestTitle: String {
+        guard let latestLog else {
+            return "대기 중"
+        }
+
+        return "\(latestLog.method) \(shortURL(latestLog.url))"
+    }
+
+    private var latestSubtitle: String {
+        guard let latestLog else {
+            return "최근 요청/응답 없음"
+        }
+
+        let status = latestLog.statusCode.map(String.init) ?? "pending"
+        return "\(status) · \(latestLog.durationText)"
+    }
+
+    private var statusColor: Color {
+        guard let latestLog else {
+            return .secondary
+        }
+
+        if latestLog.isError {
+            return .red
+        }
+
+        guard let statusCode = latestLog.statusCode else {
+            return .orange
+        }
+
+        switch statusCode {
+        case 200..<300:
+            return .green
+        case 400..<600:
+            return .red
+        default:
+            return .orange
+        }
+    }
+
+    private func requestText(for entry: APITrafficLogEntry) -> String {
+        [
+            "\(entry.method) \(entry.url)",
+            entry.requestBody.isEmpty ? "" : entry.requestBody,
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n")
+    }
+
+    private func responseText(for entry: APITrafficLogEntry) -> String {
+        let status = entry.statusCode.map { "HTTP \($0)" } ?? "HTTP -"
+        return [
+            "\(status) · \(entry.durationText)",
+            entry.responseBody,
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n")
+    }
+
+    private func shortURL(_ value: String) -> String {
+        guard let url = URL(string: value) else {
+            return value
+        }
+
+        if let query = url.query, !query.isEmpty {
+            return "\(url.path)?\(query)"
+        }
+
+        return url.path.isEmpty ? value : url.path
+    }
+}
+#endif
 
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
     func application(
