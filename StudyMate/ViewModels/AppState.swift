@@ -474,6 +474,7 @@ final class AppState: ObservableObject {
     private let appNotificationEventProvider: AppNotificationEventProviding
     private let appClock: AppClockProviding
     private let appIdentifierProvider: AppIdentifierProviding
+    private let appTimeZoneProvider: AppTimeZoneProviding
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -994,6 +995,7 @@ final class AppState: ObservableObject {
         appNotificationEventProvider: AppNotificationEventProviding = DefaultAppNotificationEventProvider(),
         appClock: AppClockProviding = SystemAppClockProvider(),
         appIdentifierProvider: AppIdentifierProviding = UUIDAppIdentifierProvider(),
+        appTimeZoneProvider: AppTimeZoneProviding = SystemAppTimeZoneProvider(),
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1093,6 +1095,7 @@ final class AppState: ObservableObject {
         self.appErrorHandlingUseCase = appErrorHandlingUseCase
         self.appClock = appClock
         self.appIdentifierProvider = appIdentifierProvider
+        self.appTimeZoneProvider = appTimeZoneProvider
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = resolvedCurrentStudySessionUseCase.loadSession()
@@ -5323,7 +5326,7 @@ final class AppState: ObservableObject {
         let registration = try await backendIdentityUseCase.registerDevice(
             apnsToken: apnsToken,
             language: settings.appLanguage,
-            timezone: TimeZone.current.identifier,
+            timezone: appTimeZoneProvider.currentIdentifier,
             apnsEnvironment: Self.backendAPNSEnvironment
         )
         storedBackendIdentityUseCase.saveRegistration(registration)
@@ -5417,7 +5420,7 @@ final class AppState: ObservableObject {
                 registration = try await backendIdentityUseCase.registerDevice(
                     apnsToken: token,
                     language: settings.appLanguage,
-                    timezone: TimeZone.current.identifier,
+                    timezone: appTimeZoneProvider.currentIdentifier,
                     apnsEnvironment: Self.backendAPNSEnvironment
                 )
                 storedBackendIdentityUseCase.saveRegistration(registration)

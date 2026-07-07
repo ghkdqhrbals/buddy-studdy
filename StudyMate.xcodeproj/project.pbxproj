@@ -18,6 +18,7 @@
 		11000000000000000000018C /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		1100000000000000000001D1 /* AppClockProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D1 /* AppClockProvider.swift */; };
 		1100000000000000000001D2 /* AppIdentifierProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D2 /* AppIdentifierProvider.swift */; };
+		1100000000000000000001D3 /* AppTimeZoneProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D3 /* AppTimeZoneProvider.swift */; };
 		1100000000000000000001A7 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		1100000000000000000001A8 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
 		1100000000000000000001A9 /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
@@ -128,6 +129,7 @@
 		12000000000000000000012D /* AppActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000045 /* AppActionRunner.swift */; };
 		1200000000000000000001D1 /* AppClockProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D1 /* AppClockProvider.swift */; };
 		1200000000000000000001D2 /* AppIdentifierProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D2 /* AppIdentifierProvider.swift */; };
+		1200000000000000000001D3 /* AppTimeZoneProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000D3 /* AppTimeZoneProvider.swift */; };
 		120000000000000000000158 /* StudyRecordIdentityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000077 /* StudyRecordIdentityPolicy.swift */; };
 		120000000000000000000159 /* CloudSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000079 /* CloudSyncProvider.swift */; };
 		12000000000000000000015A /* AppPlatformEffectsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000007A /* AppPlatformEffectsProvider.swift */; };
@@ -276,6 +278,7 @@
 		110000000000000000000045 /* AppActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActionRunner.swift; sourceTree = "<group>"; };
 		1100000000000000000000D1 /* AppClockProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppClockProvider.swift; sourceTree = "<group>"; };
 		1100000000000000000000D2 /* AppIdentifierProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIdentifierProvider.swift; sourceTree = "<group>"; };
+		1100000000000000000000D3 /* AppTimeZoneProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTimeZoneProvider.swift; sourceTree = "<group>"; };
 		110000000000000000000077 /* StudyRecordIdentityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyRecordIdentityPolicy.swift; sourceTree = "<group>"; };
 		110000000000000000000046 /* AppUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCases.swift; sourceTree = "<group>"; };
 		11000000000000000000006F /* AppUseCasesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUseCasesProvider.swift; sourceTree = "<group>"; };
@@ -472,6 +475,7 @@
 				110000000000000000000045 /* AppActionRunner.swift */,
 				1100000000000000000000D1 /* AppClockProvider.swift */,
 				1100000000000000000000D2 /* AppIdentifierProvider.swift */,
+				1100000000000000000000D3 /* AppTimeZoneProvider.swift */,
 			);
 			path = AppRuntime;
 			sourceTree = "<group>";
@@ -1090,6 +1094,7 @@
 				11000000000000000000018C /* AppActionRunner.swift in Sources */,
 				1100000000000000000001D1 /* AppClockProvider.swift in Sources */,
 				1100000000000000000001D2 /* AppIdentifierProvider.swift in Sources */,
+				1100000000000000000001D3 /* AppTimeZoneProvider.swift in Sources */,
 				1100000000000000000001A7 /* StudyRecordIdentityPolicy.swift in Sources */,
 				110000000000000000000183 /* PageAccessPolicy.swift in Sources */,
 				110000000000000000000184 /* RefreshPageAccessUseCase.swift in Sources */,
@@ -1216,6 +1221,7 @@
 				12000000000000000000012D /* AppActionRunner.swift in Sources */,
 				1200000000000000000001D1 /* AppClockProvider.swift in Sources */,
 				1200000000000000000001D2 /* AppIdentifierProvider.swift in Sources */,
+				1200000000000000000001D3 /* AppTimeZoneProvider.swift in Sources */,
 				120000000000000000000158 /* StudyRecordIdentityPolicy.swift in Sources */,
 				120000000000000000000124 /* PageAccessPolicy.swift in Sources */,
 				120000000000000000000125 /* RefreshPageAccessUseCase.swift in Sources */,

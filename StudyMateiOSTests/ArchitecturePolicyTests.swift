@@ -164,6 +164,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateUsesTimeZoneProviderForRuntimeTimeZone() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("TimeZone.current"),
+            "AppState must use AppTimeZoneProviding for runtime timezone values instead of reading TimeZone.current directly."
+        )
+    }
+
     func testAppStateDoesNotOwnApplicationUninstallInfrastructure() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
