@@ -1389,6 +1389,11 @@ extension Difficulty {
     }
 }
 
+enum AppLegalLinks {
+    static let termsOfServiceURL = URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html")!
+    static let privacyPolicyURL = URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy.html")!
+}
+
 struct AppStrings {
     var language: AppLanguage
 
@@ -1874,6 +1879,23 @@ struct AppStrings {
     var communityLogin: String { text("로그인", "Sign In") }
     var signInWithGoogle: String { "Sign in with Google" }
     var signInWithEmail: String { "Sign in with Email" }
+    var loginPageHelp: String {
+        text(
+            "로그인하면 기록, 통계, 내 학습 동기화 기능을 사용할 수 있습니다.",
+            "Sign in to use records, statistics, and My Study sync."
+        )
+    }
+    var protectedPageLoginHelp: String {
+        text(
+            "이 화면은 로그인 후 사용할 수 있습니다.",
+            "This page is available after sign-in."
+        )
+    }
+    var loginAgreementPrefix: String { text("로그인하면", "By signing in, you agree to") }
+    var loginAgreementConjunction: String { text("및", "and") }
+    var loginAgreementSuffix: String { text("에 동의하게됩니다.", ".") }
+    var termsOfService: String { text("사용 약관", "Terms of Service") }
+    var privacyPolicy: String { text("개인정보 취급 방침", "Privacy Policy") }
     var email: String { text("이메일", "Email") }
     var password: String { text("비밀번호", "Password") }
     var emailLoginHelp: String {

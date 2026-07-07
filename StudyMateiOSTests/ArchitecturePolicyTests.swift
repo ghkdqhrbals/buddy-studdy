@@ -864,6 +864,77 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testProtectedMobileTabsNavigateToDedicatedLoginPage() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("if appState.shouldShowRecordsLoginPage {\n                            MobileLoginPage("),
+            "Records tab must show a lightweight gate and navigate to a dedicated login page instead of rendering the login page inline."
+        )
+        XCTAssertFalse(
+            content.contains("if appState.shouldShowStatisticsLoginPage {\n                            MobileLoginPage("),
+            "Statistics tab must show a lightweight gate and navigate to a dedicated login page instead of rendering the login page inline."
+        )
+        XCTAssertTrue(
+            content.contains("MobileProtectedLoginGate"),
+            "Protected mobile tabs should use a reusable gate view before pushing the login page."
+        )
+        XCTAssertTrue(
+            content.contains(".navigationDestination(isPresented: $isRecordsLoginPagePresented)"),
+            "Records login action should push a dedicated login page in the tab navigation stack."
+        )
+        XCTAssertTrue(
+            content.contains(".navigationDestination(isPresented: $isStatisticsLoginPagePresented)"),
+            "Statistics login action should push a dedicated login page in the tab navigation stack."
+        )
+    }
+
+    func testMobileLoginPageIncludesLegalAgreementLinks() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let stringsFile = root.appendingPathComponent("StudyMate/Models/StudyModels.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+        let stringsContent = try String(contentsOf: stringsFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("Link(strings.termsOfService"),
+            "Login page must link to the Terms of Service."
+        )
+        XCTAssertTrue(
+            viewContent.contains("Link(strings.privacyPolicy"),
+            "Login page must link to the Privacy Policy."
+        )
+        XCTAssertTrue(
+            viewContent.contains("AppLegalLinks.termsOfServiceURL"),
+            "Login page should use the shared legal URL constants."
+        )
+        XCTAssertTrue(
+            viewContent.contains("AppLegalLinks.privacyPolicyURL"),
+            "Login page should use the shared legal URL constants."
+        )
+        XCTAssertTrue(
+            stringsContent.contains("loginAgreementPrefix"),
+            "Legal agreement copy must be localized through AppStrings."
+        )
+    }
+
+    func testGoogleLoginUsesSystemWebAuthenticationSheet() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Services/GoogleOAuthService.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("ASWebAuthenticationSession"),
+            "Google Login must use the iOS system web authentication sheet instead of embedding OAuth in an arbitrary WebView."
+        )
+        XCTAssertTrue(
+            content.contains("presentationContextProvider"),
+            "The OAuth sheet needs an iOS presentation anchor so it appears as the system authentication sheet."
+        )
+    }
+
     func testGoogleSignInUseCaseDependsOnAuthRepositoryBoundary() throws {
         let root = try repositoryRoot()
         let useCaseFile = root.appendingPathComponent("StudyMate/UseCases/Auth/GoogleSignInUseCase.swift")

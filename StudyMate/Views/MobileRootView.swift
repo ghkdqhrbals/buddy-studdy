@@ -5,6 +5,8 @@ import UIKit
 
 struct MobileRootView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var isRecordsLoginPagePresented = false
+    @State private var isStatisticsLoginPagePresented = false
 
     var body: some View {
         let strings = appState.strings
@@ -29,11 +31,20 @@ struct MobileRootView: View {
                     .tag(AppTab.home)
 
                     NavigationStack {
-                        if appState.shouldShowRecordsLoginPage {
-                            MobileLoginPage(prompt: appState.pageAccessPrompt)
+                        Group {
+                            if appState.shouldShowRecordsLoginPage {
+                                MobileProtectedLoginGate(
+                                    prompt: appState.pageAccessPrompt,
+                                    onLogin: { isRecordsLoginPagePresented = true }
+                                )
                                 .padding(.horizontal, 16)
-                        } else {
-                            HistoryView()
+                            } else {
+                                HistoryView()
+                                    .padding(.horizontal, 16)
+                            }
+                        }
+                        .navigationDestination(isPresented: $isRecordsLoginPagePresented) {
+                            MobileLoginPage(prompt: appState.pageAccessPrompt)
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -43,11 +54,20 @@ struct MobileRootView: View {
                     .tag(AppTab.records)
 
                     NavigationStack {
-                        if appState.shouldShowStatisticsLoginPage {
-                            MobileLoginPage(prompt: appState.pageAccessPrompt)
+                        Group {
+                            if appState.shouldShowStatisticsLoginPage {
+                                MobileProtectedLoginGate(
+                                    prompt: appState.pageAccessPrompt,
+                                    onLogin: { isStatisticsLoginPagePresented = true }
+                                )
                                 .padding(.horizontal, 16)
-                        } else {
-                            StatisticsView()
+                            } else {
+                                StatisticsView()
+                                    .padding(.horizontal, 16)
+                            }
+                        }
+                        .navigationDestination(isPresented: $isStatisticsLoginPagePresented) {
+                            MobileLoginPage(prompt: appState.pageAccessPrompt)
                                 .padding(.horizontal, 16)
                         }
                     }
@@ -91,6 +111,35 @@ struct MobileRootView: View {
     }
 }
 
+private struct MobileProtectedLoginGate: View {
+    @EnvironmentObject private var appState: AppState
+    var prompt: PageAccessPrompt?
+    var onLogin: () -> Void
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(prompt?.title ?? strings.pageAccessRequiresLogin)
+                .font(.title3.weight(.semibold))
+
+            Text(strings.protectedPageLoginHelp)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Button(action: onLogin) {
+                SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 24)
+    }
+}
+
 private struct MobileLoginPage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -102,9 +151,24 @@ private struct MobileLoginPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(prompt?.title ?? strings.pageAccessRequiresLogin)
-                .font(.title3.weight(.semibold))
+        VStack(spacing: 18) {
+            Spacer(minLength: 18)
+
+            Image("LaunchLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            VStack(spacing: 8) {
+                Text(strings.communityLogin)
+                    .font(.title2.weight(.bold))
+
+                Text(prompt?.title ?? strings.loginPageHelp)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
             Button {
                 appState.signInToCommunity()
@@ -121,6 +185,8 @@ private struct MobileLoginPage: View {
             .buttonStyle(.plain)
 
             Spacer(minLength: 0)
+
+            loginAgreement
         }
         .padding(20)
         .navigationTitle(strings.communityLogin)
@@ -140,6 +206,24 @@ private struct MobileLoginPage: View {
             }
             .environmentObject(appState)
         }
+    }
+
+    private var loginAgreement: some View {
+        VStack(spacing: 4) {
+            Text(strings.loginAgreementPrefix)
+
+            HStack(spacing: 4) {
+                Link(strings.termsOfService, destination: AppLegalLinks.termsOfServiceURL)
+                Text(strings.loginAgreementConjunction)
+                Link(strings.privacyPolicy, destination: AppLegalLinks.privacyPolicyURL)
+            }
+
+            Text(strings.loginAgreementSuffix)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
     }
 }
 
