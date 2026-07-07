@@ -302,7 +302,7 @@ private struct FloatingAPIDebugOverlay: View {
                         }
 
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 5) {
+                            VStack(alignment: .leading, spacing: apiLogRowSpacing) {
                                 ForEach(recentLogs) { log in
                                     Button {
                                         selectedLogID = log.id
@@ -382,7 +382,6 @@ private struct FloatingAPIDebugOverlay: View {
 
             Spacer(minLength: 4)
         }
-        .frame(height: apiLogRowHeight)
         .padding(.horizontal, 7)
         .padding(.vertical, 6)
         .background(
@@ -393,6 +392,7 @@ private struct FloatingAPIDebugOverlay: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
         }
+        .frame(height: apiLogRowHeight)
         .contentShape(Rectangle())
     }
 
@@ -404,15 +404,19 @@ private struct FloatingAPIDebugOverlay: View {
         let visibleRows = min(recentLogs.count, 3)
         let contentHeight = (CGFloat(visibleRows) * apiLogRowHeight)
             + (CGFloat(max(0, visibleRows - 1)) * apiLogRowSpacing)
-        return min(142, contentHeight)
+        return min(apiLogListMaxHeight, contentHeight)
     }
 
     private var apiLogRowHeight: CGFloat {
-        44
+        54
     }
 
     private var apiLogRowSpacing: CGFloat {
-        5
+        6
+    }
+
+    private var apiLogListMaxHeight: CGFloat {
+        (apiLogRowHeight * 3) + (apiLogRowSpacing * 2)
     }
 
     private func panelWidth(for size: CGSize) -> CGFloat {
