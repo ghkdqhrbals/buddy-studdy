@@ -142,9 +142,10 @@ private struct StartupPixelFoxSplashView: View {
 #if DEBUG
 private struct FloatingAPIDebugOverlay: View {
     @EnvironmentObject private var appState: AppState
+    @State private var isVisible = true
     @State private var isExpanded = false
-    @State private var dragOffset: CGSize = .zero
     @State private var committedOffset = CGSize(width: 12, height: 74)
+    @State private var dragStartOffset: CGSize?
 
     private var latestLog: APITrafficLogEntry? {
         appState.apiTrafficLogs.first
@@ -152,54 +153,106 @@ private struct FloatingAPIDebugOverlay: View {
 
     var body: some View {
         GeometryReader { geometry in
-            panel
+            content
                 .frame(width: panelWidth(for: geometry.size), alignment: .leading)
+                .frame(maxHeight: panelMaxHeight(for: geometry.size))
                 .offset(
-                    x: committedOffset.width + dragOffset.width,
-                    y: committedOffset.height + dragOffset.height
+                    x: boundedOffset(for: geometry.size).width,
+                    y: boundedOffset(for: geometry.size).height
                 )
-                .gesture(dragGesture)
+                .gesture(dragGesture(in: geometry.size))
                 .animation(.smooth(duration: 0.18), value: isExpanded)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(true)
+                .onChange(of: isExpanded) {
+                    withAnimation(.smooth(duration: 0.18)) {
+                        committedOffset = boundedOffset(for: geometry.size)
+                    }
+                }
+                .onChange(of: geometry.size) {
+                    committedOffset = boundedOffset(for: geometry.size)
+                }
         }
         .ignoresSafeArea(.keyboard)
     }
 
+    @ViewBuilder
+    private var content: some View {
+        if isVisible {
+            panel
+        } else {
+            Button {
+                isVisible = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text("API")
+                        .font(.caption.weight(.bold))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(statusColor, in: Capsule())
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private var panel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
-                isExpanded.toggle()
-            } label: {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    isExpanded.toggle()
+                } label: {
                     Text("API")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 4)
                         .background(statusColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(latestTitle)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(latestTitle)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
 
-                        Text(latestSubtitle)
-                            .font(.caption2.monospacedDigit())
+                            Text(latestSubtitle)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
-                    Spacer(minLength: 4)
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                Button {
+                    isExpanded = false
+                    isVisible = false
+                } label: {
+                    Image(systemName: "xmark")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             if isExpanded {
                 Divider()
@@ -249,18 +302,67 @@ private struct FloatingAPIDebugOverlay: View {
     }
 
     private func panelWidth(for size: CGSize) -> CGFloat {
-        min(max(size.width - 24, 220), isExpanded ? 380 : 300)
+        guard isVisible else {
+            return 64
+        }
+        return min(max(size.width - 24, 220), isExpanded ? 380 : 300)
     }
 
-    private var dragGesture: some Gesture {
-        DragGesture()
+    private func panelMaxHeight(for size: CGSize) -> CGFloat {
+        guard isVisible else {
+            return 36
+        }
+        return min(isExpanded ? 360 : 64, max(80, size.height - 24))
+    }
+
+    private func panelEstimatedHeight(for size: CGSize) -> CGFloat {
+        guard isVisible else {
+            return 36
+        }
+        return min(isExpanded ? 360 : 64, panelMaxHeight(for: size))
+    }
+
+    private func boundedOffset(for size: CGSize, proposed proposedOffset: CGSize? = nil) -> CGSize {
+        let offset = proposedOffset ?? committedOffset
+        let margin: CGFloat = 12
+        let panelWidth = panelWidth(for: size)
+        let panelHeight = panelEstimatedHeight(for: size)
+        let maxX = max(margin, size.width - panelWidth - margin)
+        let maxY = max(margin, size.height - panelHeight - margin)
+
+        return CGSize(
+            width: min(max(offset.width, margin), maxX),
+            height: min(max(offset.height, margin), maxY)
+        )
+    }
+
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .onChanged { value in
-                dragOffset = value.translation
+                if dragStartOffset == nil {
+                    dragStartOffset = boundedOffset(for: size)
+                }
+
+                let startOffset = dragStartOffset ?? committedOffset
+                let proposedOffset = CGSize(
+                    width: startOffset.width + value.translation.width,
+                    height: startOffset.height + value.translation.height
+                )
+
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    committedOffset = boundedOffset(for: size, proposed: proposedOffset)
+                }
             }
             .onEnded { value in
-                committedOffset.width += value.translation.width
-                committedOffset.height += value.translation.height
-                dragOffset = .zero
+                let startOffset = dragStartOffset ?? committedOffset
+                let proposedOffset = CGSize(
+                    width: startOffset.width + value.translation.width,
+                    height: startOffset.height + value.translation.height
+                )
+                dragStartOffset = nil
+                committedOffset = boundedOffset(for: size, proposed: proposedOffset)
             }
     }
 
