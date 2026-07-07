@@ -2005,11 +2005,17 @@ private struct MobileProfileSettingsSheet: View {
     @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
     @State private var draftAvatarColorSeed = ""
     @State private var allowPublicQuestionsAccess = true
+    @State private var hasAgreedTermsOfService = false
+    @State private var hasAgreedPrivacyPolicy = false
+    @State private var hasAgreedInfoNotification = false
+    @State private var hasAgreedMarketingNotification = false
+    @State private var hasAgreedNightMarketingNotification = false
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
     @State private var isShowingAvatarCustomization = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
+    @State private var legalWebRoute: MobileLegalWebRoute?
 
     private var strings: AppStrings {
         appState.strings
@@ -2233,6 +2239,48 @@ private struct MobileProfileSettingsSheet: View {
                     }
 
                     Section {
+                        termsConsentRow(
+                            title: strings.termsOfService,
+                            code: "TERMS_OF_SERVICE",
+                            isOn: $hasAgreedTermsOfService,
+                            url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage),
+                            strings: strings
+                        )
+                        termsConsentRow(
+                            title: strings.privacyPolicy,
+                            code: "PRIVACY_POLICY",
+                            isOn: $hasAgreedPrivacyPolicy,
+                            url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage),
+                            strings: strings
+                        )
+                        termsConsentRow(
+                            title: strings.infoNotificationConsent,
+                            code: "INFO_NOTIFICATION",
+                            isOn: $hasAgreedInfoNotification,
+                            url: AppLegalLinks.infoNotificationURL(language: appState.settings.appLanguage),
+                            strings: strings
+                        )
+                        termsConsentRow(
+                            title: strings.marketingNotificationConsent,
+                            code: "MARKETING_NOTIFICATION",
+                            isOn: $hasAgreedMarketingNotification,
+                            url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
+                            strings: strings
+                        )
+                        termsConsentRow(
+                            title: strings.nightMarketingNotificationConsent,
+                            code: "NIGHT_MARKETING_NOTIFICATION",
+                            isOn: $hasAgreedNightMarketingNotification,
+                            url: AppLegalLinks.nightMarketingNotificationURL(language: appState.settings.appLanguage),
+                            strings: strings
+                        )
+                    } header: {
+                        Text(strings.termsAndConsents)
+                    } footer: {
+                        Text(strings.termsConsentHelp)
+                    }
+
+                    Section {
                         Button(role: .destructive) {
                             appState.signOutFromCommunity()
                             dismiss()
@@ -2304,10 +2352,12 @@ private struct MobileProfileSettingsSheet: View {
             .onAppear {
                 wasSignedInWhenOpened = appState.isCommunitySignedIn
                 resetDraftProfile()
+                resetTermsAgreementDraft()
                 Task {
                     isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
                     resetDraftProfile()
+                    resetTermsAgreementDraft()
                     isLoadingProfileDraft = false
                 }
             }
@@ -2318,6 +2368,7 @@ private struct MobileProfileSettingsSheet: View {
 
                 guard let profile else {
                     resetDraftProfile()
+                    resetTermsAgreementDraft()
                     return
                 }
 
@@ -2325,6 +2376,7 @@ private struct MobileProfileSettingsSheet: View {
                 draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
                 draftAvatarColorSeed = profile.avatarColorSeed
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
+                resetTermsAgreementDraft()
             }
             .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
                 if isSignedIn, !wasSignedInWhenOpened {
@@ -2346,6 +2398,15 @@ private struct MobileProfileSettingsSheet: View {
                 }
                 .environmentObject(appState)
             }
+            .sheet(item: $legalWebRoute) { route in
+                #if os(iOS)
+                MobileLegalWebView(url: route.url)
+                    .ignoresSafeArea()
+                #else
+                Link(route.url.absoluteString, destination: route.url)
+                    .padding()
+                #endif
+            }
         }
     }
 
@@ -2356,12 +2417,82 @@ private struct MobileProfileSettingsSheet: View {
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
     }
 
+    private func resetTermsAgreementDraft() {
+        hasAgreedTermsOfService = loadTermsAgreement(code: "TERMS_OF_SERVICE")
+        hasAgreedPrivacyPolicy = loadTermsAgreement(code: "PRIVACY_POLICY")
+        hasAgreedInfoNotification = loadTermsAgreement(code: "INFO_NOTIFICATION")
+        hasAgreedMarketingNotification = loadTermsAgreement(code: "MARKETING_NOTIFICATION")
+        hasAgreedNightMarketingNotification = loadTermsAgreement(code: "NIGHT_MARKETING_NOTIFICATION")
+    }
+
+    private func loadTermsAgreement(code: String) -> Bool {
+        guard let key = termsAgreementCacheKey(code: code) else {
+            return false
+        }
+
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func saveTermsAgreementCache(code: String, isAgreed: Bool) {
+        guard let key = termsAgreementCacheKey(code: code) else {
+            return
+        }
+
+        UserDefaults.standard.set(isAgreed, forKey: key)
+    }
+
+    private func termsAgreementCacheKey(code: String) -> String? {
+        guard let profileID = appState.communityProfile?.id else {
+            return nil
+        }
+
+        return "termsAgreement.user.\(profileID).\(code)"
+    }
+
     private func profileConfirmationTitle(strings: AppStrings) -> String {
         guard appState.isCommunitySignedIn else {
             return strings.done
         }
 
         return strings.save
+    }
+
+    private func termsConsentRow(
+        title: String,
+        code: String,
+        isOn: Binding<Bool>,
+        url: URL,
+        strings: AppStrings
+    ) -> some View {
+        HStack(spacing: 12) {
+            Toggle(
+                title,
+                isOn: Binding(
+                    get: { isOn.wrappedValue },
+                    set: { newValue in
+                        let previousValue = isOn.wrappedValue
+                        isOn.wrappedValue = newValue
+                        Task {
+                            let didSave = await appState.saveTermsAgreement(
+                                code: code,
+                                isAgreed: newValue,
+                                source: .profile
+                            )
+                            if !didSave {
+                                isOn.wrappedValue = previousValue
+                            } else {
+                                saveTermsAgreementCache(code: code, isAgreed: newValue)
+                            }
+                        }
+                    }
+                )
+            )
+
+            Button(strings.details) {
+                legalWebRoute = MobileLegalWebRoute(url: url)
+            }
+            .buttonStyle(.borderless)
+        }
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
@@ -3881,12 +4012,6 @@ private struct MobileOnboardingView: View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @AppStorage("termsAgreement.termsOfService") private var hasAgreedTermsOfService = false
-    @AppStorage("termsAgreement.privacyPolicy") private var hasAgreedPrivacyPolicy = false
-    @AppStorage("termsAgreement.infoNotification") private var hasAgreedInfoNotification = false
-    @AppStorage("termsAgreement.marketingNotification") private var hasAgreedMarketingNotification = false
-    @AppStorage("termsAgreement.nightMarketingNotification") private var hasAgreedNightMarketingNotification = false
-    @State private var legalWebRoute: MobileLegalWebRoute?
 
     private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
@@ -3935,48 +4060,6 @@ private struct MobileSettingsView: View {
                             Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
                         }
                     }
-                }
-
-                Section {
-                    termsConsentRow(
-                        title: strings.termsOfService,
-                        code: "TERMS_OF_SERVICE",
-                        isOn: $hasAgreedTermsOfService,
-                        url: AppLegalLinks.termsOfServiceURL(language: appState.draftSettings.appLanguage),
-                        strings: strings
-                    )
-                    termsConsentRow(
-                        title: strings.privacyPolicy,
-                        code: "PRIVACY_POLICY",
-                        isOn: $hasAgreedPrivacyPolicy,
-                        url: AppLegalLinks.privacyPolicyURL(language: appState.draftSettings.appLanguage),
-                        strings: strings
-                    )
-                    termsConsentRow(
-                        title: strings.infoNotificationConsent,
-                        code: "INFO_NOTIFICATION",
-                        isOn: $hasAgreedInfoNotification,
-                        url: AppLegalLinks.infoNotificationURL(language: appState.draftSettings.appLanguage),
-                        strings: strings
-                    )
-                    termsConsentRow(
-                        title: strings.marketingNotificationConsent,
-                        code: "MARKETING_NOTIFICATION",
-                        isOn: $hasAgreedMarketingNotification,
-                        url: AppLegalLinks.marketingNotificationURL(language: appState.draftSettings.appLanguage),
-                        strings: strings
-                    )
-                    termsConsentRow(
-                        title: strings.nightMarketingNotificationConsent,
-                        code: "NIGHT_MARKETING_NOTIFICATION",
-                        isOn: $hasAgreedNightMarketingNotification,
-                        url: AppLegalLinks.nightMarketingNotificationURL(language: appState.draftSettings.appLanguage),
-                        strings: strings
-                    )
-                } header: {
-                    Text(strings.termsAndConsents)
-                } footer: {
-                    Text(strings.termsConsentHelp)
                 }
 
                 Section(strings.developerOptions) {
@@ -4064,47 +4147,6 @@ private struct MobileSettingsView: View {
         }
         .onDisappear {
             appState.cancelSettingsEditing()
-        }
-        .sheet(item: $legalWebRoute) { route in
-            #if os(iOS)
-            MobileLegalWebView(url: route.url)
-                .ignoresSafeArea()
-            #else
-            Link(route.url.absoluteString, destination: route.url)
-                .padding()
-            #endif
-        }
-    }
-
-    private func termsConsentRow(
-        title: String,
-        code: String,
-        isOn: Binding<Bool>,
-        url: URL,
-        strings: AppStrings
-    ) -> some View {
-        HStack(spacing: 12) {
-            Toggle(
-                title,
-                isOn: Binding(
-                    get: { isOn.wrappedValue },
-                    set: { newValue in
-                        let previousValue = isOn.wrappedValue
-                        isOn.wrappedValue = newValue
-                        Task {
-                            let didSave = await appState.saveTermsAgreement(code: code, isAgreed: newValue)
-                            if !didSave {
-                                isOn.wrappedValue = previousValue
-                            }
-                        }
-                    }
-                )
-            )
-
-            Button(strings.details) {
-                legalWebRoute = MobileLegalWebRoute(url: url)
-            }
-            .buttonStyle(.borderless)
         }
     }
 

@@ -2353,6 +2353,7 @@ enum BackendTermsAgreementAction: String {
 enum BackendTermsAgreementSource: String {
     case signup = "SIGNUP"
     case settings = "SETTINGS"
+    case profile = "PROFILE"
     case requiredGate = "REQUIRED_GATE"
     case migration = "MIGRATION"
 }

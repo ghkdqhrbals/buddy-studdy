@@ -5067,7 +5067,16 @@ final class AppState: ObservableObject {
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }
 
-    func saveTermsAgreement(code: String, isAgreed: Bool) async -> Bool {
+    func saveTermsAgreement(
+        code: String,
+        isAgreed: Bool,
+        source: BackendTermsAgreementSource = .settings
+    ) async -> Bool {
+        guard source != .profile || isCommunitySignedIn else {
+            log(.warning, "프로필 약관 동의는 로그인 후 저장할 수 있습니다. code=\(code)")
+            return false
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "terms-agreement") else {
             log(.warning, "약관 동의 저장을 위한 백엔드 등록이 없습니다. code=\(code)")
             return false
@@ -5082,7 +5091,7 @@ final class AppState: ObservableObject {
                         registration: recoveredRegistration,
                         code: code,
                         action: isAgreed ? .agreed : .withdrawn,
-                        source: .settings
+                        source: source
                     )
                 }
             )

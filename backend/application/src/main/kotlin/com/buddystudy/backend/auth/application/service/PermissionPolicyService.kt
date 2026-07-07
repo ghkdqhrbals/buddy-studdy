@@ -42,6 +42,9 @@ class PermissionPolicyService(
         if (source !in AGREEMENT_SOURCES) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid terms agreement source.")
         }
+        if (source == "PROFILE" && principal.anonymous) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Profile terms agreement requires an active login.")
+        }
         val activeTerms = terms.activeTerms(command.code.trim(), Instant.now())
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Active terms were not found.")
 
@@ -104,6 +107,6 @@ class PermissionPolicyService(
 
     private companion object {
         private val AGREEMENT_ACTIONS = setOf("AGREED", "WITHDRAWN")
-        private val AGREEMENT_SOURCES = setOf("SIGNUP", "SETTINGS", "REQUIRED_GATE", "MIGRATION")
+        private val AGREEMENT_SOURCES = setOf("SIGNUP", "SETTINGS", "PROFILE", "REQUIRED_GATE", "MIGRATION")
     }
 }
