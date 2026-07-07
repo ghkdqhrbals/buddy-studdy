@@ -947,6 +947,25 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMobileLoginButtonsUseRoundedRectangleShape() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("let buttonShape = RoundedRectangle(cornerRadius: 10, style: .continuous)"),
+            "Login buttons should use a subtle rounded rectangle shape."
+        )
+        XCTAssertTrue(
+            viewContent.contains(".background {\n                buttonShape"),
+            "Login buttons should fill the rounded shape directly."
+        )
+        XCTAssertTrue(
+            viewContent.contains(".contentShape(buttonShape)"),
+            "Login button hit testing should follow the rounded shape."
+        )
+    }
+
     func testGoogleLoginUsesSystemWebAuthenticationSheet() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Services/GoogleOAuthService.swift")

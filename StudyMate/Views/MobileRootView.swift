@@ -2921,19 +2921,24 @@ private struct SignInButtonLabel: View {
     var isPrimary: Bool
 
     var body: some View {
+        let buttonShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
         Text(title)
             .font(.subheadline.weight(.semibold))
             .lineLimit(1)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 11)
-        .padding(.horizontal, 12)
-        .background(isPrimary ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.06))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isPrimary ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.16), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .padding(.horizontal, 12)
+            .background {
+                buttonShape
+                    .fill(isPrimary ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.06))
+            }
+            .overlay {
+                buttonShape
+                    .stroke(isPrimary ? Color.accentColor.opacity(0.28) : Color.secondary.opacity(0.18), lineWidth: 1)
+            }
+            .contentShape(buttonShape)
+            .foregroundStyle(.primary)
     }
 }
 
