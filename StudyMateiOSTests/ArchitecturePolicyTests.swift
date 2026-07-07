@@ -882,6 +882,22 @@ final class ArchitecturePolicyTests: XCTestCase {
             "Protected mobile tabs should use a reusable gate view before pushing the login page."
         )
         XCTAssertTrue(
+            content.contains("MobileProtectedLoginGate(\n                                    title: strings.tabRecords"),
+            "Records login gate should keep the same root title position as the records screen."
+        )
+        XCTAssertTrue(
+            content.contains("MobileProtectedLoginGate(\n                                    title: strings.tabStatistics"),
+            "Statistics login gate should keep the same root title position as the statistics screen."
+        )
+        XCTAssertTrue(
+            content.contains("MobileRootLargeTitle(title)"),
+            "Protected mobile gates should render the tab title instead of replacing the screen chrome with a login prompt."
+        )
+        XCTAssertTrue(
+            content.contains("MobileInlineLoginButtonLabel(title: strings.communityLogin)"),
+            "Protected mobile gates should use a subdued inline login action."
+        )
+        XCTAssertTrue(
             content.contains(".navigationDestination(isPresented: $isRecordsLoginPagePresented)"),
             "Records login action should push a dedicated login page in the tab navigation stack."
         )
@@ -900,6 +916,14 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(
             content.contains("prompt?.title"),
             "The dedicated login page should not echo page-access prompt text such as sign-in-required."
+        )
+        XCTAssertTrue(
+            content.contains("Button {\n                isHomeLoginPagePresented = true"),
+            "The My Study login action should be a plain button so list rows do not show a navigation chevron."
+        )
+        XCTAssertFalse(
+            content.contains("NavigationLink {\n                    MobileLoginPage()"),
+            "The My Study login action should not use an inline NavigationLink row accessory."
         )
     }
 
@@ -949,9 +973,9 @@ final class ArchitecturePolicyTests: XCTestCase {
             viewContent.contains("Image(\"LaunchLogo\")"),
             "Login UI should use the app's LaunchLogo asset."
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             viewContent.contains("MobileLoginLogo(size: 72)"),
-            "The protected login gate should show a centered app logo before the login action."
+            "Protected login gates should stay visually quiet and leave the prominent app logo to the dedicated login page."
         )
         XCTAssertTrue(
             viewContent.contains("MobileLoginLogo(size: 96)"),

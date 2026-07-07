@@ -34,6 +34,7 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowRecordsLoginPage {
                                 MobileProtectedLoginGate(
+                                    title: strings.tabRecords,
                                     onLogin: { isRecordsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -56,6 +57,7 @@ struct MobileRootView: View {
                         Group {
                             if appState.shouldShowStatisticsLoginPage {
                                 MobileProtectedLoginGate(
+                                    title: strings.tabStatistics,
                                     onLogin: { isStatisticsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
@@ -111,6 +113,7 @@ struct MobileRootView: View {
 
 private struct MobileProtectedLoginGate: View {
     @EnvironmentObject private var appState: AppState
+    var title: String
     var onLogin: () -> Void
 
     private var strings: AppStrings {
@@ -118,20 +121,48 @@ private struct MobileProtectedLoginGate: View {
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 16) {
-            MobileLoginLogo(size: 72)
+        VStack(alignment: .leading, spacing: 0) {
+            MobileRootLargeTitle(title)
+                .padding(.top, 6)
                 .padding(.bottom, 8)
 
-            Button(action: onLogin) {
-                SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
+            ScrollView {
+                Button(action: onLogin) {
+                    MobileInlineLoginButtonLabel(title: strings.communityLogin)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 8)
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(.systemBackground))
+        .navigationTitle("")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+private struct MobileInlineLoginButtonLabel: View {
+    var title: String
+
+    var body: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -247,6 +278,7 @@ private struct MobileHomeView: View {
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var notificationForwardRoute: NotificationForwardRoute?
+    @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
     @State private var isShowingEmailSignIn = false
@@ -345,6 +377,10 @@ private struct MobileHomeView: View {
             MobileNotificationsView(forwardedRoute: $notificationForwardRoute)
                 .padding(.horizontal, 16)
                 .mobileTabTitle(strings.notificationInbox)
+        }
+        .navigationDestination(isPresented: $isHomeLoginPagePresented) {
+            MobileLoginPage()
+                .padding(.horizontal, 16)
         }
         .toolbar {
             #if os(iOS)
@@ -558,19 +594,15 @@ private struct MobileHomeView: View {
 
     private var myStudyLoginSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(strings.myStudyLoginHelp)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                NavigationLink {
-                    MobileLoginPage()
-                } label: {
-                    SignInButtonLabel(title: strings.communityLogin, isPrimary: true)
-                }
-                .buttonStyle(.plain)
+            Button {
+                isHomeLoginPagePresented = true
+            } label: {
+                MobileInlineLoginButtonLabel(title: strings.communityLogin)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
+            .buttonStyle(.plain)
+            .listRowSeparator(.hidden)
         }
     }
 
