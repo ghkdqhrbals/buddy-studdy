@@ -28,4 +28,20 @@ final class PageAccessPolicyTests: XCTestCase {
             )
         )
     }
+
+    func testCommunitySessionUsesOneAuthoritativePolicy() {
+        XCTAssertFalse(
+            PageAccessPolicy.isCommunitySessionActive(
+                accessState: .signedOut,
+                hasRegisteredAccessToken: false
+            )
+        )
+
+        XCTAssertTrue(
+            PageAccessPolicy.isCommunitySessionActive(
+                accessState: .signedOut,
+                hasRegisteredAccessToken: true
+            )
+        )
+    }
 }

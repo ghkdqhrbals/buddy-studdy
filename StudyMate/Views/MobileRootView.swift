@@ -269,7 +269,7 @@ private struct MobileLoginPage: View {
         .padding(.vertical, 24)
         .navigationTitle(strings.communityLogin)
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+        .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
             guard isSignedIn else {
                 return
             }
@@ -527,7 +527,7 @@ private struct MobileHomeView: View {
                 }
             }
         }
-        .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+        .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
             hasLoadedCommunityQuestions = false
             guard isSignedIn, selectedHomeScope == .all else {
                 return
@@ -642,7 +642,7 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private var homeContentSection: some View {
-        if selectedHomeScope == .my, !appState.isCommunitySignedIn {
+        if selectedHomeScope == .my, !appState.isCommunitySessionActive {
             myStudyLoginSection
         } else if selectedHomeScope == .my {
             myStudySection
@@ -783,7 +783,7 @@ private struct MobileHomeView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if appState.isCommunitySignedIn {
+            if appState.isCommunitySessionActive {
                 Button(role: .destructive) {
                     Task {
                         await appState.reportCommunityQuestion(
@@ -806,7 +806,7 @@ private struct MobileHomeView: View {
     }
 
     private var shouldShowHomeAddToolbarButton: Bool {
-        !isHomeSearchActive && selectedHomeScope == .my && appState.isCommunitySignedIn
+        !isHomeSearchActive && selectedHomeScope == .my && appState.isCommunitySessionActive
     }
 
     private var profileToolbarControl: some View {
@@ -852,7 +852,7 @@ private struct MobileHomeView: View {
     }
 
     private var signedInProfileColorSeed: String? {
-        guard appState.isCommunitySignedIn,
+        guard appState.isCommunitySessionActive,
               !appState.profileAvatarColorSeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
@@ -883,7 +883,7 @@ private struct MobileHomeView: View {
     @ViewBuilder
     private func homeToolbarItems(strings: AppStrings) -> some View {
         HStack(spacing: 16) {
-            if selectedHomeScope == .my, appState.isCommunitySignedIn {
+            if selectedHomeScope == .my, appState.isCommunitySessionActive {
                 Button {
                     isAddingStudyCategory = true
                 } label: {
@@ -2026,7 +2026,7 @@ private struct MobileProfileSettingsSheet: View {
     }
 
     private var hasProfileChanges: Bool {
-        guard appState.isCommunitySignedIn else {
+        guard appState.isCommunitySessionActive else {
             return false
         }
 
@@ -2043,7 +2043,7 @@ private struct MobileProfileSettingsSheet: View {
     }
 
     private var canSaveProfile: Bool {
-        appState.isCommunitySignedIn
+        appState.isCommunitySessionActive
             && !appState.isUpdatingCommunityProfile
             && !trimmedProfileDisplayName.isEmpty
             && hasProfileChanges
@@ -2071,7 +2071,7 @@ private struct MobileProfileSettingsSheet: View {
 
         NavigationStack {
             Form {
-                if appState.isCommunitySignedIn, appState.communityProfile == nil {
+                if appState.isCommunitySessionActive, appState.communityProfile == nil {
                     Section {
                         VStack(spacing: 14) {
                             if isLoadingProfileDraft {
@@ -2110,7 +2110,7 @@ private struct MobileProfileSettingsSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                     }
-                } else if appState.isCommunitySignedIn {
+                } else if appState.isCommunitySessionActive {
                     Section {
                         VStack(alignment: .center, spacing: 14) {
                             HomeProfileAvatar(
@@ -2319,7 +2319,7 @@ private struct MobileProfileSettingsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        guard appState.isCommunitySignedIn else {
+                        guard appState.isCommunitySessionActive else {
                             dismiss()
                             return
                         }
@@ -2346,11 +2346,11 @@ private struct MobileProfileSettingsSheet: View {
                             Text(profileConfirmationTitle(strings: strings))
                         }
                     }
-                    .disabled(appState.isCommunitySignedIn ? !canSaveProfile : appState.isUpdatingCommunityProfile)
+                    .disabled(appState.isCommunitySessionActive ? !canSaveProfile : appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
-                wasSignedInWhenOpened = appState.isCommunitySignedIn
+                wasSignedInWhenOpened = appState.isCommunitySessionActive
                 resetDraftProfile()
                 resetTermsAgreementDraft()
                 Task {
@@ -2378,7 +2378,7 @@ private struct MobileProfileSettingsSheet: View {
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
                 resetTermsAgreementDraft()
             }
-            .onChange(of: appState.isCommunitySignedIn) { _, isSignedIn in
+            .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
                 if isSignedIn, !wasSignedInWhenOpened {
                     dismiss()
                 }
@@ -2450,7 +2450,7 @@ private struct MobileProfileSettingsSheet: View {
     }
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
-        guard appState.isCommunitySignedIn else {
+        guard appState.isCommunitySessionActive else {
             return strings.done
         }
 
@@ -3380,7 +3380,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private var canWriteCommunityReaction: Bool {
-        appState.isCommunitySignedIn
+        appState.isCommunitySessionActive
     }
 
     var body: some View {

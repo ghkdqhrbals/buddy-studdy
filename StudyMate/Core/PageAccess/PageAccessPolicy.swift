@@ -50,6 +50,21 @@ struct PageAccessPrompt: Identifiable, Equatable {
 }
 
 enum PageAccessPolicy {
+    static func isCommunitySessionActive(
+        accessState: BackendAccessState,
+        hasRegisteredAccessToken: Bool
+    ) -> Bool {
+        if accessState.user.status != "ANONYMOUS" {
+            return true
+        }
+
+        if hasRegisteredAccessToken {
+            return true
+        }
+
+        return false
+    }
+
     static func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
         switch tab {
         case .study:

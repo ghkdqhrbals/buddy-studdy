@@ -124,7 +124,7 @@ struct HistoryView: View {
                                     selectedRecordID = record.id
                                 }
                                 .contextMenu {
-                                    if appState.isCommunitySignedIn {
+                                    if appState.isCommunitySessionActive {
                                         Button {
                                             appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
                                         } label: {

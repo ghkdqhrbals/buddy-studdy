@@ -514,6 +514,13 @@ final class AppState: ObservableObject {
         AppStrings(language: draftSettings.appLanguage)
     }
 
+    var isCommunitySessionActive: Bool {
+        PageAccessPolicy.isCommunitySessionActive(
+            accessState: backendAccessState,
+            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken()
+        )
+    }
+
     var statusTitle: String {
         strings.statusTitle(isRunning: isRunning)
     }
@@ -521,7 +528,7 @@ final class AppState: ObservableObject {
     var hasUnsavedSettingsChanges: Bool {
         var comparableActiveSettings = normalizedSettings(activeSettingsForEditing)
         var comparableSavedSettings = normalizedSettings(savedSettings)
-        if !isCommunitySignedIn {
+        if !isCommunitySessionActive {
             comparableActiveSettings = comparableActiveSettings.withQuestionPrivacy(false)
             comparableSavedSettings = comparableSavedSettings.withQuestionPrivacy(false)
         }
@@ -587,7 +594,7 @@ final class AppState: ObservableObject {
     }
 
     private func shouldRefreshPageAccessBeforeDenying() -> Bool {
-        if isCommunitySignedIn {
+        if isCommunitySessionActive {
             return true
         }
 
@@ -2347,7 +2354,7 @@ final class AppState: ObservableObject {
 
                 var nextSettings = backendSettings.studySettings(fallback: settings)
                 nextSettings = synchronizedTopicCategories(for: nextSettings)
-                if !isCommunitySignedIn {
+                if !isCommunitySessionActive {
                     nextSettings = nextSettings.withQuestionPrivacy(false)
                 }
                 let normalizedNextSettings = normalizedSettings(nextSettings)
@@ -2404,7 +2411,7 @@ final class AppState: ObservableObject {
     }
 
     func setDraftQuestionPublicity(_ isQuestionPublic: Bool) {
-        draftSettings.isQuestionPublic = isCommunitySignedIn && isQuestionPublic
+        draftSettings.isQuestionPublic = isCommunitySessionActive && isQuestionPublic
     }
 
     func signInToCommunity() {
@@ -2644,7 +2651,7 @@ final class AppState: ObservableObject {
         if let colorSeed {
             updateProfileAvatarColorSeed(colorSeed)
         }
-        guard isCommunitySignedIn else {
+        guard isCommunitySessionActive else {
             return
         }
 
@@ -2662,7 +2669,7 @@ final class AppState: ObservableObject {
     }
 
     func loadCommunityProfile() async {
-        guard isCommunitySignedIn,
+        guard isCommunitySessionActive,
               let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
             return
         }
@@ -2807,7 +2814,7 @@ final class AppState: ObservableObject {
     }
 
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
-        guard isCommunitySignedIn else {
+        guard isCommunitySessionActive else {
             return nil
         }
 
@@ -2889,7 +2896,7 @@ final class AppState: ObservableObject {
     }
 
     func createCommunityQuestionComment(questionID: String, body: String) async -> CommunityQuestionComment? {
-        guard isCommunitySignedIn else {
+        guard isCommunitySessionActive else {
             return nil
         }
 
@@ -2919,7 +2926,7 @@ final class AppState: ObservableObject {
     }
 
     func deleteCommunityQuestionComment(questionID: String, commentID: String) async -> Bool {
-        guard isCommunitySignedIn else {
+        guard isCommunitySessionActive else {
             return false
         }
 
@@ -3705,7 +3712,7 @@ final class AppState: ObservableObject {
             includeResolvedTopicCategory: false
         )
         var sanitizedSettings = normalizedSettings(synchronizedSettings)
-        if !isCommunitySignedIn {
+        if !isCommunitySessionActive {
             sanitizedSettings = sanitizedSettings.withQuestionPrivacy(false)
         }
         let trimmedAPIKey = pendingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -5080,7 +5087,7 @@ final class AppState: ObservableObject {
         isAgreed: Bool,
         source: BackendTermsAgreementSource = .settings
     ) async -> Bool {
-        guard source != .profile || isCommunitySignedIn else {
+        guard source != .profile || isCommunitySessionActive else {
             log(.warning, "프로필 약관 동의는 로그인 후 저장할 수 있습니다. code=\(code)")
             return false
         }
@@ -5466,7 +5473,7 @@ final class AppState: ObservableObject {
         let hasPushToken = !registration.apnsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let shouldEnableRemotePush = isRunning && hasPushToken && hasRemoteUsableKey
         let shouldUploadAPIKey = !trimmedAPIKey.isEmpty && (includeAPIKey || !isBackendOpenAIKeyConfigured)
-        let backendSettings = isCommunitySignedIn ? settings : settings.withQuestionPrivacy(false)
+        let backendSettings = isCommunitySessionActive ? settings : settings.withQuestionPrivacy(false)
         try await settingsUseCase.updateSchedule(
             registration: registration,
             settings: backendSettings,
