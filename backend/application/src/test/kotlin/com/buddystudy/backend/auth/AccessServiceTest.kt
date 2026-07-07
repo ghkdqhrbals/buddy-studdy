@@ -1,18 +1,19 @@
 package com.buddystudy.backend.auth
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
+import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
 import com.buddystudy.backend.auth.application.permission.Permissions
-import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
-import com.buddystudy.backend.auth.application.port.outbound.UserPermissionProjection
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccessService
+import com.buddystudy.backend.common.application.error.ApiErrorCode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.Optional
 
 class AccessServiceTest {
     private val users = FakeUserPort()
-    private val permissions = FakePermissionQueryPort()
+    private val permissions = FakePermissionEvaluator()
     private val service = AccessService(
         users = users,
         permissions = permissions,
@@ -20,22 +21,22 @@ class AccessServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `access page permissions are calculated from one permission lookup`() {
+    fun `access page permissions are calculated through permission evaluator`() {
         users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE", displayName = "Min")
-        permissions.rows += UserPermissionProjection(Permissions.PUBLIC_QUESTION_READ, requiresActiveAccount = false)
-        permissions.rows += UserPermissionProjection(Permissions.STUDY_READ, requiresActiveAccount = false)
-        permissions.rows += UserPermissionProjection(Permissions.RECORD_UPDATE, requiresActiveAccount = true)
-        permissions.rows += UserPermissionProjection(Permissions.RECORD_READ, requiresActiveAccount = false)
-        permissions.rows += UserPermissionProjection(Permissions.STATS_READ, requiresActiveAccount = false)
-        permissions.rows += UserPermissionProjection(Permissions.PROFILE_READ, requiresActiveAccount = false)
+        permissions.granted += Permissions.PUBLIC_QUESTION_READ
+        permissions.granted += Permissions.STUDY_READ
+        permissions.granted += Permissions.RECORD_UPDATE
+        permissions.granted += Permissions.RECORD_READ
+        permissions.granted += Permissions.PROFILE_READ
 
         val response = service.access(principal)
 
         assertThat(response.pageAccess.publicQuestions).isTrue()
         assertThat(response.pageAccess.studyRoom).isTrue()
+        assertThat(response.pageAccess.stats).isFalse()
         assertThat(response.pageAccess.admin).isFalse()
         assertThat(users.findByIdCalls).isEqualTo(1)
-        assertThat(permissions.permissionsForUserCalls).isEqualTo(1)
+        assertThat(permissions.calls).contains(Permissions.STATS_READ)
     }
 
     private class FakeUserPort : UserPort {
@@ -51,12 +52,21 @@ class AccessServiceTest {
         override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
-    private class FakePermissionQueryPort : PermissionQueryPort {
-        val rows = mutableSetOf<UserPermissionProjection>()
-        var permissionsForUserCalls = 0
-        override fun permissionsForUser(userId: Long): Set<UserPermissionProjection> {
-            permissionsForUserCalls += 1
-            return rows
+    private class FakePermissionEvaluator : PermissionEvaluator {
+        val granted = mutableSetOf<String>()
+        val calls = mutableListOf<String>()
+
+        override fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
+            calls += permissionCode
+            return if (permissionCode in granted) {
+                PermissionEvaluationResult.granted(permissionCode)
+            } else {
+                PermissionEvaluationResult.denied(
+                    permissionCode = permissionCode,
+                    failureCode = ApiErrorCode.PERMISSION_DENIED,
+                    reason = "Permission denied.",
+                )
+            }
         }
     }
 }

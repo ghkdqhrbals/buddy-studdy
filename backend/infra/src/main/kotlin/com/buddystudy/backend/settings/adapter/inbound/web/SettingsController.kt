@@ -24,7 +24,6 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1")
 @Tag(name = "Settings", description = "Authenticated study settings and schedule configuration APIs.")
-@RequirePermission(Permissions.PROFILE_READ)
 class SettingsController(
     private val settings: SettingsWebPort,
 ) {
@@ -37,7 +36,6 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @PutMapping("/settings")
-    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
         settings.schedule(body, authentication)
 

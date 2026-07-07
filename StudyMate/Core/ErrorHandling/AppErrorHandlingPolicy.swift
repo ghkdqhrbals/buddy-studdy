@@ -6,6 +6,7 @@ struct AppErrorHandlingResolution: Equatable {
     var requiresLogin: Bool
     var isPageAccessDenied: Bool
     var requiresEmailVerification: Bool
+    var requiresTermsAgreement: Bool
     var shouldResetBackendIdentity: Bool
     var shouldClearFeatureMessage: Bool
 }
@@ -15,6 +16,7 @@ enum AppErrorHandlingPolicy {
         let presentation = BackendErrorPresentationPolicy.presentation(for: error, fallback: fallback)
         let suppressFeatureMessage = presentation.requiresLogin ||
             presentation.isPageAccessDenied ||
+            presentation.requiresTermsAgreement ||
             presentation.shouldResetBackendIdentity
         let shouldClearFeatureMessage = suppressFeatureMessage ||
             BackendErrorPresentationPolicy.shouldClearFeatureMessage(for: error)
@@ -25,6 +27,7 @@ enum AppErrorHandlingPolicy {
             requiresLogin: presentation.requiresLogin,
             isPageAccessDenied: presentation.isPageAccessDenied,
             requiresEmailVerification: presentation.requiresEmailVerification,
+            requiresTermsAgreement: presentation.requiresTermsAgreement,
             shouldResetBackendIdentity: presentation.shouldResetBackendIdentity,
             shouldClearFeatureMessage: shouldClearFeatureMessage
         )

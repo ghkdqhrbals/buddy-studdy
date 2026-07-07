@@ -101,7 +101,6 @@ class AuthController(
 
     @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
     @PutMapping("/push-token")
-    @RequirePermission(Permissions.PROFILE_UPDATE)
     fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
         auth.pushToken(body, authentication)
 }

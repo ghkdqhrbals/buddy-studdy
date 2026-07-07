@@ -1407,6 +1407,33 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy.html")!
         }
     }
+
+    static func infoNotificationURL(language: AppLanguage) -> URL {
+        switch language {
+        case .korean:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#info-notification")!
+        case .english:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#info-notification")!
+        }
+    }
+
+    static func marketingNotificationURL(language: AppLanguage) -> URL {
+        switch language {
+        case .korean:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#marketing-notification")!
+        case .english:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#marketing-notification")!
+        }
+    }
+
+    static func nightMarketingNotificationURL(language: AppLanguage) -> URL {
+        switch language {
+        case .korean:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms.html#night-marketing-notification")!
+        case .english:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html#night-marketing-notification")!
+        }
+    }
 }
 
 struct AppStrings {
@@ -1933,6 +1960,17 @@ struct AppStrings {
     var loginAgreementSuffix: String { text("에 동의하게됩니다.", ".") }
     var termsOfService: String { text("사용 약관", "Terms of Service") }
     var privacyPolicy: String { text("개인정보 취급 방침", "Privacy Policy") }
+    var termsAndConsents: String { text("약관 및 수신 동의", "Terms and Consents") }
+    var infoNotificationConsent: String { text("정보성 알림 수신 동의", "Informational notifications") }
+    var marketingNotificationConsent: String { text("마케팅 알림 수신 동의", "Marketing notifications") }
+    var nightMarketingNotificationConsent: String { text("야간 마케팅 알림 수신 동의", "Night marketing notifications") }
+    var termsConsentHelp: String {
+        text(
+            "동의 상태는 기능 사용과 알림 수신 가능 여부에 반영됩니다. 자세한 내용은 각 항목의 링크에서 확인할 수 있습니다.",
+            "Consent status affects feature availability and notification delivery. Open each detail link for the full text."
+        )
+    }
+    var details: String { text("자세히", "Details") }
     var email: String { text("이메일", "Email") }
     var password: String { text("비밀번호", "Password") }
     var emailLoginHelp: String {

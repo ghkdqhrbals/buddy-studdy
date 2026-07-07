@@ -169,6 +169,17 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchAccess(registration: RemotePushRegistration) async throws -> BackendAccessState
 
+    func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms]
+
+    func saveTermsAgreement(
+        registration: RemotePushRegistration,
+        code: String,
+        action: BackendTermsAgreementAction,
+        source: BackendTermsAgreementSource
+    ) async throws -> BackendPermissionEvaluations
+
+    func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations
+
     func fetchNotifications(
         registration: RemotePushRegistration,
         limit: Int,
@@ -468,6 +479,49 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         let data = try await perform(request)
         return try decoder.decode(BackendAccessState.self, from: data)
+    }
+
+    func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms] {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "terms", "active")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode([BackendTerms].self, from: data)
+    }
+
+    func saveTermsAgreement(
+        registration: RemotePushRegistration,
+        code: String,
+        action: BackendTermsAgreementAction,
+        source: BackendTermsAgreementSource
+    ) async throws -> BackendPermissionEvaluations {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "terms", "agreements")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            TermsAgreementRequest(
+                code: code,
+                action: action.rawValue,
+                source: source.rawValue
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendPermissionEvaluations.self, from: data)
+    }
+
+    func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "me", "permissions")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendPermissionEvaluations.self, from: data)
     }
 
     func updateSchedule(
@@ -1333,6 +1387,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = URLRequest(url: url)
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
         if registration.hasAccessToken,
            let accessToken = registration.accessToken,
            !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1345,7 +1400,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = URLRequest(url: url)
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
+        request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
         return request
+    }
+
+    private static var currentAppVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return [version, build]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "0"
     }
 
     private static let dateFormatter = ISO8601DateFormatter()
@@ -1380,6 +1444,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct AccessTokenResponse: Decodable {
         var accessToken: String
         var accessTokenExpiresAt: Date
+    }
+
+    private struct TermsAgreementRequest: Encodable {
+        var code: String
+        var action: String
+        var source: String
     }
 
     private struct ScheduleRequest: Encodable {
@@ -2205,6 +2275,8 @@ struct BackendAPIError: Decodable, Equatable {
     var requestID: String?
     var status: Int?
     var requiredPermissions: [String]?
+    var requiredTerms: [BackendTerms]?
+    var requiredActions: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case code
@@ -2216,6 +2288,8 @@ struct BackendAPIError: Decodable, Equatable {
         case requestID = "requestId"
         case status
         case requiredPermissions
+        case requiredTerms
+        case requiredActions
     }
 
     init(
@@ -2227,7 +2301,9 @@ struct BackendAPIError: Decodable, Equatable {
         message: String,
         requestID: String? = nil,
         status: Int? = nil,
-        requiredPermissions: [String]? = nil
+        requiredPermissions: [String]? = nil,
+        requiredTerms: [BackendTerms]? = nil,
+        requiredActions: [String]? = nil
     ) {
         self.code = code
         self.numericCode = numericCode
@@ -2238,6 +2314,8 @@ struct BackendAPIError: Decodable, Equatable {
         self.requestID = requestID
         self.status = status
         self.requiredPermissions = requiredPermissions
+        self.requiredTerms = requiredTerms
+        self.requiredActions = requiredActions
     }
 
     init(from decoder: Decoder) throws {
@@ -2262,7 +2340,46 @@ struct BackendAPIError: Decodable, Equatable {
         requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
         status = try container.decodeIfPresent(Int.self, forKey: .status)
         requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)
+        requiredTerms = try container.decodeIfPresent([BackendTerms].self, forKey: .requiredTerms)
+        requiredActions = try container.decodeIfPresent([String].self, forKey: .requiredActions)
     }
+}
+
+enum BackendTermsAgreementAction: String {
+    case agreed = "AGREED"
+    case withdrawn = "WITHDRAWN"
+}
+
+enum BackendTermsAgreementSource: String {
+    case signup = "SIGNUP"
+    case settings = "SETTINGS"
+    case requiredGate = "REQUIRED_GATE"
+    case migration = "MIGRATION"
+}
+
+struct BackendTerms: Codable, Equatable, Identifiable {
+    var code: String
+    var version: String
+    var title: String
+    var url: URL
+    var contentHash: String
+
+    var id: String { "\(code):\(version):\(contentHash)" }
+}
+
+struct BackendPermissionEvaluation: Decodable, Equatable, Identifiable {
+    var permissionCode: String
+    var granted: Bool
+    var failureCode: String?
+    var reason: String?
+    var requiredTerms: [BackendTerms]
+    var requiredActions: [String]
+
+    var id: String { permissionCode }
+}
+
+struct BackendPermissionEvaluations: Decodable, Equatable {
+    var permissions: [BackendPermissionEvaluation]
 }
 
 enum RemotePushBackendError: LocalizedError {

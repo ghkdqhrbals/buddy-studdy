@@ -4699,6 +4699,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchSettingsCallCount = 0
     var fetchOpenAIModelOptionsCallCount = 0
     var fetchAccessCallCount = 0
+    var savedTermsAgreements: [(code: String, action: BackendTermsAgreementAction)] = []
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
     var markedNotificationIDs: [String] = []
@@ -4794,6 +4795,24 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             throw fetchAccessErrors.removeFirst()
         }
         return accessState
+    }
+
+    func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms] {
+        []
+    }
+
+    func saveTermsAgreement(
+        registration: RemotePushRegistration,
+        code: String,
+        action: BackendTermsAgreementAction,
+        source: BackendTermsAgreementSource
+    ) async throws -> BackendPermissionEvaluations {
+        savedTermsAgreements.append((code: code, action: action))
+        return BackendPermissionEvaluations(permissions: [])
+    }
+
+    func fetchPermissionEvaluations(registration: RemotePushRegistration) async throws -> BackendPermissionEvaluations {
+        BackendPermissionEvaluations(permissions: [])
     }
 
     func logout(registration: RemotePushRegistration) async throws {

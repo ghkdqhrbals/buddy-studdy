@@ -1,6 +1,7 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.PermissionChecker
+import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import org.aspectj.lang.ProceedingJoinPoint
 import org.aspectj.lang.annotation.Around
@@ -10,6 +11,9 @@ import org.springframework.aop.support.AopUtils
 import org.springframework.core.annotation.AnnotatedElementUtils
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Component
+import org.springframework.web.context.request.RequestContextHolder
+import org.springframework.web.context.request.ServletRequestAttributes
+import java.time.Instant
 
 @Aspect
 @Component
@@ -26,7 +30,21 @@ class RequirePermissionAspect(
             AnnotatedElementUtils.findMergedAnnotation(method, RequirePermission::class.java)?.let { addAll(it.value) }
         }.distinct()
 
-        permissionChecker.check(SecurityContextHolder.getContext().authentication.optionalPrincipal(), required)
+        val principal = SecurityContextHolder.getContext().authentication.optionalPrincipal()
+        val request = (RequestContextHolder.getRequestAttributes() as? ServletRequestAttributes)?.request
+        permissionChecker.check(
+            principal,
+            required,
+            principal?.let {
+                PermissionEvaluationContext(
+                    now = Instant.now(),
+                    appVersion = request?.getHeader("X-App-Version"),
+                    sessionId = it.sessionId,
+                    status = it.status,
+                    anonymous = it.anonymous,
+                )
+            },
+        )
         return joinPoint.proceed()
     }
 }

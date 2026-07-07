@@ -6,6 +6,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.util.Base64
 
 class TokenProviderTest {
     @Test
@@ -40,6 +41,18 @@ class TokenProviderTest {
         assertThat(provider.parse(token)).isEqualTo(
             Principal(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false),
         )
+    }
+
+    @Test
+    fun `created token does not contain permission claims`() {
+        val provider = tokenProvider()
+        val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
+
+        val payload = String(Base64.getUrlDecoder().decode(token.split(".")[1]))
+
+        assertThat(payload).contains("\"user_id\"")
+        assertThat(payload).contains("\"device_id\"")
+        assertThat(payload).doesNotContain("permission")
     }
 
     @Test

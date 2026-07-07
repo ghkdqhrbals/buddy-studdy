@@ -7,6 +7,7 @@ struct BackendErrorPresentation: Equatable {
     var requiresLogin: Bool
     var isPageAccessDenied: Bool
     var requiresEmailVerification: Bool
+    var requiresTermsAgreement: Bool
     var shouldResetBackendIdentity: Bool
 }
 
@@ -24,6 +25,7 @@ enum BackendErrorPresentationPolicy {
                 requiresLogin: false,
                 isPageAccessDenied: false,
                 requiresEmailVerification: false,
+                requiresTermsAgreement: false,
                 shouldResetBackendIdentity: false
             )
         }
@@ -36,6 +38,7 @@ enum BackendErrorPresentationPolicy {
             requiresLogin: false,
             isPageAccessDenied: false,
             requiresEmailVerification: false,
+            requiresTermsAgreement: false,
             shouldResetBackendIdentity: false
         )
     }
@@ -43,6 +46,7 @@ enum BackendErrorPresentationPolicy {
     static func presentation(for error: RemotePushBackendError, fallback: String) -> BackendErrorPresentation {
         let message = userFacingMessage(for: error, fallback: fallback)
         let requiresEmailVerification = requiresEmailVerification(error)
+        let requiresTermsAgreement = requiresTermsAgreement(error)
         let requiresLogin = requiresEmailVerification ? false : requiresLogin(error)
         let isPageAccessDenied = requiresEmailVerification ? false : isPageAccessDenied(error)
         let shouldResetBackendIdentity = requiresEmailVerification ? false : shouldResetBackendIdentity(after: error)
@@ -54,6 +58,7 @@ enum BackendErrorPresentationPolicy {
             requiresLogin: requiresLogin,
             isPageAccessDenied: isPageAccessDenied,
             requiresEmailVerification: requiresEmailVerification,
+            requiresTermsAgreement: requiresTermsAgreement,
             shouldResetBackendIdentity: shouldResetBackendIdentity
         )
     }
@@ -159,6 +164,20 @@ enum BackendErrorPresentationPolicy {
         }
     }
 
+    static func requiresTermsAgreement(_ error: RemotePushBackendError) -> Bool {
+        switch error {
+        case .httpStatus(_, _, let apiError):
+            guard let apiError else {
+                return false
+            }
+            return apiError.code == "TERMS_AGREEMENT_REQUIRED"
+                || apiError.code == "TERMS_REAGREEMENT_REQUIRED"
+                || !(apiError.requiredTerms ?? []).isEmpty
+        case .invalidResponse:
+            return false
+        }
+    }
+
     static func shouldShowPopup(for error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
@@ -167,6 +186,9 @@ enum BackendErrorPresentationPolicy {
             }
             guard let apiError else {
                 return true
+            }
+            if requiresTermsAgreement(error) {
+                return false
             }
             return !suppressesUserMessage(apiError)
         case .invalidResponse:
@@ -182,6 +204,9 @@ enum BackendErrorPresentationPolicy {
             }
             guard let apiError else {
                 return true
+            }
+            if requiresTermsAgreement(error) {
+                return false
             }
             return !suppressesUserMessage(apiError)
         case .invalidResponse:

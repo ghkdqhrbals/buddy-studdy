@@ -23,6 +23,14 @@ enum class ApiErrorCode(
 
     ACCOUNT_FORBIDDEN(HttpStatus.FORBIDDEN, 300, "error.account.forbidden", "Account access is forbidden."),
     PERMISSION_DENIED(HttpStatus.FORBIDDEN, 301, "error.permission.denied", "Permission is denied."),
+    TERMS_AGREEMENT_REQUIRED(HttpStatus.FORBIDDEN, 302, "error.terms.agreement_required", "Latest terms agreement is required."),
+    TERMS_REAGREEMENT_REQUIRED(HttpStatus.FORBIDDEN, 303, "error.terms.reagreement_required", "Terms re-agreement is required."),
+    NOTIFICATION_PREFERENCE_DISABLED(HttpStatus.FORBIDDEN, 304, "error.notification.preference_disabled", "Notification preference is disabled."),
+    QUOTA_EXCEEDED(HttpStatus.FORBIDDEN, 305, "error.quota.exceeded", "Quota is exceeded."),
+    DEVICE_NOT_REGISTERED(HttpStatus.FORBIDDEN, 306, "error.device.not_registered", "Device is not registered."),
+    USER_INACTIVE(HttpStatus.FORBIDDEN, 307, "error.user.inactive", "User is inactive."),
+    EMAIL_NOT_VERIFIED(HttpStatus.FORBIDDEN, 308, "error.email.not_verified", "Email is not verified."),
+    APP_VERSION_UNSUPPORTED(HttpStatus.UPGRADE_REQUIRED, 309, "error.app.version_unsupported", "App version is unsupported."),
 
     RECORD_NOT_FOUND(HttpStatus.NOT_FOUND, 400, "error.record.not_found", "Record was not found."),
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, 401, "error.resource.not_found", "Resource was not found."),
@@ -39,6 +47,9 @@ open class ApiRuntimeException(
     override val message: String = errorCode.debugDescription,
     val statusOverride: HttpStatus? = null,
     val requiredPermissions: List<String>? = null,
+    val requiredTerms: List<Any>? = null,
+    val requiredActions: List<String>? = null,
+    val metadata: Map<String, Any?>? = null,
 ) : RuntimeException(message) {
     val status: HttpStatus
         get() = statusOverride ?: errorCode.status

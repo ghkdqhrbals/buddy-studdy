@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import SafariServices
 import UIKit
 #endif
 
@@ -3994,6 +3995,12 @@ private struct MobileOnboardingView: View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage("termsAgreement.termsOfService") private var hasAgreedTermsOfService = false
+    @AppStorage("termsAgreement.privacyPolicy") private var hasAgreedPrivacyPolicy = false
+    @AppStorage("termsAgreement.infoNotification") private var hasAgreedInfoNotification = false
+    @AppStorage("termsAgreement.marketingNotification") private var hasAgreedMarketingNotification = false
+    @AppStorage("termsAgreement.nightMarketingNotification") private var hasAgreedNightMarketingNotification = false
+    @State private var legalWebRoute: MobileLegalWebRoute?
 
     private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
@@ -4042,6 +4049,48 @@ private struct MobileSettingsView: View {
                             Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
                         }
                     }
+                }
+
+                Section {
+                    termsConsentRow(
+                        title: strings.termsOfService,
+                        code: "TERMS_OF_SERVICE",
+                        isOn: $hasAgreedTermsOfService,
+                        url: AppLegalLinks.termsOfServiceURL(language: appState.draftSettings.appLanguage),
+                        strings: strings
+                    )
+                    termsConsentRow(
+                        title: strings.privacyPolicy,
+                        code: "PRIVACY_POLICY",
+                        isOn: $hasAgreedPrivacyPolicy,
+                        url: AppLegalLinks.privacyPolicyURL(language: appState.draftSettings.appLanguage),
+                        strings: strings
+                    )
+                    termsConsentRow(
+                        title: strings.infoNotificationConsent,
+                        code: "INFO_NOTIFICATION",
+                        isOn: $hasAgreedInfoNotification,
+                        url: AppLegalLinks.infoNotificationURL(language: appState.draftSettings.appLanguage),
+                        strings: strings
+                    )
+                    termsConsentRow(
+                        title: strings.marketingNotificationConsent,
+                        code: "MARKETING_NOTIFICATION",
+                        isOn: $hasAgreedMarketingNotification,
+                        url: AppLegalLinks.marketingNotificationURL(language: appState.draftSettings.appLanguage),
+                        strings: strings
+                    )
+                    termsConsentRow(
+                        title: strings.nightMarketingNotificationConsent,
+                        code: "NIGHT_MARKETING_NOTIFICATION",
+                        isOn: $hasAgreedNightMarketingNotification,
+                        url: AppLegalLinks.nightMarketingNotificationURL(language: appState.draftSettings.appLanguage),
+                        strings: strings
+                    )
+                } header: {
+                    Text(strings.termsAndConsents)
+                } footer: {
+                    Text(strings.termsConsentHelp)
                 }
 
                 Section(strings.developerOptions) {
@@ -4130,6 +4179,47 @@ private struct MobileSettingsView: View {
         .onDisappear {
             appState.cancelSettingsEditing()
         }
+        .sheet(item: $legalWebRoute) { route in
+            #if os(iOS)
+            MobileLegalWebView(url: route.url)
+                .ignoresSafeArea()
+            #else
+            Link(route.url.absoluteString, destination: route.url)
+                .padding()
+            #endif
+        }
+    }
+
+    private func termsConsentRow(
+        title: String,
+        code: String,
+        isOn: Binding<Bool>,
+        url: URL,
+        strings: AppStrings
+    ) -> some View {
+        HStack(spacing: 12) {
+            Toggle(
+                title,
+                isOn: Binding(
+                    get: { isOn.wrappedValue },
+                    set: { newValue in
+                        let previousValue = isOn.wrappedValue
+                        isOn.wrappedValue = newValue
+                        Task {
+                            let didSave = await appState.saveTermsAgreement(code: code, isAgreed: newValue)
+                            if !didSave {
+                                isOn.wrappedValue = previousValue
+                            }
+                        }
+                    }
+                )
+            )
+
+            Button(strings.details) {
+                legalWebRoute = MobileLegalWebRoute(url: url)
+            }
+            .buttonStyle(.borderless)
+        }
     }
 
     private func settingsSaveToolbarButton(strings: AppStrings) -> some View {
@@ -4150,6 +4240,23 @@ private struct MobileSettingsView: View {
         .disabled(appState.isValidatingAPIKey)
     }
 }
+
+private struct MobileLegalWebRoute: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+#if os(iOS)
+private struct MobileLegalWebView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+#endif
 
 private struct MobileSettingsSaveButtonLabel: View {
     var title: String

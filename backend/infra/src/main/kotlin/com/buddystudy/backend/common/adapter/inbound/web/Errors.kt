@@ -30,6 +30,9 @@ data class ApiError(
     val status: Int,
     val reason: String? = null,
     val requiredPermissions: List<String>? = null,
+    val requiredTerms: List<Any>? = null,
+    val requiredActions: List<String>? = null,
+    val metadata: Map<String, Any?>? = null,
 )
 
 @Component
@@ -43,6 +46,9 @@ class ApiErrorResponseFactory(
         reason: String? = null,
         debugDescription: String = code.debugDescription,
         requiredPermissions: List<String>? = null,
+        requiredTerms: List<Any>? = null,
+        requiredActions: List<String>? = null,
+        metadata: Map<String, Any?>? = null,
     ): ApiErrorEnvelope {
         val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
         val localizedMessage = messageSource.getMessage(
@@ -62,6 +68,9 @@ class ApiErrorResponseFactory(
                 status = status.value(),
                 reason = reason,
                 requiredPermissions = requiredPermissions,
+                requiredTerms = requiredTerms,
+                requiredActions = requiredActions,
+                metadata = metadata,
             )
         )
     }
@@ -81,6 +90,9 @@ class ErrorHandler(
             request,
             debugDescription = error.message,
             requiredPermissions = error.requiredPermissions,
+            requiredTerms = error.requiredTerms,
+            requiredActions = error.requiredActions,
+            metadata = error.metadata,
         )
         log.warn(
             "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",

@@ -442,6 +442,7 @@ final class AppState: ObservableObject {
     @Published private var communityProfileState = CommunityProfileStateStore()
     @Published private var notificationState = NotificationStateStore()
     @Published var pageAccessPrompt: PageAccessPrompt?
+    @Published private(set) var backendPermissionEvaluations = BackendPermissionEvaluations(permissions: [])
 
     private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
@@ -464,6 +465,7 @@ final class AppState: ObservableObject {
     private var notificationsUseCase: NotificationsUseCase { appUseCases.notifications }
     private var statsUseCase: StatsUseCase { appUseCases.stats }
     private var settingsUseCase: SettingsUseCase { appUseCases.settings }
+    private var termsUseCase: TermsUseCase { appUseCases.terms }
     private var communityUseCase: CommunityUseCase { appUseCases.community }
     private let actionRunner = AppActionRunner()
     private let notificationService: NotificationServicing
@@ -787,6 +789,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    func refreshPermissionEvaluations(reason: String = "manual") async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "permissions-\(reason)") else {
+            return
+        }
+
+        do {
+            let evaluations = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "permissions-\(reason)",
+                operation: { recoveredRegistration in
+                    try await self.termsUseCase.fetchPermissionEvaluations(registration: recoveredRegistration)
+                }
+            )
+            backendPermissionEvaluations = evaluations
+        } catch {
+            log(.warning, "권한 평가 상태 조회 실패: \(error.localizedDescription), reason=\(reason)")
+        }
+    }
+
     @discardableResult
     private func handleAppError(
         _ error: Error,
@@ -799,6 +820,16 @@ final class AppState: ObservableObject {
         if resolution.shouldResetBackendIdentity {
             clearStoredBackendAccessToken()
             resetCommunitySignInState()
+        }
+
+        if resolution.requiresTermsAgreement {
+            clearErrorMessage(target)
+            pageAccessPrompt = nil
+            setSelectedTab(.settings)
+            Task { [weak self] in
+                await self?.refreshPermissionEvaluations(reason: "terms-required")
+            }
+            return true
         }
 
         if resolution.isPageAccessDenied || resolution.requiresLogin {
@@ -1220,6 +1251,7 @@ final class AppState: ObservableObject {
 
         await loadOpenAIModelOptions()
         await refreshPageAccess(reason: "startup")
+        await refreshPermissionEvaluations(reason: "startup")
         await refreshNotificationUnreadCount()
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
@@ -1238,6 +1270,7 @@ final class AppState: ObservableObject {
         reloadPersistedState()
         await loadOpenAIModelOptions()
         await refreshPageAccess(reason: "foreground")
+        await refreshPermissionEvaluations(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -2449,6 +2482,7 @@ final class AppState: ObservableObject {
             }
         )
 
+        await refreshPermissionEvaluations(reason: reason)
         await refreshBackendStudyIfPossible(
             updateVisibleQuestion: true,
             preserveLocalSettings: false
@@ -5020,6 +5054,36 @@ final class AppState: ObservableObject {
         developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
+    }
+
+    func saveTermsAgreement(code: String, isAgreed: Bool) async -> Bool {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "terms-agreement") else {
+            log(.warning, "약관 동의 저장을 위한 백엔드 등록이 없습니다. code=\(code)")
+            return false
+        }
+
+        do {
+            _ = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "terms-agreement",
+                operation: { recoveredRegistration in
+                    try await self.termsUseCase.saveAgreement(
+                        registration: recoveredRegistration,
+                        code: code,
+                        action: isAgreed ? .agreed : .withdrawn,
+                        source: .settings
+                    )
+                }
+            )
+            await refreshPageAccess(reason: "terms-agreement")
+            await refreshPermissionEvaluations(reason: "terms-agreement")
+            log(.info, "약관 동의 상태를 저장했습니다. code=\(code), agreed=\(isAgreed)")
+            return true
+        } catch {
+            handleAppError(error, fallback: "", target: .none)
+            log(.warning, "약관 동의 상태 저장 실패: code=\(code), error=\(error.localizedDescription)")
+            return false
+        }
     }
 
     func setCloudSyncEnabled(_ isEnabled: Bool) {

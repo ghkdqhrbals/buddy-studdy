@@ -9,6 +9,7 @@ import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationR
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
+import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -30,6 +31,7 @@ class NotificationStreamListener(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
+    private val sendPolicy: NotificationSendPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
@@ -138,6 +140,22 @@ class NotificationStreamListener(
                 notificationId,
                 command.eventId,
                 command.userId,
+            )
+            return
+        }
+        val policyCommand = command.copy(
+            userId = command.userId ?: targetDevice.userId,
+            deviceId = targetDevice.deviceId,
+        )
+        if (!sendPolicy.canSendPush(policyCommand)) {
+            notifications.markPushFailed(notificationId, "Push policy denied.", Instant.now())
+            logger.info(
+                "notification_push_skipped reason=send_policy_denied notificationId={} eventId={} userId={} deviceId={} type={}",
+                notificationId,
+                command.eventId,
+                policyCommand.userId,
+                targetDevice.deviceId,
+                command.type,
             )
             return
         }

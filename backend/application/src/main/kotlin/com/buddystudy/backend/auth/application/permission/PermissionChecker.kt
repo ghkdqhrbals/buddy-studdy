@@ -1,17 +1,22 @@
 package com.buddystudy.backend.auth.application.permission
 
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
+import java.time.Instant
 
 @Component
 class PermissionChecker(
-    private val permissions: PermissionQueryPort,
+    private val evaluator: PermissionEvaluator,
 ) {
-    fun check(principal: Principal?, requiredPermissions: Collection<String>) {
+    fun check(
+        principal: Principal?,
+        requiredPermissions: Collection<String>,
+        context: PermissionEvaluationContext? = null,
+    ) {
         val required = requiredPermissions.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (required.isEmpty()) return
         if (principal == null) {
@@ -23,33 +28,32 @@ class PermissionChecker(
             )
         }
 
-        val granted = permissions.permissionsForUser(principal.userId)
-        val grantedByCode = granted.associateBy { it.code }
-        val missing = required.filter { grantedByCode[it] == null }
-        if (missing.isNotEmpty()) {
-            throw ApiException(
-                HttpStatus.FORBIDDEN,
-                ApiErrorCode.PERMISSION_DENIED,
-                "Permission denied.",
-                requiredPermissions = missing,
+        required.forEach { permission ->
+            val result = evaluator.evaluate(
+                userId = principal.userId,
+                deviceId = principal.deviceId,
+                permissionCode = permission,
+                context = context ?: PermissionEvaluationContext(
+                    now = Instant.now(),
+                    sessionId = principal.sessionId,
+                    status = principal.status,
+                    anonymous = principal.anonymous,
+                ),
             )
-        }
-
-        val activeRequired = required.any { grantedByCode[it]?.requiresActiveAccount == true }
-        if (activeRequired && principal.status in FORBIDDEN_WRITE_STATUSES) {
-            throw ApiException(
-                HttpStatus.FORBIDDEN,
-                ApiErrorCode.ACCOUNT_FORBIDDEN,
-                "Account is not allowed to perform this action.",
-                requiredPermissions = required,
-            )
+            if (!result.granted) {
+                val failureCode = result.failureCode ?: ApiErrorCode.PERMISSION_DENIED
+                throw ApiRuntimeException(
+                    errorCode = failureCode,
+                    message = result.reason ?: failureCode.debugDescription,
+                    requiredPermissions = listOf(permission),
+                    requiredTerms = result.requiredTerms,
+                    requiredActions = result.requiredActions.map { it.name },
+                    metadata = result.metadata,
+                )
+            }
         }
     }
 
     fun has(principal: Principal, requiredPermissions: Collection<String>): Boolean =
         runCatching { check(principal, requiredPermissions) }.isSuccess
-
-    private companion object {
-        private val FORBIDDEN_WRITE_STATUSES = setOf("SUSPENDED", "WITHDRAWN")
-    }
 }

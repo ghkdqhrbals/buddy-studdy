@@ -1,9 +1,12 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
+import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.community.domain.entity.QuestionSearchEntity
@@ -59,6 +62,7 @@ class StudyService(
     private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
+    private val permissionEvaluator: PermissionEvaluator,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
     override fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse = runBlocking {
@@ -66,6 +70,19 @@ class StudyService(
     }
 
     private suspend fun createQuestionAsync(principal: Principal, studyId: Long): StudyRecordResponse = coroutineScope {
+        val permission = permissionEvaluator.evaluate(principal, Permissions.STUDY_CREATE)
+        if (!permission.granted) {
+            val failureCode = permission.failureCode ?: ApiErrorCode.PERMISSION_DENIED
+            throw ApiRuntimeException(
+                errorCode = failureCode,
+                message = permission.reason ?: failureCode.debugDescription,
+                requiredPermissions = listOf(Permissions.STUDY_CREATE),
+                requiredTerms = permission.requiredTerms,
+                requiredActions = permission.requiredActions.map { it.name },
+                metadata = permission.metadata,
+            )
+        }
+
         val studyDeferred = async(Dispatchers.IO) { studies.findByIdAndUserId(studyId, principal.userId) }
         val userDeferred = async(Dispatchers.IO) { users.findById(principal.userId).orElse(null) }
 
