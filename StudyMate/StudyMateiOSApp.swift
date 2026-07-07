@@ -145,7 +145,7 @@ private struct FloatingAPIDebugOverlay: View {
     @State private var isVisible = true
     @State private var isExpanded = false
     @State private var committedOffset = CGSize(width: 12, height: 74)
-    @State private var dragStartOffset: CGSize?
+    @GestureState private var dragTranslation: CGSize = .zero
 
     private var latestLog: APITrafficLogEntry? {
         appState.apiTrafficLogs.first
@@ -157,10 +157,10 @@ private struct FloatingAPIDebugOverlay: View {
                 .frame(width: panelWidth(for: geometry.size), alignment: .leading)
                 .frame(maxHeight: panelMaxHeight(for: geometry.size))
                 .offset(
-                    x: boundedOffset(for: geometry.size).width,
-                    y: boundedOffset(for: geometry.size).height
+                    x: displayOffset(for: geometry.size).width,
+                    y: displayOffset(for: geometry.size).height
                 )
-                .gesture(dragGesture(in: geometry.size))
+                .simultaneousGesture(dragGesture(in: geometry.size))
                 .animation(.smooth(duration: 0.18), value: isExpanded)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(true)
@@ -336,14 +336,23 @@ private struct FloatingAPIDebugOverlay: View {
         )
     }
 
-    private func dragGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-            .onChanged { value in
-                if dragStartOffset == nil {
-                    dragStartOffset = boundedOffset(for: size)
-                }
+    private func displayOffset(for size: CGSize) -> CGSize {
+        let baseOffset = boundedOffset(for: size)
+        let proposedOffset = CGSize(
+            width: baseOffset.width + dragTranslation.width,
+            height: baseOffset.height + dragTranslation.height
+        )
+        return boundedOffset(for: size, proposed: proposedOffset)
+    }
 
-                let startOffset = dragStartOffset ?? committedOffset
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+            .updating($dragTranslation) { value, state, transaction in
+                transaction.disablesAnimations = true
+                state = value.translation
+            }
+            .onEnded { value in
+                let startOffset = boundedOffset(for: size)
                 let proposedOffset = CGSize(
                     width: startOffset.width + value.translation.width,
                     height: startOffset.height + value.translation.height
@@ -354,15 +363,6 @@ private struct FloatingAPIDebugOverlay: View {
                 withTransaction(transaction) {
                     committedOffset = boundedOffset(for: size, proposed: proposedOffset)
                 }
-            }
-            .onEnded { value in
-                let startOffset = dragStartOffset ?? committedOffset
-                let proposedOffset = CGSize(
-                    width: startOffset.width + value.translation.width,
-                    height: startOffset.height + value.translation.height
-                )
-                dragStartOffset = nil
-                committedOffset = boundedOffset(for: size, proposed: proposedOffset)
             }
     }
 
