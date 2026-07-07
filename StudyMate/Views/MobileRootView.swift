@@ -4157,6 +4157,14 @@ private struct MobileSettingsView: View {
                         )
                     )
 
+                    #if DEBUG
+                    Button {
+                        appState.requestDebugPanelIfEnabledOrEnableOnDemand()
+                    } label: {
+                        Label("앱/API 로그 보기", systemImage: "doc.text.magnifyingglass")
+                    }
+                    #endif
+
                     if appState.isDebuggingEnabled {
                         VStack(alignment: .leading, spacing: 6) {
                             TextField(
@@ -4303,112 +4311,6 @@ private struct MobileSettingsSaveButtonLabel: View {
         return .secondary
     }
 }
-
-#if os(iOS)
-private struct SettingsDebugLongPressInstaller: UIViewRepresentable {
-    let onLongPress: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onLongPress: onLongPress)
-    }
-
-    func makeUIView(context: Context) -> UIView {
-        let view = WindowTrackingView(frame: .zero)
-        view.isUserInteractionEnabled = false
-        view.onMoveToWindow = { markerView in
-            context.coordinator.attach(from: markerView)
-        }
-        DispatchQueue.main.async {
-            context.coordinator.attach(from: view)
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.onLongPress = onLongPress
-        DispatchQueue.main.async {
-            context.coordinator.attach(from: uiView)
-        }
-    }
-
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class WindowTrackingView: UIView {
-        var onMoveToWindow: ((UIView) -> Void)?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            onMoveToWindow?(self)
-        }
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onLongPress: () -> Void
-        private weak var attachedView: UIView?
-        private weak var recognizer: UILongPressGestureRecognizer?
-
-        init(onLongPress: @escaping () -> Void) {
-            self.onLongPress = onLongPress
-        }
-
-        func attach(from markerView: UIView) {
-            guard let targetView = markerView.window else {
-                return
-            }
-
-            if attachedView === targetView, recognizer != nil {
-                return
-            }
-
-            detach()
-            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-            recognizer.minimumPressDuration = 0.75
-            recognizer.cancelsTouchesInView = false
-            recognizer.delaysTouchesBegan = false
-            recognizer.delaysTouchesEnded = false
-            recognizer.delegate = self
-            targetView.addGestureRecognizer(recognizer)
-            self.attachedView = targetView
-            self.recognizer = recognizer
-        }
-
-        func detach() {
-            if let recognizer, let attachedView {
-                attachedView.removeGestureRecognizer(recognizer)
-            }
-
-            self.recognizer = nil
-            self.attachedView = nil
-        }
-
-        @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
-            guard recognizer.state == .began else {
-                return
-            }
-
-            onLongPress()
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            true
-        }
-    }
-}
-#else
-private struct SettingsDebugLongPressInstaller: View {
-    let onLongPress: () -> Void
-
-    var body: some View {
-        Color.clear
-            .onLongPressGesture(minimumDuration: 0.75, perform: onLongPress)
-    }
-}
-#endif
 
 private struct MobileAPIDebugSheet: View {
     let logs: [APITrafficLogEntry]

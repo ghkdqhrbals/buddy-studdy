@@ -1,5 +1,9 @@
 import Foundation
 import Combine
+import OSLog
+
+private let appStateLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "app")
+private let appAuthLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "auth")
 
 private enum QuestionGenerationSkip: Error {
     case pendingLimit
@@ -6797,9 +6801,23 @@ final class AppState: ObservableObject {
     }
 
     private func log(_ level: LogLevel, _ message: String) {
+        writeSystemLog(level, message)
         let entry = AppLogEntry(level: level, message: message)
         appLogUseCase.appendLog(entry)
         loadAppLogPage(appLogPage)
+    }
+
+    private func writeSystemLog(_ level: LogLevel, _ message: String) {
+        let logger = message.contains("auth_trace") ? appAuthLogger : appStateLogger
+
+        switch level {
+        case .info:
+            logger.info("\(message, privacy: .public)")
+        case .warning:
+            logger.warning("\(message, privacy: .public)")
+        case .error:
+            logger.error("\(message, privacy: .public)")
+        }
     }
 
     private func logAuthTrace(
