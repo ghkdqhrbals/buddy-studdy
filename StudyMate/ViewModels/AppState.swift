@@ -989,6 +989,7 @@ final class AppState: ObservableObject {
         settingsStore: SettingsStore = SettingsStore(),
         remotePushBackendClient: RemotePushBackendClientProtocol? = nil,
         runtimeDependencies: AppRuntimeDependencies = .live,
+        useCaseDependencies: AppUseCaseDependencies? = nil,
         notificationService: NotificationServicing? = nil,
         cloudSyncProvider: CloudSyncProviding? = nil,
         platformEffectsProvider: AppPlatformEffectsProviding? = nil,
@@ -1030,8 +1031,9 @@ final class AppState: ObservableObject {
         let appIdentifierProvider = appIdentifierProvider ?? runtimeDependencies.appIdentifierProvider
         let appTimeZoneProvider = appTimeZoneProvider ?? runtimeDependencies.appTimeZoneProvider
         let appSleepProvider = appSleepProvider ?? runtimeDependencies.appSleepProvider
-        let localUseCases = AppLocalUseCases(
+        let useCaseDependencies = useCaseDependencies ?? AppUseCaseDependencies.live(
             settingsStore: settingsStore,
+            remotePushBackendClient: remotePushBackendClient,
             appLogRepository: appLogRepository,
             appLogUseCase: appLogUseCase,
             remotePushRegistrationRepository: remotePushRegistrationRepository,
@@ -1054,7 +1056,8 @@ final class AppState: ObservableObject {
             localStudyRecordUseCase: localStudyRecordUseCase,
             appErrorHandlingUseCase: appErrorHandlingUseCase
         )
-        let appUseCasesProvider = AppUseCasesProvider(backendClient: remotePushBackendClient)
+        let localUseCases = useCaseDependencies.localUseCases
+        let appUseCasesProvider = useCaseDependencies.appUseCasesProvider
         let loadedLocalStudySettings = localUseCases.localStudySettings.loadSettings()
         let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
