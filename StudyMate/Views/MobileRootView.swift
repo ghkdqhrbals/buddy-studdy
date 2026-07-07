@@ -313,7 +313,7 @@ private struct MobileLoginLogo: View {
     var size: CGFloat
 
     var body: some View {
-        Image("BuddyStudyBrandLogo")
+        Image("BuddyStudyLoginLogo")
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
