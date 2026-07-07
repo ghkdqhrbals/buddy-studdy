@@ -39,9 +39,23 @@ struct MobileRootView: View {
                                     onLogin: { isRecordsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
+                                .onAppear {
+                                    appState.logMobileAuthView(
+                                        "mobile_render_login_gate",
+                                        page: .records,
+                                        reason: "records-tab"
+                                    )
+                                }
                             } else {
                                 HistoryView()
                                     .padding(.horizontal, 16)
+                                    .onAppear {
+                                        appState.logMobileAuthView(
+                                            "mobile_render_protected_content",
+                                            page: .records,
+                                            reason: "records-tab"
+                                        )
+                                    }
                             }
                         }
                         .navigationDestination(isPresented: $isRecordsLoginPagePresented) {
@@ -62,9 +76,23 @@ struct MobileRootView: View {
                                     onLogin: { isStatisticsLoginPagePresented = true }
                                 )
                                 .padding(.horizontal, 16)
+                                .onAppear {
+                                    appState.logMobileAuthView(
+                                        "mobile_render_login_gate",
+                                        page: .statistics,
+                                        reason: "statistics-tab"
+                                    )
+                                }
                             } else {
                                 StatisticsView()
                                     .padding(.horizontal, 16)
+                                    .onAppear {
+                                        appState.logMobileAuthView(
+                                            "mobile_render_protected_content",
+                                            page: .statistics,
+                                            reason: "statistics-tab"
+                                        )
+                                    }
                             }
                         }
                         .navigationDestination(isPresented: $isStatisticsLoginPagePresented) {
@@ -269,7 +297,15 @@ private struct MobileLoginPage: View {
         .padding(.vertical, 24)
         .navigationTitle(strings.communityLogin)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            appState.logMobileAuthView("mobile_login_page_appear", reason: "MobileLoginPage")
+        }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
+            appState.logMobileAuthView(
+                "mobile_login_page_session_change",
+                reason: "MobileLoginPage",
+                extra: ["isSignedIn=\(isSignedIn)"]
+            )
             guard isSignedIn else {
                 return
             }
@@ -520,6 +556,12 @@ private struct MobileHomeView: View {
             closeHomeSearch(clearText: false)
         }
         .onChange(of: selectedHomeScope) { _, newScope in
+            appState.logMobileAuthView(
+                "mobile_home_scope_change",
+                page: newScope == .my ? .myStudies : .publicQuestions,
+                reason: "selectedHomeScope",
+                extra: ["scope=\(String(describing: newScope))"]
+            )
             if newScope == .all {
                 editMode = .inactive
                 Task {
@@ -528,6 +570,11 @@ private struct MobileHomeView: View {
             }
         }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
+            appState.logMobileAuthView(
+                "mobile_home_session_change",
+                reason: "MobileHomeView",
+                extra: ["isSignedIn=\(isSignedIn)", "scope=\(String(describing: selectedHomeScope))"]
+            )
             hasLoadedCommunityQuestions = false
             guard isSignedIn, selectedHomeScope == .all else {
                 return
@@ -644,10 +691,31 @@ private struct MobileHomeView: View {
     private var homeContentSection: some View {
         if selectedHomeScope == .my, !appState.isCommunitySessionActive {
             myStudyLoginSection
+                .onAppear {
+                    appState.logMobileAuthView(
+                        "mobile_render_login_gate",
+                        page: .myStudies,
+                        reason: "home-my-study"
+                    )
+                }
         } else if selectedHomeScope == .my {
             myStudySection
+                .onAppear {
+                    appState.logMobileAuthView(
+                        "mobile_render_protected_content",
+                        page: .myStudies,
+                        reason: "home-my-study"
+                    )
+                }
         } else {
             communityQuestionSection
+                .onAppear {
+                    appState.logMobileAuthView(
+                        "mobile_render_public_content",
+                        page: .publicQuestions,
+                        reason: "home-public"
+                    )
+                }
         }
     }
 
@@ -2351,6 +2419,12 @@ private struct MobileProfileSettingsSheet: View {
             }
             .onAppear {
                 wasSignedInWhenOpened = appState.isCommunitySessionActive
+                appState.logMobileAuthView(
+                    "mobile_profile_sheet_appear",
+                    page: .profile,
+                    reason: "MobileProfileSettingsSheet",
+                    extra: ["hasProfile=\(appState.communityProfile != nil)"]
+                )
                 resetDraftProfile()
                 resetTermsAgreementDraft()
                 Task {
@@ -2362,6 +2436,12 @@ private struct MobileProfileSettingsSheet: View {
                 }
             }
             .onChange(of: appState.communityProfile) { _, profile in
+                appState.logMobileAuthView(
+                    "mobile_profile_state_change",
+                    page: .profile,
+                    reason: "communityProfile",
+                    extra: ["hasProfile=\(profile != nil)", "provider=\(profile?.provider ?? "-")"]
+                )
                 guard isLoadingProfileDraft || !hasProfileChanges else {
                     return
                 }
@@ -2379,6 +2459,12 @@ private struct MobileProfileSettingsSheet: View {
                 resetTermsAgreementDraft()
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
+                appState.logMobileAuthView(
+                    "mobile_profile_session_change",
+                    page: .profile,
+                    reason: "MobileProfileSettingsSheet",
+                    extra: ["isSignedIn=\(isSignedIn)"]
+                )
                 if isSignedIn, !wasSignedInWhenOpened {
                     dismiss()
                 }

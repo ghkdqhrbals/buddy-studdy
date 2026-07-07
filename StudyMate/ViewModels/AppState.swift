@@ -502,6 +502,7 @@ final class AppState: ObservableObject {
         var answer: String
     }
     private var appNotificationEventCancellables: [AnyCancellable] = []
+    private var lastAuthTraceMessages: [String: String] = [:]
     private var lastAPIKeyUpdatedAt: Date?
     private var lastLocalSettingsMutationAt: Date?
     lazy var notificationLandingCoordinator = NotificationLandingCoordinator(appState: self)
@@ -552,21 +553,43 @@ final class AppState: ObservableObject {
     }
 
     var shouldShowRecordsLoginPage: Bool {
-        shouldShowLoginGate(for: .records)
+        let shouldShow = shouldShowLoginGate(for: .records)
+        logAuthTrace(
+            "mobile_login_gate",
+            page: .records,
+            reason: "computed-property",
+            extra: ["showLoginGate=\(shouldShow)"]
+        )
+        return shouldShow
     }
 
     var shouldShowStatisticsLoginPage: Bool {
-        shouldShowLoginGate(for: .statistics)
+        let shouldShow = shouldShowLoginGate(for: .statistics)
+        logAuthTrace(
+            "mobile_login_gate",
+            page: .statistics,
+            reason: "computed-property",
+            extra: ["showLoginGate=\(shouldShow)"]
+        )
+        return shouldShow
     }
 
     func normalizeSelectedTabForMobile() {
+        logAuthTrace("mobile_normalize_tab_start", reason: "normalizeSelectedTabForMobile")
         if selectedTab == .study {
             selectedTab = .home
         }
         homeStudyRoute = nil
+        logAuthTrace("mobile_normalize_tab_end", reason: "normalizeSelectedTabForMobile")
     }
 
     func setSelectedTab(_ nextTab: AppTab) {
+        logAuthTrace(
+            "mobile_tab_request",
+            page: protectedPage(for: nextTab),
+            reason: "setSelectedTab",
+            extra: ["nextTab=\(String(describing: nextTab))"]
+        )
         if isEditingSettings && selectedTab == .settings && nextTab != .settings {
             cancelSettingsEditing()
         }
@@ -575,14 +598,32 @@ final class AppState: ObservableObject {
            !canAccess(protectedPage) {
             if shouldRefreshPageAccessBeforeDenying() {
                 selectedTab = nextTab
+                logAuthTrace(
+                    "mobile_tab_page_access_refresh",
+                    page: protectedPage,
+                    reason: "setSelectedTab",
+                    extra: ["nextTab=\(String(describing: nextTab))"]
+                )
                 refreshPageAccessThenOpen(nextTab, protectedPage: protectedPage)
                 return
             }
             selectedTab = nextTab
+            logAuthTrace(
+                "mobile_tab_denied_login_gate",
+                page: protectedPage,
+                reason: "setSelectedTab",
+                extra: ["nextTab=\(String(describing: nextTab))"]
+            )
             redirectToPageAccessGuide(for: protectedPage)
             return
         }
 
+        logAuthTrace(
+            "mobile_tab_allowed",
+            page: protectedPage(for: nextTab),
+            reason: "setSelectedTab",
+            extra: ["nextTab=\(String(describing: nextTab))"]
+        )
         applySelectedTab(nextTab)
     }
 
@@ -591,26 +632,42 @@ final class AppState: ObservableObject {
         if nextTab == .home {
             homeStudyRoute = nil
         }
+        logAuthTrace(
+            "mobile_tab_applied",
+            page: protectedPage(for: nextTab),
+            reason: "applySelectedTab",
+            extra: ["nextTab=\(String(describing: nextTab))"]
+        )
     }
 
     private func shouldRefreshPageAccessBeforeDenying() -> Bool {
-        if isCommunitySessionActive {
-            return true
-        }
-
-        return storedBackendIdentityUseCase.hasAccessToken()
+        let shouldRefresh = isCommunitySessionActive || storedBackendIdentityUseCase.hasAccessToken()
+        logAuthTrace(
+            "page_access_refresh_decision",
+            reason: "shouldRefreshPageAccessBeforeDenying",
+            extra: ["shouldRefresh=\(shouldRefresh)"]
+        )
+        return shouldRefresh
     }
 
     private func shouldAllowProvisionalAccessWhileRefreshing(_ page: ProtectedAppPage) -> Bool {
-        PageAccessPolicy.shouldAllowProvisionalAccess(
+        let shouldAllow = PageAccessPolicy.shouldAllowProvisionalAccess(
             to: page,
             hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken(),
             userStatus: backendAccessState.user.status
         )
+        logAuthTrace(
+            "page_access_provisional_decision",
+            page: page,
+            reason: "shouldAllowProvisionalAccessWhileRefreshing",
+            extra: ["allow=\(shouldAllow)"]
+        )
+        return shouldAllow
     }
 
     private func refreshPageAccessInBackground(reason: String) {
         protectedPageAccessRefreshTask?.cancel()
+        logAuthTrace("page_access_background_refresh_schedule", reason: reason)
         protectedPageAccessRefreshTask = Task { [weak self] in
             await self?.refreshPageAccess(reason: reason)
         }
@@ -618,6 +675,12 @@ final class AppState: ObservableObject {
 
     private func refreshPageAccessThenOpen(_ nextTab: AppTab, protectedPage: ProtectedAppPage) {
         protectedPageAccessRefreshTask?.cancel()
+        logAuthTrace(
+            "page_access_refresh_then_open_schedule",
+            page: protectedPage,
+            reason: "refreshPageAccessThenOpen",
+            extra: ["nextTab=\(String(describing: nextTab))"]
+        )
         protectedPageAccessRefreshTask = Task { [weak self] in
             guard let self else {
                 return
@@ -629,9 +692,21 @@ final class AppState: ObservableObject {
             }
 
             if canAccess(protectedPage) {
+                logAuthTrace(
+                    "page_access_refresh_then_open_allowed",
+                    page: protectedPage,
+                    reason: "refreshPageAccessThenOpen",
+                    extra: ["nextTab=\(String(describing: nextTab))"]
+                )
                 applySelectedTab(nextTab)
             } else {
                 selectedTab = nextTab
+                logAuthTrace(
+                    "page_access_refresh_then_open_denied",
+                    page: protectedPage,
+                    reason: "refreshPageAccessThenOpen",
+                    extra: ["nextTab=\(String(describing: nextTab))"]
+                )
                 redirectToPageAccessGuide(for: protectedPage)
             }
         }
@@ -704,11 +779,18 @@ final class AppState: ObservableObject {
     }
 
     private func shouldShowLoginGate(for page: ProtectedAppPage) -> Bool {
-        PageAccessPolicy.shouldShowLoginGate(
+        let shouldShow = PageAccessPolicy.shouldShowLoginGate(
             for: page,
             in: backendAccessState,
             hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken()
         )
+        logAuthTrace(
+            "page_login_gate_decision",
+            page: page,
+            reason: "shouldShowLoginGate",
+            extra: ["showLoginGate=\(shouldShow)"]
+        )
+        return shouldShow
     }
 
     @discardableResult
@@ -724,6 +806,7 @@ final class AppState: ObservableObject {
             return false
         }
 
+        logAuthTrace("page_access_required_allowed", page: page, reason: "requirePageAccess")
         return true
     }
 
@@ -731,10 +814,21 @@ final class AppState: ObservableObject {
         homeStudyRoute = nil
         focusedRecordRequest = nil
         pageAccessPrompt = PageAccessPolicy.prompt(for: page, strings: strings)
+        logAuthTrace("page_access_guide_redirect", page: page, reason: "redirectToPageAccessGuide")
     }
 
     func dismissPageAccessPrompt() {
         pageAccessPrompt = nil
+        logAuthTrace("page_access_prompt_dismiss", reason: "dismissPageAccessPrompt")
+    }
+
+    func logMobileAuthView(
+        _ event: String,
+        page: ProtectedAppPage? = nil,
+        reason: String,
+        extra: [String] = []
+    ) {
+        logAuthTrace(event, page: page, reason: reason, extra: extra)
     }
 
     func isCurrentCommunityUser(id userID: Int) -> Bool {
@@ -747,7 +841,9 @@ final class AppState: ObservableObject {
     }
 
     func refreshPageAccess(reason: String = "manual") async {
+        logAuthTrace("page_access_refresh_start", reason: reason, deduplicate: false)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "page-access-\(reason)") else {
+            logAuthTrace("page_access_refresh_missing_registration", reason: reason, deduplicate: false)
             resetCommunitySignInState()
             return
         }
@@ -766,10 +862,17 @@ final class AppState: ObservableObject {
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
                 communitySessionUseCase.setSignedIn(isCommunitySignedIn)
+                logAuthTrace("page_access_refresh_success", reason: reason, deduplicate: false)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
                 handleAppError(error, fallback: "", target: .none)
+                logAuthTrace(
+                    "page_access_refresh_failure",
+                    reason: reason,
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
             }
         )
@@ -778,9 +881,11 @@ final class AppState: ObservableObject {
     private func reconcileVisiblePageAccessAfterRefresh() {
         guard let visibleProtectedPage = currentVisibleProtectedPage(),
               !canAccess(visibleProtectedPage) else {
+            logAuthTrace("page_access_reconcile_allowed", page: currentVisibleProtectedPage(), reason: "reconcileVisiblePageAccessAfterRefresh")
             return
         }
 
+        logAuthTrace("page_access_reconcile_denied", page: visibleProtectedPage, reason: "reconcileVisiblePageAccessAfterRefresh")
         redirectToPageAccessGuide(for: visibleProtectedPage)
     }
 
@@ -833,8 +938,22 @@ final class AppState: ObservableObject {
         termsRetry: (() async -> Void)? = nil
     ) -> Bool {
         let resolution = appErrorResolution(error, fallback: fallback)
+        logAuthTrace(
+            "app_error_resolution",
+            page: protectedPage ?? currentVisibleProtectedPage(),
+            reason: "handleAppError",
+            extra: [
+                "requiresLogin=\(resolution.requiresLogin)",
+                "pageAccessDenied=\(resolution.isPageAccessDenied)",
+                "resetIdentity=\(resolution.shouldResetBackendIdentity)",
+                "requiresTerms=\(resolution.requiresTermsAgreement)",
+                "error=\(error.localizedDescription)"
+            ],
+            deduplicate: false
+        )
 
         if resolution.shouldResetBackendIdentity {
+            logAuthTrace("app_error_reset_backend_identity", reason: "handleAppError", deduplicate: false)
             clearStoredBackendAccessToken()
             resetCommunitySignInState()
         }
@@ -852,6 +971,7 @@ final class AppState: ObservableObject {
 
         if resolution.isPageAccessDenied || resolution.requiresLogin {
             if let page = protectedPage ?? currentVisibleProtectedPage() {
+                logAuthTrace("app_error_redirect_login_gate", page: page, reason: "handleAppError", deduplicate: false)
                 redirectToPageAccessGuide(for: page)
             }
             clearErrorMessage(target)
@@ -2415,6 +2535,7 @@ final class AppState: ObservableObject {
     }
 
     func signInToCommunity() {
+        logAuthTrace("community_sign_in_start", reason: "google", deduplicate: false)
         Task {
             #if os(iOS)
             do {
@@ -2423,12 +2544,20 @@ final class AppState: ObservableObject {
                 await signInToCommunity(idToken: idToken)
             } catch GoogleOAuthError.cancelled {
                 communityErrorMessage = nil
+                logAuthTrace("community_sign_in_cancelled", reason: "google", deduplicate: false)
                 log(.info, "Google Login이 사용자에 의해 취소되었습니다.")
             } catch GoogleOAuthError.notConfigured {
                 statusMessage = strings.googleLoginSetupRequired
+                logAuthTrace("community_sign_in_not_configured", reason: "google", deduplicate: false)
                 log(.warning, "Google Login 설정이 없습니다.")
             } catch {
                 handleCommunityError(error)
+                logAuthTrace(
+                    "community_sign_in_failure",
+                    reason: "google",
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "Google Login 실패: \(error.localizedDescription)")
             }
             #else
@@ -2438,7 +2567,9 @@ final class AppState: ObservableObject {
     }
 
     func signInToCommunity(idToken: String) async {
+        logAuthTrace("community_sign_in_token_exchange_start", reason: "google-login", deduplicate: false)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "google-login") else {
+            logAuthTrace("community_sign_in_missing_registration", reason: "google-login", deduplicate: false)
             clearCommunityErrorForMissingRegistration(reason: "google-login")
             return
         }
@@ -2456,10 +2587,17 @@ final class AppState: ObservableObject {
                 isCommunitySignedIn = true
                 communitySessionUseCase.setSignedIn(true)
                 communityErrorMessage = nil
+                logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
             onFailure: { error in
                 handleCommunityError(error)
+                logAuthTrace(
+                    "community_sign_in_token_exchange_failure",
+                    reason: "google-login",
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "Google 로그인 실패: \(error.localizedDescription)")
             }
         )
@@ -2469,6 +2607,7 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         reason: String
     ) {
+        logAuthTrace("community_sign_in_data_refresh_schedule", reason: reason, deduplicate: false)
         Task { [weak self] in
             await self?.refreshCommunitySignInData(registration: registration, reason: reason)
         }
@@ -2478,6 +2617,7 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         reason: String
     ) async {
+        logAuthTrace("community_sign_in_data_refresh_start", reason: reason, deduplicate: false)
         await actionRunner.run(
             operation: {
                 try await performWithBackendIdentityRecovery(
@@ -2492,10 +2632,17 @@ final class AppState: ObservableObject {
                 backendAccessState = state
                 isCommunitySignedIn = state.user.status != "ANONYMOUS"
                 communitySessionUseCase.setSignedIn(isCommunitySignedIn)
+                logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
                 reconcileVisiblePageAccessAfterRefresh()
             },
             onFailure: { error in
                 handleAppError(error, fallback: "", target: .community)
+                logAuthTrace(
+                    "community_sign_in_data_refresh_failure",
+                    reason: reason,
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "로그인 후 페이지 접근 권한 조회 실패: \(error.localizedDescription), reason=\(reason)")
             }
         )
@@ -2533,8 +2680,10 @@ final class AppState: ObservableObject {
     }
 
     func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
+        logAuthTrace("community_sign_in_start", reason: "email-login", deduplicate: false)
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
+            logAuthTrace("community_sign_in_missing_registration", reason: "email-login", deduplicate: false)
             clearCommunityErrorForMissingRegistration(reason: "email-login")
             return .failed
         }
@@ -2554,14 +2703,22 @@ final class AppState: ObservableObject {
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 isCommunitySignedIn = true
                 communitySessionUseCase.setSignedIn(true)
+                logAuthTrace("community_sign_in_success", reason: "email-login", deduplicate: false)
             },
             onFailure: { error in
                 if appErrorResolution(error, fallback: strings.communityRequestFailed).requiresEmailVerification {
                     communityErrorMessage = strings.emailVerificationRequired
+                    logAuthTrace("community_sign_in_email_verification_required", reason: "email-login", deduplicate: false)
                     log(.info, "Email 로그인에 인증코드가 필요합니다.")
                     return
                 }
                 handleCommunityError(error)
+                logAuthTrace(
+                    "community_sign_in_failure",
+                    reason: "email-login",
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "Email 로그인 실패: \(error.localizedDescription)")
             }
         )
@@ -2580,6 +2737,7 @@ final class AppState: ObservableObject {
     }
 
     func signOutFromCommunity() {
+        logAuthTrace("community_sign_out_start", reason: "manual", deduplicate: false)
         let registrationForLogout = storedBackendIdentityUseCase.loadRegistration()
         resetCommunitySignInState()
         if var registration = registrationForLogout {
@@ -2611,9 +2769,11 @@ final class AppState: ObservableObject {
             }
         }
         statusMessage = strings.communitySignedOut
+        logAuthTrace("community_sign_out_local_complete", reason: "manual", deduplicate: false)
     }
 
     private func resetCommunitySignInState() {
+        logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
         isCommunitySignedIn = false
         var nextState = communityProfileState
         nextState.resetSignedOutProfile()
@@ -2621,6 +2781,7 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         communitySessionUseCase.setSignedIn(false)
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
+        logAuthTrace("community_session_reset_end", reason: "resetCommunitySignInState", deduplicate: false)
     }
 
     func updateProfileAvatarSymbolName(_ symbolName: String) {
@@ -2669,8 +2830,10 @@ final class AppState: ObservableObject {
     }
 
     func loadCommunityProfile() async {
+        logAuthTrace("community_profile_load_start", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
         guard isCommunitySessionActive,
               let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile") else {
+            logAuthTrace("community_profile_load_skipped", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
             return
         }
 
@@ -2680,13 +2843,28 @@ final class AppState: ObservableObject {
             },
             onSuccess: { profile in
                 applyCommunityProfile(profile)
+                logAuthTrace("community_profile_load_success", page: .profile, reason: "loadCommunityProfile", deduplicate: false)
             },
             onFailure: { error in
                 let handled = handleCommunityError(error)
                 if handled {
                     communityProfile = nil
+                    logAuthTrace(
+                        "community_profile_load_handled_failure",
+                        page: .profile,
+                        reason: "loadCommunityProfile",
+                        extra: ["error=\(error.localizedDescription)"],
+                        deduplicate: false
+                    )
                     return
                 }
+                logAuthTrace(
+                    "community_profile_load_failure",
+                    page: .profile,
+                    reason: "loadCommunityProfile",
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "커뮤니티 프로필 조회 실패: \(error.localizedDescription)")
             }
         )
@@ -2730,11 +2908,25 @@ final class AppState: ObservableObject {
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {
+        logAuthTrace(
+            "community_profile_apply_start",
+            page: .profile,
+            reason: "applyCommunityProfile",
+            extra: ["profileId=\(profile.id)", "provider=\(profile.provider)"],
+            deduplicate: false
+        )
         let resolvedProfile = communityProfileCacheUseCase.applyProfile(profile)
         var nextState = communityProfileState
         nextState.applyProfile(resolvedProfile)
         communityProfileState = nextState
         applyProfilePageAccess(resolvedProfile)
+        logAuthTrace(
+            "community_profile_apply_end",
+            page: .profile,
+            reason: "applyCommunityProfile",
+            extra: ["profileId=\(resolvedProfile.id)", "provider=\(resolvedProfile.provider)"],
+            deduplicate: false
+        )
     }
 
     private func applyProfilePageAccess(_ profile: CommunityUserProfile) {
@@ -5360,22 +5552,37 @@ final class AppState: ObservableObject {
         reason: String
     ) async -> RemotePushRegistration? {
         guard !registration.hasAccessToken else {
+            logAuthTrace("backend_access_token_reuse", reason: reason)
             return registration
         }
 
         do {
+            logAuthTrace("backend_access_token_bootstrap_start", reason: reason, deduplicate: false)
             let updatedRegistration = try await backendIdentityUseCase.bootstrapAccessToken(registration: registration)
             storedBackendIdentityUseCase.saveRegistration(updatedRegistration)
+            logAuthTrace("backend_access_token_bootstrap_success", reason: reason, deduplicate: false)
             log(.info, "백엔드 access token을 갱신했습니다. reason=\(reason), deviceID=\(updatedRegistration.deviceID)")
             return updatedRegistration
         } catch {
             if appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) {
+                logAuthTrace(
+                    "backend_access_token_bootstrap_reset_identity",
+                    reason: reason,
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
                 log(.warning, "저장된 백엔드 identity가 유효하지 않아 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID), error=\(error.localizedDescription)")
                 return await resetBackendIdentityAndRegisterFresh(
                     previousRegistration: registration,
                     reason: "\(reason)-device-recovery"
                 )
             }
+            logAuthTrace(
+                "backend_access_token_bootstrap_failure",
+                reason: reason,
+                extra: ["error=\(error.localizedDescription)"],
+                deduplicate: false
+            )
             log(.warning, "백엔드 access token 갱신 실패: \(error.localizedDescription)")
             return nil
         }
@@ -5393,13 +5600,21 @@ final class AppState: ObservableObject {
                 throw error
             }
 
+            logAuthTrace(
+                "backend_identity_recovery_start",
+                reason: reason,
+                extra: ["error=\(error.localizedDescription)"],
+                deduplicate: false
+            )
             guard let recoveredRegistration = await resetBackendIdentityAndRegisterFresh(
                 previousRegistration: registration,
                 reason: reason
             ) else {
+                logAuthTrace("backend_identity_recovery_failure", reason: reason, deduplicate: false)
                 throw error
             }
 
+            logAuthTrace("backend_identity_recovery_success", reason: reason, deduplicate: false)
             return try await operation(recoveredRegistration)
         }
     }
@@ -5448,8 +5663,10 @@ final class AppState: ObservableObject {
     }
 
     private func clearStoredBackendAccessToken() {
+        logAuthTrace("backend_access_token_clear_start", reason: "clearStoredBackendAccessToken", deduplicate: false)
         guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
+            logAuthTrace("backend_access_token_clear_skipped", reason: "clearStoredBackendAccessToken", deduplicate: false)
             return
         }
 
@@ -5460,6 +5677,7 @@ final class AppState: ObservableObject {
         isCommunitySignedIn = false
         communityProfile = nil
         communitySessionUseCase.setSignedIn(false)
+        logAuthTrace("backend_access_token_clear_end", reason: "clearStoredBackendAccessToken", deduplicate: false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
 
@@ -6582,6 +6800,82 @@ final class AppState: ObservableObject {
         let entry = AppLogEntry(level: level, message: message)
         appLogUseCase.appendLog(entry)
         loadAppLogPage(appLogPage)
+    }
+
+    private func logAuthTrace(
+        _ event: String,
+        page: ProtectedAppPage? = nil,
+        reason: String,
+        extra: [String] = [],
+        deduplicate: Bool = true
+    ) {
+        let message = authTraceMessage(event: event, page: page, reason: reason, extra: extra)
+        let key = [
+            event,
+            page?.accessLogName ?? "-",
+            reason
+        ].joined(separator: "|")
+
+        if deduplicate, lastAuthTraceMessages[key] == message {
+            return
+        }
+
+        lastAuthTraceMessages[key] = message
+        Task { @MainActor [weak self] in
+            self?.log(.info, message)
+        }
+    }
+
+    private func authTraceMessage(
+        event: String,
+        page: ProtectedAppPage?,
+        reason: String,
+        extra: [String]
+    ) -> String {
+        let registration = storedBackendIdentityUseCase.loadRegistration()
+        let access = backendAccessState.pageAccess
+        var fields = [
+            "auth_trace",
+            "event=\(event)",
+            "reason=\(reason)",
+            "selectedTab=\(String(describing: selectedTab))",
+            "visibleTab=\(String(describing: mobileVisibleTab))",
+            "storedSignedIn=\(isCommunitySignedIn)",
+            "sessionActive=\(isCommunitySessionActive)",
+            "userId=\(backendAccessState.user.id)",
+            "userStatus=\(backendAccessState.user.status)",
+            "hasAccessToken=\(registration?.hasAccessToken == true)",
+            "hasRegisteredAccessToken=\(registration?.hasRegisteredAccessToken == true)",
+            "hasRegistration=\(registration != nil)",
+            "hasProfile=\(communityProfile != nil)",
+            "profileId=\(communityProfile?.id ?? 0)",
+            "profileProvider=\(communityProfile?.provider ?? "-")",
+            "pageAccess.home=\(access.home)",
+            "pageAccess.publicQuestions=\(access.publicQuestions)",
+            "pageAccess.myStudies=\(access.myStudies)",
+            "pageAccess.studyRoom=\(access.studyRoom)",
+            "pageAccess.records=\(access.records)",
+            "pageAccess.stats=\(access.stats)",
+            "pageAccess.profile=\(access.profile)",
+            "pageAccess.developer=\(access.developer)",
+            "pageAccess.admin=\(access.admin)",
+            "pageAccessPrompt=\(pageAccessPrompt != nil)",
+            "homeRoute=\(homeStudyRoute != nil)"
+        ]
+
+        if let page {
+            let pageShowLoginGate = PageAccessPolicy.shouldShowLoginGate(
+                for: page,
+                in: backendAccessState,
+                hasRegisteredAccessToken: registration?.hasRegisteredAccessToken == true
+            )
+            fields.append("page=\(page.accessLogName)")
+            fields.append("pageCanAccess=\(PageAccessPolicy.canAccess(page, in: access))")
+            fields.append("pageShowLoginGate=\(pageShowLoginGate)")
+        }
+
+        fields.append(contentsOf: extra)
+        return fields.joined(separator: " ")
     }
 
     private func openURLString(_ urlString: String) {
