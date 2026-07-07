@@ -71,6 +71,10 @@ struct LocalStudyRecordUseCase {
         repository.saveDeletedStudyRecordMarkers(markers)
     }
 
+    func limitedDeletedRecordMarkers(_ markers: [DeletedStudyRecordMarker]) -> [DeletedStudyRecordMarker] {
+        Array(markers.suffix(SettingsStore.maxDeletedStudyRecordMarkerCount))
+    }
+
     func loadRecordsClearedAt() -> Date? {
         repository.loadStudyRecordsClearedAt()
     }

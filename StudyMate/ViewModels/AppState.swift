@@ -6066,10 +6066,8 @@ final class AppState: ObservableObject {
             }
         }
 
-        return Array(
-            markersByKey.values
-                .sorted { $0.deletedAt < $1.deletedAt }
-                .suffix(SettingsStore.maxDeletedStudyRecordMarkerCount)
+        return localStudyRecordUseCase.limitedDeletedRecordMarkers(
+            markersByKey.values.sorted { $0.deletedAt < $1.deletedAt }
         )
     }
 

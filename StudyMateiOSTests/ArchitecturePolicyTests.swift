@@ -316,6 +316,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateDoesNotReadSettingsStoreStorageConstantsDirectly() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("SettingsStore.maxDeletedStudyRecordMarkerCount"),
+            "AppState must ask LocalStudyRecordUseCase to enforce study-record storage limits instead of reading SettingsStore constants directly."
+        )
+    }
+
     func testAppStateRoutesAppLogsThroughUseCase() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
