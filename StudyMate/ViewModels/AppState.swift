@@ -2738,6 +2738,11 @@ final class AppState: ObservableObject {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
         }
+        applyLocalCommunityProfileDraft(
+            displayName: displayName,
+            avatarSymbolName: avatarSymbolName,
+            avatarColorSeed: avatarColorSeed
+        )
         isUpdatingCommunityProfile = true
 
         await actionRunner.run(
@@ -2761,6 +2766,62 @@ final class AppState: ObservableObject {
             onCompletion: {
                 isUpdatingCommunityProfile = false
             }
+        )
+    }
+
+    private func applyLocalCommunityProfileDraft(
+        displayName: String,
+        avatarSymbolName: String?,
+        avatarColorSeed: String?
+    ) {
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAvatarSymbolName = avatarSymbolName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAvatarColorSeed = avatarColorSeed?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextDisplayName = trimmedDisplayName.isEmpty ? communityProfile?.displayName : trimmedDisplayName
+        let nextAvatarSymbolName: String
+        if let trimmedAvatarSymbolName, !trimmedAvatarSymbolName.isEmpty {
+            nextAvatarSymbolName = trimmedAvatarSymbolName
+        } else {
+            nextAvatarSymbolName = communityProfile?.avatarSymbolName ?? profileAvatarSymbolName
+        }
+        let nextAvatarColorSeed: String
+        if let trimmedAvatarColorSeed, !trimmedAvatarColorSeed.isEmpty {
+            nextAvatarColorSeed = trimmedAvatarColorSeed
+        } else {
+            nextAvatarColorSeed = communityProfile?.avatarColorSeed ?? profileAvatarColorSeed
+        }
+
+        if let nextDisplayName {
+            communityProfileCacheUseCase.saveDisplayName(nextDisplayName)
+        }
+        communityProfileCacheUseCase.saveAvatarSymbolName(nextAvatarSymbolName)
+        communityProfileCacheUseCase.saveAvatarColorSeed(nextAvatarColorSeed)
+
+        var nextState = communityProfileState
+        nextState.updateAvatar(symbolName: nextAvatarSymbolName, colorSeed: nextAvatarColorSeed)
+        if let profile = nextState.profile {
+            nextState.profile = CommunityUserProfile(
+                id: profile.id,
+                displayName: nextDisplayName ?? profile.displayName,
+                provider: profile.provider,
+                email: profile.email,
+                bio: profile.bio,
+                avatarURL: profile.avatarURL,
+                avatarSymbolName: nextAvatarSymbolName,
+                avatarColorSeed: nextAvatarColorSeed,
+                pageAccess: profile.pageAccess
+            )
+        }
+        communityProfileState = nextState
+        logAuthTrace(
+            "community_profile_apply_local_draft",
+            page: .profile,
+            reason: "updateCommunityProfile",
+            extra: [
+                "avatarSymbolName=\(nextAvatarSymbolName)",
+                "avatarColorSeed=\(nextAvatarColorSeed)",
+            ],
+            deduplicate: false
         )
     }
 
