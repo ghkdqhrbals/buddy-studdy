@@ -1772,6 +1772,30 @@ struct ProfileAvatarSprite: View {
     }
 }
 
+enum AvatarBuilderAssetRegistry {
+    static let localImageAssetNames: Set<String> = [
+        "avatar-top-hoodie-blue",
+        "avatar-top-varsity-green",
+        "avatar-top-sweater-rose",
+        "avatar-bottom-denim-pants",
+        "avatar-bottom-jogger-black",
+        "avatar-bottom-shorts-tan",
+        "avatar-shoes-white-sneakers",
+        "avatar-shoes-brown-loafers",
+        "avatar-shoes-blue-boots",
+        "avatar-hat-beanie-navy",
+        "avatar-hat-cap-orange",
+        "avatar-hat-grad-black",
+        "avatar-item-laptop",
+        "avatar-item-book",
+        "avatar-item-pencil"
+    ]
+
+    static func hasLocalImageAsset(_ assetName: String) -> Bool {
+        localImageAssetNames.contains(assetName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+}
+
 private struct AvatarBuilderSprite: View {
     var config: [String: String]
     var catalog: AvatarCatalogResponse
@@ -1848,20 +1872,32 @@ private struct AvatarBuilderLayer: View {
 
     @ViewBuilder
     var body: some View {
-        switch item.slot {
-        case "top":
-            topLayer
-        case "bottom":
-            bottomLayer
-        case "shoes":
-            shoesLayer
-        case "hat":
-            hatLayer
-        case "item":
-            itemLayer
-        default:
-            EmptyView()
+        if AvatarBuilderAssetRegistry.hasLocalImageAsset(item.assetName) {
+            localImageLayer
+        } else {
+            switch item.slot {
+            case "top":
+                topLayer
+            case "bottom":
+                bottomLayer
+            case "shoes":
+                shoesLayer
+            case "hat":
+                hatLayer
+            case "item":
+                itemLayer
+            default:
+                EmptyView()
+            }
         }
+    }
+
+    private var localImageLayer: some View {
+        Image(assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder

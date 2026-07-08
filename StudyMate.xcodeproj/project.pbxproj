@@ -120,6 +120,7 @@
 		110000000000000000000170 /* CloudSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* CloudSyncService.swift */; };
 		120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000200 /* ArchitecturePolicyTests.swift */; };
 		120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000204 /* PageAccessPolicyTests.swift */; };
+		120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000206 /* AvatarBuilderAssetTests.swift */; };
 		120000000000000000000101 /* StudyMateiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000001 /* StudyMateiOSApp.swift */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		120000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
@@ -390,6 +391,7 @@
 		120000000000000000000200 /* ArchitecturePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchitecturePolicyTests.swift; sourceTree = "<group>"; };
 		120000000000000000000202 /* QuestionSchedulePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionSchedulePolicyTests.swift; sourceTree = "<group>"; };
 		120000000000000000000204 /* PageAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicyTests.swift; sourceTree = "<group>"; };
+		120000000000000000000206 /* AvatarBuilderAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarBuilderAssetTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -841,6 +843,7 @@
 				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
 				120000000000000000000202 /* QuestionSchedulePolicyTests.swift */,
 				120000000000000000000204 /* PageAccessPolicyTests.swift */,
+				120000000000000000000206 /* AvatarBuilderAssetTests.swift */,
 			);
 			path = StudyMateiOSTests;
 			sourceTree = "<group>";
@@ -1206,6 +1209,7 @@
 				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
 				120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */,
 				120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */,
+				120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

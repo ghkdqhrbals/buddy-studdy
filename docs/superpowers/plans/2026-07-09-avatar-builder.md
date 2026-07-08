@@ -39,9 +39,11 @@ The iOS app composes avatars locally:
 
 - Background color comes from the selected background item.
 - Base uses existing bundled profile avatar images.
-- Outfit/accessory slots render lightweight SwiftUI layers based on item slot, `assetName`, and color so data rows such as hoodie, varsity jacket, shorts, boots, cap, and graduation hat produce distinct visuals.
+- Seeded outfit/accessory slots use bundled transparent PNG layers whose asset names match `avatar_items.asset_name`.
+- `AvatarBuilderAssetRegistry` lists local image-backed item assets and is covered by iOS tests so DB seed rows cannot silently reference missing app assets.
+- If a future DB row is delivered before the app bundles a matching image, the renderer falls back to lightweight SwiftUI layers based on slot, `assetName`, and color.
 - The selected config is cached with the profile cache so profile UI stays consistent across tabs and launches.
 
 ## Extension Path
 
-If photo upload or server-rendered avatar images are added later, keep the catalog shape. Add URL/image variants to `avatar_items` or a derived style endpoint while preserving `avatar_config` as the canonical user selection.
+If photo upload or server-rendered avatar images are added later, keep the catalog shape. Add URL/image variants to `avatar_items` or a derived style endpoint while preserving `avatar_config` as the canonical user selection. For local builder items, add the DB row and a matching `Assets.xcassets/<asset_name>.imageset` before enabling it by default.
