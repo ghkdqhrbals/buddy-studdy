@@ -278,15 +278,15 @@ private struct MobileRequiredTermsGateSheet: View {
     private var strings: AppStrings { appState.strings }
 
     private var termsOfService: BackendTerms? {
-        appState.activeTerms.first { $0.code == "TERMS_OF_SERVICE" }
+        appState.activeTerms.first { $0.type == .termsOfService }
     }
 
     private var privacyPolicy: BackendTerms? {
-        appState.activeTerms.first { $0.code == "PRIVACY_POLICY" }
+        appState.activeTerms.first { $0.type == .privacyPolicy }
     }
 
     private var marketingTerms: BackendTerms? {
-        appState.activeTerms.first { $0.code == "MARKETING_NOTIFICATION" }
+        appState.activeTerms.first { $0.type == .marketingNotification }
     }
 
     var body: some View {
@@ -423,14 +423,14 @@ private struct MobileRequiredTermsGateSheet: View {
         isSaving = true
         defer { isSaving = false }
 
-        let requiredCodes = ["TERMS_OF_SERVICE", "PRIVACY_POLICY"]
-        for code in requiredCodes {
-            guard await appState.saveTermsAgreement(code: code, isAgreed: true, source: .requiredGate) else {
+        let requiredTypes: [BackendTermsType] = [.termsOfService, .privacyPolicy]
+        for type in requiredTypes {
+            guard await appState.saveTermsAgreement(type: type, isAgreed: true, source: .requiredGate) else {
                 return
             }
         }
         if marketingAgreed {
-            _ = await appState.saveTermsAgreement(code: "MARKETING_NOTIFICATION", isAgreed: true, source: .requiredGate)
+            _ = await appState.saveTermsAgreement(type: .marketingNotification, isAgreed: true, source: .requiredGate)
         }
         await appState.refreshTermsAndNotificationPreferences(reason: "required-terms-complete")
         appState.isRequiredTermsGatePresented = false
@@ -2770,15 +2770,15 @@ private struct MobileProfileSettingsSheet: View {
 
 private struct MobileTermsSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var savingCode: String?
+    @State private var savingType: BackendTermsType?
     @State private var legalWebRoute: MobileLegalWebRoute?
 
     private var strings: AppStrings { appState.strings }
 
     private var visibleTerms: [BackendTerms] {
-        let order = ["TERMS_OF_SERVICE", "PRIVACY_POLICY", "MARKETING_NOTIFICATION"]
-        return order.compactMap { code in
-            appState.activeTerms.first { $0.code == code } ?? fallbackTerms(code: code)
+        let order: [BackendTermsType] = [.termsOfService, .privacyPolicy, .marketingNotification]
+        return order.compactMap { type in
+            appState.activeTerms.first { $0.type == type } ?? fallbackTerms(type: type)
         }
     }
 
@@ -2829,7 +2829,7 @@ private struct MobileTermsSettingsView: View {
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderless)
 
-            if savingCode == term.code {
+            if savingType == term.type {
                 ProgressView()
                     .controlSize(.small)
             } else {
@@ -2853,16 +2853,17 @@ private struct MobileTermsSettingsView: View {
     }
 
     private func saveAgreement(term: BackendTerms, isAgreed: Bool) async {
-        savingCode = term.code
-        defer { savingCode = nil }
-        _ = await appState.saveTermsAgreement(code: term.code, isAgreed: isAgreed, source: .profile)
+        savingType = term.type
+        defer { savingType = nil }
+        _ = await appState.saveTermsAgreement(type: term.type, isAgreed: isAgreed, source: .profile)
     }
 
-    private func fallbackTerms(code: String) -> BackendTerms? {
-        switch code {
-        case "TERMS_OF_SERVICE":
+    private func fallbackTerms(type: BackendTermsType) -> BackendTerms {
+        switch type {
+        case .termsOfService:
             return BackendTerms(
-                code: code,
+                type: type,
+                code: type.rawValue,
                 version: "-",
                 title: strings.termsOfService,
                 url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage),
@@ -2871,9 +2872,10 @@ private struct MobileTermsSettingsView: View {
                 mutable: false,
                 agreed: true
             )
-        case "PRIVACY_POLICY":
+        case .privacyPolicy:
             return BackendTerms(
-                code: code,
+                type: type,
+                code: type.rawValue,
                 version: "-",
                 title: strings.privacyPolicy,
                 url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage),
@@ -2882,9 +2884,10 @@ private struct MobileTermsSettingsView: View {
                 mutable: false,
                 agreed: true
             )
-        case "MARKETING_NOTIFICATION":
+        case .marketingNotification:
             return BackendTerms(
-                code: code,
+                type: type,
+                code: type.rawValue,
                 version: "-",
                 title: strings.marketingNotifications,
                 url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
@@ -2893,22 +2896,18 @@ private struct MobileTermsSettingsView: View {
                 mutable: true,
                 agreed: false
             )
-        default:
-            return nil
         }
     }
 
     private func title(for term: BackendTerms) -> String {
         let baseTitle: String
-        switch term.code {
-        case "TERMS_OF_SERVICE":
+        switch term.type {
+        case .termsOfService:
             baseTitle = strings.termsOfService
-        case "PRIVACY_POLICY":
+        case .privacyPolicy:
             baseTitle = strings.privacyPolicy
-        case "MARKETING_NOTIFICATION":
+        case .marketingNotification:
             baseTitle = strings.marketingNotifications
-        default:
-            baseTitle = term.title
         }
         let suffix = term.required ? strings.requiredTermsBadge : strings.optionalTermsBadge
         return "\(baseTitle) [\(suffix)]"
@@ -2923,11 +2922,11 @@ private struct MobileNotificationSettingsView: View {
     private var strings: AppStrings { appState.strings }
 
     private var isQuestionEnabled: Bool {
-        appState.notificationPreferences.first { $0.key == "question_notification" }?.enabled ?? false
+        appState.notificationPreferences.first { $0.type == .questionNotification }?.enabled ?? false
     }
 
     private var isMarketingEnabled: Bool {
-        appState.notificationPreferences.first { $0.key == "marketing_notification" }?.enabled ?? false
+        appState.notificationPreferences.first { $0.type == .marketingNotification }?.enabled ?? false
     }
 
     var body: some View {
@@ -3002,7 +3001,7 @@ private struct MobileNotificationSettingsView: View {
                 return
             }
         }
-        _ = await appState.saveNotificationPreference(key: "question_notification", enabled: enabled)
+        _ = await appState.saveNotificationPreference(type: .questionNotification, enabled: enabled)
     }
 
     private func saveMarketingPreference(enabled: Bool) async {
@@ -3013,7 +3012,7 @@ private struct MobileNotificationSettingsView: View {
                 return
             }
         }
-        _ = await appState.saveNotificationPreference(key: "marketing_notification", enabled: enabled)
+        _ = await appState.saveNotificationPreference(type: .marketingNotification, enabled: enabled)
     }
 }
 

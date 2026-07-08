@@ -3,10 +3,12 @@ package com.buddystudy.backend.auth.application.service
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceResponse
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceType
 import com.buddystudy.backend.auth.application.model.PermissionEvaluationResponse
 import com.buddystudy.backend.auth.application.model.PermissionEvaluationsResponse
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
 import com.buddystudy.backend.auth.application.model.TermsResponse
+import com.buddystudy.backend.auth.application.model.TermsType
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
 import com.buddystudy.backend.auth.application.port.inbound.NotificationPreferenceUseCase
@@ -40,8 +42,7 @@ class PermissionPolicyService(
         val userId = principal?.userId?.takeUnless { principal.anonymous }
         val deviceId = principal?.deviceId
         return terms.activeTerms(userId, deviceId, Instant.now()).map {
-            TermsResponse(it.code, it.version, it.title, it.url, it.contentHash)
-                .copy(required = it.required, mutable = it.mutable, agreed = it.agreed)
+            it.toResponse()
         }
     }
 
@@ -58,7 +59,7 @@ class PermissionPolicyService(
         if (source == "PROFILE" && principal.anonymous) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Profile terms agreement requires an active login.")
         }
-        val activeTerms = terms.activeTerms(command.code.trim(), Instant.now())
+        val activeTerms = terms.activeTerms(command.type.code, Instant.now())
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Active terms were not found.")
 
         termAgreements.saveAgreement(
@@ -114,28 +115,52 @@ class PermissionPolicyService(
             granted = granted,
             failureCode = failureCode?.name,
             reason = reason,
-            requiredTerms = requiredTerms.map { TermsResponse(it.code, it.version, it.title, it.url, it.contentHash) },
+            requiredTerms = requiredTerms.map {
+                TermsResponse(
+                    type = TermsType.parse(it.code),
+                    code = it.code,
+                    version = it.version,
+                    title = it.title,
+                    url = it.url,
+                    contentHash = it.contentHash,
+                )
+            },
             requiredActions = requiredActions.map { it.name },
             metadata = metadata,
+        )
+
+    private fun com.buddystudy.backend.auth.application.port.outbound.ActiveTermsProjection.toResponse(): TermsResponse =
+        TermsResponse(
+            type = TermsType.parse(code),
+            code = code,
+            version = version,
+            title = title,
+            url = url,
+            contentHash = contentHash,
+            required = required,
+            mutable = mutable,
+            agreed = agreed,
         )
 
     @Transactional(readOnly = true)
     override fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse> =
         listOf(
             NotificationPreferenceResponse(
-                key = QUESTION_NOTIFICATION_PREFERENCE,
+                type = NotificationPreferenceType.QUESTION_NOTIFICATION,
+                key = NotificationPreferenceType.QUESTION_NOTIFICATION.key,
                 enabled = notificationPreferences.isEnabled(
                     principal.userId.takeUnless { principal.anonymous },
                     principal.deviceId,
-                    QUESTION_NOTIFICATION_PREFERENCE,
+                    NotificationPreferenceType.QUESTION_NOTIFICATION.key,
                 )
             ),
             NotificationPreferenceResponse(
-                key = MARKETING_NOTIFICATION_PREFERENCE,
+                type = NotificationPreferenceType.MARKETING_NOTIFICATION,
+                key = NotificationPreferenceType.MARKETING_NOTIFICATION.key,
                 enabled = notificationPreferences.isEnabled(
                     principal.userId.takeUnless { principal.anonymous },
                     principal.deviceId,
-                    MARKETING_NOTIFICATION_PREFERENCE,
+                    NotificationPreferenceType.MARKETING_NOTIFICATION.key,
                 )
             )
         )
@@ -148,10 +173,8 @@ class PermissionPolicyService(
         if (principal.anonymous) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Notification preferences require login.")
         }
-        val key = command.key.trim().lowercase()
-        if (key !in ALLOWED_NOTIFICATION_PREFERENCES) {
-            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid notification preference key. $key")
-        }
+        val type = command.type
+        val key = type.key
         notificationPreferenceCommands.savePreference(
             userId = principal.userId,
             deviceId = principal.deviceId,
@@ -159,7 +182,7 @@ class PermissionPolicyService(
             enabled = command.enabled,
             now = Instant.now(),
         )
-        return NotificationPreferenceResponse(key = key, enabled = command.enabled)
+        return NotificationPreferenceResponse(type = type, key = key, enabled = command.enabled)
     }
 
     private fun activateUserIfRequiredTermsAreAgreed(principal: Principal) {
@@ -175,11 +198,5 @@ class PermissionPolicyService(
     private companion object {
         private val AGREEMENT_ACTIONS = setOf("AGREED", "WITHDRAWN")
         private val AGREEMENT_SOURCES = setOf("SIGNUP", "SETTINGS", "PROFILE", "REQUIRED_GATE", "MIGRATION")
-        private const val QUESTION_NOTIFICATION_PREFERENCE = "question_notification"
-        private const val MARKETING_NOTIFICATION_PREFERENCE = "marketing_notification"
-        private val ALLOWED_NOTIFICATION_PREFERENCES = setOf(
-            QUESTION_NOTIFICATION_PREFERENCE,
-            MARKETING_NOTIFICATION_PREFERENCE,
-        )
     }
 }

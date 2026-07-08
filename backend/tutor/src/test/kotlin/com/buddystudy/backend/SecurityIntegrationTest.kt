@@ -184,16 +184,20 @@ class SecurityIntegrationTest {
     @Test
     fun `policy request DTOs keep bean constructors for Spring JSON binding`() {
         val preferenceRequest = NotificationPreferenceRequest::class.java.getDeclaredConstructor().newInstance()
+        preferenceRequest.type = "QUESTION_NOTIFICATION"
         preferenceRequest.key = "question_notification"
         preferenceRequest.enabled = true
 
         val termsRequest = TermsAgreementRequest::class.java.getDeclaredConstructor().newInstance()
+        termsRequest.type = "TERMS_OF_SERVICE"
         termsRequest.code = "TERMS_OF_SERVICE"
         termsRequest.action = "AGREED"
         termsRequest.source = "PROFILE"
 
+        assertThat(preferenceRequest.resolvedType()).isEqualTo("QUESTION_NOTIFICATION")
         assertThat(preferenceRequest.key).isEqualTo("question_notification")
         assertThat(preferenceRequest.enabled).isTrue()
+        assertThat(termsRequest.resolvedType()).isEqualTo("TERMS_OF_SERVICE")
         assertThat(termsRequest.code).isEqualTo("TERMS_OF_SERVICE")
         assertThat(termsRequest.action).isEqualTo("AGREED")
         assertThat(termsRequest.source).isEqualTo("PROFILE")

@@ -350,6 +350,40 @@ Patch request:
 
 `DELETE /api/v1/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
 
+### Permission Policy, Terms, And Notifications
+
+```http
+GET /api/v1/terms/active?context=SIGNUP
+POST /api/v1/terms/agreements
+GET /api/v1/notification-preferences
+POST /api/v1/notification-preferences
+```
+
+The backend owns the active terms list, links, required/optional flags, and mutability. Clients should render the returned terms instead of hard-coding signup requirements.
+
+Terms agreement requests use enum `type`; legacy `code` is accepted only for backward compatibility:
+
+```json
+{
+  "type": "TERMS_OF_SERVICE",
+  "action": "AGREED",
+  "source": "PROFILE"
+}
+```
+
+Supported terms types are `TERMS_OF_SERVICE`, `PRIVACY_POLICY`, and `MARKETING_NOTIFICATION`.
+
+Notification preference requests use enum `type`; legacy `key` is accepted only for backward compatibility:
+
+```json
+{
+  "type": "QUESTION_NOTIFICATION",
+  "enabled": true
+}
+```
+
+Supported notification preference types are `QUESTION_NOTIFICATION` and `MARKETING_NOTIFICATION`. Responses include both `type` and legacy storage key/code fields during migration.
+
 ### Report Public Question
 
 ```http

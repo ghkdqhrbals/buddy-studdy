@@ -2,9 +2,11 @@ package com.buddystudy.backend.auth.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceResponse
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceType
 import com.buddystudy.backend.auth.application.model.PermissionEvaluationsResponse
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
 import com.buddystudy.backend.auth.application.model.TermsResponse
+import com.buddystudy.backend.auth.application.model.TermsType
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.port.inbound.NotificationPreferenceUseCase
 import com.buddystudy.backend.auth.application.port.inbound.PermissionEvaluationUseCase
@@ -46,7 +48,7 @@ class PermissionPolicyController(
         terms.saveAgreement(
             authentication.principalOrThrow(),
             TermsAgreementCommand(
-                code = body.code,
+                type = TermsType.parse(body.resolvedType()),
                 action = body.action,
                 source = body.source,
                 ipAddress = ClientIpResolver.resolve(request),
@@ -82,14 +84,14 @@ class PermissionPolicyController(
         authentication: Authentication,
         @RequestBody body: NotificationPreferenceRequest,
     ): NotificationPreferenceResponse {
-        val key = body.key.trim()
-        if (key.isBlank()) {
-            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Notification preference key is required.")
+        val type = body.resolvedType()
+        if (type.isBlank()) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Notification preference type is required.")
         }
         return notificationPreferences.saveNotificationPreference(
             authentication.principalOrThrow(),
             NotificationPreferenceCommand(
-                key = key,
+                type = NotificationPreferenceType.parse(type),
                 enabled = body.enabled,
             )
         )
@@ -97,12 +99,18 @@ class PermissionPolicyController(
 }
 
 class TermsAgreementRequest {
+    var type: String = ""
     var code: String = ""
     var action: String = "AGREED"
     var source: String = "SETTINGS"
+
+    fun resolvedType(): String = type.ifBlank { code }
 }
 
 class NotificationPreferenceRequest {
+    var type: String = ""
     var key: String = ""
     var enabled: Boolean = false
+
+    fun resolvedType(): String = type.ifBlank { key }
 }

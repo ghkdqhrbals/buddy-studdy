@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -34,11 +35,16 @@ class ProfileController(
     @PatchMapping("/profile")
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(body, authentication)
+
+    @Operation(summary = "Delete my account", description = "Deletes the active member account and reconnects the current device as anonymous.")
+    @DeleteMapping("/profile")
+    fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
 }
 
 interface ProfileWebPort {
     fun profile(authentication: Authentication): Any
     fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
+    fun withdrawProfile(authentication: Authentication): Any
 }
 
 @Component
@@ -49,6 +55,9 @@ class ProfileWebAdapter(
 
     override fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(authentication.principalOrThrow(), body.toCommand())
+
+    override fun withdrawProfile(authentication: Authentication) =
+        profiles.withdrawProfile(authentication.principalOrThrow())
 }
 
 private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(

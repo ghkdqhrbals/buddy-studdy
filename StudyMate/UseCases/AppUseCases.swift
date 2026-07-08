@@ -6,7 +6,7 @@ protocol TermsRepository {
 
     func saveAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations
@@ -15,7 +15,7 @@ protocol TermsRepository {
     func fetchNotificationPreferences(registration: RemotePushRegistration) async throws -> [BackendNotificationPreference]
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference
 }
@@ -34,13 +34,13 @@ struct RemoteTermsRepository: TermsRepository {
 
     func saveAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
         try await backendClient.saveTermsAgreement(
             registration: registration,
-            code: code,
+            type: type,
             action: action,
             source: source
         )
@@ -56,12 +56,12 @@ struct RemoteTermsRepository: TermsRepository {
 
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference {
         try await backendClient.saveNotificationPreference(
             registration: registration,
-            key: key,
+            type: type,
             enabled: enabled
         )
     }
@@ -81,13 +81,13 @@ struct TermsUseCase {
 
     func saveAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource = .settings
     ) async throws -> BackendPermissionEvaluations {
         try await repository.saveAgreement(
             registration: registration,
-            code: code,
+            type: type,
             action: action,
             source: source
         )
@@ -103,12 +103,12 @@ struct TermsUseCase {
 
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference {
         try await repository.saveNotificationPreference(
             registration: registration,
-            key: key,
+            type: type,
             enabled: enabled
         )
     }

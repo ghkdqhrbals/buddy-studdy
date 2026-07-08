@@ -4639,19 +4639,21 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
 
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference {
+        let key = type.key
         savedNotificationPreferences.append((key: key, enabled: enabled))
-        return BackendNotificationPreference(key: key, enabled: enabled)
+        return BackendNotificationPreference(type: type, key: key, enabled: enabled)
     }
 
     func saveTermsAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
+        let code = type.rawValue
         savedTermsAgreements.append((code: code, action: action))
         return BackendPermissionEvaluations(permissions: [])
     }

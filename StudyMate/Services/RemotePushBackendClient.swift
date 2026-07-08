@@ -171,7 +171,7 @@ protocol RemotePushBackendClientProtocol {
 
     func saveTermsAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations
@@ -182,7 +182,7 @@ protocol RemotePushBackendClientProtocol {
 
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference
 
@@ -489,7 +489,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func saveTermsAgreement(
         registration: RemotePushRegistration,
-        code: String,
+        type: BackendTermsType,
         action: BackendTermsAgreementAction,
         source: BackendTermsAgreementSource
     ) async throws -> BackendPermissionEvaluations {
@@ -501,7 +501,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(
             TermsAgreementRequest(
-                code: code,
+                type: type.rawValue,
                 action: action.rawValue,
                 source: source.rawValue
             )
@@ -532,7 +532,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func saveNotificationPreference(
         registration: RemotePushRegistration,
-        key: String,
+        type: BackendNotificationPreferenceType,
         enabled: Bool
     ) async throws -> BackendNotificationPreference {
         var request = authenticatedRequest(
@@ -541,7 +541,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(NotificationPreferenceRequest(key: key, enabled: enabled))
+        request.httpBody = try encoder.encode(NotificationPreferenceRequest(type: type.rawValue, enabled: enabled))
         let data = try await perform(request)
         return try decoder.decode(BackendNotificationPreference.self, from: data)
     }
@@ -1467,13 +1467,13 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct TermsAgreementRequest: Encodable {
-        var code: String
+        var type: String
         var action: String
         var source: String
     }
 
     private struct NotificationPreferenceRequest: Encodable {
-        var key: String
+        var type: String
         var enabled: Bool
     }
 
@@ -2387,7 +2387,18 @@ enum BackendTermsAgreementSource: String {
     case migration = "MIGRATION"
 }
 
+enum BackendTermsType: String, Codable, Equatable {
+    case termsOfService = "TERMS_OF_SERVICE"
+    case privacyPolicy = "PRIVACY_POLICY"
+    case marketingNotification = "MARKETING_NOTIFICATION"
+
+    init(code: String) {
+        self = BackendTermsType(rawValue: code) ?? .termsOfService
+    }
+}
+
 struct BackendTerms: Codable, Equatable, Identifiable {
+    var type: BackendTermsType
     var code: String
     var version: String
     var title: String
@@ -2398,13 +2409,109 @@ struct BackendTerms: Codable, Equatable, Identifiable {
     var agreed: Bool = false
 
     var id: String { "\(code):\(version):\(contentHash)" }
+
+    init(
+        type: BackendTermsType? = nil,
+        code: String,
+        version: String,
+        title: String,
+        url: URL,
+        contentHash: String,
+        required: Bool = true,
+        mutable: Bool = false,
+        agreed: Bool = false
+    ) {
+        self.code = code
+        self.type = type ?? BackendTermsType(code: code)
+        self.version = version
+        self.title = title
+        self.url = url
+        self.contentHash = contentHash
+        self.required = required
+        self.mutable = mutable
+        self.agreed = agreed
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case code
+        case version
+        case title
+        case url
+        case contentHash
+        case required
+        case mutable
+        case agreed
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let code = try container.decode(String.self, forKey: .code)
+        self.init(
+            type: try container.decodeIfPresent(BackendTermsType.self, forKey: .type) ?? BackendTermsType(code: code),
+            code: code,
+            version: try container.decode(String.self, forKey: .version),
+            title: try container.decode(String.self, forKey: .title),
+            url: try container.decode(URL.self, forKey: .url),
+            contentHash: try container.decode(String.self, forKey: .contentHash),
+            required: try container.decodeIfPresent(Bool.self, forKey: .required) ?? true,
+            mutable: try container.decodeIfPresent(Bool.self, forKey: .mutable) ?? false,
+            agreed: try container.decodeIfPresent(Bool.self, forKey: .agreed) ?? false
+        )
+    }
+}
+
+enum BackendNotificationPreferenceType: String, Codable, Equatable {
+    case questionNotification = "QUESTION_NOTIFICATION"
+    case marketingNotification = "MARKETING_NOTIFICATION"
+
+    var key: String {
+        switch self {
+        case .questionNotification:
+            return "question_notification"
+        case .marketingNotification:
+            return "marketing_notification"
+        }
+    }
+
+    init(key: String) {
+        switch key {
+        case "marketing_notification":
+            self = .marketingNotification
+        default:
+            self = .questionNotification
+        }
+    }
 }
 
 struct BackendNotificationPreference: Codable, Equatable, Identifiable {
+    var type: BackendNotificationPreferenceType
     var key: String
     var enabled: Bool
 
     var id: String { key }
+
+    init(type: BackendNotificationPreferenceType? = nil, key: String, enabled: Bool) {
+        self.key = key
+        self.type = type ?? BackendNotificationPreferenceType(key: key)
+        self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case key
+        case enabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let key = try container.decode(String.self, forKey: .key)
+        self.init(
+            type: try container.decodeIfPresent(BackendNotificationPreferenceType.self, forKey: .type) ?? BackendNotificationPreferenceType(key: key),
+            key: key,
+            enabled: try container.decode(Bool.self, forKey: .enabled)
+        )
+    }
 }
 
 struct BackendPermissionEvaluation: Decodable, Equatable, Identifiable {

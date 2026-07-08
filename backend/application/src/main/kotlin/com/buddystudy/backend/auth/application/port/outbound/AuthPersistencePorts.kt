@@ -4,6 +4,7 @@ import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.account.domain.entity.UserEntity
 import java.time.Duration
+import java.time.Instant
 import java.util.Optional
 
 interface UserPort {
@@ -18,6 +19,10 @@ interface DevicePort {
     fun save(entity: DeviceEntity): DeviceEntity
     fun findByDeviceId(deviceId: String): DeviceEntity?
     fun findAllByUserId(userId: Long): List<DeviceEntity>
+}
+
+interface AccountDeletionPort {
+    fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant)
 }
 
 interface UserDevicePort {

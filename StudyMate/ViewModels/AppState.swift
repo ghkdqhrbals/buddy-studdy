@@ -5134,17 +5134,17 @@ final class AppState: ObservableObject {
     }
 
     func saveTermsAgreement(
-        code: String,
+        type: BackendTermsType,
         isAgreed: Bool,
         source: BackendTermsAgreementSource = .settings
     ) async -> Bool {
         guard source != .profile || isCommunitySessionActive else {
-            log(.warning, "프로필 약관 동의는 로그인 후 저장할 수 있습니다. code=\(code)")
+            log(.warning, "프로필 약관 동의는 로그인 후 저장할 수 있습니다. type=\(type.rawValue)")
             return false
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "terms-agreement") else {
-            log(.warning, "약관 동의 저장을 위한 백엔드 등록이 없습니다. code=\(code)")
+            log(.warning, "약관 동의 저장을 위한 백엔드 등록이 없습니다. type=\(type.rawValue)")
             return false
         }
 
@@ -5155,7 +5155,7 @@ final class AppState: ObservableObject {
                 operation: { recoveredRegistration in
                     try await self.termsUseCase.saveAgreement(
                         registration: recoveredRegistration,
-                        code: code,
+                        type: type,
                         action: isAgreed ? .agreed : .withdrawn,
                         source: source
                     )
@@ -5170,11 +5170,11 @@ final class AppState: ObservableObject {
                 pendingTermsRequirementRetry = nil
                 await retry()
             }
-            log(.info, "약관 동의 상태를 저장했습니다. code=\(code), agreed=\(isAgreed)")
+            log(.info, "약관 동의 상태를 저장했습니다. type=\(type.rawValue), agreed=\(isAgreed)")
             return true
         } catch {
             handleAppError(error, fallback: "", target: .none)
-            log(.warning, "약관 동의 상태 저장 실패: code=\(code), error=\(error.localizedDescription)")
+            log(.warning, "약관 동의 상태 저장 실패: type=\(type.rawValue), error=\(error.localizedDescription)")
             return false
         }
     }
@@ -5206,35 +5206,35 @@ final class AppState: ObservableObject {
         }
     }
 
-    func saveNotificationPreference(key: String, enabled: Bool) async -> Bool {
+    func saveNotificationPreference(type: BackendNotificationPreferenceType, enabled: Bool) async -> Bool {
         guard isCommunitySessionActive else {
-            log(.warning, "알림 설정은 로그인 후 저장할 수 있습니다. key=\(key)")
+            log(.warning, "알림 설정은 로그인 후 저장할 수 있습니다. type=\(type.rawValue)")
             return false
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "notification-preference") else {
-            log(.warning, "알림 설정 저장을 위한 백엔드 등록이 없습니다. key=\(key)")
+            log(.warning, "알림 설정 저장을 위한 백엔드 등록이 없습니다. type=\(type.rawValue)")
             return false
         }
 
         do {
             let preference = try await termsUseCase.saveNotificationPreference(
                 registration: registration,
-                key: key,
+                type: type,
                 enabled: enabled
             )
             var nextPreferences = notificationPreferences
-            if let index = nextPreferences.firstIndex(where: { $0.key == preference.key }) {
+            if let index = nextPreferences.firstIndex(where: { $0.type == preference.type }) {
                 nextPreferences[index] = preference
             } else {
                 nextPreferences.append(preference)
             }
             notificationPreferences = nextPreferences
-            log(.info, "알림 설정을 저장했습니다. key=\(key), enabled=\(enabled)")
+            log(.info, "알림 설정을 저장했습니다. type=\(type.rawValue), enabled=\(enabled)")
             return true
         } catch {
             handleAppError(error, fallback: "", target: .none)
-            log(.warning, "알림 설정 저장 실패: key=\(key), error=\(error.localizedDescription)")
+            log(.warning, "알림 설정 저장 실패: type=\(type.rawValue), error=\(error.localizedDescription)")
             return false
         }
     }

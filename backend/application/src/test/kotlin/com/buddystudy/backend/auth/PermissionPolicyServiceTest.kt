@@ -2,7 +2,9 @@ package com.buddystudy.backend.auth
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
+import com.buddystudy.backend.auth.application.model.NotificationPreferenceType
 import com.buddystudy.backend.auth.application.model.TermsAgreementCommand
+import com.buddystudy.backend.auth.application.model.TermsType
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
@@ -60,7 +62,7 @@ class PermissionPolicyServiceTest {
         val result = service.saveAgreement(
             principal,
             TermsAgreementCommand(
-                code = "terms_of_service",
+                type = TermsType.TERMS_OF_SERVICE,
                 action = "AGREED",
                 source = "PROFILE",
                 ipAddress = "127.0.0.1",
@@ -94,11 +96,12 @@ class PermissionPolicyServiceTest {
         val result = service.saveNotificationPreference(
             principal,
             NotificationPreferenceCommand(
-                key = "question_notification",
+                type = NotificationPreferenceType.QUESTION_NOTIFICATION,
                 enabled = true,
             ),
         )
 
+        assertThat(result.type).isEqualTo(NotificationPreferenceType.QUESTION_NOTIFICATION)
         assertThat(result.key).isEqualTo("question_notification")
         assertThat(result.enabled).isTrue()
         assertThat(notificationPreferences.saved).containsExactly(
