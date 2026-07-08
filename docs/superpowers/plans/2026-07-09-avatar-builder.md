@@ -39,7 +39,7 @@ The iOS app composes avatars locally:
 
 - Background color comes from the selected background item.
 - Base uses existing bundled profile avatar images.
-- Outfit/accessory slots render lightweight SwiftUI layers based on item slot and color.
+- Outfit/accessory slots render lightweight SwiftUI layers based on item slot, `assetName`, and color so data rows such as hoodie, varsity jacket, shorts, boots, cap, and graduation hat produce distinct visuals.
 - The selected config is cached with the profile cache so profile UI stays consistent across tabs and launches.
 
 ## Extension Path

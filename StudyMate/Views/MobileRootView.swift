@@ -1842,6 +1842,10 @@ private struct AvatarBuilderLayer: View {
         Color.avatarHex(item.colorHex, fallback: .secondary)
     }
 
+    private var assetName: String {
+        item.assetName.lowercased()
+    }
+
     @ViewBuilder
     var body: some View {
         switch item.slot {
@@ -1860,60 +1864,196 @@ private struct AvatarBuilderLayer: View {
         }
     }
 
+    @ViewBuilder
     private var topLayer: some View {
-        RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
-            .fill(color.opacity(0.92))
-            .frame(width: size * 0.45, height: size * 0.24)
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: size * 0.19, height: size * 0.035)
-                    .offset(y: size * 0.035)
+        if assetName.contains("varsity") {
+            ZStack {
+                RoundedRectangle(cornerRadius: size * 0.07, style: .continuous)
+                    .fill(color.opacity(0.92))
+                    .frame(width: size * 0.48, height: size * 0.24)
+                Rectangle()
+                    .fill(Color.white.opacity(0.72))
+                    .frame(width: size * 0.035, height: size * 0.22)
+                HStack(spacing: size * 0.21) {
+                    Circle()
+                        .fill(Color.white.opacity(0.65))
+                        .frame(width: size * 0.055, height: size * 0.055)
+                    Circle()
+                        .fill(Color.white.opacity(0.65))
+                        .frame(width: size * 0.055, height: size * 0.055)
+                }
             }
             .offset(y: size * 0.20)
-    }
-
-    private var bottomLayer: some View {
-        HStack(spacing: size * 0.04) {
-            Capsule()
-                .fill(color.opacity(0.95))
-                .frame(width: size * 0.12, height: size * 0.19)
-            Capsule()
-                .fill(color.opacity(0.95))
-                .frame(width: size * 0.12, height: size * 0.19)
+        } else if assetName.contains("sweater") {
+            RoundedRectangle(cornerRadius: size * 0.10, style: .continuous)
+                .fill(color.opacity(0.92))
+                .frame(width: size * 0.47, height: size * 0.23)
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: size * 0.025) {
+                        ForEach(0..<5, id: \.self) { _ in
+                            Capsule()
+                                .fill(Color.white.opacity(0.23))
+                                .frame(width: size * 0.018, height: size * 0.052)
+                        }
+                    }
+                    .padding(.bottom, size * 0.025)
+                }
+                .offset(y: size * 0.20)
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
+                .fill(color.opacity(0.92))
+                .frame(width: size * 0.45, height: size * 0.24)
+                .overlay(alignment: .top) {
+                    RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: size * 0.19, height: size * 0.035)
+                        .offset(y: size * 0.035)
+                }
+                .offset(y: size * 0.20)
         }
-        .offset(y: size * 0.35)
     }
 
+    @ViewBuilder
+    private var bottomLayer: some View {
+        if assetName.contains("shorts") {
+            HStack(spacing: size * 0.04) {
+                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
+                    .fill(color.opacity(0.95))
+                    .frame(width: size * 0.15, height: size * 0.12)
+                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
+                    .fill(color.opacity(0.95))
+                    .frame(width: size * 0.15, height: size * 0.12)
+            }
+            .offset(y: size * 0.34)
+        } else {
+            HStack(spacing: size * 0.04) {
+                pantLeg
+                pantLeg
+            }
+            .overlay {
+                if assetName.contains("denim") {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(width: size * 0.018, height: size * 0.18)
+                }
+            }
+            .offset(y: size * 0.35)
+        }
+    }
+
+    private var pantLeg: some View {
+        Capsule()
+            .fill(color.opacity(0.95))
+            .frame(width: size * 0.12, height: size * 0.19)
+            .overlay(alignment: .bottom) {
+                if assetName.contains("jogger") {
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(height: size * 0.035)
+                }
+            }
+    }
+
+    @ViewBuilder
     private var shoesLayer: some View {
+        let shoeWidth = assetName.contains("boots") ? size * 0.14 : size * 0.17
+        let shoeHeight = assetName.contains("boots") ? size * 0.085 : size * 0.055
+
         HStack(spacing: size * 0.08) {
-            Capsule()
-                .fill(color)
-                .frame(width: size * 0.17, height: size * 0.055)
-            Capsule()
-                .fill(color)
-                .frame(width: size * 0.17, height: size * 0.055)
+            shoeShape(width: shoeWidth, height: shoeHeight)
+            shoeShape(width: shoeWidth, height: shoeHeight)
         }
         .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
         .offset(y: size * 0.46)
     }
 
-    private var hatLayer: some View {
-        VStack(spacing: -size * 0.02) {
-            RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
+    @ViewBuilder
+    private func shoeShape(width: CGFloat, height: CGFloat) -> some View {
+        if assetName.contains("loafers") {
+            RoundedRectangle(cornerRadius: size * 0.025, style: .continuous)
                 .fill(color)
-                .frame(width: size * 0.34, height: size * 0.16)
+                .frame(width: width, height: height)
+                .overlay(alignment: .top) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(width: width * 0.58, height: height * 0.24)
+                }
+        } else if assetName.contains("boots") {
+            RoundedRectangle(cornerRadius: size * 0.025, style: .continuous)
+                .fill(color)
+                .frame(width: width, height: height)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.24))
+                        .frame(height: height * 0.18)
+                }
+        } else {
             Capsule()
-                .fill(color.opacity(0.92))
-                .frame(width: size * 0.46, height: size * 0.055)
+                .fill(color)
+                .frame(width: width, height: height)
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.14))
+                        .frame(height: height * 0.20)
+                }
         }
-        .rotationEffect(.degrees(item.key.contains("cap") ? -6 : 0))
-        .offset(y: -size * 0.34)
     }
 
+    @ViewBuilder
+    private var hatLayer: some View {
+        if assetName.contains("grad") {
+            VStack(spacing: -size * 0.015) {
+                Diamond()
+                    .fill(color)
+                    .frame(width: size * 0.42, height: size * 0.18)
+                RoundedRectangle(cornerRadius: size * 0.018, style: .continuous)
+                    .fill(color.opacity(0.95))
+                    .frame(width: size * 0.18, height: size * 0.09)
+            }
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.yellow.opacity(0.75))
+                    .frame(width: size * 0.012, height: size * 0.16)
+                    .offset(x: size * 0.16, y: size * 0.08)
+            }
+            .offset(y: -size * 0.35)
+        } else if assetName.contains("cap") {
+            VStack(spacing: -size * 0.02) {
+                RoundedRectangle(cornerRadius: size * 0.075, style: .continuous)
+                    .fill(color)
+                    .frame(width: size * 0.34, height: size * 0.14)
+                    .overlay {
+                        Circle()
+                            .fill(Color.white.opacity(0.24))
+                            .frame(width: size * 0.055, height: size * 0.055)
+                    }
+                Capsule()
+                    .fill(color.opacity(0.92))
+                    .frame(width: size * 0.50, height: size * 0.045)
+                    .offset(x: size * 0.06)
+            }
+            .rotationEffect(.degrees(-6))
+            .offset(y: -size * 0.34)
+        } else {
+            VStack(spacing: -size * 0.02) {
+                RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
+                    .fill(color)
+                    .frame(width: size * 0.34, height: size * 0.16)
+                Capsule()
+                    .fill(Color.white.opacity(0.20))
+                    .frame(width: size * 0.30, height: size * 0.025)
+                Capsule()
+                    .fill(color.opacity(0.92))
+                    .frame(width: size * 0.46, height: size * 0.055)
+            }
+            .offset(y: -size * 0.34)
+        }
+    }
+
+    @ViewBuilder
     private var itemLayer: some View {
         Group {
-            if item.key.contains("book") {
+            if assetName.contains("book") {
                 RoundedRectangle(cornerRadius: size * 0.03, style: .continuous)
                     .fill(color)
                     .frame(width: size * 0.26, height: size * 0.18)
@@ -1923,11 +2063,18 @@ private struct AvatarBuilderLayer: View {
                             .frame(width: size * 0.018)
                             .padding(.leading, size * 0.07)
                     }
-            } else if item.key.contains("pencil") {
+            } else if assetName.contains("pencil") {
                 Capsule()
                     .fill(color)
                     .frame(width: size * 0.34, height: size * 0.055)
                     .rotationEffect(.degrees(-32))
+                    .overlay(alignment: .trailing) {
+                        Triangle()
+                            .fill(Color.orange.opacity(0.92))
+                            .frame(width: size * 0.06, height: size * 0.06)
+                            .rotationEffect(.degrees(90))
+                            .offset(x: size * 0.03)
+                    }
             } else {
                 RoundedRectangle(cornerRadius: size * 0.04, style: .continuous)
                     .fill(color)
@@ -1937,9 +2084,37 @@ private struct AvatarBuilderLayer: View {
                             .fill(Color.black.opacity(0.18))
                             .frame(height: size * 0.035)
                     }
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(height: size * 0.11)
+                    }
             }
         }
         .offset(x: size * 0.18, y: size * 0.29)
+    }
+}
+
+private struct Diamond: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
