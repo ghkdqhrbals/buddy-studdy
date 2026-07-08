@@ -38,6 +38,43 @@ class ProfileServiceAccountDeletionTest {
     )
 
     @Test
+    fun `update profile returns the requested avatar symbol and color`() {
+        val activeUser = users.save(
+            UserEntity(
+                provider = "GOOGLE",
+                providerId = "google-subject",
+                email = "user@example.com",
+                status = "ACTIVE",
+                displayName = "Jamma",
+                avatarSymbolName = "pixel-cat-laptop",
+                avatarColorSeed = "avatar-color-mint",
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+            )
+        )
+
+        val response = service.updateProfile(
+            Principal(
+                userId = activeUser.id,
+                deviceId = "dev-current",
+                sessionId = 1,
+                anonymous = false,
+                status = "ACTIVE",
+            ),
+            com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand(
+                displayName = "Jamma",
+                bio = "",
+                avatarSymbolName = "pixel-cat-geek",
+                avatarColorSeed = "avatar-color-teal",
+            )
+        )
+
+        assertThat(response.avatarSymbolName).isEqualTo("pixel-cat-geek")
+        assertThat(response.avatarColorSeed).isEqualTo("avatar-color-teal")
+        assertThat(users.findById(activeUser.id).orElseThrow().avatarSymbolName).isEqualTo("pixel-cat-geek")
+    }
+
+    @Test
     fun `withdraw deletes member data and reconnects current device to a new anonymous user`() {
         val activeUser = users.save(
             UserEntity(

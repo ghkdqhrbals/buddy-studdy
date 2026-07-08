@@ -1,7 +1,6 @@
 package com.buddystudy.backend.community.application.model
 
 import com.buddystudy.community.domain.PublicQuestionProjection
-import com.buddystudy.backend.profile.application.model.CommunityPageAccess
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.study.application.model.GradingResultResponse
 
@@ -26,7 +25,6 @@ fun PublicQuestionProjection.toCommunityQuestionResponse() = CommunityQuestionRe
             avatarUrl = it.avatarUrl,
             avatarSymbolName = it.avatarSymbolName,
             avatarColorSeed = it.avatarColorSeed,
-            pageAccess = CommunityPageAccess(publicQuestions = it.publicQuestionsAllowed),
         )
     },
     likeCount = likeCount,

@@ -12,5 +12,4 @@ fun UserEntity.toProfile() = UserProfileResponse(
     avatarUrl = avatarUrl,
     avatarSymbolName = avatarSymbolName,
     avatarColorSeed = avatarColorSeed,
-    pageAccess = CommunityPageAccess(publicQuestions = allowPublicQuestions),
 )

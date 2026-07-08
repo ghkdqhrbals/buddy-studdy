@@ -40,7 +40,7 @@ class ProfileService(
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
         user.updatedAt = Instant.now()
-        return user.toProfile()
+        return users.save(user).toProfile()
     }
 
     @Transactional
