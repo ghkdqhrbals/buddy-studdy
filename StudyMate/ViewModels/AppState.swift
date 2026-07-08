@@ -5138,6 +5138,56 @@ final class AppState: ObservableObject {
         isAgreed: Bool,
         source: BackendTermsAgreementSource = .settings
     ) async -> Bool {
+        updateLocalTermsAgreement(type: type, isAgreed: isAgreed)
+
+        guard await persistTermsAgreement(type: type, isAgreed: isAgreed, source: source, shouldShowError: true) else {
+            return false
+        }
+
+        await refreshPermissionEvaluations(reason: "terms-agreement")
+        await refreshTermsAndNotificationPreferences(reason: "terms-agreement")
+        if activeTerms.filter(\.required).allSatisfy(\.agreed) {
+            isRequiredTermsGatePresented = false
+        }
+        if isAgreed, let retry = pendingTermsRequirementRetry {
+            pendingTermsRequirementRetry = nil
+            await retry()
+        }
+        return true
+    }
+
+    func saveTermsAgreementInBackground(
+        type: BackendTermsType,
+        isAgreed: Bool,
+        source: BackendTermsAgreementSource = .settings
+    ) {
+        updateLocalTermsAgreement(type: type, isAgreed: isAgreed)
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            guard await self.persistTermsAgreement(type: type, isAgreed: isAgreed, source: source, shouldShowError: false) else {
+                await self.refreshTermsAndNotificationPreferences(reason: "terms-agreement-background-reconcile")
+                return
+            }
+            await self.refreshPermissionEvaluations(reason: "terms-agreement-background")
+            if self.activeTerms.filter(\.required).allSatisfy(\.agreed) {
+                self.isRequiredTermsGatePresented = false
+            }
+            if isAgreed, let retry = self.pendingTermsRequirementRetry {
+                self.pendingTermsRequirementRetry = nil
+                await retry()
+            }
+        }
+    }
+
+    private func persistTermsAgreement(
+        type: BackendTermsType,
+        isAgreed: Bool,
+        source: BackendTermsAgreementSource,
+        shouldShowError: Bool
+    ) async -> Bool {
         guard source != .profile || isCommunitySessionActive else {
             log(.warning, "프로필 약관 동의는 로그인 후 저장할 수 있습니다. type=\(type.rawValue)")
             return false
@@ -5161,21 +5211,25 @@ final class AppState: ObservableObject {
                     )
                 }
             )
-            await refreshPermissionEvaluations(reason: "terms-agreement")
-            await refreshTermsAndNotificationPreferences(reason: "terms-agreement")
-            if activeTerms.filter(\.required).allSatisfy(\.agreed) {
-                isRequiredTermsGatePresented = false
-            }
-            if isAgreed, let retry = pendingTermsRequirementRetry {
-                pendingTermsRequirementRetry = nil
-                await retry()
-            }
             log(.info, "약관 동의 상태를 저장했습니다. type=\(type.rawValue), agreed=\(isAgreed)")
             return true
         } catch {
-            handleAppError(error, fallback: "", target: .none)
+            if shouldShowError {
+                handleAppError(error, fallback: "", target: .none)
+            }
             log(.warning, "약관 동의 상태 저장 실패: type=\(type.rawValue), error=\(error.localizedDescription)")
             return false
+        }
+    }
+
+    private func updateLocalTermsAgreement(type: BackendTermsType, isAgreed: Bool) {
+        activeTerms = activeTerms.map { term in
+            guard term.type == type else {
+                return term
+            }
+            var nextTerm = term
+            nextTerm.agreed = term.required ? true : isAgreed
+            return nextTerm
         }
     }
 
@@ -5207,6 +5261,8 @@ final class AppState: ObservableObject {
     }
 
     func saveNotificationPreference(type: BackendNotificationPreferenceType, enabled: Bool) async -> Bool {
+        updateLocalNotificationPreference(type: type, enabled: enabled)
+
         guard isCommunitySessionActive else {
             log(.warning, "알림 설정은 로그인 후 저장할 수 있습니다. type=\(type.rawValue)")
             return false
@@ -5223,13 +5279,7 @@ final class AppState: ObservableObject {
                 type: type,
                 enabled: enabled
             )
-            var nextPreferences = notificationPreferences
-            if let index = nextPreferences.firstIndex(where: { $0.type == preference.type }) {
-                nextPreferences[index] = preference
-            } else {
-                nextPreferences.append(preference)
-            }
-            notificationPreferences = nextPreferences
+            updateLocalNotificationPreference(type: preference.type, enabled: preference.enabled)
             log(.info, "알림 설정을 저장했습니다. type=\(type.rawValue), enabled=\(enabled)")
             return true
         } catch {
@@ -5237,6 +5287,46 @@ final class AppState: ObservableObject {
             log(.warning, "알림 설정 저장 실패: type=\(type.rawValue), error=\(error.localizedDescription)")
             return false
         }
+    }
+
+    func saveNotificationPreferenceInBackground(type: BackendNotificationPreferenceType, enabled: Bool) {
+        updateLocalNotificationPreference(type: type, enabled: enabled)
+
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            guard self.isCommunitySessionActive else {
+                self.log(.warning, "알림 설정은 로그인 후 저장할 수 있습니다. type=\(type.rawValue)")
+                return
+            }
+            guard let registration = await self.backendRegistrationForOpenAIRequests(reason: "notification-preference-background") else {
+                self.log(.warning, "알림 설정 저장을 위한 백엔드 등록이 없습니다. type=\(type.rawValue)")
+                return
+            }
+            do {
+                let preference = try await self.termsUseCase.saveNotificationPreference(
+                    registration: registration,
+                    type: type,
+                    enabled: enabled
+                )
+                self.updateLocalNotificationPreference(type: preference.type, enabled: preference.enabled)
+                self.log(.info, "알림 설정을 백그라운드 저장했습니다. type=\(type.rawValue), enabled=\(enabled)")
+            } catch {
+                self.log(.warning, "알림 설정 백그라운드 저장 실패: type=\(type.rawValue), error=\(error.localizedDescription)")
+                await self.refreshTermsAndNotificationPreferences(reason: "notification-preference-background-reconcile")
+            }
+        }
+    }
+
+    private func updateLocalNotificationPreference(type: BackendNotificationPreferenceType, enabled: Bool) {
+        var nextPreferences = notificationPreferences
+        if let index = nextPreferences.firstIndex(where: { $0.type == type }) {
+            nextPreferences[index].enabled = enabled
+        } else {
+            nextPreferences.append(BackendNotificationPreference(type: type, key: type.key, enabled: enabled))
+        }
+        notificationPreferences = nextPreferences
     }
 
     func setCloudSyncEnabled(_ isEnabled: Bool) {

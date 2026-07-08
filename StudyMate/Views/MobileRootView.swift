@@ -272,7 +272,6 @@ private struct MobileRequiredTermsGateSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var marketingAgreed = false
-    @State private var isSaving = false
     @State private var legalWebRoute: MobileLegalWebRoute?
 
     private var strings: AppStrings { appState.strings }
@@ -331,17 +330,12 @@ private struct MobileRequiredTermsGateSheet: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    Task { await agreeRequiredTerms() }
+                    agreeRequiredTerms()
                 } label: {
                     HStack {
                         Spacer()
-                        if isSaving {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text(strings.agreeAllAndStart)
-                                .font(.headline.weight(.bold))
-                        }
+                        Text(strings.agreeAllAndStart)
+                            .font(.headline.weight(.bold))
                         Spacer()
                     }
                     .frame(minHeight: 54)
@@ -349,7 +343,6 @@ private struct MobileRequiredTermsGateSheet: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(isSaving)
 
                 Button(strings.nextTime) {
                     appState.isRequiredTermsGatePresented = false
@@ -358,7 +351,6 @@ private struct MobileRequiredTermsGateSheet: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
-                .disabled(isSaving)
             }
             .padding(24)
             .navigationTitle(strings.operatingTerms)
@@ -419,20 +411,14 @@ private struct MobileRequiredTermsGateSheet: View {
         return "\(title) [\(suffix)]"
     }
 
-    private func agreeRequiredTerms() async {
-        isSaving = true
-        defer { isSaving = false }
-
+    private func agreeRequiredTerms() {
         let requiredTypes: [BackendTermsType] = [.termsOfService, .privacyPolicy]
         for type in requiredTypes {
-            guard await appState.saveTermsAgreement(type: type, isAgreed: true, source: .requiredGate) else {
-                return
-            }
+            appState.saveTermsAgreementInBackground(type: type, isAgreed: true, source: .requiredGate)
         }
         if marketingAgreed {
-            _ = await appState.saveTermsAgreement(type: .marketingNotification, isAgreed: true, source: .requiredGate)
+            appState.saveTermsAgreementInBackground(type: .marketingNotification, isAgreed: true, source: .requiredGate)
         }
-        await appState.refreshTermsAndNotificationPreferences(reason: "required-terms-complete")
         appState.isRequiredTermsGatePresented = false
         dismiss()
     }
@@ -2770,7 +2756,6 @@ private struct MobileProfileSettingsSheet: View {
 
 private struct MobileTermsSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var savingType: BackendTermsType?
     @State private var legalWebRoute: MobileLegalWebRoute?
 
     private var strings: AppStrings { appState.strings }
@@ -2829,33 +2814,22 @@ private struct MobileTermsSettingsView: View {
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderless)
 
-            if savingType == term.type {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Toggle(
-                    "",
-                    isOn: Binding(
-                        get: { term.required || term.agreed },
-                        set: { nextValue in
-                            guard term.mutable else {
-                                return
-                            }
-                            Task { await saveAgreement(term: term, isAgreed: nextValue) }
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { term.required || term.agreed },
+                    set: { nextValue in
+                        guard term.mutable else {
+                            return
                         }
-                    )
+                        appState.saveTermsAgreementInBackground(type: term.type, isAgreed: nextValue, source: .profile)
+                    }
                 )
-                .labelsHidden()
-                .disabled(!term.mutable)
-            }
+            )
+            .labelsHidden()
+            .disabled(!term.mutable)
         }
         .padding(.vertical, 4)
-    }
-
-    private func saveAgreement(term: BackendTerms, isAgreed: Bool) async {
-        savingType = term.type
-        defer { savingType = nil }
-        _ = await appState.saveTermsAgreement(type: term.type, isAgreed: isAgreed, source: .profile)
     }
 
     private func fallbackTerms(type: BackendTermsType) -> BackendTerms {
@@ -2916,8 +2890,6 @@ private struct MobileTermsSettingsView: View {
 
 private struct MobileNotificationSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var isSavingQuestionPreference = false
-    @State private var isSavingMarketingPreference = false
 
     private var strings: AppStrings { appState.strings }
 
@@ -2940,21 +2912,16 @@ private struct MobileNotificationSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
-                    if isSavingQuestionPreference {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Toggle(
-                            "",
-                            isOn: Binding(
-                                get: { isQuestionEnabled },
-                                set: { enabled in
-                                    Task { await saveQuestionPreference(enabled: enabled) }
-                                }
-                            )
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { isQuestionEnabled },
+                            set: { enabled in
+                                Task { await saveQuestionPreference(enabled: enabled) }
+                            }
                         )
-                        .labelsHidden()
-                    }
+                    )
+                    .labelsHidden()
                 }
 
                 HStack {
@@ -2965,21 +2932,16 @@ private struct MobileNotificationSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
-                    if isSavingMarketingPreference {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Toggle(
-                            "",
-                            isOn: Binding(
-                                get: { isMarketingEnabled },
-                                set: { enabled in
-                                    Task { await saveMarketingPreference(enabled: enabled) }
-                                }
-                            )
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { isMarketingEnabled },
+                            set: { enabled in
+                                Task { await saveMarketingPreference(enabled: enabled) }
+                            }
                         )
-                        .labelsHidden()
-                    }
+                    )
+                    .labelsHidden()
                 }
             }
         }
@@ -2994,25 +2956,21 @@ private struct MobileNotificationSettingsView: View {
     }
 
     private func saveQuestionPreference(enabled: Bool) async {
-        isSavingQuestionPreference = true
-        defer { isSavingQuestionPreference = false }
         if enabled {
             guard await appState.ensureSystemNotificationPermissionForPreferenceEnable(reason: "question-notification") else {
                 return
             }
         }
-        _ = await appState.saveNotificationPreference(type: .questionNotification, enabled: enabled)
+        appState.saveNotificationPreferenceInBackground(type: .questionNotification, enabled: enabled)
     }
 
     private func saveMarketingPreference(enabled: Bool) async {
-        isSavingMarketingPreference = true
-        defer { isSavingMarketingPreference = false }
         if enabled {
             guard await appState.ensureSystemNotificationPermissionForPreferenceEnable(reason: "marketing-notification") else {
                 return
             }
         }
-        _ = await appState.saveNotificationPreference(type: .marketingNotification, enabled: enabled)
+        appState.saveNotificationPreferenceInBackground(type: .marketingNotification, enabled: enabled)
     }
 }
 
