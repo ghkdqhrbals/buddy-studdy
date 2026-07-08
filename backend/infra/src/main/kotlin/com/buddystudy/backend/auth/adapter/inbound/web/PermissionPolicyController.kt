@@ -96,13 +96,13 @@ class PermissionPolicyController(
     }
 }
 
-data class TermsAgreementRequest(
-    val code: String = "",
-    val action: String = "AGREED",
-    val source: String = "SETTINGS",
-)
+class TermsAgreementRequest {
+    var code: String = ""
+    var action: String = "AGREED"
+    var source: String = "SETTINGS"
+}
 
-data class NotificationPreferenceRequest(
-    var key: String = "",
-    var enabled: Boolean = false,
-)
+class NotificationPreferenceRequest {
+    var key: String = ""
+    var enabled: Boolean = false
+}

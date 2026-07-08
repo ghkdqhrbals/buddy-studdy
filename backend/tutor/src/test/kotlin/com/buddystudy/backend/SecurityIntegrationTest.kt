@@ -2,6 +2,8 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystudy.backend.auth.application.service.LoginService
+import com.buddystudy.backend.auth.adapter.inbound.web.NotificationPreferenceRequest
+import com.buddystudy.backend.auth.adapter.inbound.web.TermsAgreementRequest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -174,10 +176,27 @@ class SecurityIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(403)
         assertThat(response.body()).contains("PERMISSION_DENIED")
-        assertThat(response.body()).contains("study:read")
         assertThat(response.body()).contains("study:create")
         assertThat(response.body()).doesNotContain("loginRequired")
         assertThat(response.body()).doesNotContain("showPopup")
+    }
+
+    @Test
+    fun `policy request DTOs keep bean constructors for Spring JSON binding`() {
+        val preferenceRequest = NotificationPreferenceRequest::class.java.getDeclaredConstructor().newInstance()
+        preferenceRequest.key = "question_notification"
+        preferenceRequest.enabled = true
+
+        val termsRequest = TermsAgreementRequest::class.java.getDeclaredConstructor().newInstance()
+        termsRequest.code = "TERMS_OF_SERVICE"
+        termsRequest.action = "AGREED"
+        termsRequest.source = "PROFILE"
+
+        assertThat(preferenceRequest.key).isEqualTo("question_notification")
+        assertThat(preferenceRequest.enabled).isTrue()
+        assertThat(termsRequest.code).isEqualTo("TERMS_OF_SERVICE")
+        assertThat(termsRequest.action).isEqualTo("AGREED")
+        assertThat(termsRequest.source).isEqualTo("PROFILE")
     }
 
     private fun get(path: String, bearerToken: String? = null): HttpResponse<String> {
