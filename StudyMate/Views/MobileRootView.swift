@@ -1772,27 +1772,57 @@ struct ProfileAvatarSprite: View {
     }
 }
 
-enum AvatarBuilderAssetRegistry {
-    static let localImageAssetNames: Set<String> = [
-        "avatar-top-hoodie-blue",
-        "avatar-top-varsity-green",
-        "avatar-top-sweater-rose",
-        "avatar-bottom-denim-pants",
-        "avatar-bottom-jogger-black",
-        "avatar-bottom-shorts-tan",
-        "avatar-shoes-white-sneakers",
-        "avatar-shoes-brown-loafers",
-        "avatar-shoes-blue-boots",
-        "avatar-hat-beanie-navy",
-        "avatar-hat-cap-orange",
-        "avatar-hat-grad-black",
-        "avatar-item-laptop",
-        "avatar-item-book",
-        "avatar-item-pencil"
+enum AvatarBuilderVisualRegistry {
+    static let supportedBaseItemKeys: Set<String> = [
+        "base-cat",
+        "base-fox",
+        "base-rabbit",
+        "base-dog"
     ]
 
-    static func hasLocalImageAsset(_ assetName: String) -> Bool {
-        localImageAssetNames.contains(assetName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    static let supportedPartItemKeys: Set<String> = [
+        "background-teal",
+        "background-indigo",
+        "background-slate",
+        "top-hoodie-blue",
+        "top-varsity-green",
+        "top-sweater-rose",
+        "bottom-denim-pants",
+        "bottom-jogger-black",
+        "bottom-shorts-tan",
+        "shoes-white-sneakers",
+        "shoes-brown-loafers",
+        "shoes-blue-boots",
+        "hat-beanie-navy",
+        "hat-cap-orange",
+        "hat-grad-black",
+        "item-laptop",
+        "item-book",
+        "item-pencil"
+    ]
+
+    static let supportedItemKeys = supportedBaseItemKeys.union(supportedPartItemKeys)
+
+    static func supportsItemKey(_ itemKey: String) -> Bool {
+        supportedItemKeys.contains(normalized(itemKey))
+    }
+
+    static func baseItemKey(forSymbolName symbolName: String) -> String {
+        let canonicalName = ProfileAvatarOption.canonicalName(for: symbolName)
+        if canonicalName.contains("cat") {
+            return "base-cat"
+        }
+        if canonicalName.contains("rabbit") {
+            return "base-rabbit"
+        }
+        if canonicalName.contains("dog") {
+            return "base-dog"
+        }
+        return "base-fox"
+    }
+
+    static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
@@ -1808,8 +1838,12 @@ private struct AvatarBuilderSprite: View {
         catalog.defaultConfig.merging(config) { _, current in current }
     }
 
-    private var baseAssetName: String {
-        catalog.item(for: resolvedConfig["base"])?.assetName ?? ProfileAvatarOption.assetName(for: fallbackSymbolName)
+    private var baseKey: String {
+        if let key = resolvedConfig["base"],
+           AvatarBuilderVisualRegistry.supportedBaseItemKeys.contains(AvatarBuilderVisualRegistry.normalized(key)) {
+            return AvatarBuilderVisualRegistry.normalized(key)
+        }
+        return AvatarBuilderVisualRegistry.baseItemKey(forSymbolName: fallbackSymbolName)
     }
 
     private var backgroundColor: Color {
@@ -1819,319 +1853,511 @@ private struct AvatarBuilderSprite: View {
         return PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor).background
     }
 
-    private var layerItems: [AvatarCatalogItem] {
-        resolvedConfig
-            .compactMap { slot, key -> AvatarCatalogItem? in
-                guard slot != "base", slot != "background" else { return nil }
-                return catalog.item(for: key)
-            }
-            .sorted { lhs, rhs in
-                if lhs.zIndex == rhs.zIndex {
-                    return lhs.key < rhs.key
-                }
-                return lhs.zIndex < rhs.zIndex
-            }
+    private var baseAccentColor: Color {
+        if let item = catalog.item(for: baseKey) {
+            return Color.avatarHex(item.colorHex, fallback: PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor).accent)
+        }
+        return PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor).accent
     }
 
     var body: some View {
         Circle()
             .fill(backgroundColor)
             .overlay {
-                Image(baseAssetName)
-                    .resizable()
-                    .interpolation(.none)
-                    .antialiased(false)
-                    .scaledToFit()
-                    .scaleEffect(1.12)
-            }
-            .overlay {
-                GeometryReader { proxy in
-                    ZStack {
-                        ForEach(layerItems) { item in
-                            AvatarBuilderLayer(item: item, size: min(proxy.size.width, proxy.size.height))
-                        }
-                    }
-                }
+                BuddySnooAvatar(
+                    baseKey: baseKey,
+                    baseAccentColor: baseAccentColor,
+                    topItem: item(forSlot: "top"),
+                    bottomItem: item(forSlot: "bottom"),
+                    shoesItem: item(forSlot: "shoes"),
+                    hatItem: item(forSlot: "hat"),
+                    heldItem: item(forSlot: "item")
+                )
+                .padding(size * 0.035)
             }
             .frame(width: size, height: size)
             .clipShape(Circle())
     }
+
+    private func item(forSlot slot: String) -> AvatarCatalogItem? {
+        catalog.item(for: resolvedConfig[slot])
+    }
 }
 
-private struct AvatarBuilderLayer: View {
-    var item: AvatarCatalogItem
-    var size: CGFloat
+private struct BuddySnooAvatar: View {
+    var baseKey: String
+    var baseAccentColor: Color
+    var topItem: AvatarCatalogItem?
+    var bottomItem: AvatarCatalogItem?
+    var shoesItem: AvatarCatalogItem?
+    var hatItem: AvatarCatalogItem?
+    var heldItem: AvatarCatalogItem?
 
-    private var color: Color {
-        Color.avatarHex(item.colorHex, fallback: .secondary)
-    }
+    private let outlineColor = Color.black.opacity(0.72)
+    private let bodyColor = Color(red: 0.97, green: 0.985, blue: 1.0)
 
-    private var assetName: String {
-        item.assetName.lowercased()
-    }
-
-    @ViewBuilder
     var body: some View {
-        if AvatarBuilderAssetRegistry.hasLocalImageAsset(item.assetName) {
-            localImageLayer
-        } else {
-            switch item.slot {
-            case "top":
-                topLayer
-            case "bottom":
-                bottomLayer
-            case "shoes":
-                shoesLayer
-            case "hat":
-                hatLayer
-            case "item":
-                itemLayer
-            default:
-                EmptyView()
-            }
-        }
-    }
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            let lineWidth = max(side * 0.015, 1)
 
-    private var localImageLayer: some View {
-        Image(assetName)
-            .resizable()
-            .scaledToFit()
-            .frame(width: size, height: size)
-            .allowsHitTesting(false)
-    }
-
-    @ViewBuilder
-    private var topLayer: some View {
-        if assetName.contains("varsity") {
             ZStack {
-                RoundedRectangle(cornerRadius: size * 0.07, style: .continuous)
-                    .fill(color.opacity(0.92))
-                    .frame(width: size * 0.48, height: size * 0.24)
-                Rectangle()
-                    .fill(Color.white.opacity(0.72))
-                    .frame(width: size * 0.035, height: size * 0.22)
-                HStack(spacing: size * 0.21) {
-                    Circle()
-                        .fill(Color.white.opacity(0.65))
-                        .frame(width: size * 0.055, height: size * 0.055)
-                    Circle()
-                        .fill(Color.white.opacity(0.65))
-                        .frame(width: size * 0.055, height: size * 0.055)
-                }
+                shadow(side)
+                antenna(side: side, lineWidth: lineWidth)
+                baseCostumeBack(side: side, lineWidth: lineWidth)
+                legs(side: side, lineWidth: lineWidth)
+                torso(side: side, lineWidth: lineWidth)
+                arms(side: side, lineWidth: lineWidth)
+                heldItemView(side: side, lineWidth: lineWidth)
+                head(side: side, lineWidth: lineWidth)
+                face(side: side, lineWidth: lineWidth)
+                hat(side: side, lineWidth: lineWidth)
             }
-            .offset(y: size * 0.20)
-        } else if assetName.contains("sweater") {
-            RoundedRectangle(cornerRadius: size * 0.10, style: .continuous)
-                .fill(color.opacity(0.92))
-                .frame(width: size * 0.47, height: size * 0.23)
-                .overlay(alignment: .bottom) {
-                    HStack(spacing: size * 0.025) {
-                        ForEach(0..<5, id: \.self) { _ in
-                            Capsule()
-                                .fill(Color.white.opacity(0.23))
-                                .frame(width: size * 0.018, height: size * 0.052)
-                        }
-                    }
-                    .padding(.bottom, size * 0.025)
-                }
-                .offset(y: size * 0.20)
-        } else {
-            RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
-                .fill(color.opacity(0.92))
-                .frame(width: size * 0.45, height: size * 0.24)
-                .overlay(alignment: .top) {
-                    RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
-                        .fill(Color.white.opacity(0.22))
-                        .frame(width: size * 0.19, height: size * 0.035)
-                        .offset(y: size * 0.035)
-                }
-                .offset(y: size * 0.20)
+            .frame(width: side, height: side)
+            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    private func color(for item: AvatarCatalogItem?, fallback: Color) -> Color {
+        guard let item else { return fallback }
+        return Color.avatarHex(item.colorHex, fallback: fallback)
+    }
+
+    private func matches(_ item: AvatarCatalogItem?, _ token: String) -> Bool {
+        guard let item else { return false }
+        let normalizedToken = token.lowercased()
+        return item.key.lowercased().contains(normalizedToken)
+            || item.assetName.lowercased().contains(normalizedToken)
+    }
+
+    private func shadow(_ side: CGFloat) -> some View {
+        Ellipse()
+            .fill(Color.black.opacity(0.18))
+            .frame(width: side * 0.56, height: side * 0.10)
+            .position(x: side * 0.50, y: side * 0.88)
+    }
+
+    private func antenna(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            Path { path in
+                path.move(to: CGPoint(x: side * 0.43, y: side * 0.19))
+                path.addQuadCurve(
+                    to: CGPoint(x: side * 0.35, y: side * 0.08),
+                    control: CGPoint(x: side * 0.34, y: side * 0.13)
+                )
+            }
+            .stroke(outlineColor, style: StrokeStyle(lineWidth: lineWidth * 1.45, lineCap: .round))
+
+            Circle()
+                .fill(bodyColor)
+                .frame(width: side * 0.085, height: side * 0.085)
+                .overlay(Circle().stroke(outlineColor, lineWidth: lineWidth))
+                .position(x: side * 0.34, y: side * 0.075)
         }
     }
 
     @ViewBuilder
-    private var bottomLayer: some View {
-        if assetName.contains("shorts") {
-            HStack(spacing: size * 0.04) {
-                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
-                    .fill(color.opacity(0.95))
-                    .frame(width: size * 0.15, height: size * 0.12)
-                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
-                    .fill(color.opacity(0.95))
-                    .frame(width: size * 0.15, height: size * 0.12)
-            }
-            .offset(y: size * 0.34)
-        } else {
-            HStack(spacing: size * 0.04) {
-                pantLeg
-                pantLeg
-            }
+    private func baseCostumeBack(side: CGFloat, lineWidth: CGFloat) -> some View {
+        switch baseKey {
+        case "base-rabbit":
+            rabbitEars(side: side, lineWidth: lineWidth)
+        case "base-dog":
+            dogEars(side: side, lineWidth: lineWidth)
+        case "base-cat":
+            catEars(side: side, lineWidth: lineWidth)
+        default:
+            foxEars(side: side, lineWidth: lineWidth)
+        }
+    }
+
+    private func catEars(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            earTriangle(side: side, width: 0.17, height: 0.17, rotation: -18, x: 0.34, y: 0.20)
+            earTriangle(side: side, width: 0.17, height: 0.17, rotation: 18, x: 0.66, y: 0.20)
+        }
+    }
+
+    private func foxEars(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            earTriangle(side: side, width: 0.19, height: 0.20, rotation: -24, x: 0.32, y: 0.21)
+            earTriangle(side: side, width: 0.19, height: 0.20, rotation: 24, x: 0.68, y: 0.21)
+        }
+    }
+
+    private func rabbitEars(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            rabbitEar(side: side, lineWidth: lineWidth, rotation: -17, x: 0.39, y: 0.13)
+            rabbitEar(side: side, lineWidth: lineWidth, rotation: 17, x: 0.61, y: 0.13)
+        }
+    }
+
+    private func dogEars(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            Ellipse()
+                .fill(baseAccentColor.opacity(0.92))
+                .frame(width: side * 0.18, height: side * 0.25)
+                .overlay(Ellipse().stroke(outlineColor.opacity(0.65), lineWidth: lineWidth))
+                .rotationEffect(.degrees(22))
+                .position(x: side * 0.32, y: side * 0.30)
+            Ellipse()
+                .fill(baseAccentColor.opacity(0.92))
+                .frame(width: side * 0.18, height: side * 0.25)
+                .overlay(Ellipse().stroke(outlineColor.opacity(0.65), lineWidth: lineWidth))
+                .rotationEffect(.degrees(-22))
+                .position(x: side * 0.68, y: side * 0.30)
+        }
+    }
+
+    private func earTriangle(side: CGFloat, width: CGFloat, height: CGFloat, rotation: Double, x: CGFloat, y: CGFloat) -> some View {
+        AvatarTriangle()
+            .fill(baseAccentColor.opacity(0.96))
+            .frame(width: side * width, height: side * height)
             .overlay {
-                if assetName.contains("denim") {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.18))
-                        .frame(width: size * 0.018, height: size * 0.18)
-                }
+                AvatarTriangle()
+                    .fill(Color(red: 1.0, green: 0.72, blue: 0.66).opacity(0.78))
+                    .padding(side * 0.028)
             }
-            .offset(y: size * 0.35)
-        }
+            .overlay(AvatarTriangle().stroke(outlineColor.opacity(0.62), lineWidth: max(side * 0.012, 1)))
+            .rotationEffect(.degrees(rotation))
+            .position(x: side * x, y: side * y)
     }
 
-    private var pantLeg: some View {
+    private func rabbitEar(side: CGFloat, lineWidth: CGFloat, rotation: Double, x: CGFloat, y: CGFloat) -> some View {
         Capsule()
-            .fill(color.opacity(0.95))
-            .frame(width: size * 0.12, height: size * 0.19)
-            .overlay(alignment: .bottom) {
-                if assetName.contains("jogger") {
-                    Capsule()
-                        .fill(Color.white.opacity(0.18))
-                        .frame(height: size * 0.035)
+            .fill(bodyColor)
+            .frame(width: side * 0.105, height: side * 0.28)
+            .overlay {
+                Capsule()
+                    .fill(baseAccentColor.opacity(0.24))
+                    .padding(side * 0.018)
+            }
+            .overlay(Capsule().stroke(outlineColor.opacity(0.62), lineWidth: lineWidth))
+            .rotationEffect(.degrees(rotation))
+            .position(x: side * x, y: side * y)
+    }
+
+    private func legs(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            Capsule()
+                .fill(bodyColor)
+                .frame(width: side * 0.095, height: side * 0.24)
+                .overlay(Capsule().stroke(outlineColor.opacity(0.50), lineWidth: lineWidth))
+                .position(x: side * 0.43, y: side * 0.70)
+            Capsule()
+                .fill(bodyColor)
+                .frame(width: side * 0.095, height: side * 0.24)
+                .overlay(Capsule().stroke(outlineColor.opacity(0.50), lineWidth: lineWidth))
+                .position(x: side * 0.57, y: side * 0.70)
+
+            bottom(side: side, lineWidth: lineWidth)
+            shoes(side: side, lineWidth: lineWidth)
+        }
+    }
+
+    @ViewBuilder
+    private func bottom(side: CGFloat, lineWidth: CGFloat) -> some View {
+        let bottomColor = color(for: bottomItem, fallback: Color(red: 0.22, green: 0.33, blue: 0.56))
+
+        if matches(bottomItem, "shorts") {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.035, style: .continuous)
+                    .fill(bottomColor)
+                    .frame(width: side * 0.135, height: side * 0.115)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.035, style: .continuous).stroke(outlineColor.opacity(0.34), lineWidth: lineWidth))
+                    .position(x: side * 0.43, y: side * 0.63)
+                RoundedRectangle(cornerRadius: side * 0.035, style: .continuous)
+                    .fill(bottomColor)
+                    .frame(width: side * 0.135, height: side * 0.115)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.035, style: .continuous).stroke(outlineColor.opacity(0.34), lineWidth: lineWidth))
+                    .position(x: side * 0.57, y: side * 0.63)
+            }
+        } else {
+            ZStack {
+                Capsule()
+                    .fill(bottomColor)
+                    .frame(width: side * 0.10, height: side * 0.205)
+                    .overlay(Capsule().stroke(outlineColor.opacity(0.30), lineWidth: lineWidth))
+                    .position(x: side * 0.43, y: side * 0.70)
+                Capsule()
+                    .fill(bottomColor)
+                    .frame(width: side * 0.10, height: side * 0.205)
+                    .overlay(Capsule().stroke(outlineColor.opacity(0.30), lineWidth: lineWidth))
+                    .position(x: side * 0.57, y: side * 0.70)
+                if matches(bottomItem, "denim") {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.20))
+                        .frame(width: side * 0.016, height: side * 0.14)
+                        .position(x: side * 0.50, y: side * 0.68)
                 }
+            }
+        }
+    }
+
+    private func shoes(side: CGFloat, lineWidth: CGFloat) -> some View {
+        let shoeColor = color(for: shoesItem, fallback: Color(red: 0.96, green: 0.97, blue: 1.0))
+        let isBoot = matches(shoesItem, "boots")
+        let isLoafer = matches(shoesItem, "loafers")
+        let shoeHeight = side * (isBoot ? 0.070 : 0.055)
+        let shoeWidth = side * (isBoot ? 0.135 : 0.155)
+
+        return ZStack {
+            shoeShape(color: shoeColor, isBoot: isBoot, isLoafer: isLoafer, lineWidth: lineWidth)
+                .frame(width: shoeWidth, height: shoeHeight)
+                .position(x: side * 0.42, y: side * 0.84)
+            shoeShape(color: shoeColor, isBoot: isBoot, isLoafer: isLoafer, lineWidth: lineWidth)
+                .frame(width: shoeWidth, height: shoeHeight)
+                .position(x: side * 0.58, y: side * 0.84)
+        }
+    }
+
+    private func shoeShape(color: Color, isBoot: Bool, isLoafer: Bool, lineWidth: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: isBoot ? lineWidth * 1.8 : lineWidth * 3.2, style: .continuous)
+            .fill(color)
+            .overlay(RoundedRectangle(cornerRadius: isBoot ? lineWidth * 1.8 : lineWidth * 3.2, style: .continuous).stroke(outlineColor.opacity(0.38), lineWidth: lineWidth))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.black.opacity(isLoafer ? 0.18 : 0.10))
+                    .frame(height: lineWidth * 1.4)
             }
     }
 
-    @ViewBuilder
-    private var shoesLayer: some View {
-        let shoeWidth = assetName.contains("boots") ? size * 0.14 : size * 0.17
-        let shoeHeight = assetName.contains("boots") ? size * 0.085 : size * 0.055
+    private func torso(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: side * 0.085, style: .continuous)
+                .fill(bodyColor)
+                .frame(width: side * 0.34, height: side * 0.25)
+                .overlay(RoundedRectangle(cornerRadius: side * 0.085, style: .continuous).stroke(outlineColor.opacity(0.52), lineWidth: lineWidth))
+                .position(x: side * 0.50, y: side * 0.56)
 
-        HStack(spacing: size * 0.08) {
-            shoeShape(width: shoeWidth, height: shoeHeight)
-            shoeShape(width: shoeWidth, height: shoeHeight)
+            top(side: side, lineWidth: lineWidth)
         }
-        .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
-        .offset(y: size * 0.46)
     }
 
     @ViewBuilder
-    private func shoeShape(width: CGFloat, height: CGFloat) -> some View {
-        if assetName.contains("loafers") {
-            RoundedRectangle(cornerRadius: size * 0.025, style: .continuous)
-                .fill(color)
-                .frame(width: width, height: height)
-                .overlay(alignment: .top) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.18))
-                        .frame(width: width * 0.58, height: height * 0.24)
+    private func top(side: CGFloat, lineWidth: CGFloat) -> some View {
+        let topColor = color(for: topItem, fallback: baseAccentColor)
+
+        if matches(topItem, "varsity") {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.075, style: .continuous)
+                    .fill(topColor)
+                    .frame(width: side * 0.36, height: side * 0.245)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.075, style: .continuous).stroke(outlineColor.opacity(0.35), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.56)
+                RoundedRectangle(cornerRadius: side * 0.025, style: .continuous)
+                    .fill(bodyColor.opacity(0.88))
+                    .frame(width: side * 0.095, height: side * 0.22)
+                    .position(x: side * 0.50, y: side * 0.57)
+                Circle()
+                    .fill(Color.white.opacity(0.65))
+                    .frame(width: side * 0.040, height: side * 0.040)
+                    .position(x: side * 0.45, y: side * 0.52)
+                Circle()
+                    .fill(Color.white.opacity(0.65))
+                    .frame(width: side * 0.040, height: side * 0.040)
+                    .position(x: side * 0.55, y: side * 0.52)
+            }
+        } else if matches(topItem, "sweater") {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.09, style: .continuous)
+                    .fill(topColor)
+                    .frame(width: side * 0.35, height: side * 0.235)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.09, style: .continuous).stroke(outlineColor.opacity(0.32), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.56)
+                HStack(spacing: side * 0.018) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        Capsule()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: side * 0.016, height: side * 0.055)
+                    }
                 }
-        } else if assetName.contains("boots") {
-            RoundedRectangle(cornerRadius: size * 0.025, style: .continuous)
-                .fill(color)
-                .frame(width: width, height: height)
+                .position(x: side * 0.50, y: side * 0.62)
+            }
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.09, style: .continuous)
+                    .fill(topColor)
+                    .frame(width: side * 0.36, height: side * 0.245)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.09, style: .continuous).stroke(outlineColor.opacity(0.34), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.56)
+                RoundedRectangle(cornerRadius: side * 0.04, style: .continuous)
+                    .fill(Color.white.opacity(0.24))
+                    .frame(width: side * 0.16, height: side * 0.035)
+                    .position(x: side * 0.50, y: side * 0.47)
+                Capsule()
+                    .fill(Color.white.opacity(0.42))
+                    .frame(width: side * 0.018, height: side * 0.075)
+                    .rotationEffect(.degrees(15))
+                    .position(x: side * 0.47, y: side * 0.52)
+                Capsule()
+                    .fill(Color.white.opacity(0.42))
+                    .frame(width: side * 0.018, height: side * 0.075)
+                    .rotationEffect(.degrees(-15))
+                    .position(x: side * 0.53, y: side * 0.52)
+            }
+        }
+    }
+
+    private func arms(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            Capsule()
+                .fill(bodyColor)
+                .frame(width: side * 0.085, height: side * 0.23)
+                .overlay(Capsule().stroke(outlineColor.opacity(0.48), lineWidth: lineWidth))
+                .rotationEffect(.degrees(18))
+                .position(x: side * 0.33, y: side * 0.60)
+            Capsule()
+                .fill(bodyColor)
+                .frame(width: side * 0.085, height: side * 0.23)
+                .overlay(Capsule().stroke(outlineColor.opacity(0.48), lineWidth: lineWidth))
+                .rotationEffect(.degrees(heldItem == nil ? -18 : -32))
+                .position(x: side * (heldItem == nil ? 0.67 : 0.69), y: side * (heldItem == nil ? 0.60 : 0.61))
+        }
+    }
+
+    private func head(side: CGFloat, lineWidth: CGFloat) -> some View {
+        Ellipse()
+            .fill(bodyColor)
+            .frame(width: side * 0.50, height: side * 0.38)
+            .overlay(Ellipse().stroke(outlineColor.opacity(0.70), lineWidth: lineWidth * 1.10))
+            .position(x: side * 0.50, y: side * 0.32)
+    }
+
+    private func face(side: CGFloat, lineWidth: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(outlineColor)
+                .frame(width: side * 0.032, height: side * 0.032)
+                .position(x: side * 0.43, y: side * 0.31)
+            Circle()
+                .fill(outlineColor)
+                .frame(width: side * 0.032, height: side * 0.032)
+                .position(x: side * 0.57, y: side * 0.31)
+            Path { path in
+                path.move(to: CGPoint(x: side * 0.46, y: side * 0.39))
+                path.addQuadCurve(
+                    to: CGPoint(x: side * 0.56, y: side * 0.39),
+                    control: CGPoint(x: side * 0.51, y: side * 0.43)
+                )
+            }
+            .stroke(outlineColor.opacity(0.75), style: StrokeStyle(lineWidth: max(lineWidth * 0.9, 1), lineCap: .round))
+            Circle()
+                .fill(baseAccentColor.opacity(0.20))
+                .frame(width: side * 0.055, height: side * 0.030)
+                .position(x: side * 0.38, y: side * 0.37)
+            Circle()
+                .fill(baseAccentColor.opacity(0.20))
+                .frame(width: side * 0.055, height: side * 0.030)
+                .position(x: side * 0.62, y: side * 0.37)
+        }
+    }
+
+    @ViewBuilder
+    private func hat(side: CGFloat, lineWidth: CGFloat) -> some View {
+        let hatColor = color(for: hatItem, fallback: Color(red: 0.12, green: 0.18, blue: 0.32))
+
+        if matches(hatItem, "grad") {
+            ZStack {
+                AvatarDiamond()
+                    .fill(hatColor)
+                    .frame(width: side * 0.40, height: side * 0.15)
+                    .overlay(AvatarDiamond().stroke(outlineColor.opacity(0.45), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.16)
+                RoundedRectangle(cornerRadius: side * 0.025, style: .continuous)
+                    .fill(hatColor)
+                    .frame(width: side * 0.17, height: side * 0.075)
+                    .position(x: side * 0.50, y: side * 0.22)
+                Capsule()
+                    .fill(Color.yellow.opacity(0.85))
+                    .frame(width: side * 0.014, height: side * 0.14)
+                    .position(x: side * 0.66, y: side * 0.23)
+            }
+        } else if matches(hatItem, "cap") {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.075, style: .continuous)
+                    .fill(hatColor)
+                    .frame(width: side * 0.31, height: side * 0.125)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.075, style: .continuous).stroke(outlineColor.opacity(0.40), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.17)
+                Capsule()
+                    .fill(hatColor.opacity(0.92))
+                    .frame(width: side * 0.28, height: side * 0.045)
+                    .rotationEffect(.degrees(-5))
+                    .position(x: side * 0.62, y: side * 0.21)
+            }
+        } else if hatItem != nil {
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.07, style: .continuous)
+                    .fill(hatColor)
+                    .frame(width: side * 0.32, height: side * 0.13)
+                    .overlay(RoundedRectangle(cornerRadius: side * 0.07, style: .continuous).stroke(outlineColor.opacity(0.38), lineWidth: lineWidth))
+                    .position(x: side * 0.50, y: side * 0.17)
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: side * 0.29, height: side * 0.026)
+                    .position(x: side * 0.50, y: side * 0.20)
+                Circle()
+                    .fill(hatColor)
+                    .frame(width: side * 0.055, height: side * 0.055)
+                    .position(x: side * 0.58, y: side * 0.105)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func heldItemView(side: CGFloat, lineWidth: CGFloat) -> some View {
+        let itemColor = color(for: heldItem, fallback: Color(red: 0.40, green: 0.46, blue: 0.55))
+
+        if matches(heldItem, "book") {
+            RoundedRectangle(cornerRadius: side * 0.030, style: .continuous)
+                .fill(itemColor)
+                .frame(width: side * 0.25, height: side * 0.17)
+                .overlay(RoundedRectangle(cornerRadius: side * 0.030, style: .continuous).stroke(outlineColor.opacity(0.38), lineWidth: lineWidth))
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.30))
+                        .frame(width: side * 0.018)
+                        .padding(.leading, side * 0.055)
+                }
+                .rotationEffect(.degrees(-4))
+                .position(x: side * 0.68, y: side * 0.62)
+        } else if matches(heldItem, "pencil") {
+            ZStack {
+                Capsule()
+                    .fill(itemColor)
+                    .frame(width: side * 0.30, height: side * 0.052)
+                    .overlay(Capsule().stroke(outlineColor.opacity(0.32), lineWidth: lineWidth))
+                AvatarTriangle()
+                    .fill(Color.orange.opacity(0.92))
+                    .frame(width: side * 0.060, height: side * 0.060)
+                    .rotationEffect(.degrees(90))
+                    .offset(x: side * 0.155)
+            }
+            .rotationEffect(.degrees(-32))
+            .position(x: side * 0.70, y: side * 0.62)
+        } else if heldItem != nil {
+            RoundedRectangle(cornerRadius: side * 0.035, style: .continuous)
+                .fill(itemColor)
+                .frame(width: side * 0.31, height: side * 0.19)
+                .overlay(RoundedRectangle(cornerRadius: side * 0.035, style: .continuous).stroke(outlineColor.opacity(0.38), lineWidth: lineWidth))
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(height: side * 0.10)
+                }
                 .overlay(alignment: .bottom) {
                     Rectangle()
-                        .fill(Color.black.opacity(0.24))
-                        .frame(height: height * 0.18)
+                        .fill(Color.black.opacity(0.18))
+                        .frame(height: side * 0.030)
                 }
-        } else {
-            Capsule()
-                .fill(color)
-                .frame(width: width, height: height)
-                .overlay(alignment: .bottom) {
-                    Capsule()
-                        .fill(Color.black.opacity(0.14))
-                        .frame(height: height * 0.20)
-                }
+                .rotationEffect(.degrees(-2))
+                .position(x: side * 0.68, y: side * 0.66)
         }
-    }
-
-    @ViewBuilder
-    private var hatLayer: some View {
-        if assetName.contains("grad") {
-            VStack(spacing: -size * 0.015) {
-                Diamond()
-                    .fill(color)
-                    .frame(width: size * 0.42, height: size * 0.18)
-                RoundedRectangle(cornerRadius: size * 0.018, style: .continuous)
-                    .fill(color.opacity(0.95))
-                    .frame(width: size * 0.18, height: size * 0.09)
-            }
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Color.yellow.opacity(0.75))
-                    .frame(width: size * 0.012, height: size * 0.16)
-                    .offset(x: size * 0.16, y: size * 0.08)
-            }
-            .offset(y: -size * 0.35)
-        } else if assetName.contains("cap") {
-            VStack(spacing: -size * 0.02) {
-                RoundedRectangle(cornerRadius: size * 0.075, style: .continuous)
-                    .fill(color)
-                    .frame(width: size * 0.34, height: size * 0.14)
-                    .overlay {
-                        Circle()
-                            .fill(Color.white.opacity(0.24))
-                            .frame(width: size * 0.055, height: size * 0.055)
-                    }
-                Capsule()
-                    .fill(color.opacity(0.92))
-                    .frame(width: size * 0.50, height: size * 0.045)
-                    .offset(x: size * 0.06)
-            }
-            .rotationEffect(.degrees(-6))
-            .offset(y: -size * 0.34)
-        } else {
-            VStack(spacing: -size * 0.02) {
-                RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
-                    .fill(color)
-                    .frame(width: size * 0.34, height: size * 0.16)
-                Capsule()
-                    .fill(Color.white.opacity(0.20))
-                    .frame(width: size * 0.30, height: size * 0.025)
-                Capsule()
-                    .fill(color.opacity(0.92))
-                    .frame(width: size * 0.46, height: size * 0.055)
-            }
-            .offset(y: -size * 0.34)
-        }
-    }
-
-    @ViewBuilder
-    private var itemLayer: some View {
-        Group {
-            if assetName.contains("book") {
-                RoundedRectangle(cornerRadius: size * 0.03, style: .continuous)
-                    .fill(color)
-                    .frame(width: size * 0.26, height: size * 0.18)
-                    .overlay(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.28))
-                            .frame(width: size * 0.018)
-                            .padding(.leading, size * 0.07)
-                    }
-            } else if assetName.contains("pencil") {
-                Capsule()
-                    .fill(color)
-                    .frame(width: size * 0.34, height: size * 0.055)
-                    .rotationEffect(.degrees(-32))
-                    .overlay(alignment: .trailing) {
-                        Triangle()
-                            .fill(Color.orange.opacity(0.92))
-                            .frame(width: size * 0.06, height: size * 0.06)
-                            .rotationEffect(.degrees(90))
-                            .offset(x: size * 0.03)
-                    }
-            } else {
-                RoundedRectangle(cornerRadius: size * 0.04, style: .continuous)
-                    .fill(color)
-                    .frame(width: size * 0.34, height: size * 0.20)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(Color.black.opacity(0.18))
-                            .frame(height: size * 0.035)
-                    }
-                    .overlay(alignment: .top) {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.18))
-                            .frame(height: size * 0.11)
-                    }
-            }
-        }
-        .offset(x: size * 0.18, y: size * 0.29)
     }
 }
 
-private struct Diamond: Shape {
+private struct AvatarDiamond: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.midX, y: rect.minY))
@@ -2143,7 +2369,7 @@ private struct Diamond: Shape {
     }
 }
 
-private struct Triangle: Shape {
+private struct AvatarTriangle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.midX, y: rect.minY))

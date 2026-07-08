@@ -35,15 +35,16 @@ BuddyStudy uses a Reddit-style avatar builder as the default profile image syste
 
 ## iOS Rendering
 
-The iOS app composes avatars locally:
+The iOS app composes avatars locally with a Reddit-style Snoo renderer:
 
 - Background color comes from the selected background item.
-- Base uses existing bundled profile avatar images.
-- Seeded outfit/accessory slots use bundled transparent PNG layers whose asset names match `avatar_items.asset_name`.
-- `AvatarBuilderAssetRegistry` lists local image-backed item assets and is covered by iOS tests so DB seed rows cannot silently reference missing app assets.
-- If a future DB row is delivered before the app bundles a matching image, the renderer falls back to lightweight SwiftUI layers based on slot, `assetName`, and color.
+- The visible character is a single neutral Snoo-like body with a consistent head, torso, arms, legs, and antenna silhouette.
+- Base items such as `base-cat`, `base-fox`, `base-rabbit`, and `base-dog` are costume variants rendered as ears or head details on the same body proportions.
+- Top, bottom, shoes, hat, and item selections are rendered into fixed body slots instead of overlaying completed avatar images, so clothes naturally attach to the body and cannot drift over the face.
+- `AvatarBuilderVisualRegistry` lists the supported seeded catalog keys and is covered by iOS tests so DB seed rows cannot silently point at unsupported visual combinations.
+- If a future DB row is delivered before the app supports a matching visual key, the renderer keeps the neutral Snoo body and simply omits that unsupported item instead of showing a misaligned asset.
 - The selected config is cached with the profile cache so profile UI stays consistent across tabs and launches.
 
 ## Extension Path
 
-If photo upload or server-rendered avatar images are added later, keep the catalog shape. Add URL/image variants to `avatar_items` or a derived style endpoint while preserving `avatar_config` as the canonical user selection. For local builder items, add the DB row and a matching `Assets.xcassets/<asset_name>.imageset` before enabling it by default.
+If photo upload or server-rendered avatar images are added later, keep the catalog shape. Add URL/image variants to `avatar_items` or a derived style endpoint while preserving `avatar_config` as the canonical user selection. For local builder items, add the DB row and a matching Snoo-renderer key before enabling it by default.
