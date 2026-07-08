@@ -15,6 +15,7 @@ import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -29,18 +30,35 @@ class ProfileService(
     private val tokenService: TokenProvider,
     private val accountDeletion: AccountDeletionPort,
 ) : ProfileUseCase {
+    private val log = LoggerFactory.getLogger(ProfileService::class.java)
+
     @Transactional(readOnly = true)
     override fun profile(principal: Principal): UserProfileResponse = user(principal.userId).toProfile()
 
     @Transactional
     override fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse {
         val user = user(principal.userId)
+        log.info(
+            "profile_update_command userId={} displayNamePresent={} bioPresent={} avatarSymbolName={} avatarColorSeed={}",
+            principal.userId,
+            command.displayName != null,
+            command.bio != null,
+            command.avatarSymbolName,
+            command.avatarColorSeed,
+        )
         command.displayName?.trim()?.takeIf { it.isNotEmpty() }?.let { user.displayName = it.take(120) }
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
         user.updatedAt = Instant.now()
-        return users.save(user).toProfile()
+        val saved = users.save(user)
+        log.info(
+            "profile_update_saved userId={} avatarSymbolName={} avatarColorSeed={}",
+            saved.id,
+            saved.avatarSymbolName,
+            saved.avatarColorSeed,
+        )
+        return saved.toProfile()
     }
 
     @Transactional
