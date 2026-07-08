@@ -80,19 +80,41 @@ struct CommunityUseCase {
         try await repository.fetchMyProfile(registration: registration)
     }
 
+    func fetchAvatarCatalog(registration: RemotePushRegistration) async throws -> AvatarCatalogResponse {
+        try await repository.fetchAvatarCatalog(registration: registration)
+    }
+
+    func updateProfileAvatar(
+        registration: RemotePushRegistration,
+        avatarMode: String,
+        avatarConfig: [String: String],
+        avatarColorSeed: String?
+    ) async throws -> CommunityUserProfile {
+        try await repository.updateProfileAvatar(
+            registration: registration,
+            avatarMode: avatarMode,
+            avatarConfig: avatarConfig,
+            avatarColorSeed: avatarColorSeed
+        )
+    }
+
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?
+        avatarColorSeed: String?,
+        avatarMode: String? = nil,
+        avatarConfig: [String: String]? = nil
     ) async throws -> CommunityUserProfile {
         try await repository.updateMyProfile(
             registration: registration,
             displayName: displayName,
             bio: bio,
             avatarSymbolName: avatarSymbolName,
-            avatarColorSeed: avatarColorSeed
+            avatarColorSeed: avatarColorSeed,
+            avatarMode: avatarMode,
+            avatarConfig: avatarConfig
         )
     }
 

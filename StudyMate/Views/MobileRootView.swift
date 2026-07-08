@@ -1680,6 +1680,8 @@ struct HomeProfileAvatar: View {
     var colorSeed: String? = "profile"
     var usesNeutralColor: Bool = false
     var size: CGFloat = 34
+    var avatarConfig: [String: String]? = nil
+    var avatarCatalog: AvatarCatalogResponse? = nil
 
     var body: some View {
         Group {
@@ -1698,13 +1700,26 @@ struct HomeProfileAvatar: View {
         .contentShape(Circle())
     }
 
+    @ViewBuilder
     private var defaultGlyph: some View {
-        ProfileAvatarSprite(
-            symbolName: symbolName,
-            colorSeed: defaultColorSeed,
-            usesNeutralColor: usesNeutralColor,
-            size: size
-        )
+        if let avatarConfig,
+           let avatarCatalog {
+            AvatarBuilderSprite(
+                config: avatarConfig,
+                catalog: avatarCatalog,
+                fallbackSymbolName: symbolName,
+                colorSeed: defaultColorSeed,
+                usesNeutralColor: usesNeutralColor,
+                size: size
+            )
+        } else {
+            ProfileAvatarSprite(
+                symbolName: symbolName,
+                colorSeed: defaultColorSeed,
+                usesNeutralColor: usesNeutralColor,
+                size: size
+            )
+        }
     }
 
     private var defaultColorSeed: String {
@@ -1754,6 +1769,177 @@ struct ProfileAvatarSprite: View {
             }
             .frame(width: size, height: size)
             .clipShape(Circle())
+    }
+}
+
+private struct AvatarBuilderSprite: View {
+    var config: [String: String]
+    var catalog: AvatarCatalogResponse
+    var fallbackSymbolName: String
+    var colorSeed: String
+    var usesNeutralColor: Bool
+    var size: CGFloat
+
+    private var resolvedConfig: [String: String] {
+        catalog.defaultConfig.merging(config) { _, current in current }
+    }
+
+    private var baseAssetName: String {
+        catalog.item(for: resolvedConfig["base"])?.assetName ?? ProfileAvatarOption.assetName(for: fallbackSymbolName)
+    }
+
+    private var backgroundColor: Color {
+        if let item = catalog.item(for: resolvedConfig["background"]) {
+            return Color.avatarHex(item.colorHex, fallback: PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor).background)
+        }
+        return PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor).background
+    }
+
+    private var layerItems: [AvatarCatalogItem] {
+        resolvedConfig
+            .compactMap { slot, key -> AvatarCatalogItem? in
+                guard slot != "base", slot != "background" else { return nil }
+                return catalog.item(for: key)
+            }
+            .sorted { lhs, rhs in
+                if lhs.zIndex == rhs.zIndex {
+                    return lhs.key < rhs.key
+                }
+                return lhs.zIndex < rhs.zIndex
+            }
+    }
+
+    var body: some View {
+        Circle()
+            .fill(backgroundColor)
+            .overlay {
+                Image(baseAssetName)
+                    .resizable()
+                    .interpolation(.none)
+                    .antialiased(false)
+                    .scaledToFit()
+                    .scaleEffect(1.12)
+            }
+            .overlay {
+                GeometryReader { proxy in
+                    ZStack {
+                        ForEach(layerItems) { item in
+                            AvatarBuilderLayer(item: item, size: min(proxy.size.width, proxy.size.height))
+                        }
+                    }
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+    }
+}
+
+private struct AvatarBuilderLayer: View {
+    var item: AvatarCatalogItem
+    var size: CGFloat
+
+    private var color: Color {
+        Color.avatarHex(item.colorHex, fallback: .secondary)
+    }
+
+    @ViewBuilder
+    var body: some View {
+        switch item.slot {
+        case "top":
+            topLayer
+        case "bottom":
+            bottomLayer
+        case "shoes":
+            shoesLayer
+        case "hat":
+            hatLayer
+        case "item":
+            itemLayer
+        default:
+            EmptyView()
+        }
+    }
+
+    private var topLayer: some View {
+        RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
+            .fill(color.opacity(0.92))
+            .frame(width: size * 0.45, height: size * 0.24)
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: size * 0.035, style: .continuous)
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: size * 0.19, height: size * 0.035)
+                    .offset(y: size * 0.035)
+            }
+            .offset(y: size * 0.20)
+    }
+
+    private var bottomLayer: some View {
+        HStack(spacing: size * 0.04) {
+            Capsule()
+                .fill(color.opacity(0.95))
+                .frame(width: size * 0.12, height: size * 0.19)
+            Capsule()
+                .fill(color.opacity(0.95))
+                .frame(width: size * 0.12, height: size * 0.19)
+        }
+        .offset(y: size * 0.35)
+    }
+
+    private var shoesLayer: some View {
+        HStack(spacing: size * 0.08) {
+            Capsule()
+                .fill(color)
+                .frame(width: size * 0.17, height: size * 0.055)
+            Capsule()
+                .fill(color)
+                .frame(width: size * 0.17, height: size * 0.055)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
+        .offset(y: size * 0.46)
+    }
+
+    private var hatLayer: some View {
+        VStack(spacing: -size * 0.02) {
+            RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
+                .fill(color)
+                .frame(width: size * 0.34, height: size * 0.16)
+            Capsule()
+                .fill(color.opacity(0.92))
+                .frame(width: size * 0.46, height: size * 0.055)
+        }
+        .rotationEffect(.degrees(item.key.contains("cap") ? -6 : 0))
+        .offset(y: -size * 0.34)
+    }
+
+    private var itemLayer: some View {
+        Group {
+            if item.key.contains("book") {
+                RoundedRectangle(cornerRadius: size * 0.03, style: .continuous)
+                    .fill(color)
+                    .frame(width: size * 0.26, height: size * 0.18)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.28))
+                            .frame(width: size * 0.018)
+                            .padding(.leading, size * 0.07)
+                    }
+            } else if item.key.contains("pencil") {
+                Capsule()
+                    .fill(color)
+                    .frame(width: size * 0.34, height: size * 0.055)
+                    .rotationEffect(.degrees(-32))
+            } else {
+                RoundedRectangle(cornerRadius: size * 0.04, style: .continuous)
+                    .fill(color)
+                    .frame(width: size * 0.34, height: size * 0.20)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.18))
+                            .frame(height: size * 0.035)
+                    }
+            }
+        }
+        .offset(x: size * 0.18, y: size * 0.29)
     }
 }
 
@@ -2232,6 +2418,20 @@ extension Color {
     func lighter() -> Color {
         self.opacity(0.82)
     }
+
+    static func avatarHex(_ value: String, fallback: Color) -> Color {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+        guard normalized.count == 6,
+              let integer = Int(normalized, radix: 16) else {
+            return fallback
+        }
+        let red = Double((integer >> 16) & 0xFF) / 255.0
+        let green = Double((integer >> 8) & 0xFF) / 255.0
+        let blue = Double(integer & 0xFF) / 255.0
+        return Color(red: red, green: green, blue: blue)
+    }
 }
 
 private struct MobileProfileSettingsSheet: View {
@@ -2240,6 +2440,8 @@ private struct MobileProfileSettingsSheet: View {
     @State private var profileDisplayName = ""
     @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
     @State private var draftAvatarColorSeed = ""
+    @State private var draftAvatarConfig: [String: String] = [:]
+    @State private var selectedAvatarCategoryKey: String?
     @State private var allowPublicQuestionsAccess = true
     @State private var isShowingEmailSignIn = false
     @State private var isShowingCustomColorEditor = false
@@ -2266,11 +2468,14 @@ private struct MobileProfileSettingsSheet: View {
         let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
         let currentAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
         let currentAvatarColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        let storedAvatarConfig = profile?.avatarConfig ?? appState.profileAvatarConfig ?? [:]
+        let currentAvatarConfig = appState.avatarCatalog?.defaultConfig.merging(storedAvatarConfig) { _, current in current } ?? storedAvatarConfig
 
         return trimmedProfileDisplayName != currentDisplayName
             || allowPublicQuestionsAccess != currentPublicQuestions
             || draftAvatarSymbolName != currentAvatarSymbolName
             || draftAvatarColorSeed != currentAvatarColorSeed
+            || draftAvatarConfig != currentAvatarConfig
     }
 
     private var canSaveProfile: Bool {
@@ -2366,7 +2571,9 @@ private struct MobileProfileSettingsSheet: View {
                                 imageData: nil,
                                 colorSeed: draftAvatarColorSeed,
                                 usesNeutralColor: appState.communityProfile == nil,
-                                size: 94
+                                size: 94,
+                                avatarConfig: draftAvatarConfig,
+                                avatarCatalog: appState.avatarCatalog
                             )
                             .padding(.top, 4)
 
@@ -2408,27 +2615,7 @@ private struct MobileProfileSettingsSheet: View {
                     Section {
                         DisclosureGroup(isExpanded: $isShowingAvatarCustomization) {
                             VStack(alignment: .leading, spacing: 18) {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(strings.profileCharacter)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-
-                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 66), spacing: 10)], spacing: 10) {
-                                        ForEach(ProfileAvatarOption.all, id: \.self) { option in
-                                            Button {
-                                                draftAvatarSymbolName = option
-                                            } label: {
-                                                avatarChoice(
-                                                    symbolName: option,
-                                                    colorSeed: draftAvatarColorSeed,
-                                                    isSelected: draftAvatarSymbolName == option
-                                                )
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
+                                avatarBuilderSection(strings: strings)
 
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(strings.profileColor)
@@ -2470,7 +2657,9 @@ private struct MobileProfileSettingsSheet: View {
                                     imageData: nil,
                                     colorSeed: draftAvatarColorSeed,
                                     usesNeutralColor: false,
-                                    size: 40
+                                    size: 40,
+                                    avatarConfig: draftAvatarConfig,
+                                    avatarCatalog: appState.avatarCatalog
                                 )
                                 Text(strings.profileAvatar)
                                     .font(.body.weight(.semibold))
@@ -2568,7 +2757,9 @@ private struct MobileProfileSettingsSheet: View {
                             await appState.updateCommunityProfile(
                                 displayName: trimmedProfileDisplayName,
                                 avatarSymbolName: draftAvatarSymbolName,
-                                avatarColorSeed: draftAvatarColorSeed
+                                avatarColorSeed: draftAvatarColorSeed,
+                                avatarMode: appState.avatarCatalog == nil ? nil : "BUILDER",
+                                avatarConfig: appState.avatarCatalog == nil ? nil : draftAvatarConfig
                             )
                             dismiss()
                         }
@@ -2595,6 +2786,7 @@ private struct MobileProfileSettingsSheet: View {
                 Task {
                     isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
+                    await appState.loadAvatarCatalog()
                     await appState.refreshTermsAndNotificationPreferences(reason: "profile-settings")
                     resetDraftProfile()
                     isLoadingProfileDraft = false
@@ -2619,6 +2811,8 @@ private struct MobileProfileSettingsSheet: View {
                 profileDisplayName = profile.displayName
                 draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
                 draftAvatarColorSeed = profile.avatarColorSeed
+                draftAvatarConfig = resolvedAvatarConfig()
+                selectedAvatarCategoryKey = selectedAvatarCategoryKey ?? appState.avatarCatalog?.categories.first?.key
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
@@ -2663,7 +2857,17 @@ private struct MobileProfileSettingsSheet: View {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
         draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
         draftAvatarColorSeed = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        draftAvatarConfig = resolvedAvatarConfig()
+        selectedAvatarCategoryKey = selectedAvatarCategoryKey ?? appState.avatarCatalog?.categories.first?.key
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
+    }
+
+    private func resolvedAvatarConfig() -> [String: String] {
+        guard let catalog = appState.avatarCatalog else {
+            return appState.communityProfile?.avatarConfig ?? appState.profileAvatarConfig ?? [:]
+        }
+        let currentConfig = appState.communityProfile?.avatarConfig ?? appState.profileAvatarConfig ?? catalog.currentConfig
+        return catalog.defaultConfig.merging(currentConfig) { _, current in current }
     }
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
@@ -2699,6 +2903,139 @@ private struct MobileProfileSettingsSheet: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.primary.opacity(0.35) : Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func avatarBuilderSection(strings: AppStrings) -> some View {
+        if let catalog = appState.avatarCatalog {
+            let categories = catalog.categories.sorted { lhs, rhs in
+                if lhs.sortOrder == rhs.sortOrder {
+                    return lhs.key < rhs.key
+                }
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            let selectedCategory = categories.first { $0.key == selectedAvatarCategoryKey } ?? categories.first
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(strings.profileCharacter)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if appState.isLoadingAvatarCatalog {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories) { category in
+                            Button {
+                                selectedAvatarCategoryKey = category.key
+                            } label: {
+                                Text(category.title(language: appState.settings.appLanguage))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(selectedAvatarCategoryKey == category.key ? .white : .primary)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 12)
+                                    .background(selectedAvatarCategoryKey == category.key ? Color.accentColor : Color.secondary.opacity(0.10), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                if let selectedCategory {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 74, maximum: 88), spacing: 10)], spacing: 12) {
+                        ForEach(catalog.items(for: selectedCategory)) { item in
+                            Button {
+                                draftAvatarConfig[selectedCategory.slot] = item.key
+                                if selectedCategory.slot == "base" {
+                                    draftAvatarSymbolName = symbolName(forBaseItem: item.key)
+                                }
+                            } label: {
+                                avatarCatalogChoice(
+                                    item: item,
+                                    catalog: catalog,
+                                    config: draftAvatarConfig.merging([selectedCategory.slot: item.key]) { _, next in next },
+                                    isSelected: draftAvatarConfig[selectedCategory.slot] == item.key
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(strings.profileCharacter)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 66), spacing: 10)], spacing: 10) {
+                    ForEach(ProfileAvatarOption.all, id: \.self) { option in
+                        Button {
+                            draftAvatarSymbolName = option
+                        } label: {
+                            avatarChoice(
+                                symbolName: option,
+                                colorSeed: draftAvatarColorSeed,
+                                isSelected: draftAvatarSymbolName == option
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func avatarCatalogChoice(
+        item: AvatarCatalogItem,
+        catalog: AvatarCatalogResponse,
+        config: [String: String],
+        isSelected: Bool
+    ) -> some View {
+        VStack(spacing: 7) {
+            HomeProfileAvatar(
+                symbolName: symbolName(forBaseItem: config["base"] ?? draftAvatarConfig["base"] ?? item.key),
+                displayName: nil,
+                imageData: nil,
+                colorSeed: draftAvatarColorSeed,
+                usesNeutralColor: false,
+                size: 54,
+                avatarConfig: config,
+                avatarCatalog: catalog
+            )
+
+            Text(item.displayName(language: appState.settings.appLanguage))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 82, height: 84)
+        .background(isSelected ? Color.primary.opacity(0.08) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.secondary.opacity(0.10), lineWidth: 1)
+        }
+    }
+
+    private func symbolName(forBaseItem itemKey: String) -> String {
+        switch itemKey {
+        case "base-cat":
+            return "pixel-cat-laptop"
+        case "base-fox":
+            return "pixel-fox-scholar"
+        case "base-rabbit":
+            return "pixel-rabbit-pencil"
+        case "base-dog":
+            return "pixel-dog-dachshund-student"
+        default:
+            return draftAvatarSymbolName
         }
     }
 

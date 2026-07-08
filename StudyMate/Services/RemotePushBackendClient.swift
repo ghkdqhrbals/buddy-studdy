@@ -84,6 +84,80 @@ struct CommunityLoginResult: Equatable {
     var registration: RemotePushRegistration
 }
 
+struct AvatarCatalogResponse: Codable, Equatable {
+    var categories: [AvatarCategory]
+    var items: [AvatarCatalogItem]
+    var defaultConfig: [String: String]
+    var currentConfig: [String: String]
+
+    func item(for key: String?) -> AvatarCatalogItem? {
+        guard let key else { return nil }
+        return items.first { $0.key == key }
+    }
+
+    func items(for category: AvatarCategory) -> [AvatarCatalogItem] {
+        items
+            .filter { $0.category == category.key }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder == rhs.sortOrder {
+                    return lhs.key < rhs.key
+                }
+                return lhs.sortOrder < rhs.sortOrder
+            }
+    }
+
+    var resolvedCurrentConfig: [String: String] {
+        defaultConfig.merging(currentConfig) { _, current in current }
+    }
+}
+
+struct AvatarCategory: Codable, Equatable, Identifiable {
+    var key: String
+    var titleKo: String
+    var titleEn: String
+    var slot: String
+    var required: Bool
+    var singleSelect: Bool
+    var zIndex: Int
+    var sortOrder: Int
+
+    var id: String { key }
+
+    func title(language: AppLanguage) -> String {
+        switch language {
+        case .korean:
+            return titleKo
+        case .english:
+            return titleEn
+        }
+    }
+}
+
+struct AvatarCatalogItem: Codable, Equatable, Identifiable {
+    var key: String
+    var category: String
+    var slot: String
+    var displayNameKo: String
+    var displayNameEn: String
+    var assetName: String
+    var colorHex: String
+    var defaultGrant: Bool
+    var compatibleBases: [String]
+    var zIndex: Int
+    var sortOrder: Int
+
+    var id: String { key }
+
+    func displayName(language: AppLanguage) -> String {
+        switch language {
+        case .korean:
+            return displayNameKo
+        case .english:
+            return displayNameEn
+        }
+    }
+}
+
 struct EmailVerificationCodeResult: Equatable {
     var email: String
     var expiresInSeconds: Int
@@ -291,12 +365,23 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
 
+    func fetchAvatarCatalog(registration: RemotePushRegistration) async throws -> AvatarCatalogResponse
+
+    func updateProfileAvatar(
+        registration: RemotePushRegistration,
+        avatarMode: String,
+        avatarConfig: [String: String],
+        avatarColorSeed: String?
+    ) async throws -> CommunityUserProfile
+
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?
+        avatarColorSeed: String?,
+        avatarMode: String?,
+        avatarConfig: [String: String]?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
@@ -991,12 +1076,47 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(CommunityUserProfile.self, from: data)
     }
 
+    func fetchAvatarCatalog(registration: RemotePushRegistration) async throws -> AvatarCatalogResponse {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "profile", "avatar", "catalog")
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(AvatarCatalogResponse.self, from: data)
+    }
+
+    func updateProfileAvatar(
+        registration: RemotePushRegistration,
+        avatarMode: String,
+        avatarConfig: [String: String],
+        avatarColorSeed: String? = nil
+    ) async throws -> CommunityUserProfile {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "profile", "avatar")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            AvatarUpdateRequest(
+                avatarMode: avatarMode,
+                avatarConfig: avatarConfig,
+                avatarColorSeed: avatarColorSeed
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(CommunityUserProfile.self, from: data)
+    }
+
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
         avatarSymbolName: String? = nil,
-        avatarColorSeed: String? = nil
+        avatarColorSeed: String? = nil,
+        avatarMode: String? = nil,
+        avatarConfig: [String: String]? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
@@ -1009,7 +1129,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 displayName: displayName,
                 bio: bio,
                 avatarSymbolName: avatarSymbolName,
-                avatarColorSeed: avatarColorSeed
+                avatarColorSeed: avatarColorSeed,
+                avatarMode: avatarMode,
+                avatarConfig: avatarConfig
             )
         )
         let data = try await perform(request)
@@ -1569,6 +1691,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var bio: String?
         var avatarSymbolName: String?
         var avatarColorSeed: String?
+        var avatarMode: String?
+        var avatarConfig: [String: String]?
+    }
+
+    private struct AvatarUpdateRequest: Encodable {
+        var avatarMode: String
+        var avatarConfig: [String: String]
+        var avatarColorSeed: String?
     }
 
     private struct CommunityLoginResponse: Decodable {
@@ -1897,6 +2027,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var avatarURL: URL?
     var avatarSymbolName: String
     var avatarColorSeed: String
+    var avatarMode: String
+    var avatarConfig: [String: String]?
     var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
@@ -1909,6 +2041,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         case avatarURL = "avatarUrl"
         case avatarSymbolName
         case avatarColorSeed
+        case avatarMode
+        case avatarConfig
         case pageAccess
     }
 
@@ -1922,6 +2056,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarURL: URL?,
         avatarSymbolName: String = "pixel-fox",
         avatarColorSeed: String = "avatar-color-mint",
+        avatarMode: String = "LEGACY",
+        avatarConfig: [String: String]? = nil,
         pageAccess: CommunityPageAccess = .restricted
     ) {
         self.id = id
@@ -1933,6 +2069,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         self.avatarURL = avatarURL
         self.avatarSymbolName = avatarSymbolName
         self.avatarColorSeed = avatarColorSeed
+        self.avatarMode = avatarMode
+        self.avatarConfig = avatarConfig
         self.pageAccess = pageAccess
     }
 
@@ -1947,6 +2085,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarURL = try container.decodeIfPresent(URL.self, forKey: .avatarURL)
         avatarSymbolName = try container.decodeIfPresent(String.self, forKey: .avatarSymbolName) ?? "pixel-fox"
         avatarColorSeed = try container.decodeIfPresent(String.self, forKey: .avatarColorSeed) ?? "avatar-color-mint"
+        avatarMode = try container.decodeIfPresent(String.self, forKey: .avatarMode) ?? "LEGACY"
+        avatarConfig = try container.decodeIfPresent([String: String].self, forKey: .avatarConfig)
         pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
     }
 }

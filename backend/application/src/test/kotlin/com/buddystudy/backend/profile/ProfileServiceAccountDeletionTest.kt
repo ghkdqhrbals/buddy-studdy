@@ -1,6 +1,8 @@
 package com.buddystudy.backend.profile
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.avatar.domain.entity.AvatarCategoryEntity
+import com.buddystudy.avatar.domain.entity.AvatarItemEntity
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.backend.auth.Principal
@@ -13,6 +15,7 @@ import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
 import com.buddystudy.backend.profile.application.service.ProfileService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -25,6 +28,7 @@ class ProfileServiceAccountDeletionTest {
     private val userDevices = InMemoryUserDevicePort()
     private val roles = InMemoryRoleAssignmentPort()
     private val deletion = CapturingAccountDeletionPort(users, userDevices, devices)
+    private val avatars = InMemoryAvatarCatalogPort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
     }
@@ -35,6 +39,7 @@ class ProfileServiceAccountDeletionTest {
         roles = roles,
         tokenService = TokenProvider(properties),
         accountDeletion = deletion,
+        avatarCatalog = avatars,
     )
 
     @Test
@@ -238,5 +243,33 @@ class ProfileServiceAccountDeletionTest {
 
         override fun countUserRoles(userId: Long, roleCode: String): Long =
             grants.count { it == userId to roleCode }.toLong()
+    }
+
+    private class InMemoryAvatarCatalogPort : AvatarCatalogPort {
+        private val categories = listOf(
+            AvatarCategoryEntity(key = "bases", titleKo = "캐릭터", titleEn = "Base", slot = "base", required = true, sortOrder = 10),
+            AvatarCategoryEntity(key = "backgrounds", titleKo = "배경", titleEn = "Background", slot = "background", required = true, sortOrder = 20),
+            AvatarCategoryEntity(key = "tops", titleKo = "상의", titleEn = "Top", slot = "top", sortOrder = 30),
+            AvatarCategoryEntity(key = "bottoms", titleKo = "하의", titleEn = "Bottom", slot = "bottom", sortOrder = 40),
+            AvatarCategoryEntity(key = "shoes", titleKo = "신발", titleEn = "Shoes", slot = "shoes", sortOrder = 50),
+            AvatarCategoryEntity(key = "hats", titleKo = "모자", titleEn = "Hat", slot = "hat", sortOrder = 60),
+            AvatarCategoryEntity(key = "items", titleKo = "소품", titleEn = "Item", slot = "item", sortOrder = 70),
+        )
+        private val items = listOf(
+            AvatarItemEntity(key = "base-cat", category = "bases", slot = "base", displayNameKo = "고양이", displayNameEn = "Cat", assetName = "ProfileAvatarCatLaptop", sortOrder = 10),
+            AvatarItemEntity(key = "background-teal", category = "backgrounds", slot = "background", displayNameKo = "청록", displayNameEn = "Teal", colorHex = "#2A9BA8", sortOrder = 20),
+            AvatarItemEntity(key = "top-hoodie-blue", category = "tops", slot = "top", displayNameKo = "후디", displayNameEn = "Hoodie", colorHex = "#1D4ED8", sortOrder = 30),
+            AvatarItemEntity(key = "bottom-denim-pants", category = "bottoms", slot = "bottom", displayNameKo = "데님", displayNameEn = "Denim", colorHex = "#1E3A8A", sortOrder = 40),
+            AvatarItemEntity(key = "shoes-white-sneakers", category = "shoes", slot = "shoes", displayNameKo = "스니커즈", displayNameEn = "Sneakers", colorHex = "#F8FAFC", sortOrder = 50),
+            AvatarItemEntity(key = "hat-beanie-navy", category = "hats", slot = "hat", displayNameKo = "비니", displayNameEn = "Beanie", colorHex = "#0F172A", sortOrder = 60),
+            AvatarItemEntity(key = "item-laptop", category = "items", slot = "item", displayNameKo = "노트북", displayNameEn = "Laptop", colorHex = "#64748B", sortOrder = 70),
+        )
+
+        override fun activeCategories(): List<AvatarCategoryEntity> = categories
+
+        override fun availableItems(userId: Long): List<AvatarItemEntity> = items
+
+        override fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
+            items.filter { it.key in keys }
     }
 }

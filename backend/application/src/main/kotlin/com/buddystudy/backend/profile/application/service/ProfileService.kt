@@ -12,9 +12,16 @@ import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
+import com.buddystudy.backend.profile.application.model.AvatarCatalogResponse
+import com.buddystudy.backend.profile.application.model.toAvatarConfigJson
+import com.buddystudy.backend.profile.application.model.toAvatarConfigMap
+import com.buddystudy.backend.profile.application.model.toCompatibleBases
 import com.buddystudy.backend.profile.application.model.toProfile
+import com.buddystudy.backend.profile.application.model.toResponse
+import com.buddystudy.backend.profile.application.port.inbound.AvatarUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
+import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -29,11 +36,46 @@ class ProfileService(
     private val roles: RoleAssignmentPort,
     private val tokenService: TokenProvider,
     private val accountDeletion: AccountDeletionPort,
+    private val avatarCatalog: AvatarCatalogPort,
 ) : ProfileUseCase {
     private val log = LoggerFactory.getLogger(ProfileService::class.java)
 
     @Transactional(readOnly = true)
     override fun profile(principal: Principal): UserProfileResponse = user(principal.userId).toProfile()
+
+    @Transactional(readOnly = true)
+    override fun avatarCatalog(principal: Principal): AvatarCatalogResponse {
+        val user = user(principal.userId)
+        val categories = avatarCatalog.activeCategories()
+        val items = avatarCatalog.availableItems(user.id)
+        val currentConfig = currentAvatarConfig(user.avatarConfig)
+        return AvatarCatalogResponse(
+            categories = categories.map { it.toResponse() },
+            items = items.map { it.toResponse(it.compatibleBases.toCompatibleBases()) },
+            defaultConfig = defaultAvatarConfig,
+            currentConfig = currentConfig,
+        )
+    }
+
+    @Transactional
+    override fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse {
+        val user = user(principal.userId)
+        val config = validateAvatarConfig(command.avatarConfig, user.id)
+        user.avatarMode = command.avatarMode.ifBlank { BUILDER_AVATAR_MODE }.take(32)
+        user.avatarConfig = config.toAvatarConfigJson()
+        command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
+        config["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
+        user.updatedAt = Instant.now()
+        val saved = users.save(user)
+        log.info(
+            "avatar_update_saved userId={} avatarMode={} slots={} base={}",
+            saved.id,
+            saved.avatarMode,
+            config.keys.sorted().joinToString(","),
+            config["base"],
+        )
+        return saved.toProfile()
+    }
 
     @Transactional
     override fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse {
@@ -50,6 +92,12 @@ class ProfileService(
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
+        command.avatarMode?.let { user.avatarMode = it.take(32) }
+        command.avatarConfig?.let { config ->
+            val validated = validateAvatarConfig(config, user.id)
+            user.avatarConfig = validated.toAvatarConfigJson()
+            validated["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
+        }
         user.updatedAt = Instant.now()
         val saved = users.save(user)
         log.info(
@@ -79,5 +127,74 @@ class ProfileService(
 
     private fun user(id: Long) = users.findById(id).orElseThrow {
         ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
+    }
+
+    private fun currentAvatarConfig(rawConfig: String?): Map<String, String> =
+        rawConfig.toAvatarConfigMap()
+            ?.takeIf { it.isNotEmpty() }
+            ?: defaultAvatarConfig
+
+    private fun validateAvatarConfig(input: Map<String, String>, userId: Long): Map<String, String> {
+        val requested = (defaultAvatarConfig + input)
+            .mapValues { (_, value) -> value.trim() }
+            .filterValues { it.isNotBlank() }
+        val categoriesBySlot = avatarCatalog.activeCategories().associateBy { it.slot }
+        val availableItemsByKey = avatarCatalog.availableItems(userId).associateBy { it.key }
+        val normalized = requested.mapValues { (slot, itemKey) ->
+            val category = categoriesBySlot[slot]
+                ?: throw validation("Unknown avatar slot: $slot.")
+            val item = availableItemsByKey[itemKey]
+                ?: throw validation("Avatar item is not available: $itemKey.")
+            if (item.slot != category.slot || item.category != category.key) {
+                throw validation("Avatar item $itemKey does not belong to slot $slot.")
+            }
+            item.key
+        }.toMutableMap()
+
+        categoriesBySlot.values
+            .filter { it.required }
+            .forEach { category ->
+                if (normalized[category.slot].isNullOrBlank()) {
+                    throw validation("Avatar slot ${category.slot} is required.")
+                }
+            }
+
+        val base = normalized["base"]
+        if (base != null) {
+            normalized.values
+                .mapNotNull { availableItemsByKey[it] }
+                .forEach { item ->
+                    val compatibleBases = item.compatibleBases.toCompatibleBases()
+                    if (compatibleBases.isNotEmpty() && base !in compatibleBases) {
+                        throw validation("Avatar item ${item.key} is not compatible with base $base.")
+                    }
+                }
+        }
+        return normalized.toSortedMap()
+    }
+
+    private fun validation(message: String) =
+        ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, message)
+
+    private fun baseSymbolName(itemKey: String): String = when (itemKey) {
+        "base-cat" -> "pixel-cat-laptop"
+        "base-fox" -> "pixel-fox-scholar"
+        "base-rabbit" -> "pixel-rabbit-reader"
+        "base-dog" -> "pixel-dog-coder"
+        else -> itemKey
+    }
+
+    companion object {
+        private const val BUILDER_AVATAR_MODE = "BUILDER"
+
+        val defaultAvatarConfig: Map<String, String> = mapOf(
+            "base" to "base-cat",
+            "background" to "background-teal",
+            "top" to "top-hoodie-blue",
+            "bottom" to "bottom-denim-pants",
+            "shoes" to "shoes-white-sneakers",
+            "hat" to "hat-beanie-navy",
+            "item" to "item-laptop",
+        )
     }
 }

@@ -27,6 +27,7 @@ final class SettingsStore {
         static let profileAvatarSymbolName = "profileAvatarSymbolName"
         static let profileAvatarImageData = "profileAvatarImageData"
         static let profileAvatarColorSeed = "profileAvatarColorSeed"
+        static let profileAvatarConfig = "profileAvatarConfig"
         static let communityProfileDisplayName = "communityProfileDisplayName"
         static let communityProfileID = "communityProfileID"
         static let cloudSyncStateUpdatedAt = "cloudSyncStateUpdatedAt"
@@ -530,6 +531,22 @@ final class SettingsStore {
 
     func saveProfileAvatarColorSeed(_ seed: String) {
         defaults.set(seed, forKey: Keys.profileAvatarColorSeed)
+    }
+
+    func loadProfileAvatarConfig() -> [String: String]? {
+        guard let data = defaults.data(forKey: Keys.profileAvatarConfig) else {
+            return nil
+        }
+        return try? decoder.decode([String: String].self, from: data)
+    }
+
+    func saveProfileAvatarConfig(_ config: [String: String]?) {
+        guard let config,
+              let data = try? encoder.encode(config) else {
+            defaults.removeObject(forKey: Keys.profileAvatarConfig)
+            return
+        }
+        defaults.set(data, forKey: Keys.profileAvatarConfig)
     }
 
     func loadCommunityProfileDisplayName() -> String? {

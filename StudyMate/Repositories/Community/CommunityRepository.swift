@@ -38,12 +38,23 @@ protocol CommunityRepository {
 
     func fetchMyProfile(registration: RemotePushRegistration) async throws -> CommunityUserProfile
 
+    func fetchAvatarCatalog(registration: RemotePushRegistration) async throws -> AvatarCatalogResponse
+
+    func updateProfileAvatar(
+        registration: RemotePushRegistration,
+        avatarMode: String,
+        avatarConfig: [String: String],
+        avatarColorSeed: String?
+    ) async throws -> CommunityUserProfile
+
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?
+        avatarColorSeed: String?,
+        avatarMode: String?,
+        avatarConfig: [String: String]?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration

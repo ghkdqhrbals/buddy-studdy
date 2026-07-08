@@ -162,7 +162,11 @@ class HibernateLoggerRuntimeHints : RuntimeHintsRegistrar {
         "com.buddystudy.backend.auth.application.model.GoogleLoginResponse",
         "com.buddystudy.backend.auth.application.model.LoggedInDeviceResponse",
         "com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse",
+        "com.buddystudy.backend.profile.adapter.inbound.web.dto.AvatarUpdateRequest",
         "com.buddystudy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest",
+        "com.buddystudy.backend.profile.application.model.AvatarCatalogResponse",
+        "com.buddystudy.backend.profile.application.model.AvatarCategoryResponse",
+        "com.buddystudy.backend.profile.application.model.AvatarItemResponse",
         "com.buddystudy.backend.profile.application.model.UserProfileResponse",
     )
 }

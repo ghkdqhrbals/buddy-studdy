@@ -37,6 +37,7 @@ class AccountDeletionPersistenceAdapter(
         update("delete from user_term_agreements where user_id = :userId or device_id in (:deviceIds)", deletionParams)
         update("delete from user_monthly_question_usage where user_id = :userId", deletionParams)
         update("delete from user_memberships where user_id = :userId", deletionParams)
+        update("delete from user_avatar_items where user_id = :userId", deletionParams)
         update("delete from user_stats_dirty_keys where user_id = :userId", deletionParams)
         update("delete from user_stats where user_id = :userId", deletionParams)
         update("delete from user_roles where user_id = :userId", deletionParams)

@@ -31,6 +31,14 @@ struct SettingsStoreCommunityProfileCacheRepository: CommunityProfileCacheReposi
         settingsStore.saveProfileAvatarColorSeed(seed)
     }
 
+    func loadProfileAvatarConfig() -> [String: String]? {
+        settingsStore.loadProfileAvatarConfig()
+    }
+
+    func saveProfileAvatarConfig(_ config: [String: String]?) {
+        settingsStore.saveProfileAvatarConfig(config)
+    }
+
     func loadCommunityProfileDisplayName() -> String? {
         settingsStore.loadCommunityProfileDisplayName()
     }

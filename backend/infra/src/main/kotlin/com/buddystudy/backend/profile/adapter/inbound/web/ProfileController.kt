@@ -1,7 +1,9 @@
 package com.buddystudy.backend.profile.adapter.inbound.web
 
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
+import com.buddystudy.backend.profile.adapter.inbound.web.dto.AvatarUpdateRequest
 import com.buddystudy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest
+import com.buddystudy.backend.profile.application.port.inbound.AvatarUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import io.swagger.v3.oas.annotations.Operation
@@ -36,6 +38,15 @@ class ProfileController(
     fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(body, authentication)
 
+    @Operation(summary = "Fetch avatar catalog", description = "Returns avatar builder categories, available items, and the user's selected avatar configuration.")
+    @GetMapping("/profile/avatar/catalog")
+    fun avatarCatalog(authentication: Authentication) = profiles.avatarCatalog(authentication)
+
+    @Operation(summary = "Update avatar builder configuration", description = "Updates the selected avatar slots for the active user's builder avatar.")
+    @PatchMapping("/profile/avatar")
+    fun updateAvatar(@RequestBody body: AvatarUpdateRequest, authentication: Authentication) =
+        profiles.updateAvatar(body, authentication)
+
     @Operation(summary = "Delete my account", description = "Deletes the active member account and reconnects the current device as anonymous.")
     @DeleteMapping("/profile")
     fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
@@ -43,6 +54,8 @@ class ProfileController(
 
 interface ProfileWebPort {
     fun profile(authentication: Authentication): Any
+    fun avatarCatalog(authentication: Authentication): Any
+    fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication): Any
     fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
     fun withdrawProfile(authentication: Authentication): Any
 }
@@ -52,6 +65,12 @@ class ProfileWebAdapter(
     private val profiles: ProfileUseCase,
 ) : ProfileWebPort {
     override fun profile(authentication: Authentication) = profiles.profile(authentication.principalOrThrow())
+
+    override fun avatarCatalog(authentication: Authentication) =
+        profiles.avatarCatalog(authentication.principalOrThrow())
+
+    override fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication) =
+        profiles.updateAvatar(authentication.principalOrThrow(), body.toCommand())
 
     override fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(authentication.principalOrThrow(), body.toCommand())
@@ -64,5 +83,13 @@ private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
     displayName = displayName,
     bio = bio,
     avatarSymbolName = avatarSymbolName,
+    avatarColorSeed = avatarColorSeed,
+    avatarMode = avatarMode,
+    avatarConfig = avatarConfig,
+)
+
+private fun AvatarUpdateRequest.toCommand() = AvatarUpdateCommand(
+    avatarMode = avatarMode,
+    avatarConfig = avatarConfig,
     avatarColorSeed = avatarColorSeed,
 )

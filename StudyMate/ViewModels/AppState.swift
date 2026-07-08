@@ -434,6 +434,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    var profileAvatarConfig: [String: String]? {
+        get {
+            communityProfileState.avatarConfig
+        }
+        set {
+            var nextState = communityProfileState
+            nextState.avatarConfig = newValue
+            communityProfileState = nextState
+        }
+    }
+
     var studyCategoriesForDisplay: [StudyCategory] {
         let synchronized = synchronizedTopicCategories(for: settings)
         return synchronized.studyCategories
@@ -448,6 +459,8 @@ final class AppState: ObservableObject {
     @Published var cloudLastSyncedAt: Date?
     @Published private var communityFeedState = CommunityFeedStateStore()
     @Published private var communityProfileState = CommunityProfileStateStore()
+    @Published private(set) var avatarCatalog: AvatarCatalogResponse?
+    @Published private(set) var isLoadingAvatarCatalog = false
     @Published private var notificationState = NotificationStateStore()
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published private(set) var backendPermissionEvaluations = BackendPermissionEvaluations(permissions: [])
@@ -1175,7 +1188,8 @@ final class AppState: ObservableObject {
         self.communityProfileState = CommunityProfileStateStore(
             avatarSymbolName: loadedAvatarCache.symbolName,
             avatarImageData: loadedAvatarCache.imageData,
-            avatarColorSeed: loadedAvatarCache.colorSeed
+            avatarColorSeed: loadedAvatarCache.colorSeed,
+            avatarConfig: loadedAvatarCache.config
         )
         self.cloudLastSyncedAt = loadedCloudLastSyncedAt
         self.lastLocalSettingsMutationAt = loadedLocalSettingsMutationAt ?? loadedCloudLastSyncedAt
@@ -2638,6 +2652,7 @@ final class AppState: ObservableObject {
         var nextState = communityProfileState
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
+        avatarCatalog = nil
         backendAccessState = .signedOut
         communitySessionUseCase.setSignedIn(false)
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
@@ -2683,7 +2698,9 @@ final class AppState: ObservableObject {
                 displayName: communityProfile?.displayName ?? "",
                 bio: communityProfile?.bio ?? "",
                 avatarSymbolName: nextSymbolName,
-                avatarColorSeed: nextColorSeed
+                avatarColorSeed: nextColorSeed,
+                avatarMode: communityProfile?.avatarMode,
+                avatarConfig: communityProfile?.avatarConfig
             )
         }
     }
@@ -2733,7 +2750,9 @@ final class AppState: ObservableObject {
         displayName: String,
         bio: String = "",
         avatarSymbolName: String? = nil,
-        avatarColorSeed: String? = nil
+        avatarColorSeed: String? = nil,
+        avatarMode: String? = nil,
+        avatarConfig: [String: String]? = nil
     ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
@@ -2741,7 +2760,9 @@ final class AppState: ObservableObject {
         applyLocalCommunityProfileDraft(
             displayName: displayName,
             avatarSymbolName: avatarSymbolName,
-            avatarColorSeed: avatarColorSeed
+            avatarColorSeed: avatarColorSeed,
+            avatarMode: avatarMode,
+            avatarConfig: avatarConfig
         )
         isUpdatingCommunityProfile = true
 
@@ -2752,7 +2773,9 @@ final class AppState: ObservableObject {
                     displayName: displayName,
                     bio: bio,
                     avatarSymbolName: avatarSymbolName,
-                    avatarColorSeed: avatarColorSeed
+                    avatarColorSeed: avatarColorSeed,
+                    avatarMode: avatarMode,
+                    avatarConfig: avatarConfig
                 )
             },
             onSuccess: { profile in
@@ -2772,7 +2795,9 @@ final class AppState: ObservableObject {
     private func applyLocalCommunityProfileDraft(
         displayName: String,
         avatarSymbolName: String?,
-        avatarColorSeed: String?
+        avatarColorSeed: String?,
+        avatarMode: String?,
+        avatarConfig: [String: String]?
     ) {
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAvatarSymbolName = avatarSymbolName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2796,9 +2821,12 @@ final class AppState: ObservableObject {
         }
         communityProfileCacheUseCase.saveAvatarSymbolName(nextAvatarSymbolName)
         communityProfileCacheUseCase.saveAvatarColorSeed(nextAvatarColorSeed)
+        if let avatarConfig {
+            communityProfileCacheUseCase.saveAvatarConfig(avatarConfig)
+        }
 
         var nextState = communityProfileState
-        nextState.updateAvatar(symbolName: nextAvatarSymbolName, colorSeed: nextAvatarColorSeed)
+        nextState.updateAvatar(symbolName: nextAvatarSymbolName, colorSeed: nextAvatarColorSeed, config: avatarConfig)
         if let profile = nextState.profile {
             nextState.profile = CommunityUserProfile(
                 id: profile.id,
@@ -2809,6 +2837,8 @@ final class AppState: ObservableObject {
                 avatarURL: profile.avatarURL,
                 avatarSymbolName: nextAvatarSymbolName,
                 avatarColorSeed: nextAvatarColorSeed,
+                avatarMode: avatarMode ?? profile.avatarMode,
+                avatarConfig: avatarConfig ?? profile.avatarConfig,
                 pageAccess: profile.pageAccess
             )
         }
@@ -2820,9 +2850,42 @@ final class AppState: ObservableObject {
             extra: [
                 "avatarSymbolName=\(nextAvatarSymbolName)",
                 "avatarColorSeed=\(nextAvatarColorSeed)",
+                "avatarConfigSlots=\((avatarConfig ?? [:]).keys.sorted().joined(separator: ","))",
             ],
             deduplicate: false
         )
+    }
+
+    func loadAvatarCatalog() async {
+        guard isCommunitySessionActive,
+              let registration = await backendRegistrationForOpenAIRequests(reason: "avatar-catalog") else {
+            avatarCatalog = nil
+            return
+        }
+        isLoadingAvatarCatalog = true
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchAvatarCatalog(registration: registration)
+            },
+            onSuccess: { catalog in
+                avatarCatalog = catalog
+                let config = communityProfile?.avatarConfig ?? catalog.currentConfig
+                updateProfileAvatarConfig(config)
+            },
+            onFailure: { error in
+                log(.warning, "아바타 카탈로그 조회 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                isLoadingAvatarCatalog = false
+            }
+        )
+    }
+
+    func updateProfileAvatarConfig(_ config: [String: String]) {
+        var nextState = communityProfileState
+        nextState.setAvatarConfig(config)
+        communityProfileState = nextState
+        communityProfileCacheUseCase.saveAvatarConfig(config)
     }
 
     private func applyCommunityProfile(_ profile: CommunityUserProfile) {

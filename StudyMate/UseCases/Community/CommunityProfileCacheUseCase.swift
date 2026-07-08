@@ -4,6 +4,7 @@ struct CommunityProfileAvatarCache {
     var symbolName: String
     var imageData: Data?
     var colorSeed: String
+    var config: [String: String]?
 }
 
 struct CommunityProfileCacheUseCase {
@@ -27,13 +28,15 @@ struct CommunityProfileCacheUseCase {
         return CommunityProfileAvatarCache(
             symbolName: repository.loadProfileAvatarSymbolName(),
             imageData: repository.loadProfileAvatarImageData(),
-            colorSeed: colorSeed
+            colorSeed: colorSeed,
+            config: repository.loadProfileAvatarConfig()
         )
     }
 
     func saveSignedOutProfile(avatarSymbolName: String) {
         repository.saveProfileAvatarSymbolName(avatarSymbolName)
         repository.saveProfileAvatarImageData(nil)
+        repository.saveProfileAvatarConfig(nil)
         repository.saveCommunityProfileID(nil)
         repository.saveCommunityProfileDisplayName("")
     }
@@ -44,6 +47,10 @@ struct CommunityProfileCacheUseCase {
 
     func saveAvatarColorSeed(_ seed: String) {
         repository.saveProfileAvatarColorSeed(seed)
+    }
+
+    func saveAvatarConfig(_ config: [String: String]?) {
+        repository.saveProfileAvatarConfig(config)
     }
 
     func saveAvatarImageData(_ data: Data?) {
@@ -72,6 +79,8 @@ struct CommunityProfileCacheUseCase {
                 avatarURL: profile.avatarURL,
                 avatarSymbolName: profile.avatarSymbolName,
                 avatarColorSeed: profile.avatarColorSeed,
+                avatarMode: profile.avatarMode,
+                avatarConfig: profile.avatarConfig,
                 pageAccess: profile.pageAccess
             )
             : profile
@@ -80,6 +89,7 @@ struct CommunityProfileCacheUseCase {
         repository.saveCommunityProfileDisplayName(resolvedProfile.displayName)
         repository.saveProfileAvatarSymbolName(resolvedProfile.avatarSymbolName)
         repository.saveProfileAvatarColorSeed(resolvedProfile.avatarColorSeed)
+        repository.saveProfileAvatarConfig(resolvedProfile.avatarConfig)
         return resolvedProfile
     }
 

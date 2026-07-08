@@ -37,6 +37,10 @@ class UserEntity(
     var avatarSymbolName: String = "pixel-buddy",
     @Column(name = "avatar_color_seed", nullable = false, length = 64)
     var avatarColorSeed: String = "avatar-color-mint",
+    @Column(name = "avatar_mode", nullable = false, length = 32)
+    var avatarMode: String = "BUILDER",
+    @Column(name = "avatar_config", columnDefinition = "text")
+    var avatarConfig: String? = null,
     @Column(nullable = false, length = 500)
     var bio: String = "",
     @Column(name = "allow_public_questions", nullable = false)

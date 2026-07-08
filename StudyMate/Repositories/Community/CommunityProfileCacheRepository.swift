@@ -7,6 +7,8 @@ protocol CommunityProfileCacheRepository {
     func saveProfileAvatarImageData(_ data: Data?)
     func loadProfileAvatarColorSeed() -> String?
     func saveProfileAvatarColorSeed(_ seed: String)
+    func loadProfileAvatarConfig() -> [String: String]?
+    func saveProfileAvatarConfig(_ config: [String: String]?)
     func loadCommunityProfileDisplayName() -> String?
     func saveCommunityProfileDisplayName(_ displayName: String)
     func loadCommunityProfileID() -> Int?

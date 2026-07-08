@@ -4575,6 +4575,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var emailVerificationRequests: [String] = []
     var emailLoginRequests: [(email: String, password: String, verificationCode: String?)] = []
     var fetchMyProfileCallCount = 0
+    var fetchAvatarCatalogCallCount = 0
     var updatedProfileDisplayNames: [String] = []
     var withdrawMyProfileCallCount = 0
     var reportedQuestionIDs: [String] = []
@@ -4949,12 +4950,48 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         CommunityUserProfile(id: 1, displayName: "Tester", bio: "", avatarURL: nil)
     }
 
+    func fetchAvatarCatalog(registration: RemotePushRegistration) async throws -> AvatarCatalogResponse {
+        fetchAvatarCatalogCallCount += 1
+        return AvatarCatalogResponse(
+            categories: [
+                AvatarCategory(key: "bases", titleKo: "베이스", titleEn: "Base", slot: "base", required: true, singleSelect: true, zIndex: 10, sortOrder: 10),
+                AvatarCategory(key: "backgrounds", titleKo: "배경", titleEn: "Background", slot: "background", required: true, singleSelect: true, zIndex: 0, sortOrder: 20)
+            ],
+            items: [
+                AvatarCatalogItem(key: "base-cat", category: "bases", slot: "base", displayNameKo: "고양이", displayNameEn: "Cat", assetName: "ProfileAvatarCatLaptop", colorHex: "#20A6B8", defaultGrant: true, compatibleBases: [], zIndex: 10, sortOrder: 10),
+                AvatarCatalogItem(key: "background-teal", category: "backgrounds", slot: "background", displayNameKo: "틸", displayNameEn: "Teal", assetName: "avatar-background-teal", colorHex: "#14B8A6", defaultGrant: true, compatibleBases: [], zIndex: 0, sortOrder: 10)
+            ],
+            defaultConfig: ["base": "base-cat", "background": "background-teal"],
+            currentConfig: ["base": "base-cat", "background": "background-teal"]
+        )
+    }
+
+    func updateProfileAvatar(
+        registration: RemotePushRegistration,
+        avatarMode: String,
+        avatarConfig: [String: String],
+        avatarColorSeed: String?
+    ) async throws -> CommunityUserProfile {
+        CommunityUserProfile(
+            id: 1,
+            displayName: "Tester",
+            bio: "",
+            avatarURL: nil,
+            avatarSymbolName: "pixel-cat-laptop",
+            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
+            avatarMode: avatarMode,
+            avatarConfig: avatarConfig
+        )
+    }
+
     func updateMyProfile(
         registration: RemotePushRegistration,
         displayName: String?,
         bio: String?,
         avatarSymbolName: String?,
-        avatarColorSeed: String?
+        avatarColorSeed: String?,
+        avatarMode: String?,
+        avatarConfig: [String: String]?
     ) async throws -> CommunityUserProfile {
         if let displayName {
             updatedProfileDisplayNames.append(displayName)
@@ -4965,7 +5002,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             bio: bio ?? "",
             avatarURL: nil,
             avatarSymbolName: avatarSymbolName ?? "pixel-buddy",
-            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint"
+            avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
+            avatarMode: avatarMode ?? "LEGACY",
+            avatarConfig: avatarConfig
         )
     }
 
