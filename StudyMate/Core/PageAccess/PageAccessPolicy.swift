@@ -50,21 +50,6 @@ struct PageAccessPrompt: Identifiable, Equatable {
 }
 
 enum PageAccessPolicy {
-    static func isCommunitySessionActive(
-        accessState: BackendAccessState,
-        hasRegisteredAccessToken: Bool
-    ) -> Bool {
-        if accessState.user.status != "ANONYMOUS" {
-            return true
-        }
-
-        if hasRegisteredAccessToken {
-            return true
-        }
-
-        return false
-    }
-
     static func protectedPage(for tab: AppTab) -> ProtectedAppPage? {
         switch tab {
         case .study:
@@ -95,36 +80,11 @@ enum PageAccessPolicy {
         }
     }
 
-    static func shouldAllowProvisionalAccess(
-        to page: ProtectedAppPage,
-        hasRegisteredAccessToken: Bool,
-        userStatus: String
-    ) -> Bool {
-        guard hasRegisteredAccessToken else {
-            return false
-        }
-
-        guard userStatus == "ANONYMOUS" else {
-            return false
-        }
-
-        switch page {
-        case .myStudies, .studyDetail, .records, .statistics, .profile:
-            return true
-        case .publicQuestions:
-            return false
-        }
-    }
-
     static func shouldShowLoginGate(
         for _: ProtectedAppPage,
-        in accessState: BackendAccessState,
-        hasRegisteredAccessToken: Bool
+        isSignedIn: Bool
     ) -> Bool {
-        !isCommunitySessionActive(
-            accessState: accessState,
-            hasRegisteredAccessToken: hasRegisteredAccessToken
-        )
+        !isSignedIn
     }
 
     static func prompt(for page: ProtectedAppPage, strings: AppStrings) -> PageAccessPrompt {

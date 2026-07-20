@@ -78,12 +78,12 @@ final class AppState: ObservableObject {
     @Published var isRefreshingVisibleData = false
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
-    @Published var isCommunitySignedIn: Bool
     @Published var activeTerms: [BackendTerms] = []
     @Published var notificationPreferences: [BackendNotificationPreference] = []
     @Published var isLoadingTermsAndPreferences = false
     @Published var isRequiredTermsGatePresented = false
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
+    @Published private var communitySessionState: CommunitySessionStateStore
     @Published private var searchState = SearchStateStore()
 
     var appLogs: [AppLogEntry] {
@@ -504,7 +504,6 @@ final class AppState: ObservableObject {
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var pendingTermsRequirementRetry: (() async -> Void)?
-    private var communitySessionEpoch = CommunitySessionEpoch()
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -537,10 +536,11 @@ final class AppState: ObservableObject {
     }
 
     var isCommunitySessionActive: Bool {
-        PageAccessPolicy.isCommunitySessionActive(
-            accessState: backendAccessState,
-            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken()
-        )
+        communitySessionState.isSignedIn
+    }
+
+    var isCommunitySignedIn: Bool {
+        communitySessionState.isSignedIn
     }
 
     var statusTitle: String {
@@ -706,8 +706,7 @@ final class AppState: ObservableObject {
     private func shouldShowLoginGate(for page: ProtectedAppPage) -> Bool {
         let shouldShow = PageAccessPolicy.shouldShowLoginGate(
             for: page,
-            in: backendAccessState,
-            hasRegisteredAccessToken: storedBackendIdentityUseCase.hasRegisteredAccessToken()
+            isSignedIn: isCommunitySessionActive
         )
         logAuthTrace(
             "page_login_gate_decision",
@@ -1182,7 +1181,7 @@ final class AppState: ObservableObject {
         if cloudSyncService == nil {
             localUseCases.cloudSyncState.saveIsEnabled(false)
         }
-        self.isCommunitySignedIn = loadedIsCommunitySignedIn
+        self.communitySessionState = CommunitySessionStateStore(isSignedIn: loadedIsCommunitySignedIn)
         let loadedAvatarCache = localUseCases.communityProfileCache.loadAvatarCache {
             appIdentifierProvider.makeIdentifier()
         }
@@ -1396,11 +1395,24 @@ final class AppState: ObservableObject {
     }
 
     func refreshNotificationUnreadCount() async {
+        let sessionGeneration = communitySessionState.generation
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            updateNotificationState { state in
+                state.applyUnreadCount(0)
+            }
+            log(.info, "로그아웃 상태라 알림 개수 조회를 건너뛰었습니다.")
+            return
+        }
+
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notification-count") else {
             updateNotificationState { state in
                 state.applyUnreadCount(0)
             }
+            return
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            log(.info, "로그아웃으로 알림 개수 조회를 중단했습니다. stage=registration")
             return
         }
 
@@ -1415,11 +1427,19 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { unreadCount in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 개수 응답 반영을 건너뛰었습니다.")
+                    return
+                }
                 updateNotificationState { state in
                     state.applyUnreadCount(unreadCount)
                 }
             },
             onFailure: { error in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 개수 오류 처리를 건너뛰었습니다.")
+                    return
+                }
                 updateNotificationState { state in
                     state.applyUnreadCount(0)
                 }
@@ -1429,12 +1449,23 @@ final class AppState: ObservableObject {
     }
 
     func loadNotifications(reset: Bool = false) async {
+        let sessionGeneration = communitySessionState.generation
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            updateNotificationState { state in
+                state.reset()
+            }
+            return
+        }
         guard !isLoadingNotifications else {
             return
         }
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "notifications") else {
             notificationErrorMessage = strings.myStudyLoginHelp
+            return
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            log(.info, "로그아웃으로 알림 목록 조회를 중단했습니다. stage=registration")
             return
         }
 
@@ -1458,15 +1489,26 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { page in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 목록 응답 반영을 건너뛰었습니다.")
+                    return
+                }
                 updateNotificationState { state in
                     state.applyPage(page, reset: reset)
                 }
             },
             onFailure: { error in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 목록 오류 처리를 건너뛰었습니다.")
+                    return
+                }
                 handleAppError(error, fallback: error.localizedDescription, target: .notification)
                 log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
             },
             onCompletion: {
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    return
+                }
                 updateNotificationState { state in
                     state.finishLoading()
                 }
@@ -1544,8 +1586,17 @@ final class AppState: ObservableObject {
         onSuccess: () async -> Void = {},
         failureMessage: (Error) -> String
     ) async {
+        let sessionGeneration = communitySessionState.generation
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            log(.info, "로그아웃 상태라 알림 변경 요청을 건너뛰었습니다. reason=\(reason)")
+            return
+        }
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: reason) else {
+            return
+        }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            log(.info, "로그아웃으로 알림 변경 요청을 중단했습니다. stage=registration, reason=\(reason)")
             return
         }
 
@@ -1557,8 +1608,18 @@ final class AppState: ObservableObject {
                     operation: operation
                 )
             },
-            onSuccess: onSuccess,
+            onSuccess: {
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 변경 응답 반영을 건너뛰었습니다. reason=\(reason)")
+                    return
+                }
+                await onSuccess()
+            },
             onFailure: { error in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    log(.info, "로그아웃 후 알림 변경 오류 처리를 건너뛰었습니다. reason=\(reason)")
+                    return
+                }
                 handleAppError(error, fallback: "", target: .notification)
                 log(.warning, failureMessage(error))
             }
@@ -2464,8 +2525,6 @@ final class AppState: ObservableObject {
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
-                isCommunitySignedIn = true
-                communitySessionUseCase.setSignedIn(true)
                 communityErrorMessage = nil
                 logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
@@ -2487,16 +2546,26 @@ final class AppState: ObservableObject {
         registration: RemotePushRegistration,
         reason: String
     ) {
+        let sessionGeneration = communitySessionState.generation
         logAuthTrace("community_sign_in_data_refresh_schedule", reason: reason, deduplicate: false)
         Task { [weak self] in
-            await self?.refreshCommunitySignInData(registration: registration, reason: reason)
+            await self?.refreshCommunitySignInData(
+                registration: registration,
+                reason: reason,
+                sessionGeneration: sessionGeneration
+            )
         }
     }
 
     private func refreshCommunitySignInData(
         registration: RemotePushRegistration,
-        reason: String
+        reason: String,
+        sessionGeneration: UInt64
     ) async {
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            logAuthTrace("community_sign_in_data_refresh_cancelled", reason: reason, deduplicate: false)
+            return
+        }
         logAuthTrace("community_sign_in_data_refresh_start", reason: reason, deduplicate: false)
         await actionRunner.run(
             operation: {
@@ -2509,12 +2578,18 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { profile in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    logAuthTrace("community_sign_in_data_refresh_stale", reason: reason, deduplicate: false)
+                    return
+                }
                 applyCommunityProfile(profile)
-                isCommunitySignedIn = true
-                communitySessionUseCase.setSignedIn(true)
                 logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
             },
             onFailure: { error in
+                guard isCurrentCommunitySession(sessionGeneration) else {
+                    logAuthTrace("community_sign_in_data_refresh_error_ignored", reason: reason, deduplicate: false)
+                    return
+                }
                 handleAppError(error, fallback: "", target: .community)
                 logAuthTrace(
                     "community_sign_in_data_refresh_failure",
@@ -2526,6 +2601,9 @@ final class AppState: ObservableObject {
             }
         )
 
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            return
+        }
         await refreshPermissionEvaluations(reason: reason)
         await refreshTermsAndNotificationPreferences(reason: reason)
         await refreshBackendStudyIfPossible(
@@ -2581,8 +2659,6 @@ final class AppState: ObservableObject {
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
-                isCommunitySignedIn = true
-                communitySessionUseCase.setSignedIn(true)
                 logAuthTrace("community_sign_in_success", reason: "email-login", deduplicate: false)
             },
             onFailure: { error in
@@ -2652,19 +2728,31 @@ final class AppState: ObservableObject {
 
     private func resetCommunitySignInState() {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
-        communitySessionEpoch.invalidate()
-        isCommunitySignedIn = false
+        setCommunitySessionSignedIn(false)
         var nextState = communityProfileState
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
         avatarCatalog = nil
         activeTerms = []
         notificationPreferences = []
+        updateNotificationState { state in
+            state.reset()
+        }
         isLoadingTermsAndPreferences = false
         backendAccessState = .signedOut
-        communitySessionUseCase.setSignedIn(false)
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
         logAuthTrace("community_session_reset_end", reason: "resetCommunitySignInState", deduplicate: false)
+    }
+
+    private func setCommunitySessionSignedIn(_ isSignedIn: Bool) {
+        var nextState = communitySessionState
+        if isSignedIn {
+            nextState.signIn()
+        } else {
+            nextState.signOut()
+        }
+        communitySessionState = nextState
+        communitySessionUseCase.setSignedIn(isSignedIn)
     }
 
     func updateProfileAvatarSymbolName(_ symbolName: String) {
@@ -2929,8 +3017,7 @@ final class AppState: ObservableObject {
             ),
             pageAccess: backendAccessState.pageAccess
         )
-        isCommunitySignedIn = true
-        communitySessionUseCase.setSignedIn(true)
+        setCommunitySessionSignedIn(true)
     }
 
     func withdrawCommunityAccount() async {
@@ -5366,7 +5453,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshTermsAndNotificationPreferences(reason: String) async {
-        let sessionGeneration = communitySessionEpoch.value
+        let sessionGeneration = communitySessionState.generation
         guard isCommunitySessionActive else {
             activeTerms = []
             notificationPreferences = []
@@ -5414,7 +5501,7 @@ final class AppState: ObservableObject {
     }
 
     private func isCurrentCommunitySession(_ generation: UInt64) -> Bool {
-        communitySessionEpoch.isCurrent(generation, sessionIsActive: isCommunitySessionActive)
+        communitySessionState.isCurrent(generation)
     }
 
     func saveNotificationPreference(type: BackendNotificationPreferenceType, enabled: Bool) async -> Bool {
@@ -5843,9 +5930,8 @@ final class AppState: ObservableObject {
         registration.accessTokenExpiresAt = nil
         storedBackendIdentityUseCase.saveRegistration(registration)
         backendAccessState = .signedOut
-        isCommunitySignedIn = false
+        setCommunitySessionSignedIn(false)
         communityProfile = nil
-        communitySessionUseCase.setSignedIn(false)
         logAuthTrace("backend_access_token_clear_end", reason: "clearStoredBackendAccessToken", deduplicate: false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }
@@ -7050,8 +7136,7 @@ final class AppState: ObservableObject {
         if let page {
             let pageShowLoginGate = PageAccessPolicy.shouldShowLoginGate(
                 for: page,
-                in: backendAccessState,
-                hasRegisteredAccessToken: registration?.hasRegisteredAccessToken == true
+                isSignedIn: isCommunitySessionActive
             )
             fields.append("page=\(page.accessLogName)")
             fields.append("pageCanAccess=\(PageAccessPolicy.canAccess(page, in: access))")

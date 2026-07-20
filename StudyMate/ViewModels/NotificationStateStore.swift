@@ -67,6 +67,14 @@ struct NotificationStateStore {
         unreadCount = 0
     }
 
+    mutating func reset() {
+        notifications = []
+        unreadCount = 0
+        totalCount = 0
+        isLoading = false
+        errorMessage = nil
+    }
+
     func canLoadMore(current notification: BackendAppNotification) -> Bool {
         notification.id == notifications.last?.id && notifications.count < totalCount
     }

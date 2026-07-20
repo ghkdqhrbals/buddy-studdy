@@ -2,58 +2,34 @@ import XCTest
 @testable import StudyMate
 
 final class PageAccessPolicyTests: XCTestCase {
-    func testLoginGateIsHiddenForRegisteredTokenWhileAccessRefreshIsPending() {
+    func testLoginGateUsesAuthoritativeSignedInState() {
         XCTAssertFalse(
             PageAccessPolicy.shouldShowLoginGate(
                 for: .statistics,
-                in: .signedOut,
-                hasRegisteredAccessToken: true
+                isSignedIn: true
             )
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             PageAccessPolicy.shouldShowLoginGate(
                 for: .records,
-                in: .signedOut,
-                hasRegisteredAccessToken: true
+                isSignedIn: false
             )
         )
     }
 
-    func testLoginGateIsShownWithoutRegisteredToken() {
-        XCTAssertTrue(
-            PageAccessPolicy.shouldShowLoginGate(
-                for: .statistics,
-                in: .signedOut,
-                hasRegisteredAccessToken: false
-            )
-        )
-    }
+    func testCommunitySessionStateInvalidatesInFlightRequestAfterSignOut() {
+        var session = CommunitySessionStateStore(isSignedIn: true)
+        let requestSnapshot = session.generation
 
-    func testCommunitySessionUsesOneAuthoritativePolicy() {
-        XCTAssertFalse(
-            PageAccessPolicy.isCommunitySessionActive(
-                accessState: .signedOut,
-                hasRegisteredAccessToken: false
-            )
-        )
+        XCTAssertTrue(session.isCurrent(requestSnapshot))
 
-        XCTAssertTrue(
-            PageAccessPolicy.isCommunitySessionActive(
-                accessState: .signedOut,
-                hasRegisteredAccessToken: true
-            )
-        )
-    }
+        session.signOut()
 
-    func testCommunitySessionEpochInvalidatesInFlightRequestAfterSignOut() {
-        var epoch = CommunitySessionEpoch()
-        let requestSnapshot = epoch.value
+        XCTAssertFalse(session.isCurrent(requestSnapshot))
+        XCTAssertFalse(session.isCurrent(session.generation))
 
-        XCTAssertTrue(epoch.isCurrent(requestSnapshot, sessionIsActive: true))
+        session.signIn()
 
-        epoch.invalidate()
-
-        XCTAssertFalse(epoch.isCurrent(requestSnapshot, sessionIsActive: true))
-        XCTAssertFalse(epoch.isCurrent(epoch.value, sessionIsActive: false))
+        XCTAssertTrue(session.isCurrent(session.generation))
     }
 }

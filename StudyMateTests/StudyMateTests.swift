@@ -303,34 +303,8 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(PageAccessPolicy.canAccess(.records, in: .signedOut))
         XCTAssertFalse(PageAccessPolicy.canAccess(.statistics, in: .signedOut))
 
-        XCTAssertTrue(
-            PageAccessPolicy.shouldAllowProvisionalAccess(
-                to: .records,
-                hasRegisteredAccessToken: true,
-                userStatus: "ANONYMOUS"
-            )
-        )
-        XCTAssertFalse(
-            PageAccessPolicy.shouldAllowProvisionalAccess(
-                to: .publicQuestions,
-                hasRegisteredAccessToken: true,
-                userStatus: "ANONYMOUS"
-            )
-        )
-        XCTAssertFalse(
-            PageAccessPolicy.shouldAllowProvisionalAccess(
-                to: .records,
-                hasRegisteredAccessToken: false,
-                userStatus: "ANONYMOUS"
-            )
-        )
-        XCTAssertFalse(
-            PageAccessPolicy.shouldAllowProvisionalAccess(
-                to: .records,
-                hasRegisteredAccessToken: true,
-                userStatus: "ACTIVE"
-            )
-        )
+        XCTAssertTrue(PageAccessPolicy.shouldShowLoginGate(for: .records, isSignedIn: false))
+        XCTAssertFalse(PageAccessPolicy.shouldShowLoginGate(for: .records, isSignedIn: true))
     }
 
     @MainActor

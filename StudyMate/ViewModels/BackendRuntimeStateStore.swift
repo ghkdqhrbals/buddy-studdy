@@ -1,14 +1,24 @@
 import Foundation
 
-struct CommunitySessionEpoch {
-    private(set) var value: UInt64 = 0
+struct CommunitySessionStateStore {
+    private(set) var isSignedIn: Bool
+    private(set) var generation: UInt64 = 0
 
-    mutating func invalidate() {
-        value &+= 1
+    init(isSignedIn: Bool = false) {
+        self.isSignedIn = isSignedIn
     }
 
-    func isCurrent(_ snapshot: UInt64, sessionIsActive: Bool) -> Bool {
-        sessionIsActive && snapshot == value
+    mutating func signIn() {
+        isSignedIn = true
+    }
+
+    mutating func signOut() {
+        isSignedIn = false
+        generation &+= 1
+    }
+
+    func isCurrent(_ snapshot: UInt64) -> Bool {
+        isSignedIn && snapshot == generation
     }
 }
 
