@@ -942,6 +942,38 @@ struct GradingResult: Codable, Equatable {
     var isCorrect: Bool
     var feedback: String
     var explanation: String
+
+    enum CodingKeys: String, CodingKey {
+        case score
+        case isCorrect
+        case correct
+        case feedback
+        case explanation
+    }
+
+    init(score: Int, isCorrect: Bool, feedback: String, explanation: String) {
+        self.score = score
+        self.isCorrect = isCorrect
+        self.feedback = feedback
+        self.explanation = explanation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        score = try container.decode(Int.self, forKey: .score)
+        isCorrect = try container.decodeIfPresent(Bool.self, forKey: .isCorrect)
+            ?? container.decode(Bool.self, forKey: .correct)
+        feedback = try container.decode(String.self, forKey: .feedback)
+        explanation = try container.decode(String.self, forKey: .explanation)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(score, forKey: .score)
+        try container.encode(isCorrect, forKey: .isCorrect)
+        try container.encode(feedback, forKey: .feedback)
+        try container.encode(explanation, forKey: .explanation)
+    }
 }
 
 struct StudyRecord: Codable, Equatable, Identifiable {

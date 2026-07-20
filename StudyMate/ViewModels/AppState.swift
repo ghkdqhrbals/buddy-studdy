@@ -2103,7 +2103,10 @@ final class AppState: ObservableObject {
                 if !userInitiated {
                     communityErrorMessage = nil
                 }
-                log(.warning, "공개 질문 로드 실패: \(error.localizedDescription)")
+                log(
+                    .warning,
+                    "공개 질문 로드 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+                )
             },
             onCompletion: {
                 finishCommunityFeedLoad(requestID)

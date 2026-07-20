@@ -233,6 +233,38 @@ enum BackendErrorPresentationPolicy {
         isCancellationLike(error)
     }
 
+    static func diagnosticDescription(for error: Error) -> String {
+        switch error {
+        case DecodingError.keyNotFound(let key, let context):
+            return decodingDiagnostic(
+                kind: "keyNotFound",
+                path: context.codingPath,
+                key: key,
+                context: context
+            )
+        case DecodingError.valueNotFound(let type, let context):
+            return decodingDiagnostic(
+                kind: "valueNotFound type=\(String(describing: type))",
+                path: context.codingPath,
+                context: context
+            )
+        case DecodingError.typeMismatch(let type, let context):
+            return decodingDiagnostic(
+                kind: "typeMismatch type=\(String(describing: type))",
+                path: context.codingPath,
+                context: context
+            )
+        case DecodingError.dataCorrupted(let context):
+            return decodingDiagnostic(
+                kind: "dataCorrupted",
+                path: context.codingPath,
+                context: context
+            )
+        default:
+            return error.localizedDescription
+        }
+    }
+
     private static func fallbackMessage(for error: Error, fallback: String) -> String {
         if error is DecodingError {
             return "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요."
@@ -243,6 +275,27 @@ enum BackendErrorPresentationPolicy {
             return fallback
         }
         return localized
+    }
+
+    private static func decodingDiagnostic(
+        kind: String,
+        path: [CodingKey],
+        key: CodingKey? = nil,
+        context: DecodingError.Context
+    ) -> String {
+        let codingPath = codingPathDescription(path, appending: key)
+        let underlying = context.underlyingError.map { " underlying=\($0.localizedDescription)" } ?? ""
+        return "decoding_error kind=\(kind) path=\(codingPath) detail=\(context.debugDescription)\(underlying)"
+    }
+
+    private static func codingPathDescription(_ path: [CodingKey], appending key: CodingKey?) -> String {
+        (path + [key].compactMap { $0 }).reduce(into: "$") { result, component in
+            if let index = component.intValue {
+                result += "[\(index)]"
+            } else {
+                result += ".\(component.stringValue)"
+            }
+        }
     }
 
     private static let suppressedPopupCodes: Set<String> = [

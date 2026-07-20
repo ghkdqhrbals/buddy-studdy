@@ -1933,6 +1933,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case commentCount
         case viewCount
         case isLikedByMe
+        case likedByMe
     }
 
     init(
@@ -1985,7 +1986,9 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
-        isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe) ?? false
+        isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
+            ?? container.decodeIfPresent(Bool.self, forKey: .likedByMe)
+            ?? false
     }
 }
 
@@ -1994,10 +1997,25 @@ struct CommunityLikeState: Decodable, Equatable {
     var likeCount: Int
     var isLikedByMe: Bool
 
+    init(questionID: String, likeCount: Int, isLikedByMe: Bool) {
+        self.questionID = questionID
+        self.likeCount = likeCount
+        self.isLikedByMe = isLikedByMe
+    }
+
     enum CodingKeys: String, CodingKey {
         case questionID = "questionId"
         case likeCount
         case isLikedByMe
+        case likedByMe
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        questionID = try container.decode(String.self, forKey: .questionID)
+        likeCount = try container.decode(Int.self, forKey: .likeCount)
+        isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
+            ?? container.decode(Bool.self, forKey: .likedByMe)
     }
 }
 

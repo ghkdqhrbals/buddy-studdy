@@ -1327,6 +1327,75 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
     }
 
+    func testCommunityPageDecodesBackendBooleanFieldNames() throws {
+        let payload = Data(
+            """
+            {
+              "questions": [
+                {
+                  "id": "25",
+                  "question": "메시지 중복 처리를 설명하세요.",
+                  "answer": "소비자에서 멱등하게 처리합니다.",
+                  "gradingResult": {
+                    "score": 88,
+                    "correct": true,
+                    "feedback": "좋아요.",
+                    "explanation": "핵심을 설명했습니다."
+                  },
+                  "topic": "메시지큐",
+                  "difficultyLevel": 7,
+                  "status": "graded",
+                  "source": "scheduled",
+                  "createdAt": "2026-07-20T08:00:00Z",
+                  "answeredAt": "2026-07-20T08:01:00Z",
+                  "likeCount": 2,
+                  "commentCount": 1,
+                  "viewCount": 12,
+                  "likedByMe": true
+                }
+              ],
+              "totalCount": 1,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let page = try decoder.decode(CommunityQuestionsResponse.self, from: payload)
+
+        XCTAssertEqual(page.questions.count, 1)
+        XCTAssertEqual(page.questions.first?.gradingResult?.isCorrect, true)
+        XCTAssertEqual(page.questions.first?.isLikedByMe, true)
+    }
+
+    func testCommunityLikeStateDecodesBackendLikedByMeFieldName() throws {
+        let payload = Data(#"{"questionId":"25","likeCount":3,"likedByMe":true}"#.utf8)
+
+        let state = try JSONDecoder().decode(CommunityLikeState.self, from: payload)
+
+        XCTAssertEqual(state.questionID, "25")
+        XCTAssertEqual(state.likeCount, 3)
+        XCTAssertTrue(state.isLikedByMe)
+    }
+
+    func testDecodingDiagnosticIncludesMissingKeyAndCodingPath() {
+        struct RequiredBodyPayload: Decodable {
+            let body: String
+        }
+
+        do {
+            _ = try JSONDecoder().decode(RequiredBodyPayload.self, from: Data("{}".utf8))
+            XCTFail("Expected decoding to fail.")
+        } catch {
+            let diagnostic = AppErrorHandlingUseCase().diagnosticDescription(for: error)
+
+            XCTAssertTrue(diagnostic.contains("kind=keyNotFound"))
+            XCTAssertTrue(diagnostic.contains("path=$.body"))
+        }
+    }
+
     private func repositoryRoot() throws -> URL {
         var current = URL(fileURLWithPath: #filePath)
         while current.path != "/" {
