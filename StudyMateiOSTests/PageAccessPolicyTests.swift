@@ -44,4 +44,16 @@ final class PageAccessPolicyTests: XCTestCase {
             )
         )
     }
+
+    func testCommunitySessionEpochInvalidatesInFlightRequestAfterSignOut() {
+        var epoch = CommunitySessionEpoch()
+        let requestSnapshot = epoch.value
+
+        XCTAssertTrue(epoch.isCurrent(requestSnapshot, sessionIsActive: true))
+
+        epoch.invalidate()
+
+        XCTAssertFalse(epoch.isCurrent(requestSnapshot, sessionIsActive: true))
+        XCTAssertFalse(epoch.isCurrent(epoch.value, sessionIsActive: false))
+    }
 }

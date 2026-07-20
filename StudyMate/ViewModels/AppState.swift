@@ -504,6 +504,7 @@ final class AppState: ObservableObject {
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var pendingTermsRequirementRetry: (() async -> Void)?
+    private var communitySessionEpoch = CommunitySessionEpoch()
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
@@ -2651,11 +2652,15 @@ final class AppState: ObservableObject {
 
     private func resetCommunitySignInState() {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
+        communitySessionEpoch.invalidate()
         isCommunitySignedIn = false
         var nextState = communityProfileState
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
         avatarCatalog = nil
+        activeTerms = []
+        notificationPreferences = []
+        isLoadingTermsAndPreferences = false
         backendAccessState = .signedOut
         communitySessionUseCase.setSignedIn(false)
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
@@ -5361,6 +5366,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshTermsAndNotificationPreferences(reason: String) async {
+        let sessionGeneration = communitySessionEpoch.value
         guard isCommunitySessionActive else {
             activeTerms = []
             notificationPreferences = []
@@ -5371,20 +5377,44 @@ final class AppState: ObservableObject {
             log(.warning, "약관/알림 설정 조회를 위한 백엔드 등록이 없습니다. reason=\(reason)")
             return
         }
+        guard isCurrentCommunitySession(sessionGeneration) else {
+            log(.info, "로그아웃으로 약관/알림 설정 조회를 중단했습니다. stage=registration, reason=\(reason)")
+            return
+        }
 
         isLoadingTermsAndPreferences = true
-        defer { isLoadingTermsAndPreferences = false }
+        defer {
+            if isCurrentCommunitySession(sessionGeneration) {
+                isLoadingTermsAndPreferences = false
+            }
+        }
 
         do {
             let terms = try await termsUseCase.fetchActiveTerms(registration: registration)
+            guard isCurrentCommunitySession(sessionGeneration) else {
+                log(.info, "로그아웃으로 약관/알림 설정 조회를 중단했습니다. stage=terms, reason=\(reason)")
+                return
+            }
             let preferences = try await termsUseCase.fetchNotificationPreferences(registration: registration)
+            guard isCurrentCommunitySession(sessionGeneration) else {
+                log(.info, "로그아웃으로 약관/알림 설정 응답 반영을 건너뛰었습니다. stage=preferences, reason=\(reason)")
+                return
+            }
             activeTerms = terms
             notificationPreferences = preferences
             log(.info, "약관/알림 설정을 갱신했습니다. terms=\(terms.count), preferences=\(preferences.count), reason=\(reason)")
         } catch {
+            guard isCurrentCommunitySession(sessionGeneration) else {
+                log(.info, "로그아웃 후 약관/알림 설정 오류 처리를 건너뛰었습니다. reason=\(reason)")
+                return
+            }
             handleAppError(error, fallback: "", target: .none)
             log(.warning, "약관/알림 설정 갱신 실패: \(error.localizedDescription), reason=\(reason)")
         }
+    }
+
+    private func isCurrentCommunitySession(_ generation: UInt64) -> Bool {
+        communitySessionEpoch.isCurrent(generation, sessionIsActive: isCommunitySessionActive)
     }
 
     func saveNotificationPreference(type: BackendNotificationPreferenceType, enabled: Bool) async -> Bool {
