@@ -147,6 +147,8 @@ The first three-round measurement is recorded in [`performance/MVC_VS_WEBFLUX_20
 
 Subsequent comparisons must collect CPU efficiency, RSS and JVM memory pools, allocation and GC behavior, OS/JVM threads, Hikari pressure, runtime worker saturation, and PostgreSQL resource pressure for every API interval. The harness in `backend/loadtest` records these signals alongside JFR, Native Memory Tracking, and thread dumps. A runtime decision based only on RPS or average latency is incomplete.
 
+The current comparison load is a constant arrival-rate sweep at 1,000, 1,500, 2,000, 2,500, and 3,000 RPS per API. Each stage reports achieved RPS, p90/p95/p99, failures, and dropped iterations so overload is not hidden by completed-request latency.
+
 ## Follow-up Boundary
 
 An end-to-end reactive persistence migration should be considered only if measurements show that the bounded JPA model is the limiting factor and the required write transactions can be redesigned explicitly. That project would require R2DBC repositories, reactive transaction management, removal of `runBlocking`, reactive external clients, and new consistency/load tests. It should not be performed as a mechanical return-type conversion.

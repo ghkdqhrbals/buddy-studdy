@@ -29,7 +29,7 @@ On macOS the runner selects JDK 25 through `/usr/libexec/java_home`. Elsewhere, 
 From the repository root:
 
 ```bash
-ROUNDS=3 VUS=50 DURATION=30s backend/loadtest/run-comparison.sh
+ROUNDS=3 DURATION=30s backend/loadtest/run-comparison.sh
 ```
 
 The default comparison is:
@@ -40,6 +40,8 @@ The default comparison is:
 - Hikari: 10 connections
 - Blocking request concurrency: 16 for both MVC/Tomcat and WebFlux
 - API exchange logging: disabled for framework isolation
+- Constant arrival-rate stages: 1,000, 1,500, 2,000, 2,500, and 3,000 RPS per API
+- Latency percentiles: p50, p90, p95, and p99, reported with achieved RPS, failures, and dropped iterations
 
 Raw k6 summaries, application logs, resource telemetry, JFR recordings, and JVM diagnostics are written under `backend/loadtest/results/<UTC timestamp>/`. This directory is ignored by Git.
 
@@ -61,12 +63,11 @@ Useful variations:
 
 ```bash
 # Production-shaped logging cost
-BENCHMARK_LOGGING=INFO ROUNDS=3 VUS=50 DURATION=30s backend/loadtest/run-comparison.sh
+BENCHMARK_LOGGING=INFO ROUNDS=3 DURATION=30s backend/loadtest/run-comparison.sh
 
-# Concurrency sweep
-for vus in 25 50 100 200; do
-  VUS=$vus ROUNDS=5 DURATION=60s backend/loadtest/run-comparison.sh
-done
+# Finer sweep around an observed saturation knee
+TARGET_RPS_LIST=1500,1750,2000,2250,2500 ROUNDS=5 DURATION=60s \
+  backend/loadtest/run-comparison.sh
 
 # Explicit refs
 MVC_REF=eca7e320 WEBFLUX_REF=e264c103 backend/loadtest/run-comparison.sh
@@ -75,7 +76,10 @@ MVC_REF=eca7e320 WEBFLUX_REF=e264c103 backend/loadtest/run-comparison.sh
 ENABLE_JFR=false ENABLE_NMT=false backend/loadtest/run-comparison.sh
 
 # Change resource sampling cadence
-TELEMETRY_INTERVAL=1 ROUNDS=3 VUS=100 DURATION=60s backend/loadtest/run-comparison.sh
+TELEMETRY_INTERVAL=1 ROUNDS=3 DURATION=60s backend/loadtest/run-comparison.sh
+
+# Increase k6 VU capacity for endpoints that remain slow under the 3,000 RPS stage
+PRE_ALLOCATED_VUS=1000 MAX_VUS=4000 backend/loadtest/run-comparison.sh
 
 # Override the disk preflight only when build artifacts are known to fit
 MIN_FREE_DISK_MB=2048 backend/loadtest/run-comparison.sh
@@ -86,7 +90,7 @@ MIN_FREE_DISK_MB=2048 backend/loadtest/run-comparison.sh
 - Use at least three rounds and compare medians. Five rounds are preferable on a developer laptop.
 - Differences below 5% are usually noise until reproduced on the deployment host.
 - Run k6 from a different machine before treating the absolute RPS as production capacity. A same-host run is useful for regression comparison but introduces CPU contention between k6, the JVM, and Docker Desktop.
-- Compare error rate and p95/p99 before average latency.
+- Compare achieved RPS, dropped iterations, error rate, and then p90/p95/p99. At saturation, completed-request latency alone is selection-biased.
 - `health` is not evidence that DB-backed APIs improved.
 - Because persistence remains JPA/JDBC, Hikari and PostgreSQL still determine the useful DB concurrency.
 - A WebFlux result with similar peak RPS can still be preferable if it maintains lower tail latency with slow clients and rejects overload predictably.

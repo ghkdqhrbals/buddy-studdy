@@ -7,22 +7,24 @@ from pathlib import Path
 
 
 def metric(data, name, key):
-    return float(data["metrics"][name]["values"].get(key, 0.0))
+    return float(data.get("metrics", {}).get(name, {}).get("values", {}).get(key, 0.0))
 
 
-def load_results(directory, runtime, rounds, scenario):
+def load_results(directory, runtime, rounds, scenario, target_rps):
     rows = []
     for round_number in range(1, rounds + 1):
-        path = directory / "raw" / f"{runtime}-round{round_number}-{scenario}.json"
+        path = directory / "raw" / f"{runtime}-round{round_number}-{scenario}-rps{target_rps}.json"
         with path.open() as handle:
             data = json.load(handle)
         rows.append(
             {
                 "rps": metric(data, "http_reqs", "rate"),
                 "p50": metric(data, "http_req_duration", "med"),
+                "p90": metric(data, "http_req_duration", "p(90)"),
                 "p95": metric(data, "http_req_duration", "p(95)"),
                 "p99": metric(data, "http_req_duration", "p(99)"),
                 "failure_rate": metric(data, "http_req_failed", "rate"),
+                "dropped": metric(data, "dropped_iterations", "count"),
             }
         )
     return {key: statistics.median(row[key] for row in rows) for key in rows[0]}
@@ -84,8 +86,9 @@ def counter_delta(values):
     return max(0.0, values[-1] - values[0]) if len(values) >= 2 else 0.0
 
 
-def load_telemetry_run(directory, runtime, round_number, scenario):
-    path = directory / "telemetry" / f"{runtime}-round{round_number}-{scenario}.jsonl"
+def load_telemetry_run(directory, runtime, round_number, scenario, target_rps=None):
+    stage = f"{scenario}-rps{target_rps}" if target_rps is not None else scenario
+    path = directory / "telemetry" / f"{runtime}-round{round_number}-{stage}.jsonl"
     samples = []
     if path.exists():
         for line in path.read_text().splitlines():
@@ -160,9 +163,9 @@ def load_telemetry_run(directory, runtime, round_number, scenario):
     }
 
 
-def load_telemetry(directory, runtime, rounds, scenario):
+def load_telemetry(directory, runtime, rounds, scenario, target_rps):
     rows = [
-        load_telemetry_run(directory, runtime, round_number, scenario)
+        load_telemetry_run(directory, runtime, round_number, scenario, target_rps)
         for round_number in range(1, rounds + 1)
     ]
     rows = [row for row in rows if row]
@@ -177,7 +180,7 @@ def main():
     parser.add_argument("--mvc-ref", required=True)
     parser.add_argument("--webflux-ref", required=True)
     parser.add_argument("--rounds", type=int, required=True)
-    parser.add_argument("--vus", required=True)
+    parser.add_argument("--target-rps-list", required=True)
     parser.add_argument("--duration", required=True)
     parser.add_argument("--heap", required=True)
     parser.add_argument("--cpu-count", required=True)
@@ -188,6 +191,7 @@ def main():
     parser.add_argument("--jfr", required=True)
     parser.add_argument("--nmt", required=True)
     args = parser.parse_args()
+    target_rates = [int(value) for value in args.target_rps_list.split(",")]
 
     lines = [
         "# MVC vs WebFlux Load-Test Result",
@@ -195,7 +199,7 @@ def main():
         f"- MVC ref: `{args.mvc_ref}`",
         f"- WebFlux ref: `{args.webflux_ref}`",
         f"- Rounds: {args.rounds} (median reported, execution order alternated)",
-        f"- Load: {args.vus} constant VUs for {args.duration} per endpoint",
+        f"- Load: constant arrival rates {', '.join(str(rate) for rate in target_rates)} RPS for {args.duration} per endpoint",
         f"- JVM: `-Xms{args.heap} -Xmx{args.heap} -XX:ActiveProcessorCount={args.cpu_count}`",
         f"- Hikari maximum pool: {args.db_pool}",
         f"- Blocking request concurrency: {args.blocking_concurrency} for both MVC/Tomcat and WebFlux",
@@ -204,24 +208,27 @@ def main():
         f"- JFR profile recording: {args.jfr}; Native Memory Tracking: {args.nmt}",
         "- Fixture: 1 user, 100 studies, 500 graded public questions",
         "",
-        "| Endpoint | Runtime | RPS | p50 ms | p95 ms | p99 ms | Failed |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| Endpoint | Target RPS | Runtime | Achieved RPS | Achieved | p50 ms | p90 ms | p95 ms | p99 ms | Failed | Dropped |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
 
     comparisons = []
     for scenario in ("health", "public-questions", "studies"):
-        mvc = load_results(args.results_dir, "mvc", args.rounds, scenario)
-        webflux = load_results(args.results_dir, "webflux", args.rounds, scenario)
-        for runtime, values in (("MVC", mvc), ("WebFlux", webflux)):
-            lines.append(
-                f"| {scenario} | {runtime} | {values['rps']:.1f} | {values['p50']:.2f} | "
-                f"{values['p95']:.2f} | {values['p99']:.2f} | {values['failure_rate'] * 100:.3f}% |"
+        for target_rps in target_rates:
+            mvc = load_results(args.results_dir, "mvc", args.rounds, scenario, target_rps)
+            webflux = load_results(args.results_dir, "webflux", args.rounds, scenario, target_rps)
+            for runtime, values in (("MVC", mvc), ("WebFlux", webflux)):
+                achieved = (values["rps"] / target_rps) * 100
+                lines.append(
+                    f"| {scenario} | {target_rps} | {runtime} | {values['rps']:.1f} | {achieved:.1f}% | "
+                    f"{values['p50']:.2f} | {values['p90']:.2f} | {values['p95']:.2f} | "
+                    f"{values['p99']:.2f} | {values['failure_rate'] * 100:.3f}% | {values['dropped']:.0f} |"
+                )
+            comparisons.append(
+                f"- `{scenario}` at {target_rps} RPS: WebFlux achieved-RPS change "
+                f"{delta(webflux['rps'], mvc['rps']):+.1f}%, p90 {delta(webflux['p90'], mvc['p90']):+.1f}%, "
+                f"p95 {delta(webflux['p95'], mvc['p95']):+.1f}%"
             )
-        comparisons.append(
-            f"- `{scenario}`: throughput {delta(webflux['rps'], mvc['rps']):+.1f}%, "
-            f"p95 latency {delta(webflux['p95'], mvc['p95']):+.1f}%, "
-            f"p99 latency {delta(webflux['p99'], mvc['p99']):+.1f}%"
-        )
 
     mvc_rss = load_rss(args.results_dir, "mvc", args.rounds)
     webflux_rss = load_rss(args.results_dir, "webflux", args.rounds)
@@ -235,7 +242,7 @@ def main():
             f"- Process RSS median: MVC {mvc_rss:.1f} MiB, WebFlux {webflux_rss:.1f} MiB "
             f"({delta(webflux_rss, mvc_rss):+.1f}%)",
             "",
-            "Positive latency change means WebFlux is slower. Treat differences below 5% as noise until confirmed on the deployment host with more rounds.",
+            "Positive latency change means WebFlux is slower. At a saturated stage, compare achieved percentage, dropped iterations, and failures before latency because rejected work can make latency appear artificially low.",
             "",
             "## Interpretation Rules",
             "",
@@ -243,15 +250,16 @@ def main():
             "- `public-questions` measures JPA reads and a response containing 20 records.",
             "- `studies` measures JWT verification, session/device DB lookup, JPA pagination, and a 100-row response.",
             "- This project still uses blocking JPA. WebFlux should be judged primarily on event-loop safety, tail latency under slow clients, and overload behavior, not only peak RPS.",
-            "- Run on an idle machine and compare at 25, 50, 100, and 200 VUs before changing production pool sizes.",
+            "- The 1,000-3,000 RPS sweep reveals the saturation knee; repeat around the first stage that drops iterations with smaller RPS increments.",
             "- The load generator and backend share one host in this harness. Use a separate load-generator host for production capacity decisions.",
         ]
     )
 
     telemetry = {
-        (runtime, scenario): load_telemetry(args.results_dir, runtime, args.rounds, scenario)
+        (runtime, scenario, target_rps): load_telemetry(args.results_dir, runtime, args.rounds, scenario, target_rps)
         for runtime in ("mvc", "webflux")
         for scenario in ("health", "public-questions", "studies")
+        for target_rps in target_rates
     }
     if any(telemetry.values()):
         lines.extend(
@@ -261,48 +269,52 @@ def main():
                 "",
                 "Process CPU uses macOS `ps` semantics and may exceed 100% when multiple cores are busy. RSS includes heap and JVM native memory.",
                 "",
-                "| Endpoint | Runtime | JVM CPU median / p95 | k6 / host CPU | RSS median / peak MiB | Heap / nonheap / direct peak MiB | OS / JVM threads peak | GC count / total / max ms | Allocation MiB/s |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| Endpoint | Target RPS | Runtime | JVM CPU median / p95 | k6 / host CPU | RSS median / peak MiB | Heap / nonheap / direct peak MiB | OS / JVM threads peak | GC count / total / max ms | Allocation MiB/s |",
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for scenario in ("health", "public-questions", "studies"):
-            for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
-                row = telemetry[(runtime, scenario)]
-                if not row:
-                    continue
-                lines.append(
-                    f"| {scenario} | {label} | {row['process_cpu_median']:.1f}% / {row['process_cpu_p95']:.1f}% | "
-                    f"{row['load_cpu_median']:.1f}% / {row['system_cpu_median']:.1f}% | "
-                    f"{row['rss_median_mib']:.1f} / {row['rss_peak_mib']:.1f} | "
-                    f"{row['heap_peak_mib']:.1f} / {row['nonheap_peak_mib']:.1f} / {row['direct_peak_mib']:.1f} | "
-                    f"{row['os_threads_peak']:.0f} / {row['jvm_threads_peak']:.0f} | "
-                    f"{row['gc_count']:.0f} / {row['gc_time_ms']:.1f} / {row['gc_max_ms']:.1f} | "
-                    f"{row['allocation_mib_per_second']:.1f} |"
-                )
+            for target_rps in target_rates:
+                for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
+                    row = telemetry[(runtime, scenario, target_rps)]
+                    if not row:
+                        continue
+                    lines.append(
+                        f"| {scenario} | {target_rps} | {label} | "
+                        f"{row['process_cpu_median']:.1f}% / {row['process_cpu_p95']:.1f}% | "
+                        f"{row['load_cpu_median']:.1f}% / {row['system_cpu_median']:.1f}% | "
+                        f"{row['rss_median_mib']:.1f} / {row['rss_peak_mib']:.1f} | "
+                        f"{row['heap_peak_mib']:.1f} / {row['nonheap_peak_mib']:.1f} / {row['direct_peak_mib']:.1f} | "
+                        f"{row['os_threads_peak']:.0f} / {row['jvm_threads_peak']:.0f} | "
+                        f"{row['gc_count']:.0f} / {row['gc_time_ms']:.1f} / {row['gc_max_ms']:.1f} | "
+                        f"{row['allocation_mib_per_second']:.1f} |"
+                    )
 
         lines.extend(
             [
                 "",
                 "## Pools and Dependencies",
                 "",
-                "| Endpoint | Runtime | Hikari active / pending max | Runtime workers active / queued max | PostgreSQL total / active / waiting max | PG cache hit | PG CPU / memory MiB | Redis CPU / memory MiB / ops max |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| Endpoint | Target RPS | Runtime | Hikari active / pending max | Runtime workers active / queued max | PostgreSQL total / active / waiting max | PG cache hit | PG CPU / memory MiB | Redis CPU / memory MiB / ops max |",
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for scenario in ("health", "public-questions", "studies"):
-            for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
-                row = telemetry[(runtime, scenario)]
-                if not row:
-                    continue
-                worker_active = row["tomcat_busy_max"] if runtime == "mvc" else row["webflux_active_max"]
-                worker_queued = 0.0 if runtime == "mvc" else row["webflux_queued_max"]
-                lines.append(
-                    f"| {scenario} | {label} | {row['hikari_active_max']:.0f} / {row['hikari_pending_max']:.0f} | "
-                    f"{worker_active:.0f} / {worker_queued:.0f} | {row['pg_connections_max']:.0f} / "
-                    f"{row['pg_active_max']:.0f} / {row['pg_waiting_max']:.0f} | {row['pg_cache_hit_percent']:.2f}% | "
-                    f"{row['postgres_cpu_median']:.1f}% / {row['postgres_memory_peak_mib']:.1f} | "
-                    f"{row['redis_cpu_median']:.1f}% / {row['redis_memory_peak_mib']:.1f} / {row['redis_ops_max']:.0f} |"
-                )
+            for target_rps in target_rates:
+                for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
+                    row = telemetry[(runtime, scenario, target_rps)]
+                    if not row:
+                        continue
+                    worker_active = row["tomcat_busy_max"] if runtime == "mvc" else row["webflux_active_max"]
+                    worker_queued = 0.0 if runtime == "mvc" else row["webflux_queued_max"]
+                    lines.append(
+                        f"| {scenario} | {target_rps} | {label} | "
+                        f"{row['hikari_active_max']:.0f} / {row['hikari_pending_max']:.0f} | "
+                        f"{worker_active:.0f} / {worker_queued:.0f} | {row['pg_connections_max']:.0f} / "
+                        f"{row['pg_active_max']:.0f} / {row['pg_waiting_max']:.0f} | {row['pg_cache_hit_percent']:.2f}% | "
+                        f"{row['postgres_cpu_median']:.1f}% / {row['postgres_memory_peak_mib']:.1f} | "
+                        f"{row['redis_cpu_median']:.1f}% / {row['redis_memory_peak_mib']:.1f} / {row['redis_ops_max']:.0f} |"
+                    )
 
         lines.extend(
             [

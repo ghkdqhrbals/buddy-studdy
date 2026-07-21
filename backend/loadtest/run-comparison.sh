@@ -8,9 +8,13 @@ REPO_DIR="$(cd "$BACKEND_DIR/.." && pwd)"
 MVC_REF="${MVC_REF:-eca7e320}"
 WEBFLUX_REF="${WEBFLUX_REF:-HEAD}"
 ROUNDS="${ROUNDS:-3}"
-VUS="${VUS:-50}"
+TARGET_RPS_LIST="${TARGET_RPS_LIST:-1000,1500,2000,2500,3000}"
 DURATION="${DURATION:-30s}"
 WARMUP_DURATION="${WARMUP_DURATION:-10s}"
+REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-5s}"
+PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-}"
+MAX_VUS="${MAX_VUS:-}"
+STAGE_COOLDOWN_SECONDS="${STAGE_COOLDOWN_SECONDS:-5}"
 JVM_HEAP="${JVM_HEAP:-512m}"
 JVM_CPU_COUNT="${JVM_CPU_COUNT:-4}"
 DB_POOL_MAX="${DB_POOL_MAX:-10}"
@@ -22,6 +26,13 @@ ENABLE_JFR="${ENABLE_JFR:-true}"
 ENABLE_NMT="${ENABLE_NMT:-true}"
 MIN_FREE_DISK_MB="${MIN_FREE_DISK_MB:-4096}"
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)}"
+IFS=',' read -r -a TARGET_RATES <<< "$TARGET_RPS_LIST"
+for target_rps in "${TARGET_RATES[@]}"; do
+  if [[ ! "$target_rps" =~ ^[1-9][0-9]*$ ]]; then
+    echo "TARGET_RPS_LIST must contain positive integers: $TARGET_RPS_LIST" >&2
+    exit 1
+  fi
+done
 
 if [[ -n "${BENCHMARK_JAVA_BIN:-}" ]]; then
   JAVA_BIN="$BENCHMARK_JAVA_BIN"
@@ -233,16 +244,21 @@ run_scenario() {
   local runtime="$1"
   local round="$2"
   local scenario="$3"
-  local prefix="$RESULTS_DIR/raw/${runtime}-round${round}-${scenario}"
-  local diagnostic_prefix="$RESULTS_DIR/diagnostics/${runtime}-round${round}-${scenario}"
-  local telemetry_file="$RESULTS_DIR/telemetry/${runtime}-round${round}-${scenario}.jsonl"
-  local recording_name="${runtime}_round${round}_${scenario//-/_}"
-  local jfr_file="$RESULTS_DIR/jfr/${runtime}-round${round}-${scenario}.jfr"
+  local target_rps="$4"
+  local stage="${scenario}-rps${target_rps}"
+  local prefix="$RESULTS_DIR/raw/${runtime}-round${round}-${stage}"
+  local diagnostic_prefix="$RESULTS_DIR/diagnostics/${runtime}-round${round}-${stage}"
+  local telemetry_file="$RESULTS_DIR/telemetry/${runtime}-round${round}-${stage}.jsonl"
+  local recording_name="${runtime}_round${round}_${scenario//-/_}_rps${target_rps}"
+  local jfr_file="$RESULTS_DIR/jfr/${runtime}-round${round}-${stage}.jfr"
 
   BASE_URL="http://127.0.0.1:$APP_PORT" \
     ACCESS_TOKEN="$ACCESS_TOKEN" \
     SCENARIO="$scenario" \
-    VUS="$VUS" \
+    TARGET_RPS="$target_rps" \
+    PRE_ALLOCATED_VUS="$PRE_ALLOCATED_VUS" \
+    MAX_VUS="$MAX_VUS" \
+    REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
     DURATION="$WARMUP_DURATION" \
     SUMMARY_PATH="$prefix-warmup.json" \
     k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null
@@ -260,7 +276,10 @@ run_scenario() {
   BASE_URL="http://127.0.0.1:$APP_PORT" \
     ACCESS_TOKEN="$ACCESS_TOKEN" \
     SCENARIO="$scenario" \
-    VUS="$VUS" \
+    TARGET_RPS="$target_rps" \
+    PRE_ALLOCATED_VUS="$PRE_ALLOCATED_VUS" \
+    MAX_VUS="$MAX_VUS" \
+    REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
     DURATION="$DURATION" \
     SUMMARY_PATH="$prefix.json" \
     k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null &
@@ -295,6 +314,7 @@ run_scenario() {
     "$JCMD_BIN" "$APP_PID" Thread.print -l >"$diagnostic_prefix-threads.txt" 2>&1 || true
     "$JCMD_BIN" "$APP_PID" GC.heap_info >"$diagnostic_prefix-heap.txt" 2>&1 || true
   fi
+  sleep "$STAGE_COOLDOWN_SECONDS"
   return "$k6_status"
 }
 
@@ -308,8 +328,10 @@ run_runtime() {
   seed_data
 
   for scenario in health public-questions studies; do
-    echo "[$runtime round $round] $scenario"
-    run_scenario "$runtime" "$round" "$scenario"
+    for target_rps in "${TARGET_RATES[@]}"; do
+      echo "[$runtime round $round] $scenario at $target_rps RPS"
+      run_scenario "$runtime" "$round" "$scenario" "$target_rps"
+    done
   done
 
   ps -o rss= -p "$APP_PID" | awk '{ print $1 }' > "$RESULTS_DIR/raw/${runtime}-round${round}-rss-kb.txt"
@@ -322,7 +344,7 @@ write_report() {
     --mvc-ref "$MVC_COMMIT" \
     --webflux-ref "$WEBFLUX_COMMIT" \
     --rounds "$ROUNDS" \
-    --vus "$VUS" \
+    --target-rps-list "$TARGET_RPS_LIST" \
     --duration "$DURATION" \
     --heap "$JVM_HEAP" \
     --cpu-count "$JVM_CPU_COUNT" \

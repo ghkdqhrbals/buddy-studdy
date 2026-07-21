@@ -67,15 +67,16 @@ If those tests do not show a product-relevant advantage, MVC is the simpler and 
 Use the harness in [`backend/loadtest/README.md`](../../backend/loadtest/README.md):
 
 ```bash
-ROUNDS=3 VUS=50 DURATION=30s backend/loadtest/run-comparison.sh
+ROUNDS=3 DURATION=30s backend/loadtest/run-comparison.sh
 ```
 
-Before production decisions, run a concurrency sweep from another host:
+The current harness uses constant arrival-rate stages from 1,000 through 3,000 RPS and reports p90/p95 together with achieved rate and dropped iterations. This is a different workload model from the historical 50-VU baseline above, so compare results only within the same harness configuration.
+
+Before production decisions, rerun a finer sweep around the observed saturation point from another host:
 
 ```bash
-for vus in 25 50 100 200; do
-  VUS=$vus ROUNDS=5 DURATION=60s backend/loadtest/run-comparison.sh
-done
+TARGET_RPS_LIST=1500,1750,2000,2250,2500 ROUNDS=5 DURATION=60s \
+  backend/loadtest/run-comparison.sh
 ```
 
-For each concurrency level, retain and compare the generated resource tables, JFR recordings, NMT diffs, and thread dumps. Throughput and latency alone are insufficient when the runtimes use different threading models.
+For each arrival-rate stage, retain and compare the generated resource tables, JFR recordings, NMT diffs, and thread dumps. Throughput and latency alone are insufficient when the runtimes use different threading models.
