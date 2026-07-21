@@ -1380,6 +1380,125 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(state.isLikedByMe)
     }
 
+    func testNotificationPageDecodesBackendReadFieldName() throws {
+        let payload = Data(
+            """
+            {
+              "notifications": [
+                {
+                  "id": "17",
+                  "type": "QUESTION_ANSWERED",
+                  "title": "답변이 등록되었습니다",
+                  "body": "질문 답변을 확인하세요.",
+                  "threadType": "question",
+                  "threadId": "25",
+                  "deepLink": "buddystudy://questions/25",
+                  "read": false,
+                  "createdAt": "2026-07-20T08:00:00.123Z",
+                  "readAt": null
+                }
+              ],
+              "unreadCount": 2,
+              "totalCount": 2,
+              "limit": 30,
+              "offset": 0
+            }
+            """.utf8
+        )
+
+        let page = try RemotePushBackendClient.makeDecoder().decode(BackendNotificationsPage.self, from: payload)
+
+        XCTAssertEqual(page.notifications.count, 1)
+        XCTAssertEqual(page.notifications.first?.id, "17")
+        XCTAssertEqual(page.notifications.first?.isRead, false)
+        XCTAssertEqual(page.unreadCount, 2)
+        XCTAssertEqual(page.totalCount, 2)
+    }
+
+    func testNotificationPageStillDecodesLegacyIsReadFieldName() throws {
+        let payload = Data(
+            """
+            {
+              "notifications": [
+                {
+                  "id": "18",
+                  "type": "COMMENT",
+                  "title": "댓글이 등록되었습니다",
+                  "body": "새 댓글을 확인하세요.",
+                  "isRead": true,
+                  "createdAt": "2026-07-20T08:00:00Z",
+                  "readAt": "2026-07-20T08:01:00Z"
+                }
+              ],
+              "unreadCount": 0,
+              "totalCount": 1,
+              "limit": 30,
+              "offset": 0
+            }
+            """.utf8
+        )
+
+        let page = try RemotePushBackendClient.makeDecoder().decode(BackendNotificationsPage.self, from: payload)
+
+        XCTAssertEqual(page.notifications.first?.isRead, true)
+        XCTAssertNotNil(page.notifications.first?.readAt)
+    }
+
+    func testNotificationPageRejectsMissingCollectionWhenCountsArePositive() {
+        let payload = Data(#"{"unreadCount":2,"totalCount":2,"limit":30,"offset":0}"#.utf8)
+
+        XCTAssertThrowsError(
+            try RemotePushBackendClient.makeDecoder().decode(BackendNotificationsPage.self, from: payload)
+        ) { error in
+            let diagnostic = AppErrorHandlingUseCase().diagnosticDescription(for: error)
+            XCTAssertTrue(diagnostic.contains("path=$.notifications"))
+        }
+    }
+
+    func testAPIValidationDecodesBackendValidFieldName() throws {
+        let payload = Data(#"{"openaiKeyConfigured":true,"valid":true,"openaiModel":"gpt-5.4"}"#.utf8)
+
+        let response = try JSONDecoder().decode(BackendAPIValidation.self, from: payload)
+
+        XCTAssertTrue(response.openAIKeyConfigured)
+        XCTAssertTrue(response.isValid)
+        XCTAssertEqual(response.openAIModel, "gpt-5.4")
+    }
+
+    func testStudyRecordDecodesBackendPublicFieldName() throws {
+        let payload = Data(
+            """
+            {
+              "id": "25",
+              "question": {
+                "question": "메시지 중복 처리를 설명하세요.",
+                "expectedAnswerHint": null,
+                "createdAt": "2026-07-20T08:00:00Z"
+              },
+              "answer": "소비자에서 멱등하게 처리합니다.",
+              "gradingResult": {
+                "score": 88,
+                "correct": true,
+                "feedback": "좋아요.",
+                "explanation": "핵심을 설명했습니다."
+              },
+              "topic": "메시지큐",
+              "difficulty": 7,
+              "answeredAt": "2026-07-20T08:01:00Z",
+              "public": false,
+              "likeCount": 2,
+              "commentCount": 1,
+              "viewCount": 12
+            }
+            """.utf8
+        )
+
+        let record = try RemotePushBackendClient.makeDecoder().decode(StudyRecord.self, from: payload)
+
+        XCTAssertFalse(record.isPublic)
+        XCTAssertEqual(record.gradingResult?.isCorrect, true)
+    }
+
     func testDecodingDiagnosticIncludesMissingKeyAndCodingPath() {
         struct RequiredBodyPayload: Decodable {
             let body: String

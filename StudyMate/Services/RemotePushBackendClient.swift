@@ -1758,8 +1758,13 @@ struct BackendStudyPage: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        studies = try container.decodeIfPresent([BackendStudyRoom].self, forKey: .studies) ?? []
-        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? studies.count
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+        studies = try container.decodeRequiredCollectionWhenPopulated(
+            [BackendStudyRoom].self,
+            forKey: .studies,
+            expectedCount: totalCount
+        )
+        totalCount = max(totalCount, studies.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? studies.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
         serverTime = try container.decodeIfPresent(Date.self, forKey: .serverTime) ?? Date()
@@ -1824,8 +1829,13 @@ struct BackendRecordsPage: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        records = try container.decodeIfPresent([StudyRecord].self, forKey: .records) ?? []
-        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? records.count
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+        records = try container.decodeRequiredCollectionWhenPopulated(
+            [StudyRecord].self,
+            forKey: .records,
+            expectedCount: totalCount
+        )
+        totalCount = max(totalCount, records.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? records.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
     }
@@ -1852,10 +1862,25 @@ struct BackendAPIValidation: Decodable, Equatable {
     var isValid: Bool
     var openAIModel: String
 
+    init(openAIKeyConfigured: Bool, isValid: Bool, openAIModel: String) {
+        self.openAIKeyConfigured = openAIKeyConfigured
+        self.isValid = isValid
+        self.openAIModel = openAIModel
+    }
+
     enum CodingKeys: String, CodingKey {
         case openAIKeyConfigured = "openaiKeyConfigured"
         case isValid
+        case valid
         case openAIModel = "openaiModel"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        openAIKeyConfigured = try container.decode(Bool.self, forKey: .openAIKeyConfigured)
+        isValid = try container.decodeIfPresent(Bool.self, forKey: .isValid)
+            ?? container.decode(Bool.self, forKey: .valid)
+        openAIModel = try container.decode(String.self, forKey: .openAIModel)
     }
 }
 
@@ -2152,8 +2177,13 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        questions = try container.decodeIfPresent([CommunityQuestion].self, forKey: .questions) ?? []
-        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? questions.count
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+        questions = try container.decodeRequiredCollectionWhenPopulated(
+            [CommunityQuestion].self,
+            forKey: .questions,
+            expectedCount: totalCount
+        )
+        totalCount = max(totalCount, questions.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? questions.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
     }
@@ -2181,8 +2211,13 @@ struct CommunityCommentsResponse: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        comments = try container.decodeIfPresent([CommunityQuestionComment].self, forKey: .comments) ?? []
-        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? comments.count
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+        comments = try container.decodeRequiredCollectionWhenPopulated(
+            [CommunityQuestionComment].self,
+            forKey: .comments,
+            expectedCount: totalCount
+        )
+        totalCount = max(totalCount, comments.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? comments.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
     }
@@ -2199,6 +2234,59 @@ struct BackendAppNotification: Decodable, Equatable, Identifiable {
     var isRead: Bool
     var createdAt: Date
     var readAt: Date?
+
+    init(
+        id: String,
+        type: String,
+        title: String,
+        body: String,
+        threadType: String? = nil,
+        threadId: String? = nil,
+        deepLink: String? = nil,
+        isRead: Bool,
+        createdAt: Date,
+        readAt: Date? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.body = body
+        self.threadType = threadType
+        self.threadId = threadId
+        self.deepLink = deepLink
+        self.isRead = isRead
+        self.createdAt = createdAt
+        self.readAt = readAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case title
+        case body
+        case threadType
+        case threadId
+        case deepLink
+        case isRead
+        case read
+        case createdAt
+        case readAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        threadType = try container.decodeIfPresent(String.self, forKey: .threadType)
+        threadId = try container.decodeIfPresent(String.self, forKey: .threadId)
+        deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
+        isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead)
+            ?? container.decode(Bool.self, forKey: .read)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        readAt = try container.decodeIfPresent(Date.self, forKey: .readAt)
+    }
 }
 
 struct BackendNotificationsPage: Decodable, Equatable {
@@ -2232,11 +2320,38 @@ struct BackendNotificationsPage: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        notifications = try container.decodeIfPresent([BackendAppNotification].self, forKey: .notifications) ?? []
         unreadCount = try container.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
-        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? notifications.count
+        totalCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+        notifications = try container.decodeRequiredCollectionWhenPopulated(
+            [BackendAppNotification].self,
+            forKey: .notifications,
+            expectedCount: max(unreadCount, totalCount)
+        )
+        totalCount = max(totalCount, notifications.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? notifications.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeRequiredCollectionWhenPopulated<Element: Decodable>(
+        _ type: [Element].Type,
+        forKey key: Key,
+        expectedCount: Int
+    ) throws -> [Element] {
+        if contains(key) {
+            return try decode(type, forKey: key)
+        }
+        guard expectedCount > 0 else {
+            return []
+        }
+        throw DecodingError.keyNotFound(
+            key,
+            DecodingError.Context(
+                codingPath: codingPath,
+                debugDescription: "Response reports \(expectedCount) items but omits the \(key.stringValue) collection."
+            )
+        )
     }
 }
 

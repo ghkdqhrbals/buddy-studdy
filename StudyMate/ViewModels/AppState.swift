@@ -1503,7 +1503,10 @@ final class AppState: ObservableObject {
                     return
                 }
                 handleAppError(error, fallback: error.localizedDescription, target: .notification)
-                log(.warning, "알림 목록 조회 실패: \(error.localizedDescription)")
+                log(
+                    .warning,
+                    "알림 목록 조회 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+                )
             },
             onCompletion: {
                 guard isCurrentCommunitySession(sessionGeneration) else {

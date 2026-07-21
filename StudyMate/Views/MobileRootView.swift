@@ -1339,12 +1339,20 @@ private struct MobileNotificationsView: View {
                     .listRowBackground(Color.clear)
             } else if appState.notifications.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(strings.noNotifications)
+                    Text(appState.notificationErrorMessage == nil ? strings.noNotifications : strings.unableToLoadNotifications)
                         .font(.title2.weight(.bold))
-                    Text(strings.noNotificationsDescription)
+                    Text(appState.notificationErrorMessage ?? strings.noNotificationsDescription)
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if appState.notificationErrorMessage != nil {
+                        Button(strings.retry) {
+                            Task {
+                                await appState.loadNotifications(reset: true)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: 320, alignment: .center)
                 .listRowSeparator(.hidden)

@@ -1003,6 +1003,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case viewCount
     }
 
+    private enum BackendBooleanCodingKeys: String, CodingKey {
+        case publicValue = "public"
+    }
+
     init(
         id: String = UUID().uuidString,
         question: QuestionItem,
@@ -1031,6 +1035,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let backendBooleanContainer = try decoder.container(keyedBy: BackendBooleanCodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         question = try container.decode(QuestionItem.self, forKey: .question)
         answer = try container.decodeIfPresent(String.self, forKey: .answer)
@@ -1038,7 +1043,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
         difficulty = try container.decodeIfPresent(Difficulty.self, forKey: .difficulty) ?? Difficulty(level: 5)
         answeredAt = try container.decodeIfPresent(Date.self, forKey: .answeredAt)
-        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? true
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic)
+            ?? backendBooleanContainer.decodeIfPresent(Bool.self, forKey: .publicValue)
+            ?? true
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
@@ -1745,6 +1752,7 @@ struct AppStrings {
     var notificationSoundHelp: String { text("질문 알림을 받을 때 소리를 낼지 선택합니다.", "Choose whether question notifications play a sound.") }
     var notificationInbox: String { text("알림", "Notifications") }
     var noNotifications: String { text("아직 알림이 없습니다", "No notifications yet") }
+    var unableToLoadNotifications: String { text("알림을 불러오지 못했습니다", "Unable to load notifications") }
     var noNotificationsDescription: String {
         text("댓글, 좋아요 같은 활동이 생기면 여기에 표시됩니다.", "Thread activity such as comments and likes will appear here.")
     }
