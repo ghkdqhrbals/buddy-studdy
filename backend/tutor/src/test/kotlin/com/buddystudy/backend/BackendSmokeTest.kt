@@ -6,9 +6,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.web.server.reactive.context.ReactiveWebServerApplicationContext
+import org.springframework.context.ApplicationContext
 import org.springframework.test.context.TestPropertySource
 
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
     properties = [
         "spring.datasource.url=jdbc:h2:mem:buddystudy;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
@@ -23,6 +25,13 @@ import org.springframework.test.context.TestPropertySource
 )
 class BackendSmokeTest {
     @Autowired lateinit var login: LoginService
+    @Autowired lateinit var context: ApplicationContext
+
+    @Test
+    fun `application starts with a reactive web server`() {
+        assertThat(context).isInstanceOf(ReactiveWebServerApplicationContext::class.java)
+        assertThat(runCatching { Class.forName("org.springframework.web.servlet.DispatcherServlet") }.isFailure).isTrue()
+    }
 
     @Test
     fun `register creates anonymous user and access token with device id`() {

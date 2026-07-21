@@ -15,9 +15,9 @@ import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.Authentication
 import org.springframework.http.HttpStatus
+import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -40,7 +40,7 @@ class PermissionPolicyController(
     @PostMapping("/terms/agreements")
     fun agreements(
         authentication: Authentication,
-        request: HttpServletRequest,
+        request: ServerHttpRequest,
         @RequestBody body: TermsAgreementRequest,
         @RequestHeader("User-Agent", required = false) userAgent: String?,
         @RequestHeader("X-App-Version", required = false) appVersion: String?,

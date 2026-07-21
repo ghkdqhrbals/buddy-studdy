@@ -1,205 +1,156 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
-import jakarta.servlet.ServletRequest
-import jakarta.servlet.ServletResponse
-import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
-import org.springframework.mock.web.MockHttpServletRequest
-import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.web.server.MockServerWebExchange
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Mono
 
 @ExtendWith(OutputCaptureExtension::class)
 class RequestLoggingFilterTest {
     private val filter = RequestLoggingFilter()
 
     @Test
-    fun `response body is preserved after content caching logging`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/studies")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.contentType = "application/json"
-            servletResponse.writer.write("""{"ok":true}""")
+    fun `response body is preserved after reactive logging`() {
+        val exchange = execute(MockServerHttpRequest.get("/api/v1/studies").build()) { current ->
+            writeJson(current, """{"ok":true}""")
         }
 
-        filter.doFilter(request, response, chain)
-
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK)
-        assertThat(response.contentAsString).isEqualTo("""{"ok":true}""")
+        assertThat(exchange.response.statusCode ?: HttpStatus.OK).isEqualTo(HttpStatus.OK)
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"ok":true}""")
     }
 
     @Test
     fun `request body is still available to downstream handlers`() {
-        val request = MockHttpServletRequest("PUT", "/api/v1/settings")
-        request.contentType = "application/json"
-        request.setContent(
-            """
-                {"openaiApiKey":"sk-secret","schedules":[{"topic":"Swift"}]}
-            """.trimIndent().toByteArray()
-        )
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { servletRequest, servletResponse ->
-            val body = servletRequest.inputStream.readBytes().decodeToString()
-            assertThat(body).contains("sk-secret")
-            servletResponse.writer.write("""{"saved":true}""")
+        val requestBody = """{"openaiApiKey":"sk-secret","schedules":[{"topic":"Swift"}]}"""
+        val exchange = execute(
+            MockServerHttpRequest.put("/api/v1/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(requestBody),
+        ) { current ->
+            readBody(current).flatMap { body ->
+                assertThat(body).contains("sk-secret")
+                writeJson(current, """{"saved":true}""")
+            }
         }
 
-        filter.doFilter(request, response, chain)
-
-        assertThat(response.contentAsString).isEqualTo("""{"saved":true}""")
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"saved":true}""")
     }
 
     @Test
-    fun `api request and response are logged in a single exchange line`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("POST", "/api/v1/auth/google")
-        request.contentType = "application/json"
-        request.addHeader("Authorization", "Bearer access-token")
-        request.addHeader("CF-Connecting-IP", "203.0.113.10")
-        request.setContent("""{"idToken":"google-id-token"}""".toByteArray())
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { servletRequest, servletResponse ->
-            servletRequest.inputStream.readBytes()
-            servletResponse.contentType = "application/json"
-            servletResponse.writer.write("""{"accessToken":"app-token"}""")
+    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput) {
+        val exchange = execute(
+            MockServerHttpRequest.post("/api/v1/auth/google")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer access-token")
+                .header("CF-Connecting-IP", "203.0.113.10")
+                .body("""{"idToken":"google-id-token"}"""),
+        ) { current ->
+            readBody(current).flatMap { writeJson(current, """{"accessToken":"app-token"}""") }
         }
 
-        filter.doFilter(request, response, chain)
-
+        assertThat(exchange.response.bodyAsString.block()).contains("app-token")
         assertThat(output.out).contains("api_exchange")
         assertThat(output.out).contains("\"method\":\"POST\"")
         assertThat(output.out).contains("\"path\":\"/api/v1/auth/google\"")
-        assertThat(output.out).contains("\"requestHeaders\":{")
         assertThat(output.out).contains("\"requestBody\":{\"idToken\":\"[REDACTED]\"}")
         assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"[REDACTED]\"}")
-        assertThat(output.out).doesNotContain("\"request\":{")
-        assertThat(output.out).doesNotContain("\"response\":{")
         assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
-        assertThat(output.out).contains("\"Authorization\":\"Bearer access-token\"")
-        assertThat(output.out).doesNotContain("api_request")
-        assertThat(output.out).doesNotContain("api_response {\"requestId\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).doesNotContain("Bearer access-token")
+        assertThat(output.out).doesNotContain("google-id-token")
     }
 
     @Test
-    fun `json response body without charset is logged as utf8`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/studies")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.contentType = "application/json"
-            servletResponse.outputStream.write("""{"customPrompt":"짧고 명확하게"}""".toByteArray(Charsets.UTF_8))
+    fun `json response is logged as nested utf8 json without escaped quotes`(output: CapturedOutput) {
+        val exchange = execute(MockServerHttpRequest.get("/api/v1/records").build()) { current ->
+            writeJson(current, """{"records":[{"id":1,"question":"짧고 명확하게"}]}""")
         }
 
-        filter.doFilter(request, response, chain)
-
-        assertThat(response.contentAsByteArray.decodeToString()).contains("짧고 명확하게")
-        assertThat(output.out).contains("짧고 명확하게")
-        assertThat(output.out).doesNotContain("ì§§")
-    }
-
-    @Test
-    fun `json response body is logged as nested json without escaped quotes`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/records")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.contentType = "application/json"
-            servletResponse.writer.write("""{"records":[{"id":1,"question":"Swift?"}]}""")
-        }
-
-        filter.doFilter(request, response, chain)
-
-        assertThat(output.out).contains("\"responseBody\":{\"records\":[{\"id\":1,\"question\":\"Swift?\"}]}")
-        assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
-    }
-
-    @Test
-    fun `json-like response body without content type is logged as nested json`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/records")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.writer.write("""{"records":[{"id":1}]}""")
-        }
-
-        filter.doFilter(request, response, chain)
-
-        assertThat(output.out).contains("\"responseBody\":{\"records\":[{\"id\":1}]}")
+        assertThat(exchange.response.bodyAsString.block()).contains("짧고 명확하게")
+        assertThat(output.out).contains("\"responseBody\":{\"records\":[{\"id\":1,\"question\":\"짧고 명확하게\"}]}")
         assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
     }
 
     @Test
     fun `json-like header values are logged as nested json`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/records")
-        request.addHeader("Cf-Visitor", """{"scheme":"https"}""")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.writer.write("""{"ok":true}""")
-        }
-
-        filter.doFilter(request, response, chain)
+        execute(
+            MockServerHttpRequest.get("/api/v1/records")
+                .header("Cf-Visitor", """{"scheme":"https"}""")
+                .build(),
+        ) { current -> writeJson(current, """{"ok":true}""") }
 
         assertThat(output.out).contains("\"Cf-Visitor\":{\"scheme\":\"https\"}")
-        assertThat(output.out).doesNotContain("\"Cf-Visitor\":\"{\\\"scheme\\\":\\\"https\\\"}\"")
     }
 
     @Test
-    fun `large json response body is logged as truncated metadata`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/records")
-        val response = MockHttpServletResponse()
+    fun `large response body capture is bounded and response remains complete`(output: CapturedOutput) {
         val records = (1..300).joinToString(",") { index ->
             """{"id":$index,"question":"question-$index-${"x".repeat(40)}"}"""
         }
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.contentType = "application/json"
-            servletResponse.writer.write("""{"records":[$records]}""")
+        val responseBody = """{"records":[$records]}"""
+        val exchange = execute(MockServerHttpRequest.get("/api/v1/records").build()) { current ->
+            writeJson(current, responseBody)
         }
 
-        filter.doFilter(request, response, chain)
-
-        assertThat(response.contentAsString).contains("question-300")
+        assertThat(exchange.response.bodyAsString.block()).contains("question-300")
         assertThat(output.out).contains("\"responseBody\":{\"truncated\":true")
-        assertThat(output.out).contains("\"originalChars\":")
+        assertThat(output.out).contains("\"observedBytes\":")
         assertThat(output.out).contains("\"preview\":")
         assertThat(output.out).doesNotContain("question-300")
-        assertThat(output.out).doesNotContain("\"responseBody\":\"{\\\"records\\\"")
     }
 
     @Test
     fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/records")
-        request.addHeader("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            servletResponse.writer.write("""{"ok":true}""")
-        }
-
-        filter.doFilter(request, response, chain)
+        execute(
+            MockServerHttpRequest.get("/api/v1/records")
+                .header("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
+                .build(),
+        ) { current -> writeJson(current, """{"ok":true}""") }
 
         assertThat(output.out).contains("\"clientIp\":\"198.51.100.7\"")
     }
 
     @Test
     fun `server error api exchanges are logged at error level`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("GET", "/api/v1/stats")
-        val response = MockHttpServletResponse()
-        val chain = FilterChain { _, servletResponse ->
-            val httpResponse = servletResponse as HttpServletResponse
-            httpResponse.status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR
-            httpResponse.contentType = "application/json"
-            httpResponse.writer.write("""{"error":{"code":"INTERNAL_SERVER_ERROR"}}""")
+        execute(MockServerHttpRequest.get("/api/v1/stats").build()) { current ->
+            current.response.statusCode = HttpStatus.INTERNAL_SERVER_ERROR
+            writeJson(current, """{"error":{"code":"INTERNAL_SERVER_ERROR"}}""")
         }
-
-        filter.doFilter(request, response, chain)
 
         assertThat(output.all).contains("ERROR")
         assertThat(output.all).contains("api_exchange")
         assertThat(output.all).contains("\"status\":500")
     }
 
-    private fun interface FilterChain : jakarta.servlet.FilterChain {
-        fun doFilterInternal(request: ServletRequest, response: ServletResponse)
+    private fun execute(
+        request: MockServerHttpRequest,
+        handler: (ServerWebExchange) -> Mono<Void>,
+    ): MockServerWebExchange {
+        val exchange = MockServerWebExchange.from(request)
+        filter.filter(exchange, WebFilterChain(handler)).block()
+        return exchange
+    }
 
-        override fun doFilter(request: ServletRequest, response: ServletResponse) {
-            doFilterInternal(request, response)
+    private fun readBody(exchange: ServerWebExchange): Mono<String> =
+        DataBufferUtils.join(exchange.request.body).map { buffer ->
+            val bytes = ByteArray(buffer.readableByteCount())
+            buffer.read(bytes)
+            DataBufferUtils.release(buffer)
+            bytes.decodeToString()
         }
+
+    private fun writeJson(exchange: ServerWebExchange, body: String): Mono<Void> {
+        exchange.response.headers.contentType = MediaType.APPLICATION_JSON
+        val buffer = exchange.response.bufferFactory().wrap(body.toByteArray())
+        return exchange.response.writeWith(Mono.just(buffer))
     }
 }

@@ -1,46 +1,118 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import jakarta.servlet.FilterChain
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
+import org.reactivestreams.Publisher
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
+import org.springframework.core.io.buffer.DataBuffer
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator
+import org.springframework.http.server.reactive.ServerHttpResponseDecorator
 import org.springframework.stereotype.Component
-import org.springframework.web.util.ContentCachingRequestWrapper
-import org.springframework.web.util.ContentCachingResponseWrapper
-import org.springframework.web.filter.OncePerRequestFilter
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.ServerWebExchangeDecorator
+import org.springframework.web.server.WebFilter
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 class RequestLoggingFilter(
     objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
-) : OncePerRequestFilter() {
+) : WebFilter {
     private val log = LoggerFactory.getLogger(javaClass)
     private val formatter = ApiExchangeLogFormatter(objectMapper)
 
-    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
+    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
-        val requestWrapper = ContentCachingRequestWrapper(request, MAX_BODY_BYTES)
-        val responseWrapper = ContentCachingResponseWrapper(response)
-        requestWrapper.setAttribute("requestId", requestId)
-        responseWrapper.setHeader("X-Request-Id", requestId)
+        val requestCapture = BodyCapture(MAX_BODY_BYTES)
+        val responseCapture = BodyCapture(MAX_BODY_BYTES)
         val started = System.nanoTime()
+        val logged = AtomicBoolean(false)
+
+        exchange.attributes[REQUEST_ID_ATTRIBUTE] = requestId
+        exchange.response.headers.set(REQUEST_ID_HEADER, requestId)
+
+        val request = object : ServerHttpRequestDecorator(exchange.request) {
+            override fun getBody(): Flux<DataBuffer> =
+                super.getBody().doOnNext(requestCapture::capture)
+        }
+        val response = object : ServerHttpResponseDecorator(exchange.response) {
+            override fun writeWith(body: Publisher<out DataBuffer>): Mono<Void> =
+                super.writeWith(Flux.from(body).doOnNext(responseCapture::capture))
+
+            override fun writeAndFlushWith(body: Publisher<out Publisher<out DataBuffer>>): Mono<Void> =
+                super.writeAndFlushWith(
+                    Flux.from(body).map { publisher ->
+                        Flux.from(publisher).doOnNext(responseCapture::capture)
+                    }
+                )
+        }
+        val decorated = object : ServerWebExchangeDecorator(exchange) {
+            override fun getRequest() = request
+            override fun getResponse() = response
+        }
+
+        return chain.filter(decorated)
+            .doFinally {
+                if (logged.compareAndSet(false, true)) {
+                    logExchange(
+                        requestId = requestId,
+                        exchange = decorated,
+                        requestBody = requestCapture.snapshot(),
+                        responseBody = responseCapture.snapshot(),
+                        durationMs = (System.nanoTime() - started) / 1_000_000.0,
+                    )
+                }
+            }
+    }
+
+    private fun logExchange(
+        requestId: String,
+        exchange: ServerWebExchange,
+        requestBody: CapturedBody,
+        responseBody: CapturedBody,
+        durationMs: Double,
+    ) {
+        val status = exchange.response.statusCode?.value() ?: 200
         try {
             MDC.put("requestId", requestId)
-            filterChain.doFilter(requestWrapper, responseWrapper)
-        } finally {
-            try {
-                val durationMs = (System.nanoTime() - started) / 1_000_000.0
-                if (requestWrapper.requestURI.startsWith("/api/")) {
-                    logApiExchange(formatter.apiExchangeJson(requestId, requestWrapper, responseWrapper, durationMs), responseWrapper.status)
-                } else {
-                    logApiResponse(formatter.apiResponseJson(requestId, requestWrapper, responseWrapper, durationMs, includeBody = false), responseWrapper.status)
-                }
-                responseWrapper.copyBodyToResponse()
-            } finally {
-                MDC.remove("requestId")
+            if (exchange.request.path.value().startsWith("/api/")) {
+                logApiExchange(
+                    formatter.apiExchangeJson(
+                        requestId,
+                        exchange.request,
+                        exchange.response,
+                        requestBody,
+                        responseBody,
+                        durationMs,
+                    ),
+                    status,
+                )
+            } else {
+                logApiResponse(
+                    formatter.apiResponseJson(
+                        requestId,
+                        exchange.request,
+                        exchange.response,
+                        responseBody,
+                        durationMs,
+                        includeBody = false,
+                    ),
+                    status,
+                )
             }
+        } catch (error: Exception) {
+            log.warn("api_exchange_logging_failed requestId={} message={}", requestId, error.message)
+        } finally {
+            MDC.remove("requestId")
         }
     }
 
@@ -61,6 +133,38 @@ class RequestLoggingFilter(
     }
 
     companion object {
+        const val REQUEST_ID_ATTRIBUTE = "requestId"
+        const val REQUEST_ID_HEADER = "X-Request-Id"
         private const val MAX_BODY_BYTES = 8_192
+    }
+}
+
+private class BodyCapture(
+    private val limit: Int,
+) {
+    private val output = ByteArrayOutputStream(limit)
+    private val observedBytes = AtomicLong()
+
+    @Synchronized
+    fun capture(buffer: DataBuffer) {
+        val readable = buffer.readableByteCount()
+        observedBytes.addAndGet(readable.toLong())
+        val remaining = limit - output.size()
+        if (remaining <= 0 || readable <= 0) return
+
+        val length = minOf(readable, remaining)
+        val destination = ByteBuffer.allocate(length)
+        buffer.toByteBuffer(buffer.readPosition(), destination, 0, length)
+        output.write(destination.array())
+    }
+
+    @Synchronized
+    fun snapshot(): CapturedBody {
+        val observed = observedBytes.get()
+        return CapturedBody(
+            bytes = output.toByteArray(),
+            observedBytes = observed,
+            truncated = observed > output.size(),
+        )
     }
 }

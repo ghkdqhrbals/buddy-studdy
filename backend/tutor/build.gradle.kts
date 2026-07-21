@@ -57,7 +57,7 @@ dependencies {
     implementation(project(":infra"))
 
     implementation(kotlin("reflect"))
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -67,7 +67,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
     implementation("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")

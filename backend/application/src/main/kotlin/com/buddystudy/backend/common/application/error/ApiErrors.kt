@@ -39,6 +39,7 @@ enum class ApiErrorCode(
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),
+    SERVER_BUSY(HttpStatus.SERVICE_UNAVAILABLE, 902, "error.server.busy", "Server is temporarily busy."),
     ;
 }
 

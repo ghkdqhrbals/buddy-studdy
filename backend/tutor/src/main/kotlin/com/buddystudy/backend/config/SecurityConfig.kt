@@ -5,6 +5,8 @@ import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
+import com.buddystudy.backend.common.adapter.inbound.web.ReactiveRequestDetails
+import com.buddystudy.backend.common.adapter.inbound.web.RequestLoggingFilter
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
@@ -12,29 +14,33 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import jakarta.servlet.FilterChain
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
-import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
+import org.springframework.http.MediaType
+import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.security.config.annotation.web.builders.HttpSecurity
-import org.springframework.security.config.http.SessionCreationPolicy
-import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.security.core.userdetails.UserDetailsService
-import org.springframework.security.core.userdetails.UsernameNotFoundException
-import org.springframework.security.web.util.matcher.RequestMatcher
-import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
-import org.springframework.web.filter.OncePerRequestFilter
+import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
+import org.springframework.security.config.web.server.SecurityWebFiltersOrder
+import org.springframework.security.config.web.server.ServerHttpSecurity
+import org.springframework.security.core.Authentication
+import org.springframework.security.core.context.ReactiveSecurityContextHolder
+import org.springframework.security.web.server.SecurityWebFilterChain
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers
+import org.springframework.stereotype.Component
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.WebFilter
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Mono
+import reactor.core.scheduler.Scheduler
 import java.util.UUID
 
 @Configuration
+@EnableWebFluxSecurity
 class SecurityConfig {
     @Bean
     @ConditionalOnMissingBean(ObjectMapper::class)
@@ -47,41 +53,43 @@ class SecurityConfig {
     fun javaTimeJacksonModule(): JavaTimeModule = JavaTimeModule()
 
     @Bean
-    fun userDetailsService(): UserDetailsService = UserDetailsService {
-        throw UsernameNotFoundException("BuddyStudy uses bearer token authentication only.")
-    }
-
-    @Bean
-    fun securityFilterChain(
-        http: HttpSecurity,
+    fun securityWebFilterChain(
+        http: ServerHttpSecurity,
         bearerTokenFilter: BearerTokenFilter,
         objectMapper: ObjectMapper,
         errorResponseFactory: ApiErrorResponseFactory,
-    ): SecurityFilterChain =
+    ): SecurityWebFilterChain =
         http
             .csrf { it.disable() }
             .httpBasic { it.disable() }
             .formLogin { it.disable() }
             .logout { it.disable() }
-            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-            .authorizeHttpRequests {
-                it.requestMatchers(NonApiRoutes.requestMatcher).permitAll()
-                AnonymousRoutes.requestMatchers.forEach { matcher -> it.requestMatchers(matcher).permitAll() }
-                it.anyRequest().authenticated()
+            .authorizeExchange { exchanges ->
+                exchanges.matchers(ServerWebExchangeMatchers.pathMatchers("/health", "/health/**")).permitAll()
+                exchanges.matchers(ServerWebExchangeMatchers.pathMatchers("/actuator/**")).permitAll()
+                AnonymousRoutes.routes.forEach { route ->
+                    val matcher = if (route.method == null) {
+                        ServerWebExchangeMatchers.pathMatchers(route.pattern)
+                    } else {
+                        ServerWebExchangeMatchers.pathMatchers(route.method, route.pattern)
+                    }
+                    exchanges.matchers(matcher).permitAll()
+                }
+                exchanges.pathMatchers("/api/**").authenticated()
+                exchanges.anyExchange().permitAll()
             }
-            .exceptionHandling {
-                it.authenticationEntryPoint { request, response, _ ->
+            .exceptionHandling { exceptions ->
+                exceptions.authenticationEntryPoint { exchange, _ ->
                     writeSecurityError(
-                        objectMapper,
-                        request,
-                        response,
-                        HttpStatus.UNAUTHORIZED,
-                        ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
-                        errorResponseFactory,
+                        objectMapper = objectMapper,
+                        exchange = exchange,
+                        status = HttpStatus.UNAUTHORIZED,
+                        code = ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
+                        errorResponseFactory = errorResponseFactory,
                     )
                 }
             }
-            .addFilterBefore(bearerTokenFilter, UsernamePasswordAuthenticationFilter::class.java)
+            .addFilterAt(bearerTokenFilter, SecurityWebFiltersOrder.AUTHENTICATION)
             .build()
 }
 
@@ -92,36 +100,41 @@ class BearerTokenFilter(
     private val userDevices: UserDevicePort,
     private val objectMapper: ObjectMapper,
     private val errorResponseFactory: ApiErrorResponseFactory,
-) : OncePerRequestFilter() {
-    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
-        SecurityContextHolder.clearContext()
-        try {
-            authenticate(request)
-            filterChain.doFilter(request, response)
-        } catch (error: ApiRuntimeException) {
-            if (AnonymousRoutes.matches(request) || NonApiRoutes.matches(request)) {
-                SecurityContextHolder.clearContext()
-                logIgnoredAuthenticationFailure(request, error)
-                filterChain.doFilter(request, response)
+    @param:Qualifier("webFluxBlockingScheduler") private val blockingScheduler: Scheduler,
+) : WebFilter {
+    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
+        val authorization = exchange.request.headers.getFirst("Authorization")
+        val filtered = if (authorization.isNullOrBlank()) {
+            chain.filter(exchange)
+        } else {
+            authentication(exchange.request, authorization)
+                .flatMap { authentication ->
+                    chain.filter(exchange)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication))
+                }
+        }
+        return filtered.onErrorResume(ApiRuntimeException::class.java) { error ->
+            if (AnonymousRoutes.matches(exchange.request) || NonApiRoutes.matches(exchange.request)) {
+                logIgnoredAuthenticationFailure(exchange, error)
+                chain.filter(exchange)
             } else {
                 writeSecurityError(
-                    objectMapper,
-                    request,
-                    response,
-                    error.status,
-                    error.errorCode,
-                    errorResponseFactory,
+                    objectMapper = objectMapper,
+                    exchange = exchange,
+                    status = error.status,
+                    code = error.errorCode,
+                    errorResponseFactory = errorResponseFactory,
                     requiredPermissions = error.requiredPermissions,
                 )
             }
-        } finally {
-            SecurityContextHolder.clearContext()
         }
     }
 
-    private fun authenticate(request: HttpServletRequest) {
-        val authorization = request.getHeader("Authorization")
-        if (authorization.isNullOrBlank()) return
+    private fun authentication(request: ServerHttpRequest, authorization: String): Mono<Authentication> =
+        Mono.fromCallable { authenticateBlocking(request, authorization) }
+            .subscribeOn(blockingScheduler)
+
+    private fun authenticateBlocking(request: ServerHttpRequest, authorization: String): Authentication {
         if (!authorization.startsWith("Bearer ")) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }
@@ -144,29 +157,25 @@ class BearerTokenFilter(
         val authenticatedPrincipal = principal.copy(
             anonymous = devices.findByDeviceId(principal.deviceId)?.userId == null || principal.anonymous,
         )
-        SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(
+        return UsernamePasswordAuthenticationToken(
             authenticatedPrincipal,
             null,
             emptyList(),
-        )
+        ).apply {
+            details = ReactiveRequestDetails(request.headers.getFirst("X-App-Version"))
+        }
     }
-
 }
 
 private object NonApiRoutes {
-    val requestMatcher: RequestMatcher = RequestMatcher { request -> matches(request) }
-
-    fun matches(request: HttpServletRequest): Boolean =
-        !request.requestURI.startsWith("/api")
+    fun matches(request: ServerHttpRequest): Boolean =
+        !request.path.value().startsWith("/api")
 }
 
 private object AnonymousRoutes {
-    private val routes = listOf(
-        Route(null, "/health"),
-        Route(null, "/health/**"),
+    val routes = listOf(
         Route(null, "/api/v1/health"),
         Route(null, "/api/v1/health/**"),
-        Route(null, "/actuator/**"),
         Route(HttpMethod.GET, "/docs"),
         Route(HttpMethod.GET, "/docs/**"),
         Route(HttpMethod.GET, "/swagger-ui.html"),
@@ -181,16 +190,12 @@ private object AnonymousRoutes {
         Route(null, "/api/v1/admin/**"),
     )
 
-    val requestMatchers: Array<RequestMatcher> = routes.map { route ->
-        RequestMatcher { request -> route.matches(request) }
-    }.toTypedArray()
-
-    fun matches(request: HttpServletRequest): Boolean =
+    fun matches(request: ServerHttpRequest): Boolean =
         routes.any { it.matches(request) }
 
-    private data class Route(val method: HttpMethod?, val pattern: String) {
-        fun matches(request: HttpServletRequest): Boolean =
-            (method == null || request.method == method.name()) && matchesPattern(request.requestURI)
+    data class Route(val method: HttpMethod?, val pattern: String) {
+        fun matches(request: ServerHttpRequest): Boolean =
+            (method == null || request.method == method) && matchesPattern(request.path.value())
 
         private fun matchesPattern(path: String): Boolean {
             if (pattern.endsWith("/**")) {
@@ -202,14 +207,16 @@ private object AnonymousRoutes {
     }
 }
 
-private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: ApiRuntimeException) {
-    val requestId = request.getAttribute("requestId") as? String ?: UUID.randomUUID().toString()
+private fun logIgnoredAuthenticationFailure(exchange: ServerWebExchange, error: ApiRuntimeException) {
+    val request = exchange.request
+    val requestId = exchange.getAttribute<String>(RequestLoggingFilter.REQUEST_ID_ATTRIBUTE)
+        ?: UUID.randomUUID().toString()
     securityLog.debug(
         "api_auth_ignored requestId={} clientIp={} method={} path={} status={} code={} message={}",
         requestId,
         ClientIpResolver.resolve(request),
         request.method,
-        request.requestURI,
+        request.path.value(),
         error.status.value(),
         error.errorCode.name,
         error.message,
@@ -218,36 +225,35 @@ private fun logIgnoredAuthenticationFailure(request: HttpServletRequest, error: 
 
 private fun writeSecurityError(
     objectMapper: ObjectMapper,
-    request: HttpServletRequest,
-    response: HttpServletResponse,
+    exchange: ServerWebExchange,
     status: HttpStatus,
     code: ApiErrorCode,
     errorResponseFactory: ApiErrorResponseFactory,
     requiredPermissions: List<String>? = null,
-) {
-    if (response.isCommitted) return
+): Mono<Void> {
+    val response = exchange.response
+    if (response.isCommitted) return Mono.empty()
     val body = errorResponseFactory.envelope(
         code = code,
         status = status,
-        request = request,
+        exchange = exchange,
         requiredPermissions = requiredPermissions,
     )
     securityLog.warn(
         "api_auth_failed requestId={} clientIp={} method={} path={} status={} code={} message={}",
         body.error.requestId,
-        ClientIpResolver.resolve(request),
-        request.method,
-        request.requestURI,
+        ClientIpResolver.resolve(exchange.request),
+        exchange.request.method,
+        exchange.request.path.value(),
         status.value(),
         code.name,
         body.error.message,
     )
-    response.status = status.value()
-    response.contentType = "application/json"
-    objectMapper.writeValue(
-        response.outputStream,
-        body,
-    )
+    val bytes = objectMapper.writeValueAsBytes(body)
+    response.statusCode = status
+    response.headers.contentType = MediaType.APPLICATION_JSON
+    response.headers.contentLength = bytes.size.toLong()
+    return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)))
 }
 
 private val securityLog = LoggerFactory.getLogger("com.buddystudy.backend.security")

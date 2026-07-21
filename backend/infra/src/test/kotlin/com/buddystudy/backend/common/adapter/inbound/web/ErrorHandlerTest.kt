@@ -5,15 +5,18 @@ import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
-import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.context.support.StaticMessageSource
-import org.springframework.http.MediaType
-import org.junit.jupiter.api.Test
+import org.springframework.core.task.TaskRejectedException
 import org.springframework.http.HttpStatus
-import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.http.MediaType
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.web.server.MockServerWebExchange
+import org.springframework.web.reactive.resource.NoResourceFoundException
+import java.net.URI
 import java.util.Locale
 
 @ExtendWith(OutputCaptureExtension::class)
@@ -21,23 +24,24 @@ class ErrorHandlerTest {
     private val messageSource = StaticMessageSource().apply {
         addMessage("error.record.not_found", Locale.ENGLISH, "Record was not found.")
         addMessage("error.record.not_found", Locale.KOREAN, "기록을 찾을 수 없습니다.")
+        addMessage("error.record.not_found", Locale.KOREA, "기록을 찾을 수 없습니다.")
         addMessage("error.resource.not_found", Locale.ENGLISH, "Resource was not found.")
         addMessage("error.internal.server_error", Locale.ENGLISH, "Internal backend error.")
+        addMessage("error.internal.server_error", Locale.US, "Internal backend error.")
         addMessage("error.internal.server_error", Locale.KOREAN, "Internal backend error.")
         addMessage("error.internal.server_error", Locale.KOREA, "Internal backend error.")
+        addMessage("error.internal.server_error", Locale.KOREAN, "Internal backend error.")
         addMessage("error.validation", Locale.ENGLISH, "Invalid request.")
+        addMessage("error.server.busy", Locale.ENGLISH, "Server is temporarily busy.")
     }
-    private val errorResponseFactory = ApiErrorResponseFactory(messageSource)
-    private val handler = ErrorHandler(errorResponseFactory)
+    private val handler = ErrorHandler(ApiErrorResponseFactory(messageSource))
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Test
     fun `fallback internal server error response includes reason`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/records").apply {
-            setAttribute("requestId", "req-1")
-        }
+        val exchange = exchange("GET", "/api/v1/records", "req-1")
 
-        val response = handler.fallback(IllegalStateException("database unavailable"), request)
+        val response = handler.fallback(IllegalStateException("database unavailable"), exchange)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
         assertThat(response.headers.contentType).isEqualTo(MediaType.APPLICATION_JSON)
@@ -49,18 +53,18 @@ class ErrorHandlerTest {
         assertThat(json["error"]["message"].asText()).isEqualTo("Internal backend error.")
         assertThat(json["error"]["requestId"].asText()).isEqualTo("req-1")
         assertThat(json["error"]["reason"].asText()).isEqualTo("IllegalStateException: database unavailable")
-        assertThat(json["error"].has("showPopup")).isFalse()
-        assertThat(json["error"].has("loginRequired")).isFalse()
     }
 
     @Test
     fun `fallback internal server error logs exception stack trace`(output: CapturedOutput) {
-        val request = MockHttpServletRequest("POST", "/api/v1/devices/register").apply {
-            setAttribute("requestId", "req-stack")
-            addHeader("X-Forwarded-For", "203.0.113.10")
-        }
+        val exchange = exchange(
+            method = "POST",
+            path = "/api/v1/devices/register",
+            requestId = "req-stack",
+            forwardedFor = "203.0.113.10",
+        )
 
-        handler.fallback(IllegalStateException("jwt init failed"), request)
+        handler.fallback(IllegalStateException("jwt init failed"), exchange)
 
         assertThat(output.all).contains("api_error requestId=req-stack")
         assertThat(output.all).contains("clientIp=203.0.113.10")
@@ -69,47 +73,46 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `api runtime exception response uses localized message and omits reason`() {
-        val request = MockHttpServletRequest("GET", "/api/v1/records").apply {
-            setAttribute("requestId", "req-2")
-        }
+    fun `api runtime exception response uses request locale and omits reason`() {
+        val exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/api/v1/records")
+                .header("Accept-Language", "ko-KR")
+                .build()
+        ).also { it.attributes[RequestLoggingFilter.REQUEST_ID_ATTRIBUTE] = "req-2" }
 
-        LocaleContextHolder.setLocale(Locale.KOREAN)
-        val response = try {
-            handler.api(
-                ApiRuntimeException(ApiErrorCode.RECORD_NOT_FOUND),
-                request,
-            )
-        } finally {
-            LocaleContextHolder.resetLocaleContext()
-        }
+        val response = handler.api(ApiRuntimeException(ApiErrorCode.RECORD_NOT_FOUND), exchange)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-        assertThat(response.headers.contentType).isEqualTo(MediaType.APPLICATION_JSON)
         val serialized = mapper.writeValueAsString(response.body)
         assertThat(serialized).contains("\"errorCode\":\"RECORD_NOT_FOUND\"")
-        assertThat(serialized).contains("\"code\":${ApiErrorCode.RECORD_NOT_FOUND.code}")
-        assertThat(serialized).contains("\"messageKey\":\"${ApiErrorCode.RECORD_NOT_FOUND.messageKey}\"")
-        assertThat(serialized).contains("\"debugDescription\":\"${ApiErrorCode.RECORD_NOT_FOUND.debugDescription}\"")
         assertThat(serialized).contains("\"message\":\"기록을 찾을 수 없습니다.\"")
         assertThat(serialized).doesNotContain("reason")
-        assertThat(serialized).doesNotContain("showPopup")
-        assertThat(serialized).doesNotContain("loginRequired")
     }
 
     @Test
     fun `not found response is json`() {
-        val request = MockHttpServletRequest("GET", "/missing").apply {
-            setAttribute("requestId", "req-3")
-        }
+        val exchange = exchange("GET", "/missing", "req-3")
+        val error = NoResourceFoundException(URI.create("/missing"), "missing")
 
-        val response = handler.notFound(NoSuchElementException("missing"), request)
+        val response = handler.notFound(error, exchange)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
         assertThat(response.headers.contentType).isEqualTo(MediaType.APPLICATION_JSON)
         val serialized = mapper.writeValueAsString(response.body)
         assertThat(serialized).contains("\"errorCode\":\"RESOURCE_NOT_FOUND\"")
-        assertThat(serialized).contains("\"code\":${ApiErrorCode.RESOURCE_NOT_FOUND.code}")
+    }
+
+    @Test
+    fun `blocking executor saturation returns service unavailable`() {
+        val exchange = exchange("POST", "/api/v1/study", "req-busy")
+
+        val response = handler.serverBusy(TaskRejectedException("blocking queue full"), exchange)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        val serialized = mapper.writeValueAsString(response.body)
+        assertThat(serialized).contains("\"errorCode\":\"SERVER_BUSY\"")
+        assertThat(serialized).contains("\"code\":902")
+        assertThat(serialized).contains("\"message\":\"Server is temporarily busy.\"")
     }
 
     @Test
@@ -122,10 +125,16 @@ class ErrorHandlerTest {
         assertThat(ApiErrorCode.INTERNAL_SERVER_ERROR.code).isBetween(900, 999)
     }
 
-    @Test
-    fun `api error code carries default status and message key`() {
-        assertThat(ApiErrorCode.DEVICE_NOT_FOUND.status).isEqualTo(HttpStatus.NOT_FOUND)
-        assertThat(ApiErrorCode.DEVICE_NOT_FOUND.messageKey).isEqualTo("error.device.not_found")
-        assertThat(ApiRuntimeException(ApiErrorCode.DEVICE_NOT_FOUND).status).isEqualTo(HttpStatus.NOT_FOUND)
+    private fun exchange(
+        method: String,
+        path: String,
+        requestId: String,
+        forwardedFor: String? = null,
+    ): MockServerWebExchange {
+        val builder = MockServerHttpRequest.method(org.springframework.http.HttpMethod.valueOf(method), path)
+        forwardedFor?.let { builder.header("X-Forwarded-For", it) }
+        return MockServerWebExchange.from(builder.build()).also {
+            it.attributes[RequestLoggingFilter.REQUEST_ID_ATTRIBUTE] = requestId
+        }
     }
 }

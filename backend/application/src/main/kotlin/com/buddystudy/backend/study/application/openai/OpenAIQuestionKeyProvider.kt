@@ -34,11 +34,11 @@ class OpenAIQuestionKeyProvider(
             ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
 
         if (user == null) {
-            throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached.")
+            throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.QUOTA_EXCEEDED, "Monthly question limit reached.")
         }
 
         val plan = memberships.activePlanForUser(user.id)
-            ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached.")
+            ?: throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.QUOTA_EXCEEDED, "Monthly question limit reached.")
         val yearMonth = YearMonth.now(ZoneOffset.UTC)
         val consumed = memberships.tryConsumeMonthlySystemQuestion(
             userId = user.id,
@@ -47,7 +47,7 @@ class OpenAIQuestionKeyProvider(
             now = Instant.now(),
         )
         if (!consumed) {
-            throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "Monthly question limit reached.")
+            throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.QUOTA_EXCEEDED, "Monthly question limit reached.")
         }
 
         return OpenAIQuestionKey(

@@ -9,10 +9,8 @@ import org.aspectj.lang.annotation.Aspect
 import org.aspectj.lang.reflect.MethodSignature
 import org.springframework.aop.support.AopUtils
 import org.springframework.core.annotation.AnnotatedElementUtils
-import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
-import org.springframework.web.context.request.RequestContextHolder
-import org.springframework.web.context.request.ServletRequestAttributes
 import java.time.Instant
 
 @Aspect
@@ -30,15 +28,16 @@ class RequirePermissionAspect(
             AnnotatedElementUtils.findMergedAnnotation(method, RequirePermission::class.java)?.let { addAll(it.value) }
         }.distinct()
 
-        val principal = SecurityContextHolder.getContext().authentication.optionalPrincipal()
-        val request = (RequestContextHolder.getRequestAttributes() as? ServletRequestAttributes)?.request
+        val authentication = joinPoint.args.filterIsInstance<Authentication>().firstOrNull()
+        val principal = authentication.optionalPrincipal()
+        val requestDetails = authentication?.details as? ReactiveRequestDetails
         permissionChecker.check(
             principal,
             required,
             principal?.let {
                 PermissionEvaluationContext(
                     now = Instant.now(),
-                    appVersion = request?.getHeader("X-App-Version"),
+                    appVersion = requestDetails?.appVersion,
                     sessionId = it.sessionId,
                     status = it.status,
                     anonymous = it.anonymous,

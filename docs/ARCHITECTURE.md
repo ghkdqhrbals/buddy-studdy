@@ -63,6 +63,8 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 
 - `backend/`
   - Spring Boot Kotlin APNs push backend.
+  - Runs Spring WebFlux on Reactor Netty. Synchronous JPA/JDBC controllers execute on a bounded `webflux-blocking-*` pool so blocking persistence never occupies Netty event-loop threads.
+  - Keeps imperative JPA transaction boundaries intentionally; this is not an R2DBC stack. Runtime details, MVC differences, capacity limits, and tuning guidance are documented in [`WEBFLUX_MIGRATION.md`](WEBFLUX_MIGRATION.md).
   - The backend is organized as multi-module hexagonal architecture: `domain`, `application`, `infra`, and executable `tutor`.
   - Incoming web/scheduler/stream handlers live in `backend/infra`, persistence/OpenAI/APNs/Redis integrations live in `backend/infra`, and use-case services live in `backend/application` behind inbound port interfaces.
   - Spring Data JPA repositories live in outbound persistence adapters. Current JPA entities are centralized under `backend/domain/src/main/kotlin/com/buddystudy/domain` as a migration bridge.

@@ -395,6 +395,8 @@ class StudyServiceTest {
         }
             .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
             .hasMessage("Monthly question limit reached.")
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.QUOTA_EXCEEDED)
 
         assertThat(openAI.generateCalls).isZero()
     }

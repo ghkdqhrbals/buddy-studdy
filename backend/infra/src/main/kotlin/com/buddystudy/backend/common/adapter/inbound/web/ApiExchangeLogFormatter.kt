@@ -1,94 +1,93 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
-import org.springframework.web.util.ContentCachingRequestWrapper
-import org.springframework.web.util.ContentCachingResponseWrapper
-import java.nio.charset.Charset
+import org.springframework.http.HttpHeaders
+import org.springframework.http.server.reactive.ServerHttpRequest
+import org.springframework.http.server.reactive.ServerHttpResponse
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+
+internal data class CapturedBody(
+    val bytes: ByteArray,
+    val observedBytes: Long,
+    val truncated: Boolean,
+) {
+    companion object {
+        val EMPTY = CapturedBody(ByteArray(0), 0, false)
+    }
+}
 
 internal class ApiExchangeLogFormatter(
     private val objectMapper: ObjectMapper,
 ) {
     fun apiExchangeJson(
         requestId: String,
-        request: ContentCachingRequestWrapper,
-        response: ContentCachingResponseWrapper,
+        request: ServerHttpRequest,
+        response: ServerHttpResponse,
+        requestBody: CapturedBody,
+        responseBody: CapturedBody,
         durationMs: Double,
     ): String =
         buildJson(
             "requestId" to requestId,
             "clientIp" to ClientIpResolver.resolve(request),
-            "method" to request.method,
-            "path" to request.requestURI,
-            "query" to (request.queryString ?: ""),
-            "requestHeaders" to headers(request),
-            "requestBody" to body(request.contentAsByteArray, request.characterEncoding, request.contentType),
-            "status" to response.status,
+            "method" to request.method.name(),
+            "path" to request.path.value(),
+            "query" to (request.uri.rawQuery ?: ""),
+            "requestHeaders" to headers(request.headers),
+            "requestBody" to body(requestBody, request.headers),
+            "status" to (response.statusCode?.value() ?: 200),
             "durationMs" to "%.2f".format(Locale.US, durationMs),
-            "responseHeaders" to responseHeaders(response),
-            "responseBody" to body(response.contentAsByteArray, response.characterEncoding, response.contentType),
+            "responseHeaders" to headers(response.headers),
+            "responseBody" to body(responseBody, response.headers),
         )
 
     fun apiResponseJson(
         requestId: String,
-        request: ContentCachingRequestWrapper,
-        response: ContentCachingResponseWrapper,
+        request: ServerHttpRequest,
+        response: ServerHttpResponse,
+        responseBody: CapturedBody,
         durationMs: Double,
         includeBody: Boolean = true,
     ): String =
         buildJson(
             "requestId" to requestId,
             "clientIp" to ClientIpResolver.resolve(request),
-            "method" to request.method,
-            "path" to request.requestURI,
-            "response" to responseFields(response, durationMs, includeBody),
+            "method" to request.method.name(),
+            "path" to request.path.value(),
+            "response" to mapOf(
+                "status" to (response.statusCode?.value() ?: 200),
+                "durationMs" to "%.2f".format(Locale.US, durationMs),
+                "headers" to headers(response.headers),
+                "body" to if (includeBody) body(responseBody, response.headers) else "",
+            ),
         )
 
-    private fun responseFields(
-        response: ContentCachingResponseWrapper,
-        durationMs: Double,
-        includeBody: Boolean = true,
-    ): Map<String, Any?> =
-        mapOf(
-            "status" to response.status,
-            "durationMs" to "%.2f".format(Locale.US, durationMs),
-            "headers" to responseHeaders(response),
-            "body" to if (includeBody) body(response.contentAsByteArray, response.characterEncoding, response.contentType) else "",
-        )
-
-    private fun headers(request: HttpServletRequest): Map<String, Any?> =
-        request.headerNames.asSequence().associateWith { name ->
+    private fun headers(headers: HttpHeaders): Map<String, Any?> =
+        headers.headerNames().associateWith { name ->
             if (isSensitiveHeader(name)) {
                 "[REDACTED]"
             } else {
-                headerValue(request.getHeaders(name).asSequence().toList())
+                headerValue(headers[name] ?: emptyList())
             }
-        }
-
-    private fun responseHeaders(response: HttpServletResponse): Map<String, Any?> =
-        response.headerNames.associateWith { name ->
-            if (isSensitiveHeader(name)) "[REDACTED]" else headerValue(response.getHeaders(name).toList())
         }
 
     private fun isSensitiveHeader(name: String): Boolean =
         name.trim().lowercase(Locale.US) in SENSITIVE_HEADERS
 
-    private fun body(bytes: ByteArray, encoding: String?, contentType: String?): Any? {
+    private fun body(captured: CapturedBody, headers: HttpHeaders): Any? {
+        val bytes = captured.bytes
         if (bytes.isEmpty()) return ""
-        val charset = charsetFor(encoding, contentType)
-        val body = redact(String(bytes, charset))
-        if (body.length > MAX_BODY_CHARS) {
+        val charset = charsetFor(headers)
+        val value = redact(String(bytes, charset))
+        if (captured.truncated || value.length > MAX_BODY_CHARS) {
             return mapOf(
                 "truncated" to true,
-                "originalChars" to body.length,
-                "preview" to body.take(MAX_BODY_CHARS) + "...[truncated]",
+                "observedBytes" to captured.observedBytes,
+                "preview" to value.take(MAX_BODY_CHARS) + "...[truncated]",
             )
         }
-        return parseJsonBody(body, contentType)
+        return parseJsonBody(value, headers.contentType?.toString())
     }
 
     private fun parseJsonBody(body: String, contentType: String?): Any? {
@@ -114,26 +113,8 @@ internal class ApiExchangeLogFormatter(
         return runCatching { objectMapper.readTree(trimmed) }.getOrElse { value }
     }
 
-    private fun charsetFor(encoding: String?, contentType: String?): Charset {
-        contentType
-            ?.split(";")
-            ?.asSequence()
-            ?.map { it.trim() }
-            ?.firstOrNull { it.startsWith("charset=", ignoreCase = true) }
-            ?.substringAfter("=")
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let { charsetName ->
-                runCatching { Charset.forName(charsetName) }.getOrNull()
-            }
-            ?.let { return it }
-
-        if (contentType?.contains("json", ignoreCase = true) == true) {
-            return StandardCharsets.UTF_8
-        }
-
-        return encoding?.let { runCatching { Charset.forName(it) }.getOrNull() } ?: StandardCharsets.UTF_8
-    }
+    private fun charsetFor(headers: HttpHeaders) =
+        headers.contentType?.charset ?: StandardCharsets.UTF_8
 
     private fun redact(value: String): String =
         value.replace(
@@ -147,6 +128,11 @@ internal class ApiExchangeLogFormatter(
 
     private companion object {
         private const val MAX_BODY_CHARS = 2_000
-        private val SENSITIVE_HEADERS = setOf("cookie", "set-cookie", "x-client-secret")
+        private val SENSITIVE_HEADERS = setOf(
+            "authorization",
+            "cookie",
+            "set-cookie",
+            "x-client-secret",
+        )
     }
 }

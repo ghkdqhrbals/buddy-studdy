@@ -8,6 +8,8 @@ logging:
 spring:
   application:
     name: buddystudy-backend
+  main:
+    web-application-type: reactive
   ai:
     model:
       audio:
@@ -66,6 +68,12 @@ management:
         include: health,info
 
 buddystudy:
+  webflux:
+    blocking:
+      core-size: ${WEBFLUX_BLOCKING_CORE_SIZE:8}
+      max-size: ${WEBFLUX_BLOCKING_MAX_SIZE:16}
+      queue-capacity: ${WEBFLUX_BLOCKING_QUEUE_CAPACITY:64}
+      keep-alive-seconds: ${WEBFLUX_BLOCKING_KEEP_ALIVE_SECONDS:60}
   auth:
     jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}

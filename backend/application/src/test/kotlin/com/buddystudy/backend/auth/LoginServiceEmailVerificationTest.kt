@@ -173,7 +173,7 @@ class LoginServiceEmailVerificationTest {
 
         val user = users.findByEmailAndProvider("new@example.com", "EMAIL")
         assertThat(user).isNotNull
-        assertThat(user?.status).isEqualTo("ACTIVE")
+        assertThat(user?.status).isEqualTo("PENDING_TERMS")
         assertThat(user?.passwordHash).isEqualTo(sha256("password123"))
         assertThat(response.profile.displayName).isEqualTo("new")
         assertThat(emailCodes.consumed).isTrue()
