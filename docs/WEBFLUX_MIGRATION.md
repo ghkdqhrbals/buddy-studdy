@@ -141,6 +141,10 @@ The migration is covered by:
 - Runtime smoke assertions that the application context is reactive and `DispatcherServlet` is absent.
 - Dependency inspection confirming `spring-webmvc` is not on the runtime path.
 
+An executable MVC/WebFlux load-test harness is documented in [`backend/loadtest/README.md`](../backend/loadtest/README.md). It compares the pre-migration MVC commit and current WebFlux runtime against disposable PostgreSQL and Redis containers with identical fixtures and JVM limits. Results are split into HTTP-only, public JPA read, and authenticated JPA read workloads; empty-database and health-only conclusions are explicitly avoided.
+
+The first three-round measurement is recorded in [`performance/MVC_VS_WEBFLUX_2026-07-21.md`](performance/MVC_VS_WEBFLUX_2026-07-21.md). Under 50 constant local VUs, WebFlux was effectively tied on the public JPA read but was about 21% lower-throughput on the authenticated studies API. This measured regression is consistent with retaining blocking JPA while adding Reactor scheduling boundaries and must be considered before treating the migration as a performance improvement.
+
 ## Follow-up Boundary
 
 An end-to-end reactive persistence migration should be considered only if measurements show that the bounded JPA model is the limiting factor and the required write transactions can be redesigned explicitly. That project would require R2DBC repositories, reactive transaction management, removal of `runBlocking`, reactive external clients, and new consistency/load tests. It should not be performed as a mechanical return-type conversion.
