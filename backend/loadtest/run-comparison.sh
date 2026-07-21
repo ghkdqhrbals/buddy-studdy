@@ -17,6 +17,10 @@ DB_POOL_MAX="${DB_POOL_MAX:-10}"
 BLOCKING_MAX_SIZE="${BLOCKING_MAX_SIZE:-16}"
 BLOCKING_QUEUE_CAPACITY="${BLOCKING_QUEUE_CAPACITY:-64}"
 BENCHMARK_LOGGING="${BENCHMARK_LOGGING:-OFF}"
+TELEMETRY_INTERVAL="${TELEMETRY_INTERVAL:-2}"
+ENABLE_JFR="${ENABLE_JFR:-true}"
+ENABLE_NMT="${ENABLE_NMT:-true}"
+MIN_FREE_DISK_MB="${MIN_FREE_DISK_MB:-4096}"
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)}"
 
 if [[ -n "${BENCHMARK_JAVA_BIN:-}" ]]; then
@@ -26,6 +30,9 @@ elif [[ -x /usr/libexec/java_home ]]; then
 else
   JAVA_BIN="$(command -v java)"
 fi
+JAVA_HOME_DIR="$(cd "$(dirname "$JAVA_BIN")/.." && pwd)"
+JCMD_BIN="$JAVA_HOME_DIR/bin/jcmd"
+JFR_BIN="$JAVA_HOME_DIR/bin/jfr"
 
 POSTGRES_CONTAINER="buddystudy-loadtest-postgres"
 REDIS_CONTAINER="buddystudy-loadtest-redis"
@@ -33,7 +40,10 @@ POSTGRES_PORT="${POSTGRES_PORT:-55432}"
 REDIS_PORT="${REDIS_PORT:-56379}"
 APP_PORT="${APP_PORT:-18080}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/buddystudy-loadtest.XXXXXX")"
+LOCK_DIR="${TMPDIR:-/tmp}/buddystudy-loadtest.lock"
 APP_PID=""
+TELEMETRY_PID=""
+LOAD_PID=""
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -51,9 +61,23 @@ if [[ ! -x "$JAVA_BIN" ]]; then
   exit 1
 fi
 
-mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/logs"
+mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/logs" "$RESULTS_DIR/telemetry" "$RESULTS_DIR/jfr" "$RESULTS_DIR/diagnostics"
+
+stop_telemetry() {
+  if [[ -n "$TELEMETRY_PID" ]] && kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+    kill -TERM "$TELEMETRY_PID" 2>/dev/null || true
+    wait "$TELEMETRY_PID" 2>/dev/null || true
+  fi
+  TELEMETRY_PID=""
+}
 
 cleanup_app() {
+  stop_telemetry
+  if [[ -n "$LOAD_PID" ]] && kill -0 "$LOAD_PID" 2>/dev/null; then
+    kill -TERM "$LOAD_PID" 2>/dev/null || true
+    wait "$LOAD_PID" 2>/dev/null || true
+  fi
+  LOAD_PID=""
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" 2>/dev/null; then
     kill "$APP_PID" 2>/dev/null || true
     wait "$APP_PID" 2>/dev/null || true
@@ -71,7 +95,13 @@ cleanup() {
     git -C "$REPO_DIR" worktree remove --force "$WORK_DIR/webflux" >/dev/null 2>&1 || true
   fi
   rm -rf "$WORK_DIR"
+  rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
 }
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "Another BuddyStudy load test is already running ($LOCK_DIR)." >&2
+  rm -rf "$WORK_DIR"
+  exit 1
+fi
 trap cleanup EXIT INT TERM
 
 start_dependencies() {
@@ -111,8 +141,26 @@ prepare_worktree() {
 
 build_jar() {
   local source_dir="$1"
-  (cd "$source_dir/backend" && ./gradlew :tutor:bootJar --no-daemon >/dev/null)
-  find "$source_dir/backend/tutor/build/libs" -maxdepth 1 -name 'tutor-*.jar' ! -name '*-plain.jar' -print -quit
+  local jar
+  if ! (cd "$source_dir/backend" && ./gradlew :tutor:bootJar --no-daemon >/dev/null); then
+    echo "Backend JAR build failed for $source_dir" >&2
+    return 1
+  fi
+  jar="$(find "$source_dir/backend/tutor/build/libs" -maxdepth 1 -name 'tutor-*.jar' ! -name '*-plain.jar' -print -quit)"
+  if [[ -z "$jar" || ! -s "$jar" ]]; then
+    echo "Backend JAR was not produced for $source_dir" >&2
+    return 1
+  fi
+  echo "$jar"
+}
+
+check_free_disk() {
+  local available_kb
+  available_kb="$(df -Pk "$WORK_DIR" | awk 'NR == 2 { print $4 }')"
+  if [[ -z "$available_kb" || "$available_kb" -lt $((MIN_FREE_DISK_MB * 1024)) ]]; then
+    echo "Load test requires at least ${MIN_FREE_DISK_MB} MiB free disk space; available: $((available_kb / 1024)) MiB." >&2
+    exit 1
+  fi
 }
 
 start_app() {
@@ -121,6 +169,11 @@ start_app() {
   local jar="$3"
   local log_file="$RESULTS_DIR/logs/${runtime}-round${round}.log"
   cleanup_app
+
+  local -a jvm_options=(-Xms"$JVM_HEAP" -Xmx"$JVM_HEAP" -XX:ActiveProcessorCount="$JVM_CPU_COUNT")
+  if [[ "$ENABLE_NMT" == "true" ]]; then
+    jvm_options+=(-XX:NativeMemoryTracking=summary)
+  fi
 
   env \
     APP_PORT="$APP_PORT" \
@@ -132,6 +185,7 @@ start_app() {
     SERVER_TOMCAT_THREADS_MAX="$BLOCKING_MAX_SIZE" \
     SERVER_TOMCAT_THREADS_MIN_SPARE="$BLOCKING_MAX_SIZE" \
     SERVER_TOMCAT_ACCEPT_COUNT="$BLOCKING_QUEUE_CAPACITY" \
+    SERVER_TOMCAT_MBEANREGISTRY_ENABLED=true \
     REDIS_HOST=127.0.0.1 \
     REDIS_PORT="$REDIS_PORT" \
     FLYWAY_ENABLED=true \
@@ -141,8 +195,9 @@ start_app() {
     WEBFLUX_BLOCKING_CORE_SIZE="$BLOCKING_MAX_SIZE" \
     WEBFLUX_BLOCKING_MAX_SIZE="$BLOCKING_MAX_SIZE" \
     WEBFLUX_BLOCKING_QUEUE_CAPACITY="$BLOCKING_QUEUE_CAPACITY" \
+    MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,metrics \
     LOGGING_LEVEL_COM_BUDDYSTUDY_BACKEND_COMMON_ADAPTER_INBOUND_WEB_REQUESTLOGGINGFILTER="$BENCHMARK_LOGGING" \
-    "$JAVA_BIN" -Xms"$JVM_HEAP" -Xmx"$JVM_HEAP" -XX:ActiveProcessorCount="$JVM_CPU_COUNT" -jar "$jar" \
+    "$JAVA_BIN" "${jvm_options[@]}" -jar "$jar" \
     >"$log_file" 2>&1 &
   APP_PID=$!
 
@@ -179,6 +234,10 @@ run_scenario() {
   local round="$2"
   local scenario="$3"
   local prefix="$RESULTS_DIR/raw/${runtime}-round${round}-${scenario}"
+  local diagnostic_prefix="$RESULTS_DIR/diagnostics/${runtime}-round${round}-${scenario}"
+  local telemetry_file="$RESULTS_DIR/telemetry/${runtime}-round${round}-${scenario}.jsonl"
+  local recording_name="${runtime}_round${round}_${scenario//-/_}"
+  local jfr_file="$RESULTS_DIR/jfr/${runtime}-round${round}-${scenario}.jfr"
 
   BASE_URL="http://127.0.0.1:$APP_PORT" \
     ACCESS_TOKEN="$ACCESS_TOKEN" \
@@ -188,13 +247,55 @@ run_scenario() {
     SUMMARY_PATH="$prefix-warmup.json" \
     k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null
 
+  if [[ "$ENABLE_NMT" == "true" && -x "$JCMD_BIN" ]]; then
+    "$JCMD_BIN" "$APP_PID" VM.native_memory baseline >"$diagnostic_prefix-nmt-baseline.txt" 2>&1 || true
+  fi
+  if [[ "$ENABLE_JFR" == "true" && -x "$JCMD_BIN" ]]; then
+    "$JCMD_BIN" "$APP_PID" JFR.start \
+      name="$recording_name" settings=profile filename="$jfr_file" \
+      >"$diagnostic_prefix-jfr-start.txt" 2>&1 || true
+  fi
+
+  local k6_status=0
   BASE_URL="http://127.0.0.1:$APP_PORT" \
     ACCESS_TOKEN="$ACCESS_TOKEN" \
     SCENARIO="$scenario" \
     VUS="$VUS" \
     DURATION="$DURATION" \
     SUMMARY_PATH="$prefix.json" \
-    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null
+    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null &
+  LOAD_PID=$!
+
+  python3 "$SCRIPT_DIR/telemetry.py" \
+    --pid "$APP_PID" \
+    --load-generator-pid "$LOAD_PID" \
+    --base-url "http://127.0.0.1:$APP_PORT" \
+    --output "$telemetry_file" \
+    --interval "$TELEMETRY_INTERVAL" \
+    --postgres-container "$POSTGRES_CONTAINER" \
+    --redis-container "$REDIS_CONTAINER" &
+  TELEMETRY_PID=$!
+
+  wait "$LOAD_PID" || k6_status=$?
+  LOAD_PID=""
+
+  stop_telemetry
+  if [[ "$ENABLE_JFR" == "true" && -x "$JCMD_BIN" ]]; then
+    "$JCMD_BIN" "$APP_PID" JFR.stop name="$recording_name" \
+      >"$diagnostic_prefix-jfr-stop.txt" 2>&1 || true
+    if [[ -s "$jfr_file" && -x "$JFR_BIN" ]]; then
+      "$JFR_BIN" summary "$jfr_file" >"$diagnostic_prefix-jfr-summary.txt" 2>&1 || true
+    fi
+  fi
+  if [[ "$ENABLE_NMT" == "true" && -x "$JCMD_BIN" ]]; then
+    "$JCMD_BIN" "$APP_PID" VM.native_memory summary.diff scale=KB \
+      >"$diagnostic_prefix-nmt-diff.txt" 2>&1 || true
+  fi
+  if [[ -x "$JCMD_BIN" ]]; then
+    "$JCMD_BIN" "$APP_PID" Thread.print -l >"$diagnostic_prefix-threads.txt" 2>&1 || true
+    "$JCMD_BIN" "$APP_PID" GC.heap_info >"$diagnostic_prefix-heap.txt" 2>&1 || true
+  fi
+  return "$k6_status"
 }
 
 run_runtime() {
@@ -227,10 +328,14 @@ write_report() {
     --cpu-count "$JVM_CPU_COUNT" \
     --db-pool "$DB_POOL_MAX" \
     --blocking-concurrency "$BLOCKING_MAX_SIZE" \
-    --logging "$BENCHMARK_LOGGING"
+    --logging "$BENCHMARK_LOGGING" \
+    --telemetry-interval "$TELEMETRY_INTERVAL" \
+    --jfr "$ENABLE_JFR" \
+    --nmt "$ENABLE_NMT"
 }
 
 require_command python3
+check_free_disk
 start_dependencies
 
 echo "Preparing MVC $MVC_REF"

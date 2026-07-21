@@ -15,6 +15,8 @@ The current hybrid WebFlux runtime is not faster than MVC for BuddyStudy's exist
 
 Median process RSS was approximately 934 MiB for MVC and 917 MiB for WebFlux. RSS includes JVM native memory and committed heap, so it is not an allocation-rate measurement.
 
+This first baseline predates the comprehensive telemetry collector. It must not be used to make CPU, thread-pool, allocation, or GC claims. The load-test harness now records those signals per API interval, but a new profiled run must be compared separately because JFR, NMT, and metric polling add equal but nonzero overhead to both runtimes.
+
 Relative WebFlux result:
 
 - Health: 25.3% lower throughput.
@@ -75,3 +77,5 @@ for vus in 25 50 100 200; do
   VUS=$vus ROUNDS=5 DURATION=60s backend/loadtest/run-comparison.sh
 done
 ```
+
+For each concurrency level, retain and compare the generated resource tables, JFR recordings, NMT diffs, and thread dumps. Throughput and latency alone are insufficient when the runtimes use different threading models.
