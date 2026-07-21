@@ -72,7 +72,7 @@ if [[ ! -x "$JAVA_BIN" ]]; then
   exit 1
 fi
 
-mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/logs" "$RESULTS_DIR/telemetry" "$RESULTS_DIR/jfr" "$RESULTS_DIR/diagnostics"
+mkdir -p "$RESULTS_DIR/raw" "$RESULTS_DIR/logs" "$RESULTS_DIR/telemetry" "$RESULTS_DIR/timeseries" "$RESULTS_DIR/k6-dashboard" "$RESULTS_DIR/jfr" "$RESULTS_DIR/diagnostics"
 
 stop_telemetry() {
   if [[ -n "$TELEMETRY_PID" ]] && kill -0 "$TELEMETRY_PID" 2>/dev/null; then
@@ -207,7 +207,7 @@ start_app() {
     WEBFLUX_BLOCKING_MAX_SIZE="$BLOCKING_MAX_SIZE" \
     WEBFLUX_BLOCKING_QUEUE_CAPACITY="$BLOCKING_QUEUE_CAPACITY" \
     MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,metrics \
-    LOGGING_LEVEL_COM_BUDDYSTUDY_BACKEND_COMMON_ADAPTER_INBOUND_WEB_REQUESTLOGGINGFILTER="$BENCHMARK_LOGGING" \
+    LOGGING_LEVEL_COM_BUDDYSTUDY_BACKEND_COMMON_ADAPTER_INBOUND_WEB="$BENCHMARK_LOGGING" \
     "$JAVA_BIN" "${jvm_options[@]}" -jar "$jar" \
     >"$log_file" 2>&1 &
   APP_PID=$!
@@ -249,6 +249,8 @@ run_scenario() {
   local prefix="$RESULTS_DIR/raw/${runtime}-round${round}-${stage}"
   local diagnostic_prefix="$RESULTS_DIR/diagnostics/${runtime}-round${round}-${stage}"
   local telemetry_file="$RESULTS_DIR/telemetry/${runtime}-round${round}-${stage}.jsonl"
+  local timeseries_file="$RESULTS_DIR/timeseries/${runtime}-round${round}-${stage}.json"
+  local k6_dashboard_file="$RESULTS_DIR/k6-dashboard/${runtime}-round${round}-${stage}.html"
   local recording_name="${runtime}_round${round}_${scenario//-/_}_rps${target_rps}"
   local jfr_file="$RESULTS_DIR/jfr/${runtime}-round${round}-${stage}.jfr"
 
@@ -273,7 +275,11 @@ run_scenario() {
   fi
 
   local k6_status=0
-  BASE_URL="http://127.0.0.1:$APP_PORT" \
+  K6_WEB_DASHBOARD=true \
+    K6_WEB_DASHBOARD_OPEN=false \
+    K6_WEB_DASHBOARD_PERIOD=1s \
+    K6_WEB_DASHBOARD_EXPORT="$k6_dashboard_file" \
+    BASE_URL="http://127.0.0.1:$APP_PORT" \
     ACCESS_TOKEN="$ACCESS_TOKEN" \
     SCENARIO="$scenario" \
     TARGET_RPS="$target_rps" \
@@ -297,6 +303,9 @@ run_scenario() {
 
   wait "$LOAD_PID" || k6_status=$?
   LOAD_PID=""
+  python3 "$SCRIPT_DIR/extract_k6_dashboard.py" \
+    --input "$k6_dashboard_file" \
+    --output "$timeseries_file"
 
   stop_telemetry
   if [[ "$ENABLE_JFR" == "true" && -x "$JCMD_BIN" ]]; then
@@ -354,6 +363,10 @@ write_report() {
     --telemetry-interval "$TELEMETRY_INTERVAL" \
     --jfr "$ENABLE_JFR" \
     --nmt "$ENABLE_NMT"
+  python3 "$SCRIPT_DIR/render_dashboard.py" "$RESULTS_DIR" \
+    --rounds "$ROUNDS" \
+    --target-rps-list "$TARGET_RPS_LIST" \
+    --duration "$DURATION"
 }
 
 require_command python3
@@ -382,3 +395,4 @@ done
 
 write_report
 echo "Benchmark report: $RESULTS_DIR/REPORT.md"
+echo "Benchmark dashboard: $RESULTS_DIR/DASHBOARD.html"

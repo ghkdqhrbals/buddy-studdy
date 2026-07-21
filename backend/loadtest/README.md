@@ -41,9 +41,11 @@ The default comparison is:
 - Blocking request concurrency: 16 for both MVC/Tomcat and WebFlux
 - API exchange logging: disabled for framework isolation
 - Constant arrival-rate stages: 1,000, 1,500, 2,000, 2,500, and 3,000 RPS per API
-- Latency percentiles: p50, p90, p95, and p99, reported with achieved RPS, failures, and dropped iterations
+- Latency percentiles: p50, p90, p95, and p99, reported with HTTP RPS, successful RPS, failures, and dropped iterations
 
-Raw k6 summaries, application logs, resource telemetry, JFR recordings, and JVM diagnostics are written under `backend/loadtest/results/<UTC timestamp>/`. This directory is ignored by Git.
+Raw k6 summaries, one-second request time series, application logs, resource telemetry, JFR recordings, and JVM diagnostics are written under `backend/loadtest/results/<UTC timestamp>/`. This directory is ignored by Git.
+
+Each run also produces a self-contained `DASHBOARD.html` with nGrinder-style MVC/WebFlux overlays for successful TPS, p90/p95 response time, failures, dropped iterations, JVM CPU, RSS, heap, and thread counts. It can be opened directly in a browser without a server. Use `?scenario=public-questions&rate=3000` to deep-link a specific endpoint and target rate.
 
 Each measured API interval collects the following at a two-second default cadence:
 

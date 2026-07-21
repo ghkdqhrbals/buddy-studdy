@@ -27,6 +27,7 @@ def load_results(directory, runtime, rounds, scenario, target_rps):
                 "dropped": metric(data, "dropped_iterations", "count"),
             }
         )
+        rows[-1]["success_rps"] = rows[-1]["rps"] * (1.0 - rows[-1]["failure_rate"])
     return {key: statistics.median(row[key] for row in rows) for key in rows[0]}
 
 
@@ -208,8 +209,8 @@ def main():
         f"- JFR profile recording: {args.jfr}; Native Memory Tracking: {args.nmt}",
         "- Fixture: 1 user, 100 studies, 500 graded public questions",
         "",
-        "| Endpoint | Target RPS | Runtime | Achieved RPS | Achieved | p50 ms | p90 ms | p95 ms | p99 ms | Failed | Dropped |",
-        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Endpoint | Target RPS | Runtime | HTTP RPS | Successful RPS | Success target | p50 ms | p90 ms | p95 ms | p99 ms | Failed | Dropped |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
 
     comparisons = []
@@ -218,15 +219,16 @@ def main():
             mvc = load_results(args.results_dir, "mvc", args.rounds, scenario, target_rps)
             webflux = load_results(args.results_dir, "webflux", args.rounds, scenario, target_rps)
             for runtime, values in (("MVC", mvc), ("WebFlux", webflux)):
-                achieved = (values["rps"] / target_rps) * 100
+                success_target = (values["success_rps"] / target_rps) * 100
                 lines.append(
-                    f"| {scenario} | {target_rps} | {runtime} | {values['rps']:.1f} | {achieved:.1f}% | "
+                    f"| {scenario} | {target_rps} | {runtime} | {values['rps']:.1f} | "
+                    f"{values['success_rps']:.1f} | {success_target:.1f}% | "
                     f"{values['p50']:.2f} | {values['p90']:.2f} | {values['p95']:.2f} | "
                     f"{values['p99']:.2f} | {values['failure_rate'] * 100:.3f}% | {values['dropped']:.0f} |"
                 )
             comparisons.append(
-                f"- `{scenario}` at {target_rps} RPS: WebFlux achieved-RPS change "
-                f"{delta(webflux['rps'], mvc['rps']):+.1f}%, p90 {delta(webflux['p90'], mvc['p90']):+.1f}%, "
+                f"- `{scenario}` at {target_rps} RPS: WebFlux successful-RPS change "
+                f"{delta(webflux['success_rps'], mvc['success_rps']):+.1f}%, p90 {delta(webflux['p90'], mvc['p90']):+.1f}%, "
                 f"p95 {delta(webflux['p95'], mvc['p95']):+.1f}%"
             )
 
@@ -242,7 +244,7 @@ def main():
             f"- Process RSS median: MVC {mvc_rss:.1f} MiB, WebFlux {webflux_rss:.1f} MiB "
             f"({delta(webflux_rss, mvc_rss):+.1f}%)",
             "",
-            "Positive latency change means WebFlux is slower. At a saturated stage, compare achieved percentage, dropped iterations, and failures before latency because rejected work can make latency appear artificially low.",
+            "Positive latency change means WebFlux is slower. HTTP RPS includes failed responses; Successful RPS excludes them. At a saturated stage, compare successful target percentage, dropped iterations, and failures before latency because rejected work can make latency appear artificially low.",
             "",
             "## Interpretation Rules",
             "",
