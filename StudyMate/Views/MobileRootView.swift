@@ -637,7 +637,10 @@ private struct MobileHomeView: View {
             focus: $isSearchFocused
         )
         .navigationDestination(isPresented: $isShowingNotifications) {
-            MobileNotificationsView(forwardedRoute: $notificationForwardRoute)
+            MobileNotificationsView(
+                isPresented: $isShowingNotifications,
+                forwardedRoute: $notificationForwardRoute
+            )
                 .padding(.horizontal, 16)
                 .mobileTabTitle(strings.notificationInbox)
         }
@@ -792,11 +795,7 @@ private struct MobileHomeView: View {
             }
         }
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
-            if let question = appState.communityQuestions.first(where: { $0.id == route.id }) {
-                CommunityQuestionDetailView(question: question)
-            } else {
-                ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
-            }
+            NotificationCommunityQuestionDestination(questionID: route.id)
         }
     }
 
@@ -806,6 +805,12 @@ private struct MobileHomeView: View {
         }
 
         if request.presentation == .notificationInbox {
+            if request.route == .home {
+                notificationForwardRoute = nil
+                isShowingNotifications = false
+                appState.appRouteRequest = nil
+                return
+            }
             notificationForwardRoute = NotificationForwardRoute(route: request.route)
             isShowingNotifications = true
             appState.appRouteRequest = nil
@@ -1322,6 +1327,7 @@ private enum HomeFeedScope: String, CaseIterable, Identifiable {
 
 private struct MobileNotificationsView: View {
     @EnvironmentObject private var appState: AppState
+    @Binding var isPresented: Bool
     @Binding var forwardedRoute: NotificationForwardRoute?
     @State private var openedAt = Date()
 
@@ -1360,11 +1366,18 @@ private struct MobileNotificationsView: View {
             } else {
                 ForEach(appState.notifications) { notification in
                     Button {
+                        let route = appState.notificationLandingCoordinator.routeForNotificationListSelection(notification)
+                        if route == .home {
+                            forwardedRoute = nil
+                            isPresented = false
+                        } else {
+                            forwardedRoute = NotificationForwardRoute(route: route)
+                        }
+                        appState.logRemoteNotificationEvent(
+                            "알림 목록에서 목적지를 열었습니다. notificationID=\(notification.id), route=\(route)"
+                        )
                         Task {
                             await appState.markNotificationRead(notification)
-                            if let route = appState.notificationLandingCoordinator.routeForNotificationListSelection(notification) {
-                                forwardedRoute = NotificationForwardRoute(route: route)
-                            }
                         }
                     } label: {
                         MobileNotificationRow(notification: notification, referenceDate: openedAt)
@@ -1519,15 +1532,8 @@ private struct NotificationRecordDestination: View {
 
     @ViewBuilder
     private func recordContent(_ record: StudyRecord) -> some View {
-        if record.gradingResult == nil {
-            StudyView(preferredCategoryID: appState.categoryIDForStudyTopic(record.topic))
-                .padding(.horizontal, 16)
-        } else if let question = record.asCommunityQuestion(author: appState.communityProfile) {
-            CommunityQuestionDetailView(question: question)
-        } else {
-            StudyRecordDetailView(record: record)
-                .padding(.horizontal, 16)
-        }
+        StudyRecordDetailView(record: record)
+            .padding(.horizontal, 16)
     }
 
     private func loadRecordIfNeeded() async {
@@ -1549,26 +1555,45 @@ private struct NotificationRecordDestination: View {
 private struct NotificationCommunityQuestionDestination: View {
     @EnvironmentObject private var appState: AppState
     var questionID: String
+    @State private var loadedQuestion: CommunityQuestion?
+    @State private var isLoading = true
 
     private var strings: AppStrings {
         appState.strings
     }
 
+    private var question: CommunityQuestion? {
+        loadedQuestion ?? appState.communityQuestions.first(where: { $0.id == questionID })
+    }
+
     var body: some View {
         Group {
-            if let question = appState.communityQuestions.first(where: { $0.id == questionID }) {
+            if let question {
                 CommunityQuestionDetailView(question: question)
+            } else if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
             } else {
                 ContentUnavailableView(strings.communityQuestion, systemImage: "bubble.left.and.bubble.right")
             }
         }
         .navigationTitle(strings.browseQuestions)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if !appState.communityQuestions.contains(where: { $0.id == questionID }) {
-                await appState.loadCommunityQuestions(reset: true, userInitiated: false)
-            }
+        .task(id: questionID) {
+            await loadQuestionIfNeeded()
         }
+    }
+
+    private func loadQuestionIfNeeded() async {
+        if let existing = appState.communityQuestions.first(where: { $0.id == questionID }) {
+            loadedQuestion = existing
+            isLoading = false
+            return
+        }
+
+        isLoading = true
+        loadedQuestion = await appState.loadCommunityQuestionDetail(questionID: questionID)
+        isLoading = false
     }
 }
 

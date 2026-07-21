@@ -1,5 +1,101 @@
 import Foundation
 
+enum NotificationRouteResolver {
+    static func recognizes(notificationType: String?) -> Bool {
+        switch normalized(notificationType) {
+        case "study_question", "question_created", "thread_activity", "comment", "question_comment", "like", "question_like":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func route(
+        deepLink: String?,
+        threadType: String?,
+        threadID: String?,
+        notificationType: String?
+    ) -> AppRoute {
+        if let deepLink = trimmed(deepLink),
+           let url = URL(string: deepLink),
+           let route = AppRoute(url: url) {
+            return route
+        }
+
+        let normalizedThreadType = normalized(threadType)
+        let normalizedNotificationType = normalized(notificationType)
+        let normalizedThreadID = trimmed(threadID)
+
+        if let normalizedThreadID {
+            switch normalizedThreadType {
+            case "study_question", "study_record", "record", "records":
+                return .recordDetail(recordID: normalizedThreadID)
+            case "question", "public_question", "community_question", "comment", "like", "thread_activity":
+                return .publicQuestion(id: normalizedThreadID)
+            case "study", "studies", "study_room":
+                return .studyRoom(categoryID: normalizedThreadID)
+            default:
+                break
+            }
+
+            switch normalizedNotificationType {
+            case "study_question", "question_created":
+                return .recordDetail(recordID: normalizedThreadID)
+            case "thread_activity", "comment", "question_comment", "like", "question_like":
+                return .publicQuestion(id: normalizedThreadID)
+            default:
+                break
+            }
+        }
+
+        switch normalizedThreadType {
+        case "study_question", "study_record", "record", "records", "study", "studies", "study_room":
+            return .studyList
+        case "question", "public_question", "community_question", "comment", "like", "thread_activity":
+            return .publicQuestions
+        default:
+            break
+        }
+
+        switch normalizedNotificationType {
+        case "study_question", "question_created":
+            return .studyList
+        case "thread_activity", "comment", "question_comment", "like", "question_like":
+            return .publicQuestions
+        default:
+            return .home
+        }
+    }
+
+    static func route(for notification: BackendAppNotification) -> AppRoute {
+        route(
+            deepLink: notification.deepLink,
+            threadType: notification.threadType,
+            threadID: notification.threadId,
+            notificationType: notification.type
+        )
+    }
+
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private static func normalized(_ value: String?) -> String {
+        guard let value = trimmed(value) else {
+            return ""
+        }
+        return value
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: ".", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+}
+
 @MainActor
 final class NotificationLandingCoordinator {
     private unowned let appState: AppState
@@ -75,33 +171,7 @@ final class NotificationLandingCoordinator {
         }
     }
 
-    func routeForNotificationListSelection(_ notification: BackendAppNotification) -> AppRoute? {
-        if let recordID = recordID(from: notification) {
-            return .recordDetail(recordID: recordID)
-        }
-
-        guard let deepLink = notification.deepLink,
-              let url = URL(string: deepLink),
-              let route = AppRoute(url: url) else {
-            return nil
-        }
-
-        return route
-    }
-
-    private func recordID(from notification: BackendAppNotification) -> String? {
-        if let deepLink = notification.deepLink,
-           let url = URL(string: deepLink),
-           case .recordDetail(let recordID) = AppRoute(url: url) {
-            return recordID
-        }
-
-        if notification.threadType == "study_question",
-           let threadID = notification.threadId,
-           !threadID.isEmpty {
-            return threadID
-        }
-
-        return nil
+    func routeForNotificationListSelection(_ notification: BackendAppNotification) -> AppRoute {
+        NotificationRouteResolver.route(for: notification)
     }
 }

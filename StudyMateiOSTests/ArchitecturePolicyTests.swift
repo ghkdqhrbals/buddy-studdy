@@ -1455,6 +1455,124 @@ final class ArchitecturePolicyTests: XCTestCase {
         }
     }
 
+    func testNotificationRouteResolverUsesStudyQuestionRecord() {
+        let notification = BackendAppNotification(
+            id: "1",
+            type: "STUDY_QUESTION",
+            title: "BuddyStudy",
+            body: "새 질문",
+            threadType: "study_question",
+            threadId: "81",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NotificationRouteResolver.route(for: notification),
+            .recordDetail(recordID: "81")
+        )
+    }
+
+    func testNotificationRouteResolverUsesCommunityQuestionThread() {
+        let notification = BackendAppNotification(
+            id: "2",
+            type: "THREAD_ACTIVITY",
+            title: "새 댓글",
+            body: "질문에 댓글이 등록되었습니다.",
+            threadType: "question",
+            threadId: "100",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NotificationRouteResolver.route(for: notification),
+            .publicQuestion(id: "100")
+        )
+    }
+
+    func testNotificationRouteResolverPrefersValidDeepLink() {
+        let notification = BackendAppNotification(
+            id: "3",
+            type: "THREAD_ACTIVITY",
+            title: "새 댓글",
+            body: "질문에 댓글이 등록되었습니다.",
+            threadType: "question",
+            threadId: "100",
+            deepLink: "buddystudy://public/questions/200",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NotificationRouteResolver.route(for: notification),
+            .publicQuestion(id: "200")
+        )
+    }
+
+    func testNotificationRouteResolverFallsBackWhenDeepLinkIsInvalid() {
+        let notification = BackendAppNotification(
+            id: "4",
+            type: "THREAD_ACTIVITY",
+            title: "새 좋아요",
+            body: "질문에 좋아요가 등록되었습니다.",
+            threadType: "like",
+            threadId: "300",
+            deepLink: "https://unsupported.example/questions/300",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NotificationRouteResolver.route(for: notification),
+            .publicQuestion(id: "300")
+        )
+    }
+
+    func testNotificationRouteResolverUsesRelevantListWithoutThreadID() {
+        XCTAssertEqual(
+            NotificationRouteResolver.route(
+                deepLink: nil,
+                threadType: nil,
+                threadID: nil,
+                notificationType: "STUDY_QUESTION"
+            ),
+            .studyList
+        )
+        XCTAssertEqual(
+            NotificationRouteResolver.route(
+                deepLink: nil,
+                threadType: nil,
+                threadID: nil,
+                notificationType: "THREAD_ACTIVITY"
+            ),
+            .publicQuestions
+        )
+    }
+
+    func testNotificationPayloadRoutesThreadMetadataWithoutDeepLink() {
+        let payload: [AnyHashable: Any] = [
+            "type": "THREAD_ACTIVITY",
+            "threadType": "question",
+            "threadId": "400"
+        ]
+
+        XCTAssertEqual(
+            StudyNotificationPayload.appRoute(from: payload),
+            .publicQuestion(id: "400")
+        )
+    }
+
+    func testNotificationPayloadDoesNotConsumeUnknownTypeAsHomeRoute() {
+        let payload: [AnyHashable: Any] = [
+            "type": "cloudkit-query",
+            StudyNotificationAction.questionCreatedAt: NSNumber(value: 100.25)
+        ]
+
+        XCTAssertNil(StudyNotificationPayload.appRoute(from: payload))
+        XCTAssertEqual(StudyNotificationPayload.questionCreatedAt(from: payload), 100.25)
+    }
+
     func testAPIValidationDecodesBackendValidFieldName() throws {
         let payload = Data(#"{"openaiKeyConfigured":true,"valid":true,"openaiModel":"gpt-5.4"}"#.utf8)
 

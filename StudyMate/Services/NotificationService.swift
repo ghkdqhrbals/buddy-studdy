@@ -96,6 +96,24 @@ enum StudyNotificationPayload {
             }
         }
 
+        for dictionary in dictionaries {
+            let threadType = stringValue(dictionary["threadType"] ?? dictionary["thread_type"])
+            let threadID = stringValue(
+                dictionary["threadId"] ?? dictionary["threadID"] ?? dictionary["thread_id"]
+            )
+            let notificationType = stringValue(
+                dictionary["type"] ?? dictionary["notificationType"] ?? dictionary["notification_type"]
+            )
+            if threadType != nil || threadID != nil || NotificationRouteResolver.recognizes(notificationType: notificationType) {
+                return NotificationRouteResolver.route(
+                    deepLink: nil,
+                    threadType: threadType,
+                    threadID: threadID,
+                    notificationType: notificationType
+                )
+            }
+        }
+
         return nil
     }
 
