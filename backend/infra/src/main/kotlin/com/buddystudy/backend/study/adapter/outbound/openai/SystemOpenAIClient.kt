@@ -15,17 +15,17 @@ class SystemOpenAIClient(
     private val executor: OpenAIRequestExecutor,
     private val properties: BuddyStudyProperties,
 ) : OpenAIPort {
-    fun validate() {
+    suspend fun validate() {
         validate(systemApiKey())
     }
 
-    fun generateQuestion(model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
+    suspend fun generateQuestion(model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
         generateQuestion(systemApiKey(), model, prompt)
 
-    fun embedText(text: String): List<Float> =
+    suspend fun embedText(text: String): List<Float> =
         embedText(systemApiKey(), text)
 
-    fun generateQuestionCoverageBlueprint(
+    suspend fun generateQuestionCoverageBlueprint(
         model: String,
         topic: String,
         level: Int,
@@ -39,7 +39,7 @@ class SystemOpenAIClient(
             customPrompt = customPrompt,
         )
 
-    fun grade(model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
+    suspend fun grade(model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
         grade(
             apiKey = systemApiKey(),
             model = model,
@@ -50,17 +50,17 @@ class SystemOpenAIClient(
             language = language,
         )
 
-    override fun validate(apiKey: String) {
+    override suspend fun validate(apiKey: String) {
         executor.validate(systemApiKey())
     }
 
-    override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
+    override suspend fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
         executor.generateQuestion(systemApiKey(), model, prompt)
 
-    override fun embedText(apiKey: String, text: String): List<Float> =
+    override suspend fun embedText(apiKey: String, text: String): List<Float> =
         executor.embedText(systemApiKey(), text)
 
-    override fun generateQuestionCoverageBlueprint(
+    override suspend fun generateQuestionCoverageBlueprint(
         apiKey: String,
         model: String,
         topic: String,
@@ -69,7 +69,7 @@ class SystemOpenAIClient(
     ): List<OpenAIPort.QuestionCoverageConcept> =
         executor.generateQuestionCoverageBlueprint(systemApiKey(), model, topic, level, customPrompt)
 
-    override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
+    override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
         executor.grade(systemApiKey(), model, question, answer, topic, level, language)
 
     private fun systemApiKey(): String =

@@ -15,7 +15,7 @@ class QuestionScheduler(
     private val questionScheduleJob: QuestionScheduleJob,
 ) {
     @Scheduled(fixedDelayString = "\${buddystudy.scheduler.poll-ms:30000}")
-    fun runScheduled() {
+    suspend fun runScheduled() {
         jobs.execute(questionScheduleJob, JobTriggerType.SCHEDULED)
     }
 }
@@ -26,7 +26,7 @@ class QuestionScheduleJob(
 ) : ManagedJob {
     override val name: String = "question-schedule"
 
-    override fun run(): String {
+    override suspend fun run(): String {
         runQuestionSchedule.runDueQuestions()
         return "dueQuestionsProcessed=true"
     }

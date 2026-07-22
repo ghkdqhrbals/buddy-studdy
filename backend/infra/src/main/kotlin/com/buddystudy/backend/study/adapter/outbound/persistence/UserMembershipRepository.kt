@@ -2,12 +2,12 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.account.domain.entity.UserMembershipEntity
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 
-interface UserMembershipRepository : JpaRepository<UserMembershipEntity, Long> {
-    fun findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId: Long, status: String): UserMembershipEntity?
+interface UserMembershipRepository : CoroutineCrudRepository<UserMembershipEntity, Long> {
+    suspend fun findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId: Long, status: String): UserMembershipEntity?
 }
 
-interface UserMembershipTierRepository : JpaRepository<UserMembershipTierEntity, String> {
-    fun findByTierCode(tierCode: String): UserMembershipTierEntity?
+interface UserMembershipTierRepository : CoroutineCrudRepository<UserMembershipTierEntity, String> {
+    suspend fun findByTierCode(tierCode: String): UserMembershipTierEntity?
 }

@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
+import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.study.adapter.inbound.web.dto.PushTestRequest
 import com.buddystudy.backend.study.application.model.PushTestCommand
 import com.buddystudy.backend.study.application.model.PushTestResponse
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequirePermission(Permissions.TEST_PUSH_SEND)
 class PushTestController(
     private val pushTest: PushTestWebPort,
+    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "Send a test push notification",
@@ -35,10 +37,13 @@ class PushTestController(
         ApiResponse(responseCode = "422", description = "The authenticated device has no APNs token."),
     )
     @PostMapping("/test/push")
-    fun send(
+    suspend fun send(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
-    ): PushTestResponse = pushTest.send(body ?: PushTestRequest(), authentication)
+    ): PushTestResponse {
+        permissionGuard.check(authentication, Permissions.TEST_PUSH_SEND)
+        return pushTest.send(body ?: PushTestRequest(), authentication)
+    }
 
     @Operation(
         summary = "Publish a test push event",
@@ -49,25 +54,28 @@ class PushTestController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @PostMapping("/test/push-event")
-    fun publishEvent(
+    suspend fun publishEvent(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
-    ): PushTestResponse = pushTest.publishEvent(body ?: PushTestRequest(), authentication)
+    ): PushTestResponse {
+        permissionGuard.check(authentication, Permissions.TEST_PUSH_SEND)
+        return pushTest.publishEvent(body ?: PushTestRequest(), authentication)
+    }
 }
 
 interface PushTestWebPort {
-    fun send(body: PushTestRequest, authentication: Authentication): PushTestResponse
-    fun publishEvent(body: PushTestRequest, authentication: Authentication): PushTestResponse
+    suspend fun send(body: PushTestRequest, authentication: Authentication): PushTestResponse
+    suspend fun publishEvent(body: PushTestRequest, authentication: Authentication): PushTestResponse
 }
 
 @Component
 class PushTestWebAdapter(
     private val sendTestPush: SendTestPushUseCase,
 ) : PushTestWebPort {
-    override fun send(body: PushTestRequest, authentication: Authentication) =
+    override suspend fun send(body: PushTestRequest, authentication: Authentication) =
         sendTestPush.sendTestPush(authentication.principalOrThrow(), body.toCommand())
 
-    override fun publishEvent(body: PushTestRequest, authentication: Authentication) =
+    override suspend fun publishEvent(body: PushTestRequest, authentication: Authentication) =
         sendTestPush.publishTestPushEvent(authentication.principalOrThrow(), body.toCommand())
 }
 

@@ -4,14 +4,13 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
-import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxDispatchPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
-import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
@@ -20,24 +19,24 @@ import java.time.Instant
 @Component
 class QuestionPushOutboxDispatcher(
     private val properties: BuddyStudyProperties,
-    private val outbox: QuestionPushOutboxJpaRepository,
+    private val outbox: QuestionPushOutboxRepository,
     private val streams: QuestionPushPublishPort,
 ) : QuestionPushOutboxDispatchPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    fun dispatchPendingPushes(): Int {
+    suspend fun dispatchPendingPushes(): Int {
         if (!properties.scheduler.enabled || !properties.streams.enabled) return 0
 
         val now = Instant.now()
         var processed = 0
-        outbox.findPending(now, PageRequest.of(0, 50)).forEach { item ->
+        outbox.findPending(now, 50).forEach { item ->
             dispatchItem(item, now)
             processed += 1
         }
         return processed
     }
 
-    fun dispatchItem(item: QuestionPushOutboxEntity, now: Instant = Instant.now()) {
+    suspend fun dispatchItem(item: QuestionPushOutboxEntity, now: Instant = Instant.now()) {
         if (item.status != "PENDING") return
         val published = runCatching { streams.publishPush(item.toRequest()) }
             .onFailure { error -> log.warn("question_push_outbox_publish_failed outboxId={} recordId={} error={}", item.id, item.recordId, error.message) }
@@ -52,16 +51,16 @@ class QuestionPushOutboxDispatcher(
         }
     }
 
-    override fun dispatchOutbox(outboxId: Long) {
+    override suspend fun dispatchOutbox(outboxId: Long) {
         if (!properties.scheduler.enabled || !properties.streams.enabled) return
-        val item = outbox.findById(outboxId).orElse(null) ?: run {
+        val item = outbox.findById(outboxId) ?: run {
             log.warn("question_push_outbox_missing outboxId={}", outboxId)
             return
         }
         dispatchItem(item, Instant.now())
     }
 
-    private fun markPublished(item: QuestionPushOutboxEntity, now: Instant) {
+    private suspend fun markPublished(item: QuestionPushOutboxEntity, now: Instant) {
         item.status = "PUBLISHED"
         item.publishedAt = now
         item.lastError = null
@@ -80,7 +79,7 @@ class QuestionPushOutboxDispatcher(
         outbox.save(item)
     }
 
-    private fun markRetry(item: QuestionPushOutboxEntity, now: Instant, error: String) {
+    private suspend fun markRetry(item: QuestionPushOutboxEntity, now: Instant, error: String) {
         item.attempts += 1
         item.lastError = error
         item.nextAttemptAt = now.plusSeconds(retryDelaySeconds(item.attempts))
@@ -126,7 +125,7 @@ class QuestionPushOutboxScheduler(
     private val questionPushOutboxDispatchJob: QuestionPushOutboxDispatchJob,
 ) {
     @Scheduled(fixedDelayString = "\${buddystudy.scheduler.poll-ms:30000}")
-    fun dispatchPendingPushes() {
+    suspend fun dispatchPendingPushes() {
         jobs.execute(questionPushOutboxDispatchJob, JobTriggerType.SCHEDULED)
     }
 }
@@ -137,6 +136,6 @@ class QuestionPushOutboxDispatchJob(
 ) : ManagedJob {
     override val name: String = "question-push-outbox-dispatch"
 
-    override fun run(): String =
+    override suspend fun run(): String =
         "processed=${dispatcher.dispatchPendingPushes()}"
 }

@@ -3,8 +3,8 @@ spring:
     activate:
       on-profile: prod
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/prod}
-  datasource:
-    url: ${DATABASE_URL}
+  r2dbc:
+    url: ${R2DBC_DATABASE_URL}
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
   flyway:

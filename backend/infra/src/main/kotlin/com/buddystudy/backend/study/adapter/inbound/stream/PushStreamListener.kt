@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.inbound.stream
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
@@ -23,6 +24,7 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -32,6 +34,7 @@ class PushStreamListener(
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
+    private val coroutineScope: ApplicationCoroutineScope,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-push"
@@ -53,11 +56,11 @@ class PushStreamListener(
     @Scheduled(fixedDelayString = "\${PUSH_CONSUMER_POLL_DELAY_MS:1000}")
     fun pollPushRequests() {
         consumer.poll(properties.streams.key, group, consumerName, 50, Duration.ofMillis(3000)) {
-            onPushRequested(it)
+            coroutineScope.launch { onPushRequested(it) }
         }
     }
 
-    fun onPushRequested(message: RedisStreamMessage) {
+    suspend fun onPushRequested(message: RedisStreamMessage) {
         try {
             if (message.fields["eventType"] != eventType) {
                 consumer.acknowledge(message, group)

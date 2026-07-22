@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.study.domain.StudyRoom
 import com.buddystudy.study.domain.StudyRoomSchedule
 import org.assertj.core.api.Assertions.assertThat
@@ -7,7 +9,7 @@ import org.junit.jupiter.api.Test
 
 class DefaultQuestionPublicityTest {
     @Test
-    fun `new questions default to public without study visibility settings`() {
+    fun `new questions default to public without study visibility settings`(): Unit = runBlocking {
         val room = StudyRoom.of(
             StudyRoomSchedule(
                 id = 1,

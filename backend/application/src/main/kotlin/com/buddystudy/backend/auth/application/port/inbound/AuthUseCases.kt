@@ -8,22 +8,22 @@ import com.buddystudy.backend.auth.application.model.GoogleLoginResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse
 
 interface RegisterDeviceUseCase {
-    fun register(command: RegisterDeviceCommand): DeviceRegisterResponse
+    suspend fun register(command: RegisterDeviceCommand): DeviceRegisterResponse
 }
 
 interface IssueDeviceTokenUseCase {
-    fun token(deviceId: String, clientSecret: String): AccessTokenResponse
-    fun authenticateDevice(deviceId: String, clientSecret: String): Principal
+    suspend fun token(deviceId: String, clientSecret: String): AccessTokenResponse
+    suspend fun authenticateDevice(deviceId: String, clientSecret: String): Principal
 }
 
 interface LoginUseCase {
-    fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse
-    fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse
-    fun emailCode(email: String): EmailVerificationCodeResponse
-    fun logout(principal: Principal)
-    fun loggedInDevices(principal: Principal): LoggedInDevicesResponse
+    suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse
+    suspend fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse
+    suspend fun emailCode(email: String): EmailVerificationCodeResponse
+    suspend fun logout(principal: Principal)
+    suspend fun loggedInDevices(principal: Principal): LoggedInDevicesResponse
 }
 
 interface UpdatePushTokenUseCase {
-    fun updatePushToken(principal: Principal, command: PushTokenCommand)
+    suspend fun updatePushToken(principal: Principal, command: PushTokenCommand)
 }

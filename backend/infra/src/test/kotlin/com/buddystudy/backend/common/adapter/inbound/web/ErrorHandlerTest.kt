@@ -1,5 +1,7 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -38,7 +40,7 @@ class ErrorHandlerTest {
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Test
-    fun `fallback internal server error response includes reason`() {
+    fun `fallback internal server error response includes reason`(): Unit = runBlocking {
         val exchange = exchange("GET", "/api/v1/records", "req-1")
 
         val response = handler.fallback(IllegalStateException("database unavailable"), exchange)
@@ -56,7 +58,7 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `fallback internal server error logs exception stack trace`(output: CapturedOutput) {
+    fun `fallback internal server error logs exception stack trace`(output: CapturedOutput) = runBlocking {
         val exchange = exchange(
             method = "POST",
             path = "/api/v1/devices/register",
@@ -73,7 +75,7 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `api runtime exception response uses request locale and omits reason`() {
+    fun `api runtime exception response uses request locale and omits reason`(): Unit = runBlocking {
         val exchange = MockServerWebExchange.from(
             MockServerHttpRequest.get("/api/v1/records")
                 .header("Accept-Language", "ko-KR")
@@ -90,7 +92,7 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `not found response is json`() {
+    fun `not found response is json`(): Unit = runBlocking {
         val exchange = exchange("GET", "/missing", "req-3")
         val error = NoResourceFoundException(URI.create("/missing"), "missing")
 
@@ -103,7 +105,7 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `blocking executor saturation returns service unavailable`() {
+    fun `blocking executor saturation returns service unavailable`(): Unit = runBlocking {
         val exchange = exchange("POST", "/api/v1/study", "req-busy")
 
         val response = handler.serverBusy(TaskRejectedException("blocking queue full"), exchange)
@@ -116,7 +118,7 @@ class ErrorHandlerTest {
     }
 
     @Test
-    fun `error code numeric ranges are reserved by category`() {
+    fun `error code numeric ranges are reserved by category`(): Unit = runBlocking {
         assertThat(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN.code).isBetween(100, 199)
         assertThat(ApiErrorCode.OPENAI_API_KEY_MISSING.code).isBetween(200, 299)
         assertThat(ApiErrorCode.PERMISSION_DENIED.code).isBetween(300, 399)

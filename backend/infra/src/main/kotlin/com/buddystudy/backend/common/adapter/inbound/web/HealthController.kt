@@ -26,7 +26,7 @@ class HealthController(
         description = "Checks required backend dependencies and scheduler freshness for external Slack monitoring.",
     )
     @GetMapping("/health/readiness", "/api/v1/health/readiness")
-    fun readiness(): ResponseEntity<ReadinessResponse> {
+    suspend fun readiness(): ResponseEntity<ReadinessResponse> {
         val response = readiness.check()
         return readinessResponse(response)
     }
@@ -36,7 +36,7 @@ class HealthController(
         description = "Checks only hard serving dependencies for Kubernetes readiness probes. Scheduler freshness is excluded.",
     )
     @GetMapping("/health/dependencies", "/api/v1/health/dependencies")
-    fun dependencyReadiness(): ResponseEntity<ReadinessResponse> {
+    suspend fun dependencyReadiness(): ResponseEntity<ReadinessResponse> {
         val response = readiness.check(includeScheduler = false)
         return readinessResponse(response)
     }

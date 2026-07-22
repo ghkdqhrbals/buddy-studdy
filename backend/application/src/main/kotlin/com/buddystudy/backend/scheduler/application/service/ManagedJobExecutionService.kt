@@ -27,7 +27,7 @@ class ManagedJobExecutionService(
 ) : ManagedJobExecutionUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun execute(
+    override suspend fun execute(
         job: ManagedJob,
         triggerType: JobTriggerType,
         retryOfRunId: Long?,
@@ -66,10 +66,10 @@ class ManagedJobExecutionService(
         }
     }
 
-    override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+    override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
         runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
 
-    override fun findStatuses(): ScheduledJobStatusResponse {
+    override suspend fun findStatuses(): ScheduledJobStatusResponse {
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
         val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
         val threshold = Duration.ofMinutes(thresholdMinutes)
@@ -119,10 +119,10 @@ class ManagedJobExecutionService(
         return ScheduledJobStatusResponse(jobs)
     }
 
-    private fun elapsedMs(started: Long): Long =
+    private suspend fun elapsedMs(started: Long): Long =
         ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0)
 
-    private fun releaseLock(jobName: String) {
+    private suspend fun releaseLock(jobName: String) {
         runCatching { locks.release(jobName) }
             .onFailure { error ->
                 logger.warn(

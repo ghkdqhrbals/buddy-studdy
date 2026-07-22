@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.auth.application.permission.PermissionChecker
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
@@ -18,7 +20,7 @@ class PermissionCheckerTest {
     )
 
     @Test
-    fun `permission check delegates to database backed evaluator`() {
+    fun `permission check delegates to database backed evaluator`(): Unit = runBlocking {
         val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false, status = "ACTIVE")
         evaluator.results[Permissions.RECORD_UPDATE] = PermissionEvaluationResult.granted(Permissions.RECORD_UPDATE)
 
@@ -30,7 +32,7 @@ class PermissionCheckerTest {
     }
 
     @Test
-    fun `permission check forwards request evaluation context`() {
+    fun `permission check forwards request evaluation context`(): Unit = runBlocking {
         val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false, status = "ACTIVE")
         evaluator.results[Permissions.RECORD_UPDATE] = PermissionEvaluationResult.granted(Permissions.RECORD_UPDATE)
 
@@ -50,7 +52,7 @@ class PermissionCheckerTest {
     }
 
     @Test
-    fun `requirement failure throws the evaluator failure code`() {
+    fun `requirement failure throws the evaluator failure code`(): Unit = runBlocking {
         val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false, status = "ACTIVE")
         evaluator.results[Permissions.STUDY_CREATE] = PermissionEvaluationResult.denied(
             permissionCode = Permissions.STUDY_CREATE,
@@ -59,7 +61,7 @@ class PermissionCheckerTest {
         )
 
         assertThatThrownBy {
-            checker.check(principal, listOf(Permissions.STUDY_CREATE))
+            runBlocking { checker.check(principal, listOf(Permissions.STUDY_CREATE)) }
         }
             .isInstanceOf(ApiRuntimeException::class.java)
             .extracting("errorCode")
@@ -73,7 +75,7 @@ class PermissionCheckerTest {
         val calls = mutableListOf<EvaluationCall>()
         val contexts = mutableListOf<PermissionEvaluationContext>()
 
-        override fun evaluate(
+        override suspend fun evaluate(
             userId: Long,
             deviceId: String,
             permissionCode: String,

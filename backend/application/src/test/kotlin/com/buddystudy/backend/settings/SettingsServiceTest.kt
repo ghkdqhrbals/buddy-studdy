@@ -1,5 +1,7 @@
 package com.buddystudy.backend.settings
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -29,7 +31,7 @@ class SettingsServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `upsert schedule loads existing studies by topics in one query`() {
+    fun `upsert schedule loads existing studies by topics in one query`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
         studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")
 
@@ -51,7 +53,7 @@ class SettingsServiceTest {
     }
 
     @Test
-    fun `upsert schedule with unchanged interval keeps existing due time`() {
+    fun `upsert schedule with unchanged interval keeps existing due time`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
         val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
         studies.rows += StudyEntity(
@@ -78,7 +80,7 @@ class SettingsServiceTest {
     }
 
     @Test
-    fun `upsert schedule with changed interval replaces existing scheduled job`() {
+    fun `upsert schedule with changed interval replaces existing scheduled job`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
         val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
         studies.rows += StudyEntity(
@@ -109,7 +111,7 @@ class SettingsServiceTest {
         var findByUserIdAndTopicsCalls = 0
         var findByUserIdAndTopicCalls = 0
 
-        override fun save(entity: StudyEntity): StudyEntity {
+        override suspend fun save(entity: StudyEntity): StudyEntity {
             val persisted = if (entity.id == 0L) {
                 entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
                 rows += entity
@@ -121,30 +123,30 @@ class SettingsServiceTest {
             return persisted
         }
 
-        override fun deleteByIdAndUserId(id: Long, userId: Long): Long = 0
-        override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = rows.firstOrNull { it.userId == userId }
-        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
-        override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? {
+        override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long = 0
+        override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = rows.firstOrNull { it.userId == userId }
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? {
             findByUserIdAndTopicCalls += 1
             return rows.firstOrNull { it.userId == userId && it.topic == topic }
         }
-        override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> {
+        override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> {
             findByUserIdAndTopicsCalls += 1
             return rows.filter { it.userId == userId && it.topic in topics }
         }
-        override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> =
+        override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())
-        override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =
+        override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId && it.topic.contains(query) }, pageable, 0)
-        override fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
+        override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
     }
 
     private class FakeUserPort : UserPort {
         var row: UserEntity? = null
-        override fun save(entity: UserEntity): UserEntity = entity
-        override fun findById(id: Long): Optional<UserEntity> = Optional.ofNullable(row?.takeIf { it.id == id })
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = row?.let { mutableListOf(it) } ?: mutableListOf()
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+        override suspend fun save(entity: UserEntity): UserEntity = entity
+        override suspend fun findById(id: Long): UserEntity? = row?.takeIf { it.id == id }
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = row?.let { mutableListOf(it) } ?: mutableListOf()
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 }

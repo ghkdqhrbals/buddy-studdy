@@ -9,17 +9,17 @@ import com.buddystudy.backend.auth.application.model.TermsResponse
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 
 interface TermsUseCase {
-    fun activeTerms(principal: Principal? = null): List<TermsResponse>
-    fun saveAgreement(principal: Principal, command: TermsAgreementCommand): PermissionEvaluationsResponse
+    suspend fun activeTerms(principal: Principal? = null): List<TermsResponse>
+    suspend fun saveAgreement(principal: Principal, command: TermsAgreementCommand): PermissionEvaluationsResponse
 }
 
 interface NotificationPreferenceUseCase {
-    fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse>
-    fun saveNotificationPreference(principal: Principal, command: NotificationPreferenceCommand): NotificationPreferenceResponse
+    suspend fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse>
+    suspend fun saveNotificationPreference(principal: Principal, command: NotificationPreferenceCommand): NotificationPreferenceResponse
 }
 
 interface PermissionEvaluationUseCase {
-    fun permissions(
+    suspend fun permissions(
         principal: Principal,
         context: PermissionEvaluationContext = PermissionEvaluationContext(java.time.Instant.now()),
     ): PermissionEvaluationsResponse

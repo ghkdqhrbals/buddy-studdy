@@ -63,11 +63,13 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 
 - `backend/`
   - Spring Boot Kotlin APNs push backend.
-  - Runs Spring WebFlux on Reactor Netty. Synchronous JPA/JDBC controllers execute on a bounded `webflux-blocking-*` pool so blocking persistence never occupies Netty event-loop threads.
-  - Keeps imperative JPA transaction boundaries intentionally; this is not an R2DBC stack. Runtime details, MVC differences, capacity limits, and tuning guidance are documented in [`WEBFLUX_MIGRATION.md`](WEBFLUX_MIGRATION.md).
+  - Runs Spring WebFlux on Reactor Netty with Kotlin suspending controllers, use cases, persistence ports, and security lookups.
+  - Uses Spring Data R2DBC and the PostgreSQL R2DBC driver for runtime database access. Request-path persistence does not use JPA, Hibernate, Hikari, JDBC, or a blocking executor.
+  - Uses reactive transaction context for suspending `@Transactional` methods. Entity mutation must be persisted explicitly because Spring Data Relational does not provide JPA dirty checking, lazy loading, or managed entity sessions.
+  - Uses JDBC only during application startup when Flyway migrations are enabled. Runtime details and migration trade-offs are documented in [`R2DBC_MIGRATION.md`](R2DBC_MIGRATION.md) and [`WEBFLUX_MIGRATION.md`](WEBFLUX_MIGRATION.md).
   - The backend is organized as multi-module hexagonal architecture: `domain`, `application`, `infra`, and executable `tutor`.
   - Incoming web/scheduler/stream handlers live in `backend/infra`, persistence/OpenAI/APNs/Redis integrations live in `backend/infra`, and use-case services live in `backend/application` behind inbound port interfaces.
-  - Spring Data JPA repositories live in outbound persistence adapters. Current JPA entities are centralized under `backend/domain/src/main/kotlin/com/buddystudy/domain` as a migration bridge.
+  - Spring Data Relational entities live in `backend/domain`; outbound adapters use coroutine repositories, `R2dbcEntityTemplate`, or `DatabaseClient` for explicit SQL.
   - Topic-level statistics calculation is separated into `backend/application/src/main/kotlin/com/buddystudy/backend/stats/StatsService.kt` and is consumed by study application services.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.

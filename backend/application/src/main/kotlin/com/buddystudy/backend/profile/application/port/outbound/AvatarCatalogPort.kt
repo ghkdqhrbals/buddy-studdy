@@ -4,7 +4,7 @@ import com.buddystudy.avatar.domain.entity.AvatarCategoryEntity
 import com.buddystudy.avatar.domain.entity.AvatarItemEntity
 
 interface AvatarCatalogPort {
-    fun activeCategories(): List<AvatarCategoryEntity>
-    fun availableItems(userId: Long): List<AvatarItemEntity>
-    fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity>
+    suspend fun activeCategories(): List<AvatarCategoryEntity>
+    suspend fun availableItems(userId: Long): List<AvatarItemEntity>
+    suspend fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity>
 }

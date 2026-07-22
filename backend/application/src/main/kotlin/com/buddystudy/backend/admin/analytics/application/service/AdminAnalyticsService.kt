@@ -48,7 +48,7 @@ class AdminAnalyticsService(
         MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8))
     }
 
-    override fun login(username: String, password: String): AdminLoginResponse {
+    override suspend fun login(username: String, password: String): AdminLoginResponse {
         if (properties.admin.password.isBlank()) {
             throw ApiException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.RESOURCE_NOT_FOUND, "Admin login is not configured.")
         }
@@ -62,7 +62,7 @@ class AdminAnalyticsService(
     }
 
     @Transactional
-    override fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse {
+    override suspend fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse {
         validate(adminToken)
         val range = normalizedRange(startDate, endDate)
         refreshDates(range)
@@ -70,25 +70,25 @@ class AdminAnalyticsService(
     }
 
     @Transactional
-    override fun refreshRecent(referenceDate: LocalDate): Int =
+    override suspend fun refreshRecent(referenceDate: LocalDate): Int =
         refreshRange(referenceDate.minusDays((properties.analytics.recentDays - 1).coerceAtLeast(0)), referenceDate)
 
     @Transactional
-    override fun refreshCorrection(referenceDate: LocalDate): Int =
+    override suspend fun refreshCorrection(referenceDate: LocalDate): Int =
         refreshRange(referenceDate.minusDays((properties.analytics.correctionDays - 1).coerceAtLeast(0)), referenceDate)
 
     @Transactional
-    override fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int =
+    override suspend fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int =
         refreshDates(normalizedRange(startDate, endDate))
 
     @Transactional(readOnly = true)
-    override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse {
+    override suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse {
         validate(adminToken)
         val range = normalizedRange(startDate, endDate)
         return response(range.first(), range.last(), metrics.findDailyMetrics(range.first(), range.last(), metricKeys))
     }
 
-    override fun validate(adminToken: String) {
+    override suspend fun validate(adminToken: String) {
         try {
             validateAdminToken(adminToken)
         } catch (error: Exception) {
@@ -96,7 +96,7 @@ class AdminAnalyticsService(
         }
     }
 
-    private fun createAdminToken(now: Instant, expiresAt: Instant): String {
+    private suspend fun createAdminToken(now: Instant, expiresAt: Instant): String {
         val header = mapOf("alg" to "HS256", "typ" to "JWT")
         val payload = mapOf(
             "sub" to "admin",
@@ -108,7 +108,7 @@ class AdminAnalyticsService(
         return "$signingInput.${base64Url(hmacSha256(signingInput))}"
     }
 
-    private fun validateAdminToken(adminToken: String) {
+    private suspend fun validateAdminToken(adminToken: String) {
         val parts = adminToken.split(".")
         require(parts.size == 3) { "invalid token parts" }
         val signingInput = "${parts[0]}.${parts[1]}"
@@ -122,16 +122,16 @@ class AdminAnalyticsService(
         require(Instant.now().epochSecond < exp) { "expired admin token" }
     }
 
-    private fun hmacSha256(value: String): ByteArray {
+    private suspend fun hmacSha256(value: String): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
         return mac.doFinal(value.toByteArray(StandardCharsets.UTF_8))
     }
 
-    private fun base64Url(bytes: ByteArray): String =
+    private suspend fun base64Url(bytes: ByteArray): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
-    private fun normalizedRange(startDate: LocalDate, endDate: LocalDate): List<LocalDate> {
+    private suspend fun normalizedRange(startDate: LocalDate, endDate: LocalDate): List<LocalDate> {
         val start = minOf(startDate, endDate)
         val end = maxOf(startDate, endDate)
         return generateSequence(start) { it.plusDays(1) }
@@ -140,7 +140,7 @@ class AdminAnalyticsService(
             .toList()
     }
 
-    private fun refreshDates(range: List<LocalDate>): Int {
+    private suspend fun refreshDates(range: List<LocalDate>): Int {
         if (range.isEmpty()) {
             return 0
         }
@@ -149,7 +149,7 @@ class AdminAnalyticsService(
         return rows.size
     }
 
-    private fun response(startDate: LocalDate, endDate: LocalDate, rows: List<AdminDailyMetricPoint>): AdminMetricsResponse {
+    private suspend fun response(startDate: LocalDate, endDate: LocalDate, rows: List<AdminDailyMetricPoint>): AdminMetricsResponse {
         val series = rows
             .filter { it.metricKey in exposedMetricKeys }
             .sortedWith(compareBy<AdminDailyMetricPoint> { it.metricKey }.thenBy { it.dimension ?: "" }.thenBy { it.date })
@@ -160,7 +160,7 @@ class AdminAnalyticsService(
         return AdminMetricsResponse(startDate, endDate, series)
     }
 
-    private fun constantTimeEquals(left: String, right: String): Boolean {
+    private suspend fun constantTimeEquals(left: String, right: String): Boolean {
         val leftBytes = left.toByteArray(StandardCharsets.UTF_8)
         val rightBytes = right.toByteArray(StandardCharsets.UTF_8)
         return MessageDigest.isEqual(leftBytes, rightBytes)

@@ -6,11 +6,11 @@ import com.buddystudy.backend.admin.application.model.APIValidationResponse
 import com.buddystudy.backend.admin.application.model.OpenAIModelOptionResponse
 
 interface AdminUseCase {
-    fun models(): List<OpenAIModelOptionResponse>
+    suspend fun models(): List<OpenAIModelOptionResponse>
 
     /**
      * key 설정 여부
      */
-    fun apiStatus(principal: Principal): APIStatusResponse
-    fun validateApi(principal: Principal): APIValidationResponse
+    suspend fun apiStatus(principal: Principal): APIStatusResponse
+    suspend fun validateApi(principal: Principal): APIValidationResponse
 }

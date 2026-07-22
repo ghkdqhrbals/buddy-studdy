@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCoveragePersistenceAdapter
@@ -10,20 +12,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.TestPropertySource
-import org.testcontainers.containers.PostgreSQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 
 @SpringBootTest
-@Testcontainers
 @TestPropertySource(
     properties = [
-        "spring.datasource.driver-class-name=org.postgresql.Driver",
-        "spring.jpa.hibernate.ddl-auto=validate",
-        "spring.flyway.enabled=true",
         "spring.flyway.locations=classpath:db/migration",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
@@ -32,33 +25,13 @@ import org.testcontainers.junit.jupiter.Testcontainers
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class FlywaySchemaIntegrationTest {
+class FlywaySchemaIntegrationTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
 
-    companion object {
-        @Container
-        @JvmStatic
-        val postgres = PostgreSQLContainer("postgres:16-alpine")
-            .withDatabaseName("buddystudy")
-            .withUsername("buddystudy")
-            .withPassword("buddystudy")
-
-        @DynamicPropertySource
-        @JvmStatic
-        fun datasource(registry: DynamicPropertyRegistry) {
-            if (!postgres.isRunning) {
-                postgres.start()
-            }
-            registry.add("spring.datasource.url", postgres::getJdbcUrl)
-            registry.add("spring.datasource.username", postgres::getUsername)
-            registry.add("spring.datasource.password", postgres::getPassword)
-        }
-    }
-
     @Test
-    fun `flyway schema supports user openai settings`() {
+    fun `flyway schema supports user openai settings`(): Unit = runBlocking {
         val saved = users.save(
             UserEntity(
                 provider = "EMAIL",
@@ -74,7 +47,7 @@ class FlywaySchemaIntegrationTest {
     }
 
     @Test
-    fun `flyway schema supports nested question coverage tree`() {
+    fun `flyway schema supports nested question coverage tree`(): Unit = runBlocking {
         val user = users.save(
             UserEntity(
                 provider = "EMAIL",

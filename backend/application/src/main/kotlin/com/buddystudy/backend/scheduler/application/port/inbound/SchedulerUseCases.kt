@@ -7,18 +7,18 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResp
 
 interface ManagedJob {
     val name: String
-    fun run(): String?
+    suspend fun run(): String?
 }
 
 interface ManagedJobExecutionUseCase {
-    fun execute(
+    suspend fun execute(
         job: ManagedJob,
         triggerType: JobTriggerType,
         retryOfRunId: Long? = null,
         createdBy: String = "system",
     ): ScheduledJobRun
 
-    fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
+    suspend fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
 
-    fun findStatuses(): ScheduledJobStatusResponse
+    suspend fun findStatuses(): ScheduledJobStatusResponse
 }

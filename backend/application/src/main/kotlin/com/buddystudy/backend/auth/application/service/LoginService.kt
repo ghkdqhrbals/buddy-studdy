@@ -57,7 +57,7 @@ class LoginService(
     private val secureRandom = SecureRandom()
 
     @Transactional
-    override fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
+    override suspend fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
         val deviceId = tokens.create("dev")
         val secret = tokens.create("sec")
         val now = Instant.now()
@@ -95,20 +95,20 @@ class LoginService(
     }
 
     @Transactional
-    override fun token(deviceId: String, clientSecret: String): AccessTokenResponse {
+    override suspend fun token(deviceId: String, clientSecret: String): AccessTokenResponse {
         val principal = authenticateDevice(deviceId, clientSecret)
         val token = tokenService.create(principal.userId, principal.deviceId, principal.sessionId, principal.anonymous, principal.status)
         return AccessTokenResponse(token.first, token.second)
     }
 
     @Transactional
-    override fun authenticateDevice(deviceId: String, clientSecret: String): Principal {
+    override suspend fun authenticateDevice(deviceId: String, clientSecret: String): Principal {
         val device = sessions.device(deviceId)
         if (device.clientSecretHash != sha256(clientSecret)) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid device credentials.")
         }
         val user = device.userId
-            ?.let { users.findById(it).orElseThrow() }
+            ?.let { users.findById(it) ?: error("Authenticated user not found: $it") }
             ?: sessions.ensureAnonymousUser(device).also { roles.grantRoleIfMissing(it.id, Roles.ANONYMOUS_USER) }
         val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
         val session = sessions.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
@@ -116,7 +116,7 @@ class LoginService(
     }
 
     @Transactional
-    override fun updatePushToken(principal: Principal, command: PushTokenCommand) {
+    override suspend fun updatePushToken(principal: Principal, command: PushTokenCommand) {
         val device = sessions.device(principal.deviceId)
         device.apply(
             Account.of(
@@ -129,7 +129,7 @@ class LoginService(
     }
 
     @Transactional
-    override fun logout(principal: Principal) {
+    override suspend fun logout(principal: Principal) {
         val now = Instant.now()
         val session = sessions.findSession(principal.sessionId, principal.userId)
         if (session != null && session.deviceId == principal.deviceId && session.loggedOutAt == null) {
@@ -143,11 +143,12 @@ class LoginService(
         if (device.userId == principal.userId) {
             device.userId = null
             device.updatedAt = now
+            devices.save(device)
         }
     }
 
     @Transactional(readOnly = true)
-    override fun loggedInDevices(principal: Principal): LoggedInDevicesResponse {
+    override suspend fun loggedInDevices(principal: Principal): LoggedInDevicesResponse {
         val deviceById = devices.findAllByUserId(principal.userId).associateBy { it.deviceId }
         return LoggedInDevicesResponse(
             sessions.activeSessions(principal.userId).mapNotNull { session ->
@@ -166,7 +167,7 @@ class LoginService(
     }
 
     @Transactional
-    override fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse {
+    override suspend fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse {
         val now = Instant.now()
         val normalized = command.email.trim().lowercase()
         var user = users.findByEmailAndProvider(normalized, "EMAIL")
@@ -197,12 +198,13 @@ class LoginService(
         roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         val device = sessions.device(principal.deviceId)
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
+        devices.save(device)
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
 
-    override fun emailCode(email: String): EmailVerificationCodeResponse {
+    override suspend fun emailCode(email: String): EmailVerificationCodeResponse {
         val normalized = email.trim().lowercase()
         val ttl = Duration.ofSeconds(properties.email.verificationTtlSeconds)
         val code = "%06d".format(secureRandom.nextInt(1_000_000))
@@ -212,7 +214,7 @@ class LoginService(
     }
 
     @Transactional
-    override fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
+    override suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
         val tokenInfo = googleRest.get()
             .uri { it.path("/tokeninfo").queryParam("id_token", idToken).build() }
             .retrieve()
@@ -238,22 +240,23 @@ class LoginService(
         roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         val device = sessions.device(principal.deviceId)
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
+        devices.save(device)
         val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
         val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
         return GoogleLoginResponse(user.toProfile(), token.first, token.second)
     }
 
-    private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
 
-    private fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
+    private suspend fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
 
-    private fun DeviceEntity.apply(update: PushTokenUpdate) {
+    private suspend fun DeviceEntity.apply(update: PushTokenUpdate) {
         apnsToken = update.apnsToken
         apnsEnvironment = update.apnsEnvironment
         updatedAt = update.updatedAt
     }
 
-    private fun clearOtherPushTokens(userId: Long, currentDeviceId: String, now: Instant) {
+    private suspend fun clearOtherPushTokens(userId: Long, currentDeviceId: String, now: Instant) {
         devices.findAllByUserId(userId)
             .filter { it.deviceId != currentDeviceId && it.apnsToken.isNotBlank() }
             .forEach { device ->
@@ -263,7 +266,7 @@ class LoginService(
             }
     }
 
-    private fun DeviceEntity.apply(attachment: DeviceAttachment) {
+    private suspend fun DeviceEntity.apply(attachment: DeviceAttachment) {
         userId = attachment.userId
         updatedAt = attachment.updatedAt
     }

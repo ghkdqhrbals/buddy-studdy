@@ -24,44 +24,44 @@ class StudyWebAdapter(
     private val statsUseCase: GetStudyStatsUseCase,
     private val studySyncUseCase: StudySyncUseCase,
 ) : StudyWebPort {
-    override fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
+    override suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
         studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
 
-    override fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
+    override suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
         recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query, language)
 
-    override fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
+    override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
-    override fun record(id: Long, language: String, authentication: Authentication) =
+    override suspend fun record(id: Long, language: String, authentication: Authentication) =
         recordsUseCase.record(authentication.principalOrThrow(), id, language)
 
-    override fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
+    override suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
         studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = false)
 
-    override fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
+    override suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
         studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = true)
 
-    override fun skip(id: Long, authentication: Authentication) =
+    override suspend fun skip(id: Long, authentication: Authentication) =
         studyUseCase.skip(authentication.principalOrThrow(), id)
 
-    override fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit> {
+    override suspend fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit> {
         studyUseCase.delete(authentication.principalOrThrow(), id)
         return ResponseEntity.noContent().build()
     }
 
-    override fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication) =
+    override suspend fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication) =
         studyUseCase.publicity(authentication.principalOrThrow(), id, body.isPublic)
 
-    override fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication) =
+    override suspend fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication) =
         statsUseCase.stats(authentication.principalOrThrow(), safeLimit(limit, 100), max(0, offset), query)
 
-    override fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
+    override suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
         statsUseCase.activity(authentication.principalOrThrow(), startAt, endAt)
 
-    override fun createQuestion(studyId: Long, authentication: Authentication) =
+    override suspend fun createQuestion(studyId: Long, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)
 
-    override fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
+    override suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
         studySyncUseCase.createStudy(
             authentication.principalOrThrow(),
             CreateStudyCommand(
@@ -76,7 +76,7 @@ class StudyWebAdapter(
             ),
         )
 
-    override fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit> {
+    override suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit> {
         studySyncUseCase.deleteStudy(authentication.principalOrThrow(), studyId)
         return ResponseEntity.noContent().build()
     }

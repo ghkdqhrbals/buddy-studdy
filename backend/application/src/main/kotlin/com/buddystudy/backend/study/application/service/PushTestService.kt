@@ -25,7 +25,7 @@ class PushTestService(
     private val pushNotifications: PushNotificationPort,
     private val pushEvents: QuestionPushPublishPort,
 ) : SendTestPushUseCase {
-    override fun sendTestPush(principal: Principal, command: PushTestCommand): PushTestResponse {
+    override suspend fun sendTestPush(principal: Principal, command: PushTestCommand): PushTestResponse {
         val device = devices.findByDeviceId(principal.deviceId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.DEVICE_NOT_FOUND, "Device not found.")
         val token = device.apnsToken.trim()
@@ -58,7 +58,7 @@ class PushTestService(
         )
     }
 
-    override fun publishTestPushEvent(principal: Principal, command: PushTestCommand): PushTestResponse {
+    override suspend fun publishTestPushEvent(principal: Principal, command: PushTestCommand): PushTestResponse {
         val recordId = command.recordId.toLongOrNull() ?: 0L
         val request = QuestionPushRequest(
             recordId = recordId,

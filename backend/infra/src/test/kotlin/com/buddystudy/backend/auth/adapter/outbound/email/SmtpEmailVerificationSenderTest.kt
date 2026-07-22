@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth.adapter.outbound.email
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import jakarta.mail.internet.MimeMessage
 import org.assertj.core.api.Assertions.assertThat
@@ -9,7 +11,7 @@ import java.time.Duration
 
 class SmtpEmailVerificationSenderTest {
     @Test
-    fun `send builds verification email with normalized sender`() {
+    fun `send builds verification email with normalized sender`(): Unit = runBlocking {
         val mailSender = RecordingMailSender()
         val properties = BuddyStudyProperties().apply {
             email.from = "BuddyStudy sender@example.com"

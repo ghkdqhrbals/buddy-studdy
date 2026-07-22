@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityGuide
@@ -8,7 +10,7 @@ import org.junit.jupiter.api.Test
 
 class QuestionPromptProviderTest {
     @Test
-    fun `question prompt keeps service system prompt in code`() {
+    fun `question prompt keeps service system prompt in code`(): Unit = runBlocking {
         val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
             topic = "Redis",
             level = 8,
@@ -30,7 +32,7 @@ class QuestionPromptProviderTest {
     }
 
     @Test
-    fun `question prompt explicitly rejects semantically similar prior questions`() {
+    fun `question prompt explicitly rejects semantically similar prior questions`(): Unit = runBlocking {
         val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
             topic = "Redis",
             level = 6,
@@ -53,7 +55,7 @@ class QuestionPromptProviderTest {
     }
 
     @Test
-    fun `question prompt falls back to default system prompt`() {
+    fun `question prompt falls back to default system prompt`(): Unit = runBlocking {
         val prompt = QuestionPromptProvider()
             .buildQuestionGenerationPrompt(
                 topic = "Kotlin",
@@ -72,7 +74,7 @@ class QuestionPromptProviderTest {
     }
 
     @Test
-    fun `question prompt includes full concept path when coverage selects nested leaf`() {
+    fun `question prompt includes full concept path when coverage selects nested leaf`(): Unit = runBlocking {
         val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(
             topic = "Redis",
             level = 7,

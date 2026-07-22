@@ -7,25 +7,25 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 
 interface StudyUseCase {
-    fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
-    fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
-    fun skip(principal: Principal, id: Long): StudyRecordResponse
-    fun delete(principal: Principal, id: Long)
-    fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
+    suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
+    suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
+    suspend fun skip(principal: Principal, id: Long): StudyRecordResponse
+    suspend fun delete(principal: Principal, id: Long)
+    suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
 }
 
 interface BrowseRecordsUseCase {
-    fun records(principal: Principal, limit: Int, offset: Int, query: String? = null, language: String = "ko"): RecordsPageResponse
-    fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
-    fun record(principal: Principal, id: Long, language: String = "ko"): StudyRecordResponse
+    suspend fun records(principal: Principal, limit: Int, offset: Int, query: String? = null, language: String = "ko"): RecordsPageResponse
+    suspend fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
+    suspend fun record(principal: Principal, id: Long, language: String = "ko"): StudyRecordResponse
 }
 
 interface StudySyncUseCase {
-    fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
-    fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
-    fun deleteStudy(principal: Principal, studyId: Long)
+    suspend fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
+    suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
+    suspend fun deleteStudy(principal: Principal, studyId: Long)
 }
 
 interface RunQuestionScheduleUseCase {
-    fun runDueQuestions()
+    suspend fun runDueQuestions()
 }

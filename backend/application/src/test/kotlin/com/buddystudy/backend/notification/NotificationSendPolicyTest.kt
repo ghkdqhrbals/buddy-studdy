@@ -1,5 +1,7 @@
 package com.buddystudy.backend.notification
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
@@ -13,7 +15,7 @@ class NotificationSendPolicyTest {
     private val policy = NotificationSendPolicy(evaluator)
 
     @Test
-    fun `marketing push is skipped when marketing notification permission is denied`() {
+    fun `marketing push is skipped when marketing notification permission is denied`(): Unit = runBlocking {
         evaluator.result = PermissionEvaluationResult.denied(
             permissionCode = "notification:receive-marketing",
             failureCode = com.buddystudy.backend.common.application.error.ApiErrorCode.TERMS_AGREEMENT_REQUIRED,
@@ -36,7 +38,7 @@ class NotificationSendPolicyTest {
     }
 
     @Test
-    fun `study question push uses informational notification permission`() {
+    fun `study question push uses informational notification permission`(): Unit = runBlocking {
         evaluator.result = PermissionEvaluationResult.granted("notification:receive-info")
 
         val allowed = policy.canSendPush(
@@ -59,7 +61,7 @@ class NotificationSendPolicyTest {
         var result = PermissionEvaluationResult.granted("notification:receive-info")
         val calls = mutableListOf<String>()
 
-        override fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
+        override suspend fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
             calls += permissionCode
             return result
         }

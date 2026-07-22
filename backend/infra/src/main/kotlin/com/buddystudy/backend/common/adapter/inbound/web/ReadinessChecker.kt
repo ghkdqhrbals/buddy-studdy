@@ -1,26 +1,30 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
+import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
 import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessCheckResponse
 import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessResponse
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import io.r2dbc.spi.Row
+import kotlinx.coroutines.reactive.awaitSingle
+import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
-import javax.sql.DataSource
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 @Component
 class ReadinessChecker(
-    private val dataSource: DataSource,
-    private val redisConnectionFactory: RedisConnectionFactory,
+    private val databaseClient: DatabaseClient,
+    private val redisConnectionFactory: ReactiveRedisConnectionFactory,
     private val properties: BuddyStudyProperties,
 ) {
     private val startedAt: Instant = Instant.now()
-    private val jdbc = NamedParameterJdbcTemplate(dataSource)
 
-    fun check(includeScheduler: Boolean = true): ReadinessResponse {
+    suspend fun check(includeScheduler: Boolean = true): ReadinessResponse {
         val checks = linkedMapOf<String, ReadinessCheckResponse>(
             "database" to checkDatabase(),
             "redis" to checkRedis(),
@@ -37,22 +41,18 @@ class ReadinessChecker(
         )
     }
 
-    private fun checkDatabase(): ReadinessCheckResponse =
+    private suspend fun checkDatabase(): ReadinessCheckResponse =
         timedCheck {
-            dataSource.connection.use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute("select 1")
-                }
-            }
+            databaseClient.sql("select 1").fetch().rowsUpdated().awaitSingle()
             ReadinessCheckResponse(ok = true)
         }
 
-    private fun checkRedis(): ReadinessCheckResponse =
+    private suspend fun checkRedis(): ReadinessCheckResponse =
         timedCheck {
-            val connection = redisConnectionFactory.connection
+            val connection = redisConnectionFactory.reactiveConnection
             try {
-                val pong = connection.ping()
-                if (pong == null || !pong.equals("PONG", ignoreCase = true)) {
+                val pong = connection.ping().awaitSingle()
+                if (!pong.equals("PONG", ignoreCase = true)) {
                     throw IllegalStateException("Unexpected Redis ping response: $pong")
                 }
             } finally {
@@ -61,7 +61,7 @@ class ReadinessChecker(
             ReadinessCheckResponse(ok = true)
         }
 
-    private fun checkScheduler(): ReadinessCheckResponse {
+    private suspend fun checkScheduler(): ReadinessCheckResponse {
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -73,9 +73,8 @@ class ReadinessChecker(
         val staleThreshold = Duration.ofMinutes(properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1))
 
         return timedCheck {
-            val params = MapSqlParameterSource()
-                .addValue("jobNames", monitoredJobs)
-            val rows = jdbc.query(
+            val jobMarkers = indexedBindMarkers("jobName", monitoredJobs.size)
+            val rows = databaseClient.sql(
                 """
                 select
                     j.job_name,
@@ -106,22 +105,16 @@ class ReadinessChecker(
                     ) as latest_error_message
                 from scheduled_jobs j
                 left join scheduled_job_runs r on r.job_name = j.job_name
-                where j.job_name in (:jobNames)
+                where j.job_name in ($jobMarkers)
                 group by j.job_name, j.enabled, j.timeout_seconds
                 """.trimIndent(),
-                params,
-            ) { rs, _ ->
-                SchedulerJobReadinessRow(
-                    jobName = rs.getString("job_name"),
-                    enabled = rs.getBoolean("enabled"),
-                    timeoutSeconds = rs.getInt("timeout_seconds").coerceAtLeast(1),
-                    latestStartedAt = rs.getTimestamp("latest_started_at")?.toInstant(),
-                    lastSuccessfulStartedAt = rs.getTimestamp("last_successful_started_at")?.toInstant(),
-                    latestRunId = rs.getLong("latest_run_id").takeUnless { rs.wasNull() },
-                    latestStatus = rs.getString("latest_status"),
-                    latestErrorMessage = rs.getString("latest_error_message"),
-                )
-            }.associateBy { it.jobName }
+            )
+                .bindIndexed("jobName", monitoredJobs)
+                .map { row, _ -> row.toSchedulerJobReadinessRow() }
+                .all()
+                .collectList()
+                .awaitSingle()
+                .associateBy { it.jobName }
 
             val missingJobs = monitoredJobs.filterNot { rows.containsKey(it) }
             val disabledJobs = rows.values
@@ -218,9 +211,11 @@ class ReadinessChecker(
         }
     }
 
-    private fun timedCheck(block: () -> ReadinessCheckResponse): ReadinessCheckResponse {
+    private suspend fun timedCheck(block: suspend () -> ReadinessCheckResponse): ReadinessCheckResponse {
         val started = System.nanoTime()
-        val response = runCatching(block).getOrElse { error ->
+        val response = try {
+            block()
+        } catch (error: Throwable) {
             ReadinessCheckResponse(ok = false, message = error.safeMessage())
         }
         return response.copy(durationMs = elapsedMs(started))
@@ -232,6 +227,27 @@ class ReadinessChecker(
     private fun Throwable.safeMessage(): String =
         listOfNotNull(javaClass.simpleName, message?.take(200))
             .joinToString(": ")
+
+    private fun Row.toSchedulerJobReadinessRow() = SchedulerJobReadinessRow(
+        jobName = get("job_name", String::class.java)!!,
+        enabled = get("enabled", java.lang.Boolean::class.java)?.booleanValue() ?: false,
+        timeoutSeconds = (get("timeout_seconds", java.lang.Integer::class.java)?.toInt() ?: 1).coerceAtLeast(1),
+        latestStartedAt = instant("latest_started_at"),
+        lastSuccessfulStartedAt = instant("last_successful_started_at"),
+        latestRunId = get("latest_run_id", java.lang.Long::class.java)?.toLong(),
+        latestStatus = get("latest_status", String::class.java),
+        latestErrorMessage = get("latest_error_message", String::class.java),
+    )
+
+    private fun Row.instant(column: String): Instant? =
+        get(column)?.let { value ->
+            when (value) {
+                is Instant -> value
+                is OffsetDateTime -> value.toInstant()
+                is LocalDateTime -> value.toInstant(ZoneOffset.UTC)
+                else -> error("Unsupported timestamp type for $column: ${value.javaClass.name}")
+            }
+        }
 
     private data class SchedulerJobReadinessRow(
         val jobName: String,

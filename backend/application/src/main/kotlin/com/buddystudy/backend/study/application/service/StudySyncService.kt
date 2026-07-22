@@ -36,7 +36,7 @@ class StudySyncService(
     private val questionSearch: QuestionSearchSyncManager,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
-    override fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
+    override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
@@ -54,7 +54,7 @@ class StudySyncService(
     }
 
     @Transactional
-    override fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse {
+    override suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse {
         val topic = command.topic.trim()
         if (topic.isEmpty()) {
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Study topic is required.")
@@ -92,15 +92,16 @@ class StudySyncService(
             )
         )
 
-        val saved = studies.save(study)
+        var saved = studies.save(study)
         if (saved.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
             saved.reschedule(now)
+            saved = studies.save(saved)
         }
         return saved.toStudyRoomResponse()
     }
 
     @Transactional
-    override fun deleteStudy(principal: Principal, studyId: Long) {
+    override suspend fun deleteStudy(principal: Principal, studyId: Long) {
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         val now = Instant.now()
@@ -114,7 +115,7 @@ class StudySyncService(
         }
     }
 
-    private fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
+    private suspend fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
         if (isEmpty()) return emptyList()
         val pendingByStudyId = questions.findLatestPendingByStudyIds(map { it.id }).associateBy { it.studyId }
         val statsByQuestionId = pendingByStudyId.values
@@ -130,7 +131,7 @@ class StudySyncService(
         }
     }
 
-    private fun StudyEntity.toStudyRoomResponse(
+    private suspend fun StudyEntity.toStudyRoomResponse(
         pendingQuestion: QuestionEntity? = null,
         statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
     ): StudyRoomResponse {
@@ -157,12 +158,12 @@ class StudySyncService(
         )
     }
 
-    private fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
+    private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
         openaiApiKeyCipher = null,
         nextDueAt = nextDueAt,
     )
 
-    private fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
+    private suspend fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
         difficultyLevel = update.difficultyLevel
         intervalMinutes = update.intervalMinutes
         enabled = update.enabled
@@ -173,12 +174,12 @@ class StudySyncService(
         updatedAt = update.updatedAt
     }
 
-    private fun StudyEntity.reschedule(now: Instant) {
+    private suspend fun StudyEntity.reschedule(now: Instant) {
         nextDueAt = if (enabled) now.plusSeconds(intervalMinutes.toLong() * 60) else null
         updatedAt = now
     }
 
-    private fun StudyEntity.shouldReschedule(
+    private suspend fun StudyEntity.shouldReschedule(
         isNewStudy: Boolean,
         previousEnabled: Boolean,
         previousIntervalMinutes: Int,
@@ -189,7 +190,7 @@ class StudySyncService(
             previousIntervalMinutes != intervalMinutes ||
             (enabled && previousNextDueAt == null)
 
-    private fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
+    private suspend fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
         StudyRecordState(
             id = id,
             question = question,

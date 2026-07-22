@@ -12,7 +12,7 @@ import java.time.Instant
 class PermissionChecker(
     private val evaluator: PermissionEvaluator,
 ) {
-    fun check(
+    suspend fun check(
         principal: Principal?,
         requiredPermissions: Collection<String>,
         context: PermissionEvaluationContext? = null,
@@ -28,7 +28,7 @@ class PermissionChecker(
             )
         }
 
-        required.forEach { permission ->
+        for (permission in required) {
             val result = evaluator.evaluate(
                 userId = principal.userId,
                 deviceId = principal.deviceId,
@@ -54,6 +54,6 @@ class PermissionChecker(
         }
     }
 
-    fun has(principal: Principal, requiredPermissions: Collection<String>): Boolean =
+    suspend fun has(principal: Principal, requiredPermissions: Collection<String>): Boolean =
         runCatching { check(principal, requiredPermissions) }.isSuccess
 }

@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -12,7 +14,7 @@ import java.time.Instant
 
 class RedisStreamStudySchedulingPublishersTest {
     @Test
-    fun `question created events publish to configured stream`() {
+    fun `question created events publish to configured stream`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = RedisStreamQuestionCreatedPublisher(
             properties = BuddyStudyProperties().apply {
@@ -31,7 +33,7 @@ class RedisStreamStudySchedulingPublishersTest {
     }
 
     @Test
-    fun `notification events publish to configured stream`() {
+    fun `notification events publish to configured stream`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = NotificationRedisStreamPublisher(
             properties = BuddyStudyProperties().apply {

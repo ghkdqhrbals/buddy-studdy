@@ -1,38 +1,34 @@
 package com.buddystudy.backend.admin.analytics.adapter.outbound.persistence
 
 import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetricPoint
+import io.r2dbc.spi.ConnectionFactories
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.r2dbc.core.DatabaseClient
 import java.time.LocalDate
 
 class AdminAnalyticsMetricPersistenceAdapterTest {
     @Test
-    fun `metrics are stored in analytics database`() {
-        val serviceDataSource = h2("service")
-        val analyticsDataSource = h2("analytics")
-        val adapter = AdminAnalyticsMetricPersistenceAdapter(NamedParameterJdbcTemplate(analyticsDataSource))
+    fun `metrics are stored through the analytics r2dbc client`(): Unit = runBlocking {
+        val serviceClient = client("service")
+        val analyticsClient = client("analytics")
+        val adapter = AdminAnalyticsMetricPersistenceAdapter(analyticsClient)
         val day = LocalDate.parse("2026-06-25")
 
         adapter.upsertDailyMetrics(listOf(AdminDailyMetricPoint(day, "daily_active_users", null, 3.0, sampleCount = 3)))
 
         val rows = adapter.findDailyMetrics(day, day, emptySet())
-        val serviceTables = serviceDataSource.connection.use { connection ->
-            connection.metaData.getTables(null, null, "ADMIN_DAILY_METRICS", null).use { resultSet ->
-                generateSequence { if (resultSet.next()) resultSet.getString("TABLE_NAME") else null }.toList()
-            }
-        }
+        val serviceTableCount = serviceClient.sql(
+            "select count(*) as total from information_schema.tables where table_name = 'admin_daily_metrics'",
+        ).map { row, _ -> (row.get("total") as Number).toLong() }.one().awaitSingle()
 
         assertThat(rows).containsExactly(AdminDailyMetricPoint(day, "daily_active_users", null, 3.0, sampleCount = 3))
-        assertThat(serviceTables).isEmpty()
+        assertThat(serviceTableCount).isZero()
     }
 
-    private fun h2(name: String): DriverManagerDataSource =
-        DriverManagerDataSource().apply {
-            setDriverClassName("org.h2.Driver")
-            url = "jdbc:h2:mem:buddystudy-$name;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
-            username = "sa"
-            password = ""
-        }
+    private fun client(name: String) = DatabaseClient.create(
+        ConnectionFactories.get("r2dbc:h2:mem:///admin-$name;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"),
+    )
 }

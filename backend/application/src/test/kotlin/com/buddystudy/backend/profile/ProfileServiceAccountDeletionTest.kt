@@ -1,5 +1,7 @@
 package com.buddystudy.backend.profile
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.avatar.domain.entity.AvatarCategoryEntity
 import com.buddystudy.avatar.domain.entity.AvatarItemEntity
@@ -43,7 +45,7 @@ class ProfileServiceAccountDeletionTest {
     )
 
     @Test
-    fun `update profile returns the requested avatar symbol and color`() {
+    fun `update profile returns the requested avatar symbol and color`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
                 provider = "GOOGLE",
@@ -76,11 +78,11 @@ class ProfileServiceAccountDeletionTest {
 
         assertThat(response.avatarSymbolName).isEqualTo("pixel-cat-geek")
         assertThat(response.avatarColorSeed).isEqualTo("avatar-color-teal")
-        assertThat(users.findById(activeUser.id).orElseThrow().avatarSymbolName).isEqualTo("pixel-cat-geek")
+        assertThat(users.findById(activeUser.id)!!.avatarSymbolName).isEqualTo("pixel-cat-geek")
     }
 
     @Test
-    fun `withdraw deletes member data and reconnects current device to a new anonymous user`() {
+    fun `withdraw deletes member data and reconnects current device to a new anonymous user`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
                 provider = "GOOGLE",
@@ -128,7 +130,7 @@ class ProfileServiceAccountDeletionTest {
         val anonymousUserId = devices.findByDeviceId("dev-current")?.userId
         assertThat(anonymousUserId).isNotNull()
         assertThat(anonymousUserId).isNotEqualTo(activeUser.id)
-        assertThat(users.findById(anonymousUserId!!).orElseThrow().status).isEqualTo("ANONYMOUS")
+        assertThat(users.findById(anonymousUserId!!)!!.status).isEqualTo("ANONYMOUS")
         assertThat(roles.grants).contains(anonymousUserId to Roles.ANONYMOUS_USER)
         assertThat(userDevices.findActiveByUserId(activeUser.id)).isEmpty()
         assertThat(userDevices.findAllByUserId(activeUser.id)).isEmpty()
@@ -144,7 +146,7 @@ class ProfileServiceAccountDeletionTest {
     ) : AccountDeletionPort {
         val deleted = mutableListOf<DeletedAccount>()
 
-        override fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant) {
+        override suspend fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant) {
             deleted += DeletedAccount(userId, currentDeviceId)
             userDevices.deleteAllForUser(userId)
             devices.detachUser(userId, now)
@@ -156,21 +158,21 @@ class ProfileServiceAccountDeletionTest {
         private val users = linkedMapOf<Long, UserEntity>()
         private var nextId = 1L
 
-        override fun save(entity: UserEntity): UserEntity {
+        override suspend fun save(entity: UserEntity): UserEntity {
             if (entity.id == 0L) entity.id = nextId++
             users[entity.id] = entity
             return entity
         }
 
-        override fun findById(id: Long): Optional<UserEntity> = Optional.ofNullable(users[id])
+        override suspend fun findById(id: Long): UserEntity? = users[id]
 
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
             ids.mapNotNull { users[it] }.toMutableList()
 
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
             users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
 
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
             users.values.firstOrNull { it.provider == provider && it.email == email }
 
         fun deleteById(id: Long) {
@@ -182,15 +184,15 @@ class ProfileServiceAccountDeletionTest {
         private val devices = linkedMapOf<String, DeviceEntity>()
         private var nextId = 1L
 
-        override fun save(entity: DeviceEntity): DeviceEntity {
+        override suspend fun save(entity: DeviceEntity): DeviceEntity {
             if (entity.id == 0L) entity.id = nextId++
             devices[entity.deviceId] = entity
             return entity
         }
 
-        override fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
 
-        override fun findAllByUserId(userId: Long): List<DeviceEntity> =
+        override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }
 
         fun detachUser(userId: Long, now: Instant) {
@@ -207,25 +209,25 @@ class ProfileServiceAccountDeletionTest {
         private val sessions = linkedMapOf<Long, UserDeviceEntity>()
         private var nextId = 1L
 
-        override fun save(entity: UserDeviceEntity): UserDeviceEntity {
+        override suspend fun save(entity: UserDeviceEntity): UserDeviceEntity {
             if (entity.id == 0L) entity.id = nextId++
             sessions[entity.id] = entity
             return entity
         }
 
-        override fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity? =
+        override suspend fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity? =
             sessions.values.firstOrNull { it.userId == userId && it.deviceId == deviceId }
 
-        override fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
             sessions[id]?.takeIf { it.userId == userId }
 
-        override fun findActiveByUserId(userId: Long): List<UserDeviceEntity> =
+        override suspend fun findActiveByUserId(userId: Long): List<UserDeviceEntity> =
             sessions.values.filter { it.userId == userId && it.isActive() }
 
         fun findAllByUserId(userId: Long): List<UserDeviceEntity> =
             sessions.values.filter { it.userId == userId }
 
-        override fun hasActiveSession(userId: Long, deviceId: String): Boolean =
+        override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
 
         fun deleteAllForUser(userId: Long) {
@@ -237,11 +239,11 @@ class ProfileServiceAccountDeletionTest {
     private class InMemoryRoleAssignmentPort : RoleAssignmentPort {
         val grants = mutableListOf<Pair<Long, String>>()
 
-        override fun grantRoleIfMissing(userId: Long, roleCode: String) {
+        override suspend fun grantRoleIfMissing(userId: Long, roleCode: String) {
             grants += userId to roleCode
         }
 
-        override fun countUserRoles(userId: Long, roleCode: String): Long =
+        override suspend fun countUserRoles(userId: Long, roleCode: String): Long =
             grants.count { it == userId to roleCode }.toLong()
     }
 
@@ -265,11 +267,11 @@ class ProfileServiceAccountDeletionTest {
             AvatarItemEntity(key = "item-laptop", category = "items", slot = "item", displayNameKo = "노트북", displayNameEn = "Laptop", colorHex = "#64748B", sortOrder = 70),
         )
 
-        override fun activeCategories(): List<AvatarCategoryEntity> = categories
+        override suspend fun activeCategories(): List<AvatarCategoryEntity> = categories
 
-        override fun availableItems(userId: Long): List<AvatarItemEntity> = items
+        override suspend fun availableItems(userId: Long): List<AvatarItemEntity> = items
 
-        override fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
+        override suspend fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
             items.filter { it.key in keys }
     }
 }

@@ -4,10 +4,10 @@ import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetric
 import java.time.LocalDate
 
 interface AdminAnalyticsMetricPort {
-    fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>)
-    fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint>
+    suspend fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>)
+    suspend fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint>
 }
 
 interface AdminAnalyticsSourcePort {
-    fun collectDailyMetrics(date: LocalDate): List<AdminDailyMetricPoint>
+    suspend fun collectDailyMetrics(date: LocalDate): List<AdminDailyMetricPoint>
 }

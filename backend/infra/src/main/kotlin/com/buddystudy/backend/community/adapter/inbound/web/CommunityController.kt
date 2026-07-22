@@ -2,6 +2,7 @@ package com.buddystudy.backend.community.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
+import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.common.adapter.inbound.web.optionalPrincipal
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
@@ -33,6 +34,7 @@ import kotlin.math.min
 @Tag(name = "Public Questions", description = "Public completed-question browsing, reactions, comments, and report APIs.")
 class CommunityController(
     private val community: CommunityWebPort,
+    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "List public completed questions",
@@ -40,7 +42,7 @@ class CommunityController(
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned."))
     @GetMapping("/public/questions")
-    fun getPublicQuestions(
+    suspend fun getPublicQuestions(
         @Parameter(description = "Optional topic keyword filter.", example = "Swift")
         @RequestParam(required = false) topic: String?,
         @Parameter(description = "Optional DB-backed public question search query. Searches topic, question, answer, feedback, explanation, and author.", example = "Swift")
@@ -56,7 +58,7 @@ class CommunityController(
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
-    fun getPublicQuestion(
+    suspend fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @Parameter(description = "Response language code.", example = "ko")
@@ -67,18 +69,22 @@ class CommunityController(
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    fun likePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
-        community.likePublicQuestion(id, authentication)
+    suspend fun likePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any {
+        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_LIKE)
+        return community.likePublicQuestion(id, authentication)
+    }
 
     @Operation(summary = "Unlike a public question", description = "Removes the authenticated user's like. Like counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    fun unlikePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication) =
-        community.unlikePublicQuestion(id, authentication)
+    suspend fun unlikePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any {
+        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_LIKE)
+        return community.unlikePublicQuestion(id, authentication)
+    }
 
     @Operation(summary = "List public question comments", description = "Returns paginated comments for a public question.")
     @GetMapping("/public/questions/{id}/comments")
-    fun getComments(
+    suspend fun getComments(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @Parameter(description = "Maximum number of comments to return. Server clamps this to 1..100.", example = "30")
@@ -91,36 +97,42 @@ class CommunityController(
     @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
     @RequirePermission(Permissions.PUBLIC_QUESTION_COMMENT)
-    fun createComment(
+    suspend fun createComment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: CommunityCommentRequest,
         authentication: Authentication,
-    ) =
-        community.createComment(id, body, authentication)
+    ): Any {
+        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_COMMENT)
+        return community.createComment(id, body, authentication)
+    }
 
     @Operation(summary = "Delete a comment", description = "Soft-deletes the authenticated user's own comment on a public question. Comment counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/comments/{commentId}")
     @RequirePermission(Permissions.COMMENT_DELETE)
-    fun deleteComment(
+    suspend fun deleteComment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @Parameter(description = "Comment id.", example = "7")
         @PathVariable commentId: Long,
         authentication: Authentication,
-    ) =
-        community.deleteComment(id, commentId, authentication)
+    ): Any {
+        permissionGuard.check(authentication, Permissions.COMMENT_DELETE)
+        return community.deleteComment(id, commentId, authentication)
+    }
 
     @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
     @RequirePermission(Permissions.PUBLIC_QUESTION_REPORT)
-    fun reportQuestion(
+    suspend fun reportQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: ReportQuestionRequest,
         authentication: Authentication,
-    ): ReportQuestionResponse =
-        community.reportQuestion(id, body, authentication)
+    ): ReportQuestionResponse {
+        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_REPORT)
+        return community.reportQuestion(id, body, authentication)
+    }
 }
 
 @RestController
@@ -135,7 +147,7 @@ class CommunitySearchV2Controller(
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned from search v2."))
     @GetMapping("/public/questions/search")
-    fun getPublicQuestionsV2(
+    suspend fun getPublicQuestionsV2(
         @Parameter(description = "Full-text search query.", example = "Swift state management")
         @RequestParam(required = false) query: String?,
         @Parameter(description = "Maximum number of items to return. Server clamps this to 1..100.", example = "20")
@@ -149,44 +161,44 @@ class CommunitySearchV2Controller(
 }
 
 interface CommunityWebPort {
-    fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    fun getPublicQuestion(id: Long, language: String, authentication: Authentication?): Any
-    fun likePublicQuestion(id: Long, authentication: Authentication): Any
-    fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
-    fun getComments(id: Long, limit: Int, offset: Int): Any
-    fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
-    fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
-    fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
+    suspend fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestion(id: Long, language: String, authentication: Authentication?): Any
+    suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
+    suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
+    suspend fun getComments(id: Long, limit: Int, offset: Int): Any
+    suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
+    suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
+    suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
 }
 
 @Component
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
 ) : CommunityWebPort {
-    override fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
+    override suspend fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestions(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
 
-    override fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
+    override suspend fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
 
-    override fun getPublicQuestion(id: Long, language: String, authentication: Authentication?) =
+    override suspend fun getPublicQuestion(id: Long, language: String, authentication: Authentication?) =
         community.getPublicQuestion(authentication.optionalPrincipal(), id, language)
 
-    override fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
+    override suspend fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 
-    override fun unlikePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
+    override suspend fun unlikePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
 
-    override fun getComments(id: Long, limit: Int, offset: Int) =
+    override suspend fun getComments(id: Long, limit: Int, offset: Int) =
         community.getComments(id, safeLimit(limit, 100), max(0, offset))
 
-    override fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
+    override suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
         community.createComment(authentication.principalOrThrow(), id, body.body)
 
-    override fun deleteComment(id: Long, commentId: Long, authentication: Authentication) =
+    override suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication) =
         community.deleteComment(authentication.principalOrThrow(), id, commentId)
 
-    override fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
+    override suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
         community.reportQuestion(authentication.principalOrThrow(), id, body.toCommand())
         return ReportQuestionResponse()
     }

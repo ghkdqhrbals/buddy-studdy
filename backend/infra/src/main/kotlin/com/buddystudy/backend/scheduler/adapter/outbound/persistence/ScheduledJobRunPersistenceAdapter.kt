@@ -1,234 +1,210 @@
 package com.buddystudy.backend.scheduler.adapter.outbound.persistence
 
-import com.buddystudy.backend.scheduler.application.model.JobRunStatus
-import com.buddystudy.backend.scheduler.application.model.JobTriggerType
-import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
-import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
-import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
+import com.buddystudy.backend.scheduler.application.model.*
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
-import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.support.GeneratedKeyHolder
+import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
+import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
+import io.r2dbc.spi.Connection
+import io.r2dbc.spi.ConnectionFactory
+import io.r2dbc.spi.Row
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactive.awaitFirstOrNull
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
-import java.sql.ResultSet
-import java.sql.Timestamp
-import javax.sql.DataSource
+import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 
 @Repository
 class ScheduledJobRunPersistenceAdapter(
-    @Qualifier("dataSource") dataSource: DataSource,
+    private val client: DatabaseClient,
 ) : ScheduledJobRunPort {
-    private val jdbc = NamedParameterJdbcTemplate(dataSource)
+    override suspend fun isEnabled(jobName: String): Boolean =
+        client.sql("select enabled from scheduled_jobs where job_name = :jobName").bind("jobName", jobName)
+            .map { row, _ -> row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue() }
+            .one().awaitSingleOrNull() ?: true
 
-    override fun isEnabled(jobName: String): Boolean =
-        jdbc.query(
-            "select enabled from scheduled_jobs where job_name = :jobName",
-            mapOf("jobName" to jobName),
-        ) { rs, _ -> rs.getBoolean("enabled") }.firstOrNull() ?: true
-
-    override fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun {
-        val keyHolder = GeneratedKeyHolder()
-        val params = MapSqlParameterSource()
-            .addValue("jobName", jobName)
-            .addValue("triggerType", triggerType.name)
-            .addValue("status", JobRunStatus.RUNNING.name)
-            .addValue("startedAt", Timestamp.from(java.time.Instant.now()))
-            .addValue("retryOfRunId", retryOfRunId)
-            .addValue("createdBy", createdBy)
-        jdbc.update(
+    override suspend fun start(
+        jobName: String,
+        triggerType: JobTriggerType,
+        retryOfRunId: Long?,
+        createdBy: String,
+    ): ScheduledJobRun {
+        val id = client.sql(
             """
-            insert into scheduled_job_runs (
-                job_name, trigger_type, status, started_at, retry_of_run_id, created_by
-            ) values (
-                :jobName, :triggerType, :status, :startedAt, :retryOfRunId, :createdBy
-            )
+            insert into scheduled_job_runs
+                (job_name, trigger_type, status, started_at, retry_of_run_id, created_by)
+            values (:jobName, :triggerType, :status, :startedAt, :retryOfRunId, :createdBy)
             """.trimIndent(),
-            params,
-            keyHolder,
-            arrayOf("id"),
-        )
-        return findById(keyHolder.key!!.toLong())
+        ).bind("jobName", jobName).bind("triggerType", triggerType.name).bind("status", JobRunStatus.RUNNING.name)
+            .bind("startedAt", Instant.now()).bindNullable("retryOfRunId", retryOfRunId, Long::class.javaObjectType)
+            .bind("createdBy", createdBy)
+            .filter { statement -> statement.returnGeneratedValues("id") }
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }.one().awaitSingle()
+        return findById(id)
     }
 
-    override fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun {
-        jdbc.update(
+    override suspend fun finish(
+        runId: Long,
+        status: JobRunStatus,
+        summary: String?,
+        errorMessage: String?,
+        durationMs: Long,
+    ): ScheduledJobRun {
+        client.sql(
             """
-            update scheduled_job_runs
-            set status = :status,
-                finished_at = current_timestamp,
-                duration_ms = :durationMs,
-                summary = :summary,
-                error_message = :errorMessage
+            update scheduled_job_runs set status = :status, finished_at = current_timestamp,
+                duration_ms = :durationMs, summary = :summary, error_message = :errorMessage
             where id = :runId
             """.trimIndent(),
-            mapOf(
-                "runId" to runId,
-                "status" to status.name,
-                "durationMs" to durationMs,
-                "summary" to summary?.take(500),
-                "errorMessage" to errorMessage?.take(1000),
-            ),
-        )
+        ).bind("runId", runId).bind("status", status.name).bind("durationMs", durationMs)
+            .bindNullable("summary", summary?.take(500), String::class.java)
+            .bindNullable("errorMessage", errorMessage?.take(1000), String::class.java)
+            .fetch().rowsUpdated().awaitSingle()
         return findById(runId)
     }
 
-    override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
-        val normalizedJobName = jobName?.trim()?.takeIf { it.isNotEmpty() }
+    override suspend fun findRuns(
+        jobName: String?,
+        runId: Long?,
+        limit: Int,
+        offset: Int,
+    ): ScheduledJobRunPageResponse {
         val conditions = mutableListOf<String>()
-        val params = MapSqlParameterSource()
-            .addValue("limit", limit)
-            .addValue("offset", offset)
-        if (normalizedJobName != null) {
-            conditions += "job_name = :jobName"
-            params.addValue("jobName", normalizedJobName)
+        if (!jobName.isNullOrBlank()) conditions += "job_name = :jobName"
+        if (runId != null) conditions += "id = :runId"
+        val where = conditions.joinToString(prefix = if (conditions.isEmpty()) "" else " where ", separator = " and ")
+        var countSpec = client.sql("select count(*) as total from scheduled_job_runs$where")
+        var rowsSpec = client.sql("select * from scheduled_job_runs$where order by started_at desc, id desc limit :limit offset :offset")
+            .bind("limit", limit).bind("offset", offset)
+        if (!jobName.isNullOrBlank()) {
+            countSpec = countSpec.bind("jobName", jobName.trim())
+            rowsSpec = rowsSpec.bind("jobName", jobName.trim())
         }
         if (runId != null) {
-            conditions += "id = :runId"
-            params.addValue("runId", runId)
+            countSpec = countSpec.bind("runId", runId)
+            rowsSpec = rowsSpec.bind("runId", runId)
         }
-        val whereSql = conditions.takeIf { it.isNotEmpty() }
-            ?.joinToString(prefix = "\nwhere ", separator = " and ")
-            .orEmpty()
-        val total = jdbc.queryForObject(
-            "select count(*) from scheduled_job_runs$whereSql",
-            params,
-            Long::class.java,
-        ) ?: 0L
-        val sql = buildString {
-            append(
-                """
-                select *
-                from scheduled_job_runs
-                """.trimIndent(),
-            )
-            append(whereSql)
-            append("\norder by started_at desc, id desc\nlimit :limit offset :offset")
-        }
-        val rows = jdbc.query(sql, params) { rs, _ -> rs.toRun() }
+        val total = countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }.one().awaitSingle()
+        val rows = rowsSpec.map { row, _ -> row.toRun() }.all().collectList().awaitSingle()
         return ScheduledJobRunPageResponse(rows, total, limit, offset)
     }
 
-    override fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> {
-        val params = MapSqlParameterSource()
-        val whereSql = if (jobNames.isEmpty()) {
-            ""
-        } else {
-            params.addValue("jobNames", jobNames)
-            "where j.job_name in (:jobNames)"
-        }
-        val snapshots = jdbc.query(
+    override suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> {
+        val jobFilter = if (jobNames.isEmpty()) "" else "where job_name in (${indexedBindMarkers("jobName", jobNames.size)})"
+        var jobSpec = client.sql(
             """
-            select j.job_name, j.enabled, j.schedule_type, j.schedule_value, j.timeout_seconds
-            from scheduled_jobs j
-            $whereSql
-            order by j.job_name
+            select job_name, enabled, schedule_type, schedule_value, timeout_seconds from scheduled_jobs
+                $jobFilter order by job_name
             """.trimIndent(),
-            params,
-        ) { rs, _ ->
-            RawScheduledJobSnapshot(
-                jobName = rs.getString("job_name"),
-                enabled = rs.getBoolean("enabled"),
-                scheduleType = rs.getString("schedule_type"),
-                scheduleValue = rs.getString("schedule_value"),
-                timeoutSeconds = rs.getInt("timeout_seconds").coerceAtLeast(1),
+        )
+        if (jobNames.isNotEmpty()) jobSpec = jobSpec.bindIndexed("jobName", jobNames)
+        val snapshots = jobSpec.map { row, _ ->
+            RawSnapshot(
+                row.get("job_name", String::class.java)!!,
+                row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue(),
+                row.get("schedule_type", String::class.java)!!,
+                row.get("schedule_value", String::class.java)!!,
+                row.get("timeout_seconds", Integer::class.java)!!.toInt().coerceAtLeast(1),
             )
-        }
+        }.all().collectList().awaitSingle()
         if (snapshots.isEmpty()) return emptyList()
-
-        val latestRuns = jdbc.query(
-            """
-            select *
-            from (
-                select r.*,
-                       row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) as rn
-                from scheduled_job_runs r
-                where r.job_name in (:jobNames)
-            ) latest_runs
-            where rn = 1
-            """.trimIndent(),
-            MapSqlParameterSource("jobNames", snapshots.map { it.jobName }),
-        ) { rs, _ -> rs.toRun() }.associateBy { it.jobName }
-
-        val lastSuccessfulRuns = jdbc.query(
-            """
-            select *
-            from (
-                select r.*,
-                       row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) as rn
-                from scheduled_job_runs r
-                where r.job_name in (:jobNames)
-                  and r.status = :successStatus
-            ) successful_runs
-            where rn = 1
-            """.trimIndent(),
-            MapSqlParameterSource()
-                .addValue("jobNames", snapshots.map { it.jobName })
-                .addValue("successStatus", JobRunStatus.SUCCESS.name),
-        ) { rs, _ -> rs.toRun() }.associateBy { it.jobName }
-
+        val names = snapshots.map { it.jobName }
+        val latest = latestRuns(names, null)
+        val successful = latestRuns(names, JobRunStatus.SUCCESS)
         return snapshots.map {
             ScheduledJobSnapshot(
-                jobName = it.jobName,
-                enabled = it.enabled,
-                scheduleType = it.scheduleType,
-                scheduleValue = it.scheduleValue,
-                timeoutSeconds = it.timeoutSeconds,
-                latestRun = latestRuns[it.jobName],
-                lastSuccessfulRun = lastSuccessfulRuns[it.jobName],
+                it.jobName, it.enabled, it.scheduleType, it.scheduleValue, it.timeoutSeconds,
+                latest[it.jobName], successful[it.jobName],
             )
         }
     }
 
-    private fun findById(id: Long): ScheduledJobRun =
-        jdbc.query(
-            "select * from scheduled_job_runs where id = :id",
-            mapOf("id" to id),
-        ) { rs, _ -> rs.toRun() }.single()
+    private suspend fun latestRuns(names: List<String>, status: JobRunStatus?): Map<String, ScheduledJobRun> {
+        val statusClause = if (status == null) "" else "and status = :status"
+        val jobMarkers = indexedBindMarkers("jobName", names.size)
+        var spec = client.sql(
+            """
+            select * from (
+                select r.*, row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) rn
+                from scheduled_job_runs r where r.job_name in ($jobMarkers) $statusClause
+            ) ranked where rn = 1
+            """.trimIndent(),
+        ).bindIndexed("jobName", names)
+        if (status != null) spec = spec.bind("status", status.name)
+        return spec.map { row, _ -> row.toRun() }.all().collectList().awaitSingle().associateBy { it.jobName }
+    }
 
-    private fun ResultSet.toRun(): ScheduledJobRun =
-        ScheduledJobRun(
-            id = getLong("id"),
-            jobName = getString("job_name"),
-            triggerType = JobTriggerType.valueOf(getString("trigger_type")),
-            status = JobRunStatus.valueOf(getString("status")),
-            startedAt = getTimestamp("started_at").toInstant(),
-            finishedAt = getTimestamp("finished_at")?.toInstant(),
-            durationMs = getObject("duration_ms")?.let { (it as Number).toLong() },
-            summary = getString("summary"),
-            errorMessage = getString("error_message"),
-            retryOfRunId = getObject("retry_of_run_id")?.let { (it as Number).toLong() },
-            createdBy = getString("created_by"),
-        )
+    private suspend fun findById(id: Long): ScheduledJobRun =
+        client.sql("select * from scheduled_job_runs where id = :id").bind("id", id)
+            .map { row, _ -> row.toRun() }.one().awaitSingle()
 
-    private data class RawScheduledJobSnapshot(
-        val jobName: String,
-        val enabled: Boolean,
-        val scheduleType: String,
-        val scheduleValue: String,
-        val timeoutSeconds: Int,
+    private fun Row.toRun() = ScheduledJobRun(
+        id = get("id", java.lang.Long::class.java)!!.toLong(),
+        jobName = get("job_name", String::class.java)!!,
+        triggerType = JobTriggerType.valueOf(get("trigger_type", String::class.java)!!),
+        status = JobRunStatus.valueOf(get("status", String::class.java)!!),
+        startedAt = instant("started_at")!!,
+        finishedAt = instant("finished_at"),
+        durationMs = (get("duration_ms") as? Number)?.toLong(),
+        summary = get("summary", String::class.java),
+        errorMessage = get("error_message", String::class.java),
+        retryOfRunId = (get("retry_of_run_id") as? Number)?.toLong(),
+        createdBy = get("created_by", String::class.java)!!,
     )
+
+    private fun Row.instant(column: String): Instant? =
+        get(column)?.let { value ->
+            when (value) {
+                is Instant -> value
+                is java.time.OffsetDateTime -> value.toInstant()
+                is java.time.LocalDateTime -> value.toInstant(java.time.ZoneOffset.UTC)
+                else -> error("Unsupported timestamp type for $column: ${value.javaClass.name}")
+            }
+        }
+
+    private data class RawSnapshot(
+        val jobName: String, val enabled: Boolean, val scheduleType: String,
+        val scheduleValue: String, val timeoutSeconds: Int,
+    )
+
+    private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(name: String, value: T?, type: Class<T>) =
+        if (value == null) bindNull(name, type) else bind(name, value)
 }
 
 @Repository
 class PostgresAdvisoryJobLockAdapter(
-    @Qualifier("dataSource") dataSource: DataSource,
+    private val connectionFactory: ConnectionFactory,
 ) : JobLockPort {
-    private val jdbc = NamedParameterJdbcTemplate(dataSource)
+    private val heldConnections = ConcurrentHashMap<String, Connection>()
 
-    override fun tryAcquire(jobName: String): Boolean =
-        jdbc.queryForObject(
-            "select pg_try_advisory_lock(hashtext(:jobName))",
-            mapOf("jobName" to jobName),
-            Boolean::class.java,
-        ) ?: false
+    override suspend fun tryAcquire(jobName: String): Boolean {
+        if (heldConnections.containsKey(jobName)) return false
+        val connection = connectionFactory.create().awaitSingle()
+        return try {
+            val result = connection.createStatement("select pg_try_advisory_lock(hashtext($1)) as acquired")
+                .bind(0, jobName).execute().awaitSingle()
+            val acquired = result.map { row, _ -> row.get("acquired", java.lang.Boolean::class.java)!!.booleanValue() }
+                .awaitSingle()
+            if (acquired && heldConnections.putIfAbsent(jobName, connection) == null) true
+            else {
+                connection.close().awaitFirstOrNull()
+                false
+            }
+        } catch (error: Exception) {
+            connection.close().awaitFirstOrNull()
+            throw error
+        }
+    }
 
-    override fun release(jobName: String) {
-        jdbc.queryForObject(
-            "select pg_advisory_unlock(hashtext(:jobName))",
-            mapOf("jobName" to jobName),
-            Boolean::class.java,
-        )
+    override suspend fun release(jobName: String) {
+        val connection = heldConnections.remove(jobName) ?: return
+        try {
+            connection.createStatement("select pg_advisory_unlock(hashtext($1))")
+                .bind(0, jobName).execute().awaitSingle()
+        } finally {
+            connection.close().awaitFirstOrNull()
+        }
     }
 }

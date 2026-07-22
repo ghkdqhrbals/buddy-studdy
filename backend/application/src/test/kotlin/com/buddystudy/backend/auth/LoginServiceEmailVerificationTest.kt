@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
@@ -49,7 +51,7 @@ class LoginServiceEmailVerificationTest {
     )
 
     @Test
-    fun `email code is generated stored and sent`() {
+    fun `email code is generated stored and sent`(): Unit = runBlocking {
         val response = login.emailCode(" Tester@Example.COM ")
 
         assertThat(response.email).isEqualTo("tester@example.com")
@@ -62,7 +64,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `device token reissue reuses authenticated user status`() {
+    fun `device token reissue reuses authenticated user status`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         users.findByIdCalls = 0
 
@@ -73,7 +75,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `push token update reuses principal user status`() {
+    fun `push token update reuses principal user status`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         users.findByIdCalls = 0
 
@@ -87,7 +89,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `push token update keeps only current user device token and login keeps one active session`() {
+    fun `push token update keeps only current user device token and login keeps one active session`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "first-token", language = "ko"))
         devices.save(
             DeviceEntity(
@@ -123,7 +125,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `logout marks current device session as logged out and clears active user from device`() {
+    fun `logout marks current device session as logged out and clears active user from device`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
 
@@ -135,7 +137,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `device token reissue after logout reuses existing anonymous user`() {
+    fun `device token reissue after logout reuses existing anonymous user`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
         login.logout(principal)
@@ -149,7 +151,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `logged in devices returns active sessions only`() {
+    fun `logged in devices returns active sessions only`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", platform = "ios", language = "ko", timezone = "Asia/Seoul"))
         val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true, status = "ANONYMOUS")
 
@@ -162,7 +164,7 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `new email user is created only when verification code matches`() {
+    fun `new email user is created only when verification code matches`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         login.emailCode("new@example.com")
 
@@ -182,15 +184,17 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
-    fun `new email user is rejected when verification code is invalid`() {
+    fun `new email user is rejected when verification code is invalid`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         login.emailCode("new@example.com")
 
         assertThatThrownBy {
-            login.emailLogin(
-                Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
-                EmailLoginCommand(email = "new@example.com", password = "password123", verificationCode = "000000"),
-            )
+            runBlocking {
+                login.emailLogin(
+                    Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
+                    EmailLoginCommand(email = "new@example.com", password = "password123", verificationCode = "000000"),
+                )
+            }
         }
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
@@ -206,14 +210,14 @@ class LoginServiceEmailVerificationTest {
         var consumed = false
             private set
 
-        override fun save(email: String, code: String, ttl: Duration) {
+        override suspend fun save(email: String, code: String, ttl: Duration) {
             savedEmail = email
             savedCode = code
             savedTtl = ttl
             consumed = false
         }
 
-        override fun consume(email: String, code: String): Boolean {
+        override suspend fun consume(email: String, code: String): Boolean {
             if (email != savedEmail || code != savedCode || consumed) {
                 return false
             }
@@ -226,7 +230,7 @@ class LoginServiceEmailVerificationTest {
         lateinit var sentEmail: String
         lateinit var sentCode: String
 
-        override fun send(email: String, code: String, ttl: Duration) {
+        override suspend fun send(email: String, code: String, ttl: Duration) {
             sentEmail = email
             sentCode = code
         }
@@ -237,7 +241,7 @@ class LoginServiceEmailVerificationTest {
         private var nextId = 1L
         var findByIdCalls = 0
 
-        override fun save(entity: UserEntity): UserEntity {
+        override suspend fun save(entity: UserEntity): UserEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
             }
@@ -245,15 +249,15 @@ class LoginServiceEmailVerificationTest {
             return entity
         }
 
-        override fun findById(id: Long): Optional<UserEntity> {
+        override suspend fun findById(id: Long): UserEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(users[id])
+            return users[id]
         }
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = ids.mapNotNull { users[it] }.toMutableList()
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = ids.mapNotNull { users[it] }.toMutableList()
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
             users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
 
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
             users.values.firstOrNull { it.email == email && it.provider == provider }
 
         fun countByProviderAndProviderId(provider: String, providerId: String): Int =
@@ -264,7 +268,7 @@ class LoginServiceEmailVerificationTest {
         private val devices = linkedMapOf<String, DeviceEntity>()
         private var nextId = 1L
 
-        override fun save(entity: DeviceEntity): DeviceEntity {
+        override suspend fun save(entity: DeviceEntity): DeviceEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
             }
@@ -272,8 +276,8 @@ class LoginServiceEmailVerificationTest {
             return entity
         }
 
-        override fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
-        override fun findAllByUserId(userId: Long): List<DeviceEntity> =
+        override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }
     }
 
@@ -281,7 +285,7 @@ class LoginServiceEmailVerificationTest {
         private val sessions = linkedMapOf<Long, UserDeviceEntity>()
         private var nextId = 1L
 
-        override fun save(entity: UserDeviceEntity): UserDeviceEntity {
+        override suspend fun save(entity: UserDeviceEntity): UserDeviceEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
             }
@@ -289,16 +293,16 @@ class LoginServiceEmailVerificationTest {
             return entity
         }
 
-        override fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity? =
+        override suspend fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity? =
             sessions.values.firstOrNull { it.userId == userId && it.deviceId == deviceId }
 
-        override fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity? =
             sessions[id]?.takeIf { it.userId == userId }
 
-        override fun findActiveByUserId(userId: Long): List<UserDeviceEntity> =
+        override suspend fun findActiveByUserId(userId: Long): List<UserDeviceEntity> =
             sessions.values.filter { it.userId == userId && it.isActive() }
 
-        override fun hasActiveSession(userId: Long, deviceId: String): Boolean =
+        override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
     }
 
@@ -308,12 +312,12 @@ class LoginServiceEmailVerificationTest {
         val grantRoleCalls: Int
             get() = calls.size
 
-        override fun grantRoleIfMissing(userId: Long, roleCode: String) {
+        override suspend fun grantRoleIfMissing(userId: Long, roleCode: String) {
             calls += userId to roleCode
             roles += userId to roleCode
         }
 
-        override fun countUserRoles(userId: Long, roleCode: String): Long =
+        override suspend fun countUserRoles(userId: Long, roleCode: String): Long =
             if (userId to roleCode in roles) 1 else 0
 
         fun grantRoleCallsFor(userId: Long, roleCode: String): Int =

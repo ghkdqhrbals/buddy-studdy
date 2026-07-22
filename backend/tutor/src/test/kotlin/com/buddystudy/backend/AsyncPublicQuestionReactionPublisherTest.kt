@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.community.adapter.outbound.stream.AsyncPublicQuestionReactionPublisher
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -14,12 +16,12 @@ class AsyncPublicQuestionReactionPublisherTest {
     private val closeables = mutableListOf<AsyncPublicQuestionReactionPublisher>()
 
     @AfterEach
-    fun tearDown() {
+    fun tearDown() = runBlocking {
         closeables.forEach { it.stop() }
     }
 
     @Test
-    fun `view publish returns before slow redis delegate finishes`() {
+    fun `view publish returns before slow redis delegate finishes`(): Unit = runBlocking {
         val delegate = SlowRecordingReactionPublisher(delayMs = 350)
         val publisher = asyncPublisher(delegate, capacity = 10).also {
             closeables += it
@@ -36,7 +38,7 @@ class AsyncPublicQuestionReactionPublisherTest {
     }
 
     @Test
-    fun `view publish returns false when async queue is full`() {
+    fun `view publish returns false when async queue is full`(): Unit = runBlocking {
         val publisher = asyncPublisher(SlowRecordingReactionPublisher(), capacity = 1)
 
         assertThat(publisher.publishViewed(1, null)).isTrue()

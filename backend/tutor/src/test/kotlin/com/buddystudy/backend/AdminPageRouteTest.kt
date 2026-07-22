@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import org.assertj.core.api.Assertions.assertThat
 import com.buddystudy.backend.config.AdminPageController
 import org.junit.jupiter.api.Test
@@ -13,22 +15,18 @@ import org.thymeleaf.spring6.SpringTemplateEngine
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-admin-page;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ],
 )
-class AdminPageRouteTest {
+class AdminPageRouteTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var context: ApplicationContext
     @Autowired lateinit var controller: AdminPageController
 
     @Test
-    fun `admin route returns Thymeleaf template`() {
+    fun `admin route returns Thymeleaf template`(): Unit = runBlocking {
         assertThat(controller.admin()).isEqualTo("admin/index")
 
         assertThat(context.getBean(SpringTemplateEngine::class.java).process("admin/index", Context()))

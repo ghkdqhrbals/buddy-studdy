@@ -1,5 +1,7 @@
 package com.buddystudy.backend.community
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -49,7 +51,7 @@ class CommunityServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `public question list loads authors stats and liked flags in batches`() {
+    fun `public question list loads authors stats and liked flags in batches`(): Unit = runBlocking {
         users.rows += UserEntity(id = 10, providerId = "u10", displayName = "Author A")
         users.rows += UserEntity(id = 11, providerId = "u11", displayName = "Author B")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
@@ -74,7 +76,7 @@ class CommunityServiceTest {
     }
 
     @Test
-    fun `public question v2 overlays translated search text in response`() {
+    fun `public question v2 overlays translated search text in response`(): Unit = runBlocking {
         users.rows += UserEntity(id = 7, providerId = "viewer", displayName = "Viewer", appLanguage = "en")
         users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "원본 주제")
@@ -105,7 +107,7 @@ class CommunityServiceTest {
     }
 
     @Test
-    fun `liking a public question increments stats without recounting likes`() {
+    fun `liking a public question increments stats without recounting likes`(): Unit = runBlocking {
         users.rows += UserEntity(id = 10, providerId = "u10", displayName = "Author A")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
         questionStats.rows += QuestionStatsEntity(questionId = 100, likeCount = 3, commentCount = 1, viewCount = 20)
@@ -126,7 +128,7 @@ class CommunityServiceTest {
     }
 
     @Test
-    fun `commenting on another user's question publishes push eligible thread notification`() {
+    fun `commenting on another user's question publishes push eligible thread notification`(): Unit = runBlocking {
         users.rows += UserEntity(id = 7, providerId = "u7", displayName = "Commenter")
         users.rows += UserEntity(id = 10, providerId = "u10", displayName = "Author A")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
@@ -145,7 +147,7 @@ class CommunityServiceTest {
     }
 
     @Test
-    fun `empty comment page skips author lookup`() {
+    fun `empty comment page skips author lookup`(): Unit = runBlocking {
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
 
         val response = service.getComments(id = 100, limit = 20, offset = 0)
@@ -197,49 +199,49 @@ class CommunityServiceTest {
         var findByIdCalls = 0
         var findAllByIdCalls = 0
 
-        override fun save(entity: UserEntity): UserEntity = entity
-        override fun findById(id: Long): Optional<UserEntity> {
+        override suspend fun save(entity: UserEntity): UserEntity = entity
+        override suspend fun findById(id: Long): UserEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(rows.firstOrNull { it.id == id })
+            return rows.firstOrNull { it.id == id }
         }
 
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> {
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> {
             findAllByIdCalls += 1
             val idSet = ids.toSet()
             return rows.filter { it.id in idSet }.toMutableList()
         }
 
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
     private class FakeQuestionPort : QuestionPort {
         val rows = mutableListOf<QuestionEntity>()
-        override fun save(entity: QuestionEntity): QuestionEntity = entity
-        override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.empty()
-        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
-        override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
-        override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
-        override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
-        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
-        override fun countPendingForStudy(studyId: Long): Long = 0
-        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
-        override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.sortedByDescending { it.createdAt })
-        override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
-        override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
-        override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
+        override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
+        override suspend fun findQuestionById(id: Long): QuestionEntity? = null
+        override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
+        override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
+        override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
+        override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
+        override suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
+        override suspend fun countPendingForStudy(studyId: Long): Long = 0
+        override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
+        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.sortedByDescending { it.createdAt })
+        override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
+        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -248,27 +250,27 @@ class CommunityServiceTest {
         var findAllByIdsCalls = 0
         var incrementLikeCalls = 0
 
-        override fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
-        override fun findById(id: Long): Optional<QuestionStatsEntity> {
+        override suspend fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
+        override suspend fun findById(id: Long): QuestionStatsEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(rows.firstOrNull { it.questionId == id })
+            return rows.firstOrNull { it.questionId == id }
         }
 
-        override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
+        override suspend fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
             findAllByIdsCalls += 1
             return rows.filter { it.questionId in ids }
         }
 
-        override fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int {
+        override suspend fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int {
             incrementLikeCalls += 1
             val row = rows.firstOrNull { it.questionId == questionId } ?: return 0
             row.likeCount = maxOf(0, row.likeCount + delta)
             row.updatedAt = now
             return 1
         }
-        override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
+        override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
 
     private class FakeQuestionLikePort : QuestionLikePort {
@@ -276,37 +278,37 @@ class CommunityServiceTest {
         var existsCalls = 0
         var findLikedQuestionIdsCalls = 0
 
-        override fun save(entity: QuestionLikeEntity): QuestionLikeEntity {
+        override suspend fun save(entity: QuestionLikeEntity): QuestionLikeEntity {
             rows += entity
             return entity
         }
-        override fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean {
+        override suspend fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean {
             existsCalls += 1
             return rows.any { it.questionId == questionId && it.userId == userId }
         }
 
-        override fun findLikedQuestionIds(userId: Long, questionIds: Collection<Long>): Set<Long> {
+        override suspend fun findLikedQuestionIds(userId: Long, questionIds: Collection<Long>): Set<Long> {
             findLikedQuestionIdsCalls += 1
             return rows.filter { it.userId == userId && it.questionId in questionIds }.map { it.questionId }.toSet()
         }
 
-        override fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long = 0
+        override suspend fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long = 0
     }
 
     private class FakeQuestionCommentPort : QuestionCommentPort {
         private var nextId = 1L
-        override fun save(entity: QuestionCommentEntity): QuestionCommentEntity {
+        override suspend fun save(entity: QuestionCommentEntity): QuestionCommentEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
             }
             return entity
         }
-        override fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity? = null
-        override fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity> = Page.empty()
+        override suspend fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity? = null
+        override suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity> = Page.empty()
     }
 
     private class FakeReportPort : ReportPort {
-        override fun save(entity: ReportEntity): ReportEntity = entity
+        override suspend fun save(entity: ReportEntity): ReportEntity = entity
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {
@@ -315,29 +317,29 @@ class CommunityServiceTest {
 
     private class FakeQuestionSearchPort : QuestionSearchPort {
         val rows = mutableListOf<QuestionSearchEntity>()
-        override fun save(entity: QuestionSearchEntity): QuestionSearchEntity {
+        override suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity {
             rows += entity
             return entity
         }
-        override fun deleteByQuestionId(questionId: Long): Long = 0
-        override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
-        override fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
-        override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
+        override suspend fun deleteByQuestionId(questionId: Long): Long = 0
+        override suspend fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
+        override suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
             rows
                 .filter { it.language == language }
                 .sortedByDescending { it.createdAt }
                 .let { SearchResult(it.map { row -> row.questionId }, it.size.toLong()) }
 
-        override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+        override suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }
 
-        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
+        override suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
             rows.firstOrNull { it.questionId == questionId && it.language == language }
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {
         val rows = mutableListOf<NotificationRequestCommand>()
-        override fun publish(command: NotificationRequestCommand): Boolean {
+        override suspend fun publish(command: NotificationRequestCommand): Boolean {
             rows += command
             return true
         }

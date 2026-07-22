@@ -5,6 +5,7 @@ import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
@@ -20,6 +21,7 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -32,6 +34,7 @@ class NotificationStreamListener(
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
     private val sendPolicy: NotificationSendPolicy,
+    private val coroutineScope: ApplicationCoroutineScope,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
@@ -42,11 +45,11 @@ class NotificationStreamListener(
     @Scheduled(fixedDelayString = "\${NOTIFICATION_CONSUMER_POLL_DELAY_MS:1000}")
     fun pollNotificationRequests() {
         consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
-            onNotificationRequested(it)
+            coroutineScope.launch { onNotificationRequested(it) }
         }
     }
 
-    fun onNotificationRequested(message: RedisStreamMessage) {
+    suspend fun onNotificationRequested(message: RedisStreamMessage) {
         try {
             if (message.fields["eventType"] != eventType) {
                 consumer.acknowledge(message, group)
@@ -109,7 +112,7 @@ class NotificationStreamListener(
         }
     }
 
-    private fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
+    private suspend fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
         val now = Instant.now()
         if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
             logger.info(

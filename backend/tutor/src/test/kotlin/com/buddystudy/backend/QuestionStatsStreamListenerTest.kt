@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.community.adapter.inbound.stream.QuestionStatsStreamEventHandler
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
@@ -16,32 +18,28 @@ import org.springframework.test.context.TestPropertySource
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-streams;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class QuestionStatsStreamListenerTest {
+class QuestionStatsStreamListenerTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var handler: QuestionStatsStreamEventHandler
     @Autowired lateinit var stats: QuestionStatsPort
 
     @Test
-    fun `view events increment question view count`() {
+    fun `view events increment question view count`(): Unit = runBlocking {
         stats.save(QuestionStatsEntity(questionId = 101))
 
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
 
-        assertThat(stats.findById(101).orElseThrow().viewCount).isEqualTo(2)
+        assertThat(stats.findById(101)!!.viewCount).isEqualTo(2)
     }
 
     @Test
-    fun `published view fields are consumable by stats listener`() {
+    fun `published view fields are consumable by stats listener`(): Unit = runBlocking {
         stats.save(QuestionStatsEntity(questionId = 606))
         val viewPublisher = RecordingPublisher()
         val publisher = reactionPublisher(viewPublisher)
@@ -51,36 +49,36 @@ class QuestionStatsStreamListenerTest {
 
         viewPublisher.requests.forEach { handler.processViewEvent(it.fields) }
 
-        val updated = stats.findById(606).orElseThrow()
+        val updated = stats.findById(606)!!
         assertThat(updated.viewCount).isEqualTo(2)
         assertThat(updated.likeCount).isZero()
         assertThat(updated.commentCount).isZero()
     }
 
     @Test
-    fun `view event creates stats row when stats row is missing`() {
+    fun `view event creates stats row when stats row is missing`(): Unit = runBlocking {
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "707"))
 
-        assertThat(stats.findById(707).orElseThrow().viewCount).isEqualTo(1)
+        assertThat(stats.findById(707)!!.viewCount).isEqualTo(1)
     }
 
     @Test
-    fun `view event accepts record id fallback`() {
+    fun `view event accepts record id fallback`(): Unit = runBlocking {
         stats.save(QuestionStatsEntity(questionId = 404))
 
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "recordId" to "404"))
 
-        assertThat(stats.findById(404).orElseThrow().viewCount).isEqualTo(1)
+        assertThat(stats.findById(404)!!.viewCount).isEqualTo(1)
     }
 
     @Test
-    fun `invalid view ids are ignored`() {
+    fun `invalid view ids are ignored`(): Unit = runBlocking {
         stats.save(QuestionStatsEntity(questionId = 505, likeCount = 2, commentCount = 3, viewCount = 4))
 
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "not-a-number"))
         handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED"))
 
-        val updated = stats.findById(505).orElseThrow()
+        val updated = stats.findById(505)!!
         assertThat(updated.likeCount).isEqualTo(2)
         assertThat(updated.commentCount).isEqualTo(3)
         assertThat(updated.viewCount).isEqualTo(4)

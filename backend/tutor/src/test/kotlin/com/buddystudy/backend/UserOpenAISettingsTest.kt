@@ -1,5 +1,8 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+
 import com.buddystudy.backend.admin.application.service.AdminService
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
@@ -21,17 +24,13 @@ import org.springframework.test.context.TestPropertySource
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-user-openai-settings;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class UserOpenAISettingsTest {
+class UserOpenAISettingsTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
     @Autowired lateinit var settings: SettingsService
     @Autowired lateinit var admin: AdminService
@@ -41,7 +40,7 @@ class UserOpenAISettingsTest {
     @Autowired lateinit var cipher: KeyCipher
 
     @Test
-    fun `openai key is stored on user while model is read from study schedule`() {
+    fun `openai key is stored on user while model is read from study schedule`(): Unit = runBlocking {
         val registered = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         val principal = login.authenticateDevice(registered.deviceId, registered.clientSecret)
         val otherDevicePrincipal = Principal(
@@ -78,7 +77,7 @@ class UserOpenAISettingsTest {
     }
 
     @Test
-    fun `study owns generated questions through study id`() {
+    fun `study owns generated questions through study id`(): Unit = runBlocking {
         val registered = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         val principal = login.authenticateDevice(registered.deviceId, registered.clientSecret)
 

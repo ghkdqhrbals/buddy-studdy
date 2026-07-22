@@ -10,16 +10,16 @@ import org.springframework.stereotype.Component
 class OpenAIClient(
     private val executor: OpenAIRequestExecutor,
 ) : OpenAIPort {
-    override fun validate(apiKey: String) =
+    override suspend fun validate(apiKey: String) =
         executor.validate(apiKey)
 
-    override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
+    override suspend fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion =
         executor.generateQuestion(apiKey, model, prompt)
 
-    override fun embedText(apiKey: String, text: String): List<Float> =
+    override suspend fun embedText(apiKey: String, text: String): List<Float> =
         executor.embedText(apiKey, text)
 
-    override fun generateQuestionCoverageBlueprint(
+    override suspend fun generateQuestionCoverageBlueprint(
         apiKey: String,
         model: String,
         topic: String,
@@ -28,6 +28,6 @@ class OpenAIClient(
     ): List<OpenAIPort.QuestionCoverageConcept> =
         executor.generateQuestionCoverageBlueprint(apiKey, model, topic, level, customPrompt)
 
-    override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
+    override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
         executor.grade(apiKey, model, question, answer, topic, level, language)
 }

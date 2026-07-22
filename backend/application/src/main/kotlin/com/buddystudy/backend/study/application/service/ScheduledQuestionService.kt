@@ -4,6 +4,7 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.transaction.afterReactiveCommit
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
@@ -31,8 +32,6 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.transaction.support.TransactionSynchronization
-import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant
 
 @Service
@@ -72,7 +71,7 @@ class ScheduledQuestionService(
     )
 
     @Transactional
-    override fun runDueQuestions() {
+    override suspend fun runDueQuestions() {
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
@@ -102,7 +101,7 @@ class ScheduledQuestionService(
         }
     }
 
-    private fun pendingCounts(studyIds: List<Long>): Map<Long, Long> {
+    private suspend fun pendingCounts(studyIds: List<Long>): Map<Long, Long> {
         if (studyIds.isEmpty()) return emptyMap()
         return questions.countPendingByStudyIds(studyIds)
     }
@@ -124,7 +123,7 @@ class ScheduledQuestionCreator(
     private val backoffPolicy: ScheduleBackoffPolicy,
     private val log: Logger,
 ) {
-    fun createIfReady(
+    suspend fun createIfReady(
         study: StudyEntity,
         now: Instant,
         pending: Long,
@@ -136,7 +135,11 @@ class ScheduledQuestionCreator(
         var questionCreated = false
         try {
             val userId = study.userId
-            val user = usersById.getOrPut(userId) { users.findById(userId).orElse(null) }
+            val user = if (usersById.containsKey(userId)) {
+                usersById[userId]
+            } else {
+                users.findById(userId).also { usersById[userId] = it }
+            }
             val appLanguage = user?.appLanguage ?: "ko"
             if (pending >= properties.scheduler.maxPendingPerStudy) {
                 study.markScheduled("Pending question limit reached ($pending).", backoffPolicy.pendingLimitNextDueAt(now), now)
@@ -144,12 +147,12 @@ class ScheduledQuestionCreator(
                 return
             }
             questionKey = questionKeys.resolveForQuestionGeneration(user)
-            val recent = recentQuestionsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
-                recentQuestions(userId, study)
-            }
-            val recentEmbeddings = recentEmbeddingsByStudyTopic.getOrPut(StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())) {
-                questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
-            }
+            val studyTopicKey = StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())
+            val recent = recentQuestionsByStudyTopic[studyTopicKey]
+                ?: recentQuestions(userId, study).also { recentQuestionsByStudyTopic[studyTopicKey] = it }
+            val recentEmbeddings = recentEmbeddingsByStudyTopic[studyTopicKey]
+                ?: questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
+                    .also { recentEmbeddingsByStudyTopic[studyTopicKey] = it }
             val coverageSelection = selectCoverage(questionKey.apiKey, study)
             val generated = generateDistinctQuestion(
                 apiKey = questionKey.apiKey,
@@ -181,7 +184,7 @@ class ScheduledQuestionCreator(
             questionKeys.markQuestionCreated(questionKey, now)
             questionCreated = true
             study.markCompleted(now)
-            afterCommit {
+            afterReactiveCommit {
                 questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now)
                 notifications.publish(saved.toQuestionNotification(study, appLanguage))
             }
@@ -200,7 +203,7 @@ class ScheduledQuestionCreator(
         }
     }
 
-    private fun recentQuestions(userId: Long, study: StudyEntity): List<String> {
+    private suspend fun recentQuestions(userId: Long, study: StudyEntity): List<String> {
         val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(study.id, study.topic, PageRequest.of(0, 30))
         val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(userId, study.topic, PageRequest.of(0, 30))
         return (sameStudy + sameTopic)
@@ -210,7 +213,7 @@ class ScheduledQuestionCreator(
             .take(40)
     }
 
-    private fun generateDistinctQuestion(
+    private suspend fun generateDistinctQuestion(
         apiKey: String,
         model: String,
         topic: String,
@@ -265,7 +268,7 @@ class ScheduledQuestionCreator(
         error("unreachable")
     }
 
-    private fun selectCoverage(apiKey: String, study: StudyEntity): QuestionCoverageSelection? {
+    private suspend fun selectCoverage(apiKey: String, study: StudyEntity): QuestionCoverageSelection? {
         questionCoverage.selectNext(study.id)?.let { return it }
         val blueprint = openAI.generateQuestionCoverageBlueprint(
             apiKey = apiKey,
@@ -285,21 +288,7 @@ class ScheduledQuestionCreator(
         return questionCoverage.selectNext(study.id)
     }
 
-    private fun afterCommit(action: () -> Unit) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action()
-            return
-        }
-        TransactionSynchronizationManager.registerSynchronization(
-            object : TransactionSynchronization {
-                override fun afterCommit() {
-                    action()
-                }
-            }
-        )
-    }
-
-    private fun StudyEntity.toScheduledQuestion(
+    private suspend fun StudyEntity.toScheduledQuestion(
         question: String,
         hint: String?,
         appLanguage: String,
@@ -331,13 +320,13 @@ data class StudyTopicKey(
     val topicKey: String,
 )
 
-private fun StudyEntity.markScheduled(error: String, scheduledAt: Instant, now: Instant) {
+private suspend fun StudyEntity.markScheduled(error: String, scheduledAt: Instant, now: Instant) {
     nextDueAt = scheduledAt
     lastError = error
     updatedAt = now
 }
 
-private fun StudyEntity.markCompleted(now: Instant) {
+private suspend fun StudyEntity.markCompleted(now: Instant) {
     lastSentAt = now
     nextDueAt = now.plusSeconds(intervalMinutes.toLong() * 60)
     lastError = null
@@ -354,12 +343,12 @@ class ScheduleBackoffPolicy(
     fun failureNextDueAt(now: Instant): Instant = now.plusSeconds(failureRetrySeconds)
 }
 
-private fun String.normalizedTopicKey(): String =
+private suspend fun String.normalizedTopicKey(): String =
     lowercase()
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()
 
-private fun String.normalizedQuestionKey(): String =
+private suspend fun String.normalizedQuestionKey(): String =
     lowercase()
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()

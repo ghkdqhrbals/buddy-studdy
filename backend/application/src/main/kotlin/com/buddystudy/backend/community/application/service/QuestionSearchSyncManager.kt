@@ -23,8 +23,8 @@ class QuestionSearchSyncManager(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    fun indexCreatedQuestion(questionId: Long) {
-        val question = questions.findQuestionById(questionId).orElse(null)
+    suspend fun indexCreatedQuestion(questionId: Long) {
+        val question = questions.findQuestionById(questionId)
         if (question == null) {
             search.deleteByQuestionId(questionId)
             return
@@ -32,12 +32,12 @@ class QuestionSearchSyncManager(
         refreshIndexedQuestion(question)
     }
 
-    fun refreshIndexedQuestion(question: QuestionEntity) {
-        val user = question.userId?.let { users.findById(it).orElse(null) }
+    suspend fun refreshIndexedQuestion(question: QuestionEntity) {
+        val user = question.userId?.let { users.findById(it) }
         refreshIndexedQuestion(question, user)
     }
 
-    fun refreshIndexedQuestion(question: QuestionEntity, user: UserEntity?) {
+    suspend fun refreshIndexedQuestion(question: QuestionEntity, user: UserEntity?) {
         if (user == null) {
             search.deleteByQuestionId(question.id)
             return
@@ -57,22 +57,22 @@ class QuestionSearchSyncManager(
         }
     }
 
-    fun removeIndexedQuestion(questionId: Long) {
+    suspend fun removeIndexedQuestion(questionId: Long) {
         search.deleteByQuestionId(questionId)
     }
 
-    fun removeIndexedStudy(studyId: Long, userId: Long) {
+    suspend fun removeIndexedStudy(studyId: Long, userId: Long) {
         search.deleteByStudyId(studyId, userId)
     }
 
-    fun removeIndexedStudyTopic(userId: Long, topic: String) {
+    suspend fun removeIndexedStudyTopic(userId: Long, topic: String) {
         search.deleteByUserIdAndTopic(userId, topic)
     }
 
-    fun findIndexedQuestion(questionId: Long, language: String): QuestionSearchEntity? =
+    suspend fun findIndexedQuestion(questionId: Long, language: String): QuestionSearchEntity? =
         search.findByQuestionIdAndLanguage(questionId, language)
 
-    private fun QuestionEntity.toSearchEntity(
+    private suspend fun QuestionEntity.toSearchEntity(
         user: UserEntity,
         language: String,
         text: TranslatedQuestionSearchText,
@@ -95,7 +95,7 @@ class QuestionSearchSyncManager(
             updatedAt = Instant.now(),
         )
 
-    private fun translateOrFallback(
+    private suspend fun translateOrFallback(
         question: QuestionEntity,
         sourceLanguage: String,
         targetLanguage: String,
@@ -120,7 +120,7 @@ class QuestionSearchSyncManager(
         }.getOrElse { question.toSearchText() }
     }
 
-    private fun QuestionEntity.toSearchText(): TranslatedQuestionSearchText =
+    private suspend fun QuestionEntity.toSearchText(): TranslatedQuestionSearchText =
         TranslatedQuestionSearchText(
             topic = topic,
             question = question,
@@ -129,6 +129,6 @@ class QuestionSearchSyncManager(
             explanation = explanation,
         )
 
-    private fun String.normalizedSearchLanguage(): String =
+    private suspend fun String.normalizedSearchLanguage(): String =
         if (lowercase().startsWith("en")) "en" else "ko"
 }

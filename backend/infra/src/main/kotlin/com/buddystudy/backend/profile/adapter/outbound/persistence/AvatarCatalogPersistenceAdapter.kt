@@ -4,20 +4,20 @@ import com.buddystudy.avatar.domain.entity.AvatarCategoryEntity
 import com.buddystudy.avatar.domain.entity.AvatarItemEntity
 import com.buddystudy.avatar.domain.entity.UserAvatarItemEntity
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 import org.springframework.stereotype.Component
 
-interface AvatarCategoryRepository : JpaRepository<AvatarCategoryEntity, String> {
-    fun findByActiveTrueOrderBySortOrderAscKeyAsc(): List<AvatarCategoryEntity>
+interface AvatarCategoryRepository : CoroutineCrudRepository<AvatarCategoryEntity, String> {
+    suspend fun findByActiveTrueOrderBySortOrderAscKeyAsc(): List<AvatarCategoryEntity>
 }
 
-interface AvatarItemRepository : JpaRepository<AvatarItemEntity, String> {
-    fun findByActiveTrueOrderBySortOrderAscKeyAsc(): List<AvatarItemEntity>
-    fun findByKeyInAndActiveTrue(keys: Collection<String>): List<AvatarItemEntity>
+interface AvatarItemRepository : CoroutineCrudRepository<AvatarItemEntity, String> {
+    suspend fun findByActiveTrueOrderBySortOrderAscKeyAsc(): List<AvatarItemEntity>
+    suspend fun findByKeyInAndActiveTrue(keys: Collection<String>): List<AvatarItemEntity>
 }
 
-interface UserAvatarItemRepository : JpaRepository<UserAvatarItemEntity, Long> {
-    fun findByUserId(userId: Long): List<UserAvatarItemEntity>
+interface UserAvatarItemRepository : CoroutineCrudRepository<UserAvatarItemEntity, Long> {
+    suspend fun findByUserId(userId: Long): List<UserAvatarItemEntity>
 }
 
 @Component
@@ -26,10 +26,10 @@ class AvatarCatalogPersistenceAdapter(
     private val items: AvatarItemRepository,
     private val userItems: UserAvatarItemRepository,
 ) : AvatarCatalogPort {
-    override fun activeCategories(): List<AvatarCategoryEntity> =
+    override suspend fun activeCategories(): List<AvatarCategoryEntity> =
         categories.findByActiveTrueOrderBySortOrderAscKeyAsc()
 
-    override fun availableItems(userId: Long): List<AvatarItemEntity> {
+    override suspend fun availableItems(userId: Long): List<AvatarItemEntity> {
         val grantedKeys = userItems.findByUserId(userId).map { it.itemKey }.toSet()
         return items.findByActiveTrueOrderBySortOrderAscKeyAsc()
             .filter { item ->
@@ -37,6 +37,6 @@ class AvatarCatalogPersistenceAdapter(
             }
     }
 
-    override fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
+    override suspend fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
         if (keys.isEmpty()) emptyList() else items.findByKeyInAndActiveTrue(keys)
 }

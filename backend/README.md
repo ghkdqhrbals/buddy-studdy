@@ -6,9 +6,9 @@ This backend is the operational source of truth for the iOS app. The app may cac
 
 ## Module Structure
 
-- `domain`: JPA entity bridge, domain root objects, common event/domain DTOs.
+- `domain`: Spring Data Relational entities, domain root objects, common event/domain DTOs.
 - `application`: inbound use cases, outbound ports, application services, application response models.
-- `infra`: web/scheduler/stream adapters, JPA repositories, OpenAI/APNs/Redis integrations.
+- `infra`: WebFlux/scheduler/stream adapters, R2DBC persistence adapters, OpenAI/APNs/Redis integrations.
 - `tutor`: executable Spring Boot root module, bootstrap resources, AWS Secrets environment post processor, integration tests.
 
 ## What It Does
@@ -19,8 +19,8 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
 - Uses database-generated autoincrement `id` primary keys on every backend table.
-- Uses Spring Data JPA ORM with repository/service transaction boundaries.
-- Runs Flyway by default in the `dev` profile and keeps Hibernate DDL auto-update disabled.
+- Uses Spring Data R2DBC with suspending repository/service transaction boundaries.
+- Runs Flyway through a startup-only JDBC connection in the `dev` profile.
 - Generates due questions with OpenAI.
 - Publishes scheduled push jobs through Redis Streams and consumes them with the backend's lightweight polling consumers.
 - Sends APNs remote notifications to iPhone from the stream consumer.
@@ -38,7 +38,8 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: fallback APNs environment. Scheduled delivery uses each registered device's `apnsEnvironment`, so one backend can serve both debug `sandbox` tokens and TestFlight/App Store `production` tokens.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
-- `DATABASE_URL`: required PostgreSQL JDBC connection string, for example `jdbc:postgresql://db:5432/buddystudy`.
+- `R2DBC_DATABASE_URL`: required runtime PostgreSQL R2DBC connection string, for example `r2dbc:postgresql://db:5432/buddystudy`.
+- `DATABASE_URL`: Flyway startup JDBC connection string, for example `jdbc:postgresql://db:5432/buddystudy`.
 - `DATABASE_USERNAME`, `DATABASE_PASSWORD`: PostgreSQL credentials.
 - `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
@@ -48,7 +49,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystudy/dev` for the `dev` profile and `buddystudy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
-  Spring property keys are also supported by Spring Cloud AWS, for example `spring.datasource.url`, `spring.datasource.username`, and `spring.datasource.password`. If one of these styles is used for the datasource URL, keep the matching username and password in the same style or provide them as environment variables.
+  Spring property keys are also supported by Spring Cloud AWS, for example `spring.r2dbc.url`, `spring.r2dbc.username`, `spring.r2dbc.password`, and the separate `spring.flyway.*` keys. Keep runtime R2DBC and Flyway JDBC URLs in their respective formats.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
 
@@ -89,7 +90,7 @@ cd backend
 docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gradle --no-daemon test :tutor:bootJar
 ```
 
-The tests cover Spring context startup and core service behavior with H2 in PostgreSQL mode.
+The tests cover Spring context startup, coroutine services, R2DBC persistence, PostgreSQL-specific SQL through Testcontainers, and core service behavior.
 
 ## API
 
@@ -197,7 +198,7 @@ Client apps should not call OpenAI directly. They should register a backend devi
 
 ## Database Migrations
 
-The `dev` profile starts with Flyway enabled by default and `spring.jpa.hibernate.ddl-auto=validate`. The `prod` profile keeps Flyway disabled unless `FLYWAY_ENABLED=true`.
+The `dev` profile starts with Flyway enabled by default. The `prod` profile keeps Flyway disabled unless `FLYWAY_ENABLED=true`. Runtime access uses `spring.r2dbc.*`; Flyway uses its separate startup JDBC configuration.
 Migration files live under `tutor/src/main/resources/db/migration`.
 
 If a running database was deployed before user-level OpenAI settings, apply the equivalent patch manually:

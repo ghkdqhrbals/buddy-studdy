@@ -11,7 +11,7 @@ class DelegatingPushNotificationAdapter(
 ) : PushNotificationPort {
     private val sendersByType = senders.associateBy { it.type }
 
-    override fun sendQuestion(message: PushQuestionMessage) {
+    override suspend fun sendQuestion(message: PushQuestionMessage) {
         val sender = sendersByType[message.type]
             ?: throw IllegalStateException("No push sender configured for ${message.type}.")
         sender.sendQuestion(message)

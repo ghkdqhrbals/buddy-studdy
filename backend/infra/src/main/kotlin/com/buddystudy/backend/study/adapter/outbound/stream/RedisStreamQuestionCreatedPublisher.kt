@@ -14,7 +14,7 @@ class RedisStreamQuestionCreatedPublisher(
 ) : QuestionCreatedPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
+    override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
         if (!properties.streams.enabled) {
             logger.info("redis_stream_publish_skipped reason=streams_disabled eventType=QUESTION_CREATED questionId={}", questionId)
             return false

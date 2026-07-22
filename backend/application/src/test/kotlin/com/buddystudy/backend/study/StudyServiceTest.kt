@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
@@ -86,7 +88,7 @@ class StudyServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `records load question stats in one batch`() {
+    fun `records load question stats in one batch`(): Unit = runBlocking {
         questions.visibleRows += gradedQuestion(id = 101, topic = "Swift")
         questions.visibleRows += gradedQuestion(id = 102, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 101, likeCount = 3, commentCount = 2, viewCount = 9)
@@ -101,7 +103,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `pending records load question stats in one batch`() {
+    fun `pending records load question stats in one batch`(): Unit = runBlocking {
         questions.pendingRows += pendingQuestion(id = 201, topic = "Redis")
         questions.pendingRows += pendingQuestion(id = 202, topic = "Postgres")
         questionStats.rows += QuestionStatsEntity(questionId = 201, viewCount = 6)
@@ -116,7 +118,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `skip reads question stats only for final response`() {
+    fun `skip reads question stats only for final response`(): Unit = runBlocking {
         questions.visibleRows += pendingQuestion(id = 301, topic = "Redis")
         questionStats.rows += QuestionStatsEntity(questionId = 301, viewCount = 5)
 
@@ -128,7 +130,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `graded answer loads user and question stats only once`() {
+    fun `graded answer loads user and question stats only once`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 501, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 501, viewCount = 5)
@@ -143,7 +145,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `delete soft deletes graded record`() {
+    fun `delete soft deletes graded record`(): Unit = runBlocking {
         questions.visibleRows += gradedQuestion(id = 601, topic = "Redis")
 
         service.delete(principal, id = 601)
@@ -152,7 +154,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question stops before generation when permission evaluator denies`() {
+    fun `create question stops before generation when permission evaluator denies`(): Unit = runBlocking {
         permissionEvaluator.result = PermissionEvaluationResult.denied(
             permissionCode = Permissions.STUDY_CREATE,
             failureCode = ApiErrorCode.QUOTA_EXCEEDED,
@@ -168,7 +170,7 @@ class StudyServiceTest {
         )
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
-            service.createQuestion(principal, studyId = 90)
+            runBlocking { service.createQuestion(principal, studyId = 90) }
         }
             .isInstanceOf(ApiRuntimeException::class.java)
             .extracting("errorCode")
@@ -178,7 +180,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question reuses loaded user for search sync`() {
+    fun `create question reuses loaded user for search sync`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(
             id = 77,
@@ -199,7 +201,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question sends same study and same topic history before openai generation`() {
+    fun `create question sends same study and same topic history before openai generation`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(
             id = 82,
@@ -237,7 +239,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question retries and stores embedding when generated question is too similar`() {
+    fun `create question retries and stores embedding when generated question is too similar`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(
             id = 83,
@@ -270,7 +272,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question lazily creates coverage and stores selected concept angle`() {
+    fun `create question lazily creates coverage and stores selected concept angle`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(
             id = 84,
@@ -329,7 +331,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `graded answer updates coverage score when question has concept angle`() {
+    fun `graded answer updates coverage score when question has concept angle`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
             conceptId = 11
@@ -345,7 +347,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question uses system key and consumes monthly tier quota when user key is missing`() {
+    fun `create question uses system key and consumes monthly tier quota when user key is missing`(): Unit = runBlocking {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -371,7 +373,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question rejects after monthly tier question limit`() {
+    fun `create question rejects after monthly tier question limit`(): Unit = runBlocking {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -391,7 +393,7 @@ class StudyServiceTest {
         )
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
-            service.createQuestion(principal, studyId = 79)
+            runBlocking { service.createQuestion(principal, studyId = 79) }
         }
             .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
             .hasMessage("Monthly question limit reached.")
@@ -402,7 +404,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question uses system key and consumes monthly tier quota even when user key is configured`() {
+    fun `create question uses system key and consumes monthly tier quota even when user key is configured`(): Unit = runBlocking {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -429,7 +431,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question does not consume monthly tier quota when openai generation fails`() {
+    fun `create question does not consume monthly tier quota when openai generation fails`(): Unit = runBlocking {
         users.row = UserEntity(
             id = principal.userId,
             providerId = "u7",
@@ -449,7 +451,7 @@ class StudyServiceTest {
         )
 
         org.assertj.core.api.Assertions.assertThatThrownBy {
-            service.createQuestion(principal, studyId = 81)
+            runBlocking { service.createQuestion(principal, studyId = 81) }
         }.isInstanceOf(IllegalStateException::class.java)
 
         assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
@@ -459,7 +461,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `publicity reads question stats only for final response`() {
+    fun `publicity reads question stats only for final response`(): Unit = runBlocking {
         questions.visibleRows += gradedQuestion(id = 401, topic = "Swift")
         questionStats.rows += QuestionStatsEntity(questionId = 401, likeCount = 2)
 
@@ -501,29 +503,29 @@ class StudyServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val visibleRows = mutableListOf<QuestionEntity>()
         val pendingRows = mutableListOf<QuestionEntity>()
-        override fun save(entity: QuestionEntity): QuestionEntity {
+        override suspend fun save(entity: QuestionEntity): QuestionEntity {
             if (entity.id == 0L) {
                 entity.id = ((visibleRows + pendingRows).maxOfOrNull { it.id } ?: 0L) + 1
             }
             visibleRows += entity
             return entity
         }
-        override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.empty()
-        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
+        override suspend fun findQuestionById(id: Long): QuestionEntity? = null
+        override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
             (visibleRows + pendingRows).firstOrNull { it.id == id && it.userId == userId && it.deletedAt == null }
-        override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
-        override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(pendingRows, pageable, pendingRows.size.toLong())
-        override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
-        override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())
-        override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows.filter { it.topic.contains(query, ignoreCase = true) }, pageable, visibleRows.size.toLong())
+        override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
+        override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(pendingRows, pageable, pendingRows.size.toLong())
+        override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
+        override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())
+        override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows.filter { it.topic.contains(query, ignoreCase = true) }, pageable, visibleRows.size.toLong())
         var findRecentQuestionTextsByStudyIdAndTopicCalls = 0
         var findRecentQuestionTextsByUserIdAndTopicCalls = 0
-        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
+        override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
             findRecentQuestionTextsByStudyIdAndTopicCalls += 1
             return visibleRows
                 .filter { it.studyId == studyId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
@@ -531,7 +533,7 @@ class StudyServiceTest {
                 .map { it.question }
                 .take(pageable.pageSize)
         }
-        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
+        override suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
             findRecentQuestionTextsByUserIdAndTopicCalls += 1
             return visibleRows
                 .filter { it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
@@ -539,29 +541,29 @@ class StudyServiceTest {
                 .map { it.question }
                 .take(pageable.pageSize)
         }
-        override fun countPendingForStudy(studyId: Long): Long = pendingRows.count { it.studyId == studyId }.toLong()
-        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
+        override suspend fun countPendingForStudy(studyId: Long): Long = pendingRows.count { it.studyId == studyId }.toLong()
+        override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
             pendingRows
                 .filter { it.studyId in studyIds }
                 .groupingBy { it.studyId!! }
                 .eachCount()
                 .mapValues { it.value.toLong() }
-        override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
-        override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
-        override fun softDelete(id: Long, userId: Long, now: Instant): Int {
+        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
+        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int {
             val row = (visibleRows + pendingRows).firstOrNull { it.id == id && it.userId == userId } ?: return 0
             row.deletedAt = now
             return 1
         }
-        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
+        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
             val rows = (visibleRows + pendingRows).filter { it.studyId == studyId && it.userId == userId && it.deletedAt == null }
             rows.forEach { it.deletedAt = now }
             return rows.size
         }
-        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
             val rows = (visibleRows + pendingRows).filter {
                 it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null
             }
@@ -574,51 +576,51 @@ class StudyServiceTest {
         val rows = mutableListOf<QuestionStatsEntity>()
         var findByIdCalls = 0
         var findAllByIdsCalls = 0
-        override fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
-        override fun findById(id: Long): Optional<QuestionStatsEntity> {
+        override suspend fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
+        override suspend fun findById(id: Long): QuestionStatsEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(rows.firstOrNull { it.questionId == id })
+            return rows.firstOrNull { it.questionId == id }
         }
-        override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
+        override suspend fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
             findAllByIdsCalls += 1
             return rows.filter { it.questionId in ids }
         }
-        override fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
+        override suspend fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
-        override fun save(entity: StudyEntity): StudyEntity = entity
-        override fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
-        override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
-        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
+        override suspend fun save(entity: StudyEntity): StudyEntity = entity
+        override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
+        override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId }
-        override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
-        override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> = emptyList()
-        override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
+        override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
+        override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> = emptyList()
+        override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
+        override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
+        override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> = emptyList()
     }
 
     private class FakeUserPort : UserPort {
         var row: UserEntity? = null
         val savedRows = mutableListOf<UserEntity>()
         var findByIdCalls = 0
-        override fun save(entity: UserEntity): UserEntity {
+        override suspend fun save(entity: UserEntity): UserEntity {
             savedRows += entity
             return entity
         }
-        override fun findById(id: Long): Optional<UserEntity> {
+        override suspend fun findById(id: Long): UserEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(row?.takeIf { it.id == id })
+            return row?.takeIf { it.id == id }
         }
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
             row?.takeIf { it.id in ids.toSet() }?.let { mutableListOf(it) } ?: mutableListOf()
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
     private class FakeQuestionMembershipPort : QuestionMembershipPort {
@@ -626,14 +628,14 @@ class StudyServiceTest {
         var usedCount = 0
         var consumeCalls = 0
         var refundCalls = 0
-        override fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
-        override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+        override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
+        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false
             usedCount += 1
             return true
         }
-        override fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+        override suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
             refundCalls += 1
             if (usedCount > 0) usedCount -= 1
         }
@@ -645,8 +647,8 @@ class StudyServiceTest {
         var failure: RuntimeException? = null
         var generatedPrompt: QuestionGenerationPrompt? = null
         val generatedApiKeys = mutableListOf<String>()
-        override fun validate(apiKey: String) = Unit
-        override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
+        override suspend fun validate(apiKey: String) = Unit
+        override suspend fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateCalls += 1
             generatedApiKeys += apiKey
             failure?.let { throw it }
@@ -657,15 +659,15 @@ class StudyServiceTest {
         }
         val generatedQuestions = ArrayDeque<GeneratedQuestion>()
         val embeddings = mutableMapOf<String, List<Float>>()
-        override fun embedText(apiKey: String, text: String): List<Float> =
+        override suspend fun embedText(apiKey: String, text: String): List<Float> =
             embeddings[text] ?: listOf(0f, 0f, 1f)
         var coverageBlueprintCalls = 0
         var coverageBlueprint = emptyList<OpenAIPort.QuestionCoverageConcept>()
-        override fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> {
+        override suspend fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> {
             coverageBlueprintCalls += 1
             return coverageBlueprint
         }
-        override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
+        override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
             gradeCalls += 1
             assertThat(language).isEqualTo("en")
             return GradedAnswer(100, true, "Good", "Because")
@@ -675,14 +677,14 @@ class StudyServiceTest {
     private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
         val rows = mutableListOf<QuestionEmbeddingCandidate>()
         val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
-        override fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
+        override suspend fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
             val row = QuestionEmbeddingCandidate(questionId, question, embedding)
             savedRows += row
             rows += row
             return row
         }
 
-        override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> =
+        override suspend fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> =
             rows.take(limit)
     }
 
@@ -691,7 +693,7 @@ class StudyServiceTest {
         val markAskedCalls = mutableListOf<QuestionCoverageSelection>()
         val markAnsweredCalls = mutableListOf<AnsweredCall>()
         private var selection: QuestionCoverageSelection? = null
-        override fun ensureCoverage(
+        override suspend fun ensureCoverage(
             studyId: Long,
             topic: String,
             concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>,
@@ -727,13 +729,13 @@ class StudyServiceTest {
             val namePath: String,
         )
 
-        override fun selectNext(studyId: Long): QuestionCoverageSelection? = selection
+        override suspend fun selectNext(studyId: Long): QuestionCoverageSelection? = selection
 
-        override fun markAsked(selection: QuestionCoverageSelection, now: Instant) {
+        override suspend fun markAsked(selection: QuestionCoverageSelection, now: Instant) {
             markAskedCalls += selection
         }
 
-        override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
+        override suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
             markAnsweredCalls += AnsweredCall(conceptId, angleKey, score, correct)
         }
 
@@ -742,28 +744,28 @@ class StudyServiceTest {
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override fun publish(command: NotificationRequestCommand): Boolean {
+        override suspend fun publish(command: NotificationRequestCommand): Boolean {
             commands += command
             return true
         }
     }
 
     private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
-        override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean = true
+        override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean = true
     }
 
     private class FakePermissionEvaluator : PermissionEvaluator {
         var result = PermissionEvaluationResult.granted(Permissions.STUDY_CREATE)
         val calls = mutableListOf<String>()
 
-        override fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
+        override suspend fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
             calls += permissionCode
             return result
         }
     }
 
     private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {
-        override fun translateSearchText(
+        override suspend fun translateSearchText(
             sourceLanguage: String,
             targetLanguage: String,
             topic: String,
@@ -776,13 +778,13 @@ class StudyServiceTest {
     }
 
     private class FakeQuestionSearchPort : QuestionSearchPort {
-        override fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
-        override fun deleteByQuestionId(questionId: Long): Long = 0
-        override fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
-        override fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
-        override fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
-        override fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
-        override fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
+        override suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
+        override suspend fun deleteByQuestionId(questionId: Long): Long = 0
+        override suspend fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
+        override suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
+        override suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
+        override suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
+        override suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
     }
 
 }

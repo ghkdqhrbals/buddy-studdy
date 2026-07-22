@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.inbound.scheduler
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -76,7 +78,7 @@ class QuestionSchedulerTest {
     )
 
     @Test
-    fun `question scheduler runs through managed job executor`() {
+    fun `question scheduler runs through managed job executor`(): Unit = runBlocking {
         val useCase = FakeRunQuestionScheduleUseCase()
         val job = QuestionScheduleJob(useCase)
         val jobs = FakeManagedJobExecutionUseCase()
@@ -90,7 +92,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run uses same study and same topic history for each study`() {
+    fun `scheduled run uses same study and same topic history for each study`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
@@ -129,7 +131,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run uses batch pending lookup when per study pending limit is one`() {
+    fun `scheduled run uses batch pending lookup when per study pending limit is one`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
@@ -146,7 +148,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run drains all due studies across multiple batches`() {
+    fun `scheduled run drains all due studies across multiple batches`(): Unit = runBlocking {
         properties.scheduler.batchSize = 2
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
@@ -171,7 +173,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run drains overdue study state without recovery jobs`() {
+    fun `scheduled run drains overdue study state without recovery jobs`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         studies.rows += study(id = 101, userId = 7, topic = "Swift", now = now)
@@ -184,7 +186,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run uses batch pending counts when per study pending limit is above one`() {
+    fun `scheduled run uses batch pending counts when per study pending limit is above one`(): Unit = runBlocking {
         properties.scheduler.maxPendingPerStudy = 2
         val now = Instant.parse("2026-06-10T00:00:00Z")
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
@@ -201,7 +203,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run backs off briefly when study already has pending question`() {
+    fun `scheduled run backs off briefly when study already has pending question`(): Unit = runBlocking {
         val dueAt = Instant.now().minusSeconds(1)
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
@@ -217,7 +219,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run backs off longer when api key is missing`() {
+    fun `scheduled run backs off longer when api key is missing`(): Unit = runBlocking {
         properties.openai.apiKey = ""
         val dueAt = Instant.now().minusSeconds(1)
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
@@ -233,7 +235,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run stops using system key after monthly tier question limit`() {
+    fun `scheduled run stops using system key after monthly tier question limit`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val user = UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         users.rows += user
@@ -251,7 +253,7 @@ class QuestionSchedulerTest {
     }
 
     @Test
-    fun `scheduled run backs off on openai failure without enqueueing push`() {
+    fun `scheduled run backs off on openai failure without enqueueing push`(): Unit = runBlocking {
         val dueAt = Instant.now().minusSeconds(1)
         users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         val study = study(id = 101, userId = 7, topic = "Swift", now = dueAt)
@@ -298,19 +300,19 @@ class QuestionSchedulerTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
-        override fun save(entity: StudyEntity): StudyEntity = entity
-        override fun deleteByIdAndUserId(id: Long, userId: Long): Long =
+        override suspend fun save(entity: StudyEntity): StudyEntity = entity
+        override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long =
             if (rows.removeIf { it.id == id && it.userId == userId }) 1 else 0
-        override fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
-        override fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
+        override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
+        override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId }
-        override fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
-        override fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
+        override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
+        override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
-        override fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
-        override fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
+        override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
+        override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
         var claimDueCalls = 0
-        override fun claimDue(now: Instant, limit: Int): List<StudyEntity> {
+        override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> {
             claimDueCalls += 1
             val due = rows
                 .filter { it.enabled && it.nextDueAt?.isAfter(now) == false }
@@ -323,7 +325,7 @@ class QuestionSchedulerTest {
 
     private class FakeRunQuestionScheduleUseCase : RunQuestionScheduleUseCase {
         var calls = 0
-        override fun runDueQuestions() {
+        override suspend fun runDueQuestions() {
             calls += 1
         }
     }
@@ -332,7 +334,7 @@ class QuestionSchedulerTest {
         val executedJobNames = mutableListOf<String>()
         val triggerTypes = mutableListOf<JobTriggerType>()
 
-        override fun execute(
+        override suspend fun execute(
             job: ManagedJob,
             triggerType: JobTriggerType,
             retryOfRunId: Long?,
@@ -354,24 +356,24 @@ class QuestionSchedulerTest {
             )
         }
 
-        override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
+        override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
             ScheduledJobRunPageResponse(emptyList(), 0, limit, offset)
 
-        override fun findStatuses(): ScheduledJobStatusResponse =
+        override suspend fun findStatuses(): ScheduledJobStatusResponse =
             ScheduledJobStatusResponse(emptyList())
     }
 
     private class FakeUserPort : UserPort {
         val rows = mutableListOf<UserEntity>()
         var findByIdCalls = 0
-        override fun save(entity: UserEntity): UserEntity = entity
-        override fun findById(id: Long): Optional<UserEntity> {
+        override suspend fun save(entity: UserEntity): UserEntity = entity
+        override suspend fun findById(id: Long): UserEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(rows.firstOrNull { it.id == id })
+            return rows.firstOrNull { it.id == id }
         }
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = rows.filter { it.id in ids.toSet() }.toMutableList()
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = rows.filter { it.id in ids.toSet() }.toMutableList()
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
     private class FakeQuestionMembershipPort : QuestionMembershipPort {
@@ -379,14 +381,14 @@ class QuestionSchedulerTest {
         var usedCount = 0
         var consumeCalls = 0
         var refundCalls = 0
-        override fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
-        override fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+        override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
+        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false
             usedCount += 1
             return true
         }
-        override fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+        override suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
             refundCalls += 1
             if (usedCount > 0) usedCount -= 1
         }
@@ -402,21 +404,21 @@ class QuestionSchedulerTest {
         var countPendingForStudyCalls = 0
         var countPendingByStudyIdsCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
-        override fun save(entity: QuestionEntity): QuestionEntity {
+        override suspend fun save(entity: QuestionEntity): QuestionEntity {
             entity.id = (savedRows.size + 1).toLong()
             savedRows += entity
             return entity
         }
-        override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.empty()
-        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
-        override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
-        override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> {
+        override suspend fun findQuestionById(id: Long): QuestionEntity? = null
+        override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
+        override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> = emptyList()
+        override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> {
             findLatestPendingByStudyIdsCalls += 1
             return pendingRows
                 .filter { it.studyId in studyIds }
@@ -424,12 +426,12 @@ class QuestionSchedulerTest {
                 .values
                 .mapNotNull { rows -> rows.maxWithOrNull(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id }) }
         }
-        override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> {
+        override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> {
             findVisibleByUserCalls += 1
             return PageImpl(visibleRows.filter { it.userId == userId }, pageable, visibleRows.count { it.userId == userId }.toLong())
         }
-        override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
+        override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
             findRecentQuestionTextsByStudyIdAndTopicCalls += 1
             return visibleRows
                 .filter { it.studyId == studyId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
@@ -437,7 +439,7 @@ class QuestionSchedulerTest {
                 .map { it.question }
                 .take(pageable.pageSize)
         }
-        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
+        override suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> {
             findRecentQuestionTextsByUserIdAndTopicCalls += 1
             return visibleRows
                 .filter { it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null }
@@ -445,11 +447,11 @@ class QuestionSchedulerTest {
                 .map { it.question }
                 .take(pageable.pageSize)
         }
-        override fun countPendingForStudy(studyId: Long): Long {
+        override suspend fun countPendingForStudy(studyId: Long): Long {
             countPendingForStudyCalls += 1
             return pendingRows.count { it.studyId == studyId }.toLong()
         }
-        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
+        override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
             countPendingByStudyIdsCalls += 1
             return pendingRows
                 .filter { it.studyId in studyIds }
@@ -457,32 +459,32 @@ class QuestionSchedulerTest {
                 .eachCount()
                 .mapValues { it.value.toLong() }
         }
-        override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
-        override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
-        override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
+        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
+        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
-        override fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
-        override fun findById(id: Long): Optional<QuestionStatsEntity> = Optional.empty()
-        override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> = emptyList()
-        override fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
+        override suspend fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
+        override suspend fun findById(id: Long): QuestionStatsEntity? = null
+        override suspend fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> = emptyList()
+        override suspend fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
 
     private class FakeOpenAI : OpenAIPort {
         val recentArguments = mutableListOf<List<String>>()
         var generateQuestionCalls = 0
         var failure: RuntimeException? = null
-        override fun validate(apiKey: String) = Unit
-        override fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
+        override suspend fun validate(apiKey: String) = Unit
+        override suspend fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
             generateQuestionCalls += 1
             failure?.let { throw it }
             val recentText = prompt.userPrompt
@@ -494,8 +496,8 @@ class QuestionSchedulerTest {
             recentArguments += recentText
             return GeneratedQuestion("Question for ${prompt.fallbackTopic}", "Hint")
         }
-        override fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
-        override fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> =
+        override suspend fun embedText(apiKey: String, text: String): List<Float> = listOf(0f, 0f, 1f)
+        override suspend fun generateQuestionCoverageBlueprint(apiKey: String, model: String, topic: String, level: Int, customPrompt: String): List<OpenAIPort.QuestionCoverageConcept> =
             listOf(
                 OpenAIPort.QuestionCoverageConcept(
                     key = "general",
@@ -503,31 +505,31 @@ class QuestionSchedulerTest {
                     angles = listOf(OpenAIPort.QuestionCoverageAngle("definition", "Definition")),
                 )
             )
-        override fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
+        override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
             GradedAnswer(100, true, "Good", "Because")
     }
 
     private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
         val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
-        override fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
+        override suspend fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
             val row = QuestionEmbeddingCandidate(questionId, question, embedding)
             savedRows += row
             return row
         }
 
-        override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> = emptyList()
+        override suspend fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> = emptyList()
     }
 
     private class FakeQuestionCoveragePort : QuestionCoveragePort {
-        override fun ensureCoverage(studyId: Long, topic: String, concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>) = Unit
-        override fun selectNext(studyId: Long): QuestionCoverageSelection? = null
-        override fun markAsked(selection: QuestionCoverageSelection, now: Instant) = Unit
-        override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) = Unit
+        override suspend fun ensureCoverage(studyId: Long, topic: String, concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>) = Unit
+        override suspend fun selectNext(studyId: Long): QuestionCoverageSelection? = null
+        override suspend fun markAsked(selection: QuestionCoverageSelection, now: Instant) = Unit
+        override suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) = Unit
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override fun publish(command: NotificationRequestCommand): Boolean {
+        override suspend fun publish(command: NotificationRequestCommand): Boolean {
             commands += command
             return true
         }
@@ -535,7 +537,7 @@ class QuestionSchedulerTest {
 
     private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
         val questionIds = mutableListOf<Long>()
-        override fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
+        override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
             questionIds += questionId
             return true
         }

@@ -9,11 +9,11 @@ import java.time.Duration
 class RedisEmailVerificationCodeAdapter(
     private val redis: StringRedisTemplate,
 ) : EmailVerificationCodePort {
-    override fun save(email: String, code: String, ttl: Duration) {
+    override suspend fun save(email: String, code: String, ttl: Duration) {
         redis.opsForValue().set(key(email), code, ttl)
     }
 
-    override fun consume(email: String, code: String): Boolean {
+    override suspend fun consume(email: String, code: String): Boolean {
         val key = key(email)
         val stored = redis.opsForValue().get(key) ?: return false
         if (stored != code.trim()) {

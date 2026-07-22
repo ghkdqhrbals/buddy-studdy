@@ -1,5 +1,7 @@
 package com.buddystudy.backend.scheduler
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
@@ -28,7 +30,7 @@ class ManagedJobExecutionServiceTest {
     private val service = ManagedJobExecutionService(runs, locks, alerts, properties)
 
     @Test
-    fun `execute records successful job run`() {
+    fun `execute records successful job run`(): Unit = runBlocking {
         val result = service.execute(FakeJob("admin-analytics-recent") { "rows=18" }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.SUCCESS)
@@ -38,7 +40,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute records failed job run without throwing`() {
+    fun `execute records failed job run without throwing`(): Unit = runBlocking {
         val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
@@ -48,7 +50,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute records failed job run even when alert delivery fails`() {
+    fun `execute records failed job run even when alert delivery fails`(): Unit = runBlocking {
         alerts.error = IllegalStateException("slack unavailable")
 
         val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
@@ -60,7 +62,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute releases lock when run start fails`() {
+    fun `execute releases lock when run start fails`(): Unit = runBlocking {
         runs.startError = IllegalStateException("database unavailable")
 
         val error = org.junit.jupiter.api.assertThrows<IllegalStateException> {
@@ -72,7 +74,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute keeps successful job result when lock release fails`() {
+    fun `execute keeps successful job result when lock release fails`(): Unit = runBlocking {
         locks.releaseError = IllegalStateException("unlock failed")
 
         val result = service.execute(FakeJob("user-stats-refresh") { "done" }, JobTriggerType.SCHEDULED)
@@ -83,7 +85,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute skips disabled job without running work`() {
+    fun `execute skips disabled job without running work`(): Unit = runBlocking {
         runs.enabled["user-stats-refresh"] = false
         var executed = false
 
@@ -95,7 +97,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute skips locked job without running work or sending alerts`() {
+    fun `execute skips locked job without running work or sending alerts`(): Unit = runBlocking {
         locks.acquired = false
         var executed = false
 
@@ -109,7 +111,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `retry keeps retry source run id`() {
+    fun `retry keeps retry source run id`(): Unit = runBlocking {
         val result = service.execute(
             FakeJob("admin-analytics-correction") { "corrected" },
             JobTriggerType.RETRY,
@@ -123,7 +125,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `find statuses marks missing and failed enabled jobs as stale`() {
+    fun `find statuses marks missing and failed enabled jobs as stale`(): Unit = runBlocking {
         runs.snapshots += ScheduledJobSnapshot(
             jobName = "question-schedule",
             enabled = true,
@@ -155,7 +157,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `find statuses includes monitored jobs that are missing from scheduler seed table`() {
+    fun `find statuses includes monitored jobs that are missing from scheduler seed table`(): Unit = runBlocking {
         runs.snapshots += ScheduledJobSnapshot(
             jobName = "question-schedule",
             enabled = true,
@@ -182,7 +184,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `find statuses ignores disabled stale jobs`() {
+    fun `find statuses ignores disabled stale jobs`(): Unit = runBlocking {
         runs.snapshots += ScheduledJobSnapshot(
             jobName = "question-schedule",
             enabled = false,
@@ -197,7 +199,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `find statuses marks running job past timeout as stuck and stale`() {
+    fun `find statuses marks running job past timeout as stuck and stale`(): Unit = runBlocking {
         runs.snapshots += ScheduledJobSnapshot(
             jobName = "question-schedule",
             enabled = true,
@@ -222,7 +224,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `find statuses uses last successful run for stale calculation`() {
+    fun `find statuses uses last successful run for stale calculation`(): Unit = runBlocking {
         val oldSuccess = ScheduledJobRun(
             id = 21,
             jobName = "question-schedule",
@@ -259,15 +261,15 @@ class ManagedJobExecutionServiceTest {
         override val name: String,
         private val block: () -> String,
     ) : ManagedJob {
-        override fun run(): String = block()
+        override suspend fun run(): String = block()
     }
 
     private class FakeJobLockPort : JobLockPort {
         val released = mutableListOf<String>()
         var acquired = true
         var releaseError: RuntimeException? = null
-        override fun tryAcquire(jobName: String): Boolean = acquired
-        override fun release(jobName: String) {
+        override suspend fun tryAcquire(jobName: String): Boolean = acquired
+        override suspend fun release(jobName: String) {
             released += jobName
             releaseError?.let { throw it }
         }
@@ -277,7 +279,7 @@ class ManagedJobExecutionServiceTest {
         val failedRuns = mutableListOf<ScheduledJobRun>()
         var error: RuntimeException? = null
 
-        override fun notifyFailed(run: ScheduledJobRun) {
+        override suspend fun notifyFailed(run: ScheduledJobRun) {
             error?.let { throw it }
             failedRuns += run
         }
@@ -290,9 +292,9 @@ class ManagedJobExecutionServiceTest {
         var startError: RuntimeException? = null
         private var nextId = 1L
 
-        override fun isEnabled(jobName: String): Boolean = enabled[jobName] ?: true
+        override suspend fun isEnabled(jobName: String): Boolean = enabled[jobName] ?: true
 
-        override fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun {
+        override suspend fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun {
             startError?.let { throw it }
             val row = ScheduledJobRun(
                 id = nextId++,
@@ -307,7 +309,7 @@ class ManagedJobExecutionServiceTest {
             return row
         }
 
-        override fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun {
+        override suspend fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun {
             val index = rows.indexOfFirst { it.id == runId }
             val updated = rows[index].copy(
                 status = status,
@@ -320,14 +322,14 @@ class ManagedJobExecutionServiceTest {
             return updated
         }
 
-        override fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+        override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
             val filtered = rows.filter {
                 (jobName == null || it.jobName == jobName) && (runId == null || it.id == runId)
             }
             return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
         }
 
-        override fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> =
+        override suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> =
             snapshots.filter { jobNames.isEmpty() || it.jobName in jobNames }
     }
 }

@@ -2,6 +2,7 @@ package com.buddystudy.backend.notification.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
+import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
 import com.buddystudy.backend.notification.application.model.NotificationMutationResponse
 import com.buddystudy.backend.notification.application.model.NotificationUnreadCountResponse
@@ -23,37 +24,48 @@ import org.springframework.web.bind.annotation.RestController
 @RequirePermission(Permissions.NOTIFICATION_READ)
 class NotificationController(
     private val notifications: NotificationWebPort,
+    private val permissions: PermissionWebGuard,
 ) {
     @Operation(summary = "List my notifications", description = "Returns the authenticated user's notification inbox with offset pagination and unread count.")
     @GetMapping
-    fun notifications(
+    suspend fun notifications(
         @Parameter(description = "Maximum notifications to return. Server clamps this to 1..100.", example = "30")
         @RequestParam(defaultValue = "30") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
         authentication: Authentication,
-    ): AppNotificationsResponse =
-        notifications.notifications(limit, offset, authentication)
+    ): AppNotificationsResponse {
+        permissions.check(authentication, Permissions.NOTIFICATION_READ)
+        return notifications.notifications(limit, offset, authentication)
+    }
 
     @Operation(summary = "Fetch unread notification count")
     @GetMapping("/unread-count")
-    fun unreadCount(authentication: Authentication): NotificationUnreadCountResponse =
-        notifications.unreadCount(authentication)
+    suspend fun unreadCount(authentication: Authentication): NotificationUnreadCountResponse {
+        permissions.check(authentication, Permissions.NOTIFICATION_READ)
+        return notifications.unreadCount(authentication)
+    }
 
     @Operation(summary = "Mark one notification as read", description = "Used when a user taps a notification row or lands from a push.")
     @PostMapping("/{id}/read")
-    fun markRead(@PathVariable id: Long, authentication: Authentication): NotificationMutationResponse =
-        notifications.markRead(id, authentication)
+    suspend fun markRead(@PathVariable id: Long, authentication: Authentication): NotificationMutationResponse {
+        permissions.check(authentication, Permissions.NOTIFICATION_READ)
+        return notifications.markRead(id, authentication)
+    }
 
     @Operation(summary = "Delete one notification")
     @DeleteMapping("/{id}")
     @RequirePermission(Permissions.NOTIFICATION_DELETE)
-    fun delete(@PathVariable id: Long, authentication: Authentication): NotificationMutationResponse =
-        notifications.delete(id, authentication)
+    suspend fun delete(@PathVariable id: Long, authentication: Authentication): NotificationMutationResponse {
+        permissions.check(authentication, Permissions.NOTIFICATION_READ, Permissions.NOTIFICATION_DELETE)
+        return notifications.delete(id, authentication)
+    }
 
     @Operation(summary = "Delete all my notifications")
     @DeleteMapping
     @RequirePermission(Permissions.NOTIFICATION_DELETE)
-    fun deleteAll(authentication: Authentication): NotificationMutationResponse =
-        notifications.deleteAll(authentication)
+    suspend fun deleteAll(authentication: Authentication): NotificationMutationResponse {
+        permissions.check(authentication, Permissions.NOTIFICATION_READ, Permissions.NOTIFICATION_DELETE)
+        return notifications.deleteAll(authentication)
+    }
 }

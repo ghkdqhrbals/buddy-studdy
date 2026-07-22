@@ -3,8 +3,8 @@ spring:
     activate:
       on-profile: dev
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystudy}
+  r2dbc:
+    url: ${R2DBC_DATABASE_URL:r2dbc:postgresql://localhost:5432/buddystudy}
     username: ${DATABASE_USERNAME:buddystudy}
     password: ${DATABASE_PASSWORD:local-password}
   flyway:

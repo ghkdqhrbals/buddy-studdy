@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.toRedisStreamFields
@@ -10,7 +12,7 @@ import java.time.Instant
 
 class RedisStreamEventsTest {
     @Test
-    fun `push event publishes envelope with full payload json`() {
+    fun `push event publishes envelope with full payload json`(): Unit = runBlocking {
         val event = QuestionPushRequestedEvent(
             recordId = 1,
             studyId = 10,
@@ -44,7 +46,7 @@ class RedisStreamEventsTest {
     }
 
     @Test
-    fun `view event exposes consistent stream field map`() {
+    fun `view event exposes consistent stream field map`(): Unit = runBlocking {
         val event = PublicQuestionViewedEvent(
             questionId = 10,
             userId = 20,

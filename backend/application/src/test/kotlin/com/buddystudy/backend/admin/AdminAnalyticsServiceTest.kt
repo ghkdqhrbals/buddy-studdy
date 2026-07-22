@@ -1,5 +1,7 @@
 package com.buddystudy.backend.admin
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetricPoint
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
@@ -23,7 +25,7 @@ class AdminAnalyticsServiceTest {
     private val service = AdminAnalyticsService(properties, metrics, source)
 
     @Test
-    fun `default admin credentials are admin admin`() {
+    fun `default admin credentials are admin admin`(): Unit = runBlocking {
         val defaultService = AdminAnalyticsService(
             BuddyStudyProperties().apply { crypto.masterKey = "test-master-key" },
             FakeMetricPort(),
@@ -36,8 +38,8 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `admin login returns token and metrics require valid admin token`() {
-        assertThatThrownBy { service.metrics("bad-token", LocalDate.parse("2026-06-01"), LocalDate.parse("2026-06-01"), emptySet()) }
+    fun `admin login returns token and metrics require valid admin token`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { service.metrics("bad-token", LocalDate.parse("2026-06-01"), LocalDate.parse("2026-06-01"), emptySet()) } }
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
             .isEqualTo(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN)
@@ -49,18 +51,18 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `admin token validation rejects tampered token`() {
+    fun `admin token validation rejects tampered token`(): Unit = runBlocking {
         val token = service.login("admin", "secret").adminToken
         val tampered = token.substringBeforeLast(".") + ".tampered"
 
-        assertThatThrownBy { service.validate(tampered) }
+        assertThatThrownBy { runBlocking { service.validate(tampered) } }
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
             .isEqualTo(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN)
     }
 
     @Test
-    fun `refresh stores daily source metrics and returns time series`() {
+    fun `refresh stores daily source metrics and returns time series`(): Unit = runBlocking {
         val day = LocalDate.parse("2026-06-01")
         source.rows[day] = listOf(
             AdminDailyMetricPoint(day, "daily_active_users", null, 7.0),
@@ -78,7 +80,7 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `scheduled recent refresh recomputes configured recent date range`() {
+    fun `scheduled recent refresh recomputes configured recent date range`(): Unit = runBlocking {
         properties.analytics.recentDays = 2
         val yesterday = LocalDate.parse("2026-06-24")
         val today = LocalDate.parse("2026-06-25")
@@ -92,7 +94,7 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `scheduled correction refresh recomputes configured correction date range`() {
+    fun `scheduled correction refresh recomputes configured correction date range`(): Unit = runBlocking {
         properties.analytics.correctionDays = 3
         val first = LocalDate.parse("2026-06-23")
         val second = LocalDate.parse("2026-06-24")
@@ -108,7 +110,7 @@ class AdminAnalyticsServiceTest {
     }
 
     @Test
-    fun `unknown admin metrics are not exposed even when persisted`() {
+    fun `unknown admin metrics are not exposed even when persisted`(): Unit = runBlocking {
         val day = LocalDate.parse("2026-06-01")
         metrics.upsertDailyMetrics(
             listOf(
@@ -125,15 +127,15 @@ class AdminAnalyticsServiceTest {
 
     private class FakeMetricPort : AdminAnalyticsMetricPort {
         val upserted = mutableListOf<AdminDailyMetricPoint>()
-        override fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
+        override suspend fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
             upserted += points
         }
-        override fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> =
+        override suspend fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> =
             upserted.filter { it.date >= startDate && it.date <= endDate && (metricKeys.isEmpty() || it.metricKey in metricKeys) }
     }
 
     private class FakeSourcePort : AdminAnalyticsSourcePort {
         val rows = mutableMapOf<LocalDate, List<AdminDailyMetricPoint>>()
-        override fun collectDailyMetrics(date: LocalDate): List<AdminDailyMetricPoint> = rows[date].orEmpty()
+        override suspend fun collectDailyMetrics(date: LocalDate): List<AdminDailyMetricPoint> = rows[date].orEmpty()
     }
 }

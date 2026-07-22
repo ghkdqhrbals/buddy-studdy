@@ -18,12 +18,12 @@ class AdminAnalyticsAggregationScheduler(
     private val correctionJob: AdminAnalyticsCorrectionJob,
 ) {
     @Scheduled(cron = "\${buddystudy.analytics.recent-cron:0 */5 * * * *}")
-    fun refreshRecent() {
+    suspend fun refreshRecent() {
         jobs.execute(recentJob, JobTriggerType.SCHEDULED)
     }
 
     @Scheduled(cron = "\${buddystudy.analytics.correction-cron:0 20 3 * * *}")
-    fun refreshCorrection() {
+    suspend fun refreshCorrection() {
         jobs.execute(correctionJob, JobTriggerType.SCHEDULED)
     }
 }
@@ -34,7 +34,7 @@ class AdminAnalyticsRecentJob(
 ) : ManagedJob {
     override val name: String = "admin-analytics-recent"
 
-    override fun run(): String {
+    override suspend fun run(): String {
         val today = LocalDate.now(ZoneOffset.UTC)
         return "rows=${analytics.refreshRecent(today)} referenceDate=$today"
     }
@@ -46,7 +46,7 @@ class AdminAnalyticsCorrectionJob(
 ) : ManagedJob {
     override val name: String = "admin-analytics-correction"
 
-    override fun run(): String {
+    override suspend fun run(): String {
         val today = LocalDate.now(ZoneOffset.UTC)
         return "rows=${analytics.refreshCorrection(today)} referenceDate=$today"
     }

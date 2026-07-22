@@ -21,20 +21,20 @@ data class NotificationRequestCommand(
 )
 
 interface BrowseNotificationsUseCase {
-    fun notifications(principal: Principal, limit: Int, offset: Int): AppNotificationsResponse
-    fun unreadCount(principal: Principal): NotificationUnreadCountResponse
+    suspend fun notifications(principal: Principal, limit: Int, offset: Int): AppNotificationsResponse
+    suspend fun unreadCount(principal: Principal): NotificationUnreadCountResponse
 }
 
 interface MutateNotificationsUseCase {
-    fun markRead(principal: Principal, id: Long): NotificationMutationResponse
-    fun delete(principal: Principal, id: Long): NotificationMutationResponse
-    fun deleteAll(principal: Principal): NotificationMutationResponse
+    suspend fun markRead(principal: Principal, id: Long): NotificationMutationResponse
+    suspend fun delete(principal: Principal, id: Long): NotificationMutationResponse
+    suspend fun deleteAll(principal: Principal): NotificationMutationResponse
 }
 
 interface ProcessNotificationEventUseCase {
-    fun process(command: NotificationRequestCommand): Long
+    suspend fun process(command: NotificationRequestCommand): Long
 }
 
 interface PublishNotificationUseCase {
-    fun publish(command: NotificationRequestCommand): Boolean
+    suspend fun publish(command: NotificationRequestCommand): Boolean
 }

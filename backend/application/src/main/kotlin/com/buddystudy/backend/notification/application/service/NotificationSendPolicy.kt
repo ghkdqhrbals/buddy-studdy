@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component
 class NotificationSendPolicy(
     private val permissions: PermissionEvaluator,
 ) {
-    fun canSendPush(command: NotificationRequestCommand): Boolean {
+    suspend fun canSendPush(command: NotificationRequestCommand): Boolean {
         if (!command.shouldPush) return false
         val userId = command.userId ?: return false
         val deviceId = command.deviceId ?: return false
@@ -17,7 +17,7 @@ class NotificationSendPolicy(
         return permissions.evaluate(userId, deviceId, permissionCode).granted
     }
 
-    private fun permissionFor(type: String): String {
+    private suspend fun permissionFor(type: String): String {
         val normalized = type.uppercase()
         return when {
             "NIGHT" in normalized && "MARKETING" in normalized -> Permissions.NOTIFICATION_RECEIVE_NIGHT_MARKETING

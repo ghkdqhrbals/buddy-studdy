@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.MonitoringConfigurationGuard
 import com.buddystudy.backend.config.PropertiesConfig
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
@@ -13,7 +15,7 @@ class MonitoringConfigurationGuardTest {
         .withUserConfiguration(PropertiesConfig::class.java, MonitoringConfigurationGuard::class.java)
 
     @Test
-    fun `prod scheduler fails fast when scheduler Slack webhook is missing`() {
+    fun `prod scheduler fails fast when scheduler Slack webhook is missing`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -29,7 +31,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `production profile matching is case insensitive for monitoring guard`() {
+    fun `production profile matching is case insensitive for monitoring guard`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=Production",
@@ -45,7 +47,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `dev scheduler can start without scheduler Slack webhook`() {
+    fun `dev scheduler can start without scheduler Slack webhook`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=dev",
@@ -58,7 +60,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler can start when scheduler monitoring dependencies are configured`() {
+    fun `prod scheduler can start when scheduler monitoring dependencies are configured`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -72,7 +74,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when admin run url is missing`() {
+    fun `prod scheduler fails fast when admin run url is missing`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -89,7 +91,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when admin run url is not https`() {
+    fun `prod scheduler fails fast when admin run url is not https`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -106,7 +108,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when scheduler readiness is disabled`() {
+    fun `prod scheduler fails fast when scheduler readiness is disabled`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -124,7 +126,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when no scheduler jobs are monitored`() {
+    fun `prod scheduler fails fast when no scheduler jobs are monitored`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -142,7 +144,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler allows managed jobs that are intentionally excluded from readiness monitoring`() {
+    fun `prod scheduler allows managed jobs that are intentionally excluded from readiness monitoring`(): Unit = runBlocking {
         contextRunner
             .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
             .withBean("adminCorrectionJob", ManagedJob::class.java, Supplier { fakeJob("admin-analytics-correction") })
@@ -159,7 +161,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when monitored job name is unknown`() {
+    fun `prod scheduler fails fast when monitored job name is unknown`(): Unit = runBlocking {
         contextRunner
             .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
             .withPropertyValues(
@@ -178,7 +180,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when Slack timeout is outside supported bounds`() {
+    fun `prod scheduler fails fast when Slack timeout is outside supported bounds`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -196,7 +198,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when scheduler stale threshold is outside supported bounds`() {
+    fun `prod scheduler fails fast when scheduler stale threshold is outside supported bounds`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -214,7 +216,7 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when scheduler startup grace is outside supported bounds`() {
+    fun `prod scheduler fails fast when scheduler startup grace is outside supported bounds`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
@@ -234,6 +236,6 @@ class MonitoringConfigurationGuardTest {
     private fun fakeJob(jobName: String): ManagedJob =
         object : ManagedJob {
             override val name: String = jobName
-            override fun run(): String = "ok"
+            override suspend fun run(): String = "ok"
         }
 }

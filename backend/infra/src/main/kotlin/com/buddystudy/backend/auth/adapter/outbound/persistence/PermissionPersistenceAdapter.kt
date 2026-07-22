@@ -4,44 +4,41 @@ import com.buddystudy.auth.domain.entity.UserRoleEntity
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPermissionProjection
-import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
+import kotlinx.coroutines.reactive.awaitSingle
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
-
-interface PermissionQueryRepository : org.springframework.data.repository.Repository<UserRoleEntity, Long> {
-    @Query(
-        """
-        select distinct p.code as code, p.requiresActiveAccount as requiresActiveAccount
-        from UserRoleEntity ur
-        join RolePermissionEntity rp on rp.roleId = ur.roleId
-        join PermissionEntity p on p.id = rp.permissionId
-        where ur.userId = :userId
-        """
-    )
-    fun permissionsForUser(@Param("userId") userId: Long): List<UserPermissionRow>
-}
-
-interface UserPermissionRow {
-    val code: String
-    val requiresActiveAccount: Boolean
-}
 
 @Component
 class PermissionPersistenceAdapter(
     private val roles: RoleRepository,
     private val userRoles: UserRoleRepository,
-    private val permissionQueries: PermissionQueryRepository,
+    private val databaseClient: DatabaseClient,
 ) : PermissionQueryPort, RoleAssignmentPort {
-    @Transactional(readOnly = true)
-    override fun permissionsForUser(userId: Long): Set<UserPermissionProjection> =
-        permissionQueries.permissionsForUser(userId)
-            .map { UserPermissionProjection(it.code, it.requiresActiveAccount) }
+    override suspend fun permissionsForUser(userId: Long): Set<UserPermissionProjection> =
+        databaseClient.sql(
+            """
+            select distinct p.code, p.requires_active_account
+            from user_roles ur
+            join role_permissions rp on rp.role_id = ur.role_id
+            join permissions p on p.id = rp.permission_id
+            where ur.user_id = :userId
+            """.trimIndent(),
+        )
+            .bind("userId", userId)
+            .map { row, _ ->
+                UserPermissionProjection(
+                    code = requireNotNull(row.get("code", String::class.java)),
+                    requiresActiveAccount =
+                        row.get("requires_active_account", java.lang.Boolean::class.java)?.booleanValue() ?: false,
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
             .toSet()
 
-    @Transactional
-    override fun grantRoleIfMissing(userId: Long, roleCode: String) {
+    override suspend fun grantRoleIfMissing(userId: Long, roleCode: String) {
         val role = roles.findByCode(roleCode) ?: return
         if (!userRoles.existsByUserIdAndRoleId(userId, role.id)) {
             val now = Instant.now()
@@ -49,8 +46,7 @@ class PermissionPersistenceAdapter(
         }
     }
 
-    @Transactional(readOnly = true)
-    override fun countUserRoles(userId: Long, roleCode: String): Long {
+    override suspend fun countUserRoles(userId: Long, roleCode: String): Long {
         val role = roles.findByCode(roleCode) ?: return 0
         return userRoles.countByUserIdAndRoleId(userId, role.id)
     }

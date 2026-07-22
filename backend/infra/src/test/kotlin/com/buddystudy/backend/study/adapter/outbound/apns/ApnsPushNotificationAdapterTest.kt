@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.apns
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystudy.backend.study.application.port.outbound.ApnsAps
@@ -11,7 +13,7 @@ import java.time.Duration
 
 class ApnsPushNotificationAdapterTest {
     @Test
-    fun `apns request timeout is five seconds`() {
+    fun `apns request timeout is five seconds`(): Unit = runBlocking {
         val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
 
         val request = adapter.buildRequest(
@@ -35,7 +37,7 @@ class ApnsPushNotificationAdapterTest {
     }
 
     @Test
-    fun `apns payload includes unread badge when provided`() {
+    fun `apns payload includes unread badge when provided`(): Unit = runBlocking {
         val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
 
         val body = adapter.buildPayloadJson(
@@ -59,7 +61,7 @@ class ApnsPushNotificationAdapterTest {
     }
 
     @Test
-    fun `apns payload includes notification id when provided`() {
+    fun `apns payload includes notification id when provided`(): Unit = runBlocking {
         val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
 
         val body = adapter.buildPayloadJson(

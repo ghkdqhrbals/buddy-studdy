@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystudy.backend.auth.application.service.LoginService
 import com.buddystudy.backend.auth.adapter.inbound.web.NotificationPreferenceRequest
@@ -21,10 +23,6 @@ import java.net.http.HttpResponse
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-security;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
@@ -32,14 +30,14 @@ import java.net.http.HttpResponse
     ]
 )
 @ExtendWith(OutputCaptureExtension::class)
-class SecurityIntegrationTest {
+class SecurityIntegrationTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
 
     @Test
-    fun `public endpoints are reachable without an access token`() {
+    fun `public endpoints are reachable without an access token`(): Unit = runBlocking {
         assertThat(get("/health").statusCode()).isEqualTo(200)
         assertThat(get("/api/v1/health").statusCode()).isEqualTo(200)
         assertThat(get("/api/v1/health/readiness").statusCode()).isIn(200, 503)
@@ -48,7 +46,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `device registration returns credentials and access token JSON`() {
+    fun `device registration returns credentials and access token JSON`(): Unit = runBlocking {
         val response = post(
             "/api/v1/devices/register",
             """{"apnsToken":"","platform":"ios","apnsEnvironment":"sandbox","language":"ko","timezone":"Asia/Seoul"}""",
@@ -62,7 +60,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `protected endpoints return unified auth error without access token`() {
+    fun `protected endpoints return unified auth error without access token`(): Unit = runBlocking {
         val response = get("/api/v1/profile")
 
         assertThat(response.statusCode()).isEqualTo(401)
@@ -71,7 +69,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput) {
+    fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput): Unit = runBlocking {
         val response = get("/api/v1/profile", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
@@ -81,10 +79,11 @@ class SecurityIntegrationTest {
             .contains("path=/api/v1/profile")
             .contains("status=401")
             .contains("code=AUTH_INVALID_ACCESS_TOKEN")
+        Unit
     }
 
     @Test
-    fun `invalid bearer token is ignored on public endpoints`() {
+    fun `invalid bearer token is ignored on public endpoints`(): Unit = runBlocking {
         val publicQuestions = get("/api/v1/public/questions", "not-a-token")
         val health = get("/api/v1/health", "not-a-token")
         val readiness = get("/api/v1/health/readiness", "not-a-token")
@@ -101,7 +100,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `unknown non api scanner paths return not found without auth warning`(output: CapturedOutput) {
+    fun `unknown non api scanner paths return not found without auth warning`(output: CapturedOutput): Unit = runBlocking {
         val response = get("/wp-su.php")
 
         assertThat(response.statusCode()).isEqualTo(404)
@@ -109,10 +108,11 @@ class SecurityIntegrationTest {
         assertThat(output.out)
             .doesNotContain("api_auth_failed")
             .doesNotContain("path=/wp-su.php")
+        Unit
     }
 
     @Test
-    fun `invalid bearer token on unknown non api path is ignored before not found`(output: CapturedOutput) {
+    fun `invalid bearer token on unknown non api path is ignored before not found`(output: CapturedOutput): Unit = runBlocking {
         val response = get("/ZSLeDE.php", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(404)
@@ -120,10 +120,11 @@ class SecurityIntegrationTest {
         assertThat(output.out)
             .doesNotContain("api_auth_failed")
             .doesNotContain("path=/ZSLeDE.php")
+        Unit
     }
 
     @Test
-    fun `invalid bearer token does not block login endpoints before controller handling`() {
+    fun `invalid bearer token does not block login endpoints before controller handling`(): Unit = runBlocking {
         val response = post("/api/v1/auth/google", """{"idToken":"invalid-google-token"}""", "not-a-token")
 
         assertThat(response.statusCode()).isEqualTo(401)
@@ -133,7 +134,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `new email login without verification code returns email verification error`() {
+    fun `new email login without verification code returns email verification error`(): Unit = runBlocking {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
         val response = post(
@@ -151,7 +152,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `valid bearer token reaches protected endpoint with security principal`() {
+    fun `valid bearer token reaches protected endpoint with security principal`(): Unit = runBlocking {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
         val response = get("/api/v1/profile", auth.accessToken)
@@ -161,7 +162,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `permission denied response includes required permissions for protected mutation`() {
+    fun `permission denied response includes required permissions for protected mutation`(): Unit = runBlocking {
         val auth = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
         val response = post(
@@ -182,7 +183,7 @@ class SecurityIntegrationTest {
     }
 
     @Test
-    fun `policy request DTOs keep bean constructors for Spring JSON binding`() {
+    fun `policy request DTOs keep bean constructors for Spring JSON binding`(): Unit = runBlocking {
         val preferenceRequest = NotificationPreferenceRequest::class.java.getDeclaredConstructor().newInstance()
         preferenceRequest.type = "QUESTION_NOTIFICATION"
         preferenceRequest.key = "question_notification"

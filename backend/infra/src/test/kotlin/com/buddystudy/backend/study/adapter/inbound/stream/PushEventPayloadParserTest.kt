@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.inbound.stream
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.PushMessageType
 import org.assertj.core.api.Assertions.assertThat
@@ -7,7 +9,7 @@ import org.junit.jupiter.api.Test
 
 class PushEventPayloadParserTest {
     @Test
-    fun `payload json is parsed into apns question message`() {
+    fun `payload json is parsed into apns question message`(): Unit = runBlocking {
         val payload = """
             {
               "recordId":10,
@@ -48,7 +50,7 @@ class PushEventPayloadParserTest {
     }
 
     @Test
-    fun `legacy flat fields remain readable during stream migration`() {
+    fun `legacy flat fields remain readable during stream migration`(): Unit = runBlocking {
         val message = PushEventPayloadParser.toPushQuestionMessage(
             fields = mapOf(
                 "recordId" to "10",

@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
@@ -13,10 +15,6 @@ import java.net.http.HttpResponse
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-openapi;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
@@ -28,11 +26,11 @@ import java.net.http.HttpResponse
         "springdoc.swagger-ui.url=/v3/api-docs",
     ]
 )
-class OpenApiDocumentationTest {
+class OpenApiDocumentationTest : PostgresIntegrationTestSupport() {
     @LocalServerPort var port: Int = 0
 
     @Test
-    fun `openapi document includes split study endpoint descriptions`() {
+    fun `openapi document includes split study endpoint descriptions`(): Unit = runBlocking {
         val response = HttpClient.newHttpClient().send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/v3/api-docs")).GET().build(),
             HttpResponse.BodyHandlers.ofString(),
@@ -59,7 +57,7 @@ class OpenApiDocumentationTest {
     }
 
     @Test
-    fun `swagger ui remote configuration loads`() {
+    fun `swagger ui remote configuration loads`(): Unit = runBlocking {
         val client = HttpClient.newHttpClient()
         val docs = client.send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port/docs")).GET().build(),

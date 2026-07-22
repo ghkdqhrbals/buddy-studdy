@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceType
@@ -40,7 +42,7 @@ class PermissionPolicyServiceTest {
     )
 
     @Test
-    fun `first profile terms agreement is saved when no prior user agreement exists`() {
+    fun `first profile terms agreement is saved when no prior user agreement exists`(): Unit = runBlocking {
         terms.active += ActiveTermsProjection(
             id = 42,
             code = "TERMS_OF_SERVICE",
@@ -84,7 +86,7 @@ class PermissionPolicyServiceTest {
     }
 
     @Test
-    fun `question notification preference can be saved`() {
+    fun `question notification preference can be saved`(): Unit = runBlocking {
         val principal = Principal(
             userId = 7,
             deviceId = "dev-1",
@@ -132,22 +134,22 @@ class PermissionPolicyServiceTest {
     private class FakeTermsAgreementQueryPort : TermsAgreementQueryPort {
         val active = mutableListOf<ActiveTermsProjection>()
 
-        override fun activeTerms(now: Instant): List<ActiveTermsProjection> = active
+        override suspend fun activeTerms(now: Instant): List<ActiveTermsProjection> = active
 
-        override fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> = active
+        override suspend fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> = active
 
-        override fun activeTerms(code: String, now: Instant): ActiveTermsProjection? =
+        override suspend fun activeTerms(code: String, now: Instant): ActiveTermsProjection? =
             active.firstOrNull { it.code == code.trim().uppercase() }
 
-        override fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean = false
+        override suspend fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean = false
 
-        override fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean = true
+        override suspend fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean = true
     }
 
     private class FakeTermsAgreementCommandPort : TermsAgreementCommandPort {
         val saved = mutableListOf<SavedAgreement>()
 
-        override fun saveAgreement(
+        override suspend fun saveAgreement(
             userId: Long?,
             deviceId: String?,
             termsId: Long,
@@ -169,15 +171,15 @@ class PermissionPolicyServiceTest {
     }
 
     private class FakePermissionQueryPort : PermissionQueryPort {
-        override fun permissionsForUser(userId: Long): Set<UserPermissionProjection> = emptySet()
+        override suspend fun permissionsForUser(userId: Long): Set<UserPermissionProjection> = emptySet()
     }
 
     private class FakeNotificationPreferencePort : NotificationPreferenceQueryPort, NotificationPreferenceCommandPort {
         val saved = mutableListOf<SavedNotificationPreference>()
 
-        override fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean = false
+        override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean = false
 
-        override fun savePreference(userId: Long?, deviceId: String, key: String, enabled: Boolean, now: Instant) {
+        override suspend fun savePreference(userId: Long?, deviceId: String, key: String, enabled: Boolean, now: Instant) {
             saved += SavedNotificationPreference(
                 userId = userId,
                 deviceId = deviceId,
@@ -190,23 +192,23 @@ class PermissionPolicyServiceTest {
     private class FakeUserPort : UserPort {
         private val users = mutableMapOf<Long, UserEntity>()
 
-        override fun save(entity: UserEntity): UserEntity {
+        override suspend fun save(entity: UserEntity): UserEntity {
             users[entity.id] = entity
             return entity
         }
 
-        override fun findById(id: Long): Optional<UserEntity> = Optional.ofNullable(users[id])
+        override suspend fun findById(id: Long): UserEntity? = users[id]
 
-        override fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
+        override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> =
             ids.mapNotNull { users[it] }.toMutableList()
 
-        override fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
+        override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? = null
 
-        override fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
+        override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
     private class FakePermissionEvaluator : PermissionEvaluator {
-        override fun evaluate(
+        override suspend fun evaluate(
             userId: Long,
             deviceId: String,
             permissionCode: String,

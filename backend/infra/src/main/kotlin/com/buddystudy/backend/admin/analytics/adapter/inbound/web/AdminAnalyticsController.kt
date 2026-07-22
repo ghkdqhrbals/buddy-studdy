@@ -32,11 +32,11 @@ class AdminAnalyticsController(
     private val admin: AdminAnalyticsWebPort,
 ) {
     @PostMapping("/login")
-    fun login(@Valid @RequestBody request: AdminLoginRequest): AdminLoginResponse =
+    suspend fun login(@Valid @RequestBody request: AdminLoginRequest): AdminLoginResponse =
         admin.login(request)
 
     @PostMapping("/analytics/refresh")
-    fun refresh(
+    suspend fun refresh(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) startDate: LocalDate,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) endDate: LocalDate,
@@ -44,7 +44,7 @@ class AdminAnalyticsController(
         admin.refresh(authorization.bearerToken(), startDate, endDate)
 
     @GetMapping("/analytics/metrics")
-    fun metrics(
+    suspend fun metrics(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) startDate: LocalDate,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) endDate: LocalDate,
@@ -53,7 +53,7 @@ class AdminAnalyticsController(
         admin.metrics(authorization.bearerToken(), startDate, endDate, metricKey.orEmpty().filter { it.isNotBlank() }.toSet())
 
     @GetMapping("/jobs/runs")
-    fun jobRuns(
+    suspend fun jobRuns(
         @RequestHeader("Authorization") authorization: String?,
         @RequestParam(required = false) jobName: String?,
         @RequestParam(required = false) runId: Long?,
@@ -63,7 +63,7 @@ class AdminAnalyticsController(
         admin.jobRuns(authorization.bearerToken(), jobName?.takeIf { it.isNotBlank() }, runId, limit, offset)
 
     @PostMapping("/jobs/{jobName}/retry")
-    fun retryJob(
+    suspend fun retryJob(
         @RequestHeader("Authorization") authorization: String?,
         @PathVariable jobName: String,
         @RequestParam(required = false) runId: Long?,
@@ -71,7 +71,7 @@ class AdminAnalyticsController(
         admin.retryJob(authorization.bearerToken(), jobName, runId)
 
     @GetMapping("/jobs/statuses")
-    fun jobStatuses(
+    suspend fun jobStatuses(
         @RequestHeader("Authorization") authorization: String?,
     ): ScheduledJobStatusResponse =
         admin.jobStatuses(authorization.bearerToken())
@@ -83,12 +83,12 @@ data class AdminLoginRequest(
 )
 
 interface AdminAnalyticsWebPort {
-    fun login(request: AdminLoginRequest): AdminLoginResponse
-    fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
-    fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
-    fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
-    fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
-    fun jobStatuses(adminToken: String): ScheduledJobStatusResponse
+    suspend fun login(request: AdminLoginRequest): AdminLoginResponse
+    suspend fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse
+    suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
+    suspend fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    suspend fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
+    suspend fun jobStatuses(adminToken: String): ScheduledJobStatusResponse
 }
 
 @Component
@@ -99,28 +99,28 @@ class AdminAnalyticsWebAdapter(
 ) : AdminAnalyticsWebPort {
     private val jobsByName = jobs.associateBy { it.name }
 
-    override fun login(request: AdminLoginRequest): AdminLoginResponse =
+    override suspend fun login(request: AdminLoginRequest): AdminLoginResponse =
         admin.login(request.username, request.password)
 
-    override fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse =
+    override suspend fun refresh(adminToken: String, startDate: LocalDate, endDate: LocalDate): AdminMetricsResponse =
         admin.refresh(adminToken, startDate, endDate)
 
-    override fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse =
+    override suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse =
         admin.metrics(adminToken, startDate, endDate, metricKeys)
 
-    override fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
+    override suspend fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse {
         admin.validate(adminToken)
         return jobExecutions.findRuns(jobName, runId, limit, offset)
     }
 
-    override fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun {
+    override suspend fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun {
         admin.validate(adminToken)
         val job = jobsByName[jobName]
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Scheduled job not found.")
         return jobExecutions.execute(job, JobTriggerType.RETRY, retryOfRunId = runId, createdBy = "admin")
     }
 
-    override fun jobStatuses(adminToken: String): ScheduledJobStatusResponse {
+    override suspend fun jobStatuses(adminToken: String): ScheduledJobStatusResponse {
         admin.validate(adminToken)
         return jobExecutions.findStatuses()
     }

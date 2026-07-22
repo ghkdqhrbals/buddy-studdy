@@ -1,5 +1,7 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import kotlinx.coroutines.runBlocking
+
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -19,7 +21,7 @@ class RequestLoggingFilterTest {
     private val filter = RequestLoggingFilter()
 
     @Test
-    fun `response body is preserved after reactive logging`() {
+    fun `response body is preserved after reactive logging`(): Unit = runBlocking {
         val exchange = execute(MockServerHttpRequest.get("/api/v1/studies").build()) { current ->
             writeJson(current, """{"ok":true}""")
         }
@@ -29,7 +31,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `request body is still available to downstream handlers`() {
+    fun `request body is still available to downstream handlers`(): Unit = runBlocking {
         val requestBody = """{"openaiApiKey":"sk-secret","schedules":[{"topic":"Swift"}]}"""
         val exchange = execute(
             MockServerHttpRequest.put("/api/v1/settings")
@@ -46,7 +48,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput) {
+    fun `api request and response are logged in a single exchange line with secrets redacted`(output: CapturedOutput) = runBlocking {
         val exchange = execute(
             MockServerHttpRequest.post("/api/v1/auth/google")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -70,7 +72,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `json response is logged as nested utf8 json without escaped quotes`(output: CapturedOutput) {
+    fun `json response is logged as nested utf8 json without escaped quotes`(output: CapturedOutput) = runBlocking {
         val exchange = execute(MockServerHttpRequest.get("/api/v1/records").build()) { current ->
             writeJson(current, """{"records":[{"id":1,"question":"짧고 명확하게"}]}""")
         }
@@ -81,7 +83,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `json-like header values are logged as nested json`(output: CapturedOutput) {
+    fun `json-like header values are logged as nested json`(output: CapturedOutput) = runBlocking {
         execute(
             MockServerHttpRequest.get("/api/v1/records")
                 .header("Cf-Visitor", """{"scheme":"https"}""")
@@ -92,7 +94,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `large response body capture is bounded and response remains complete`(output: CapturedOutput) {
+    fun `large response body capture is bounded and response remains complete`(output: CapturedOutput) = runBlocking {
         val records = (1..300).joinToString(",") { index ->
             """{"id":$index,"question":"question-$index-${"x".repeat(40)}"}"""
         }
@@ -109,7 +111,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) {
+    fun `x forwarded for first address is logged as client ip`(output: CapturedOutput) = runBlocking {
         execute(
             MockServerHttpRequest.get("/api/v1/records")
                 .header("X-Forwarded-For", "198.51.100.7, 10.0.0.2")
@@ -120,7 +122,7 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `server error api exchanges are logged at error level`(output: CapturedOutput) {
+    fun `server error api exchanges are logged at error level`(output: CapturedOutput) = runBlocking {
         execute(MockServerHttpRequest.get("/api/v1/stats").build()) { current ->
             current.response.statusCode = HttpStatus.INTERNAL_SERVER_ERROR
             writeJson(current, """{"error":{"code":"INTERNAL_SERVER_ERROR"}}""")

@@ -1,5 +1,10 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.single
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.reactive.awaitSingle
+
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -26,25 +31,21 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
-import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-public-api;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-@Transactional
-class CommunityStudyServiceTest {
+class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
+    @Autowired lateinit var databaseClient: DatabaseClient
     @Autowired lateinit var community: CommunityService
     @Autowired lateinit var study: StudyService
     @Autowired lateinit var studySync: StudySyncService
@@ -64,7 +65,15 @@ class CommunityStudyServiceTest {
     private val now: Instant = Instant.parse("2026-06-08T00:00:00Z")
 
     @BeforeEach
-    fun setUp() {
+    fun setUp() = runBlocking {
+        databaseClient.sql(
+            """
+            truncate table
+                reports, question_comments, question_likes, question_stats,
+                question_search, questions, studies, users
+            restart identity cascade
+            """.trimIndent(),
+        ).fetch().rowsUpdated().awaitSingle()
         author = users.save(user("author", "Author", allowPublic = true))
         viewer = users.save(user("viewer", "Viewer", allowPublic = true))
         hiddenAuthor = users.save(user("hidden", "Hidden", allowPublic = false))
@@ -72,7 +81,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `public questions only include answered public records from authors who allow public questions`() {
+    fun `public questions only include answered public records from authors who allow public questions`(): Unit = runBlocking {
         val visible = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(4))
         answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(3), publicQuestion = false)
         pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
@@ -91,7 +100,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `public questions without topic search return answered public records`() {
+    fun `public questions without topic search return answered public records`(): Unit = runBlocking {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
@@ -104,7 +113,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `public questions v2 reads from search table and only returns public answered records`() {
+    fun `public questions v2 reads from search table and only returns public answered records`(): Unit = runBlocking {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         val private = answeredPublicQuestion(author, "Private", createdAt = now.plusSeconds(3), publicQuestion = false)
@@ -119,7 +128,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `public question detail includes stats author and viewer like state`() {
+    fun `public question detail includes stats author and viewer like state`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 7, commentCount = 2, viewCount = 11))
         likes.save(QuestionLikeEntity(questionId = q.id, userId = viewer.id))
@@ -135,7 +144,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `public detail rejects private pending deleted or globally hidden questions`() {
+    fun `public detail rejects private pending deleted or globally hidden questions`(): Unit = runBlocking {
         val privateQuestion = answeredPublicQuestion(author, "Private", publicQuestion = false)
         val pending = pendingPublicQuestion(author, "Pending")
         val deleted = answeredPublicQuestion(author, "Deleted", deletedAt = now)
@@ -147,7 +156,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `like is idempotent and unlike does not go below zero`() {
+    fun `like is idempotent and unlike does not go below zero`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         stats.save(QuestionStatsEntity(questionId = q.id, likeCount = 3))
 
@@ -161,19 +170,19 @@ class CommunityStudyServiceTest {
         assertThat(unliked.likeCount).isEqualTo(3)
         assertThat(unlikedAgain.likeCount).isEqualTo(3)
         assertThat(likes.existsByQuestionIdAndUserId(q.id, viewer.id)).isFalse()
-        assertThat(stats.findById(q.id).orElseThrow().likeCount).isEqualTo(3)
+        assertThat(stats.findById(q.id)!!.likeCount).isEqualTo(3)
     }
 
     @Test
-    fun `like rejects records that are not public answered questions`() {
+    fun `like rejects records that are not public answered questions`(): Unit = runBlocking {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
         assertRecordNotFound { community.setLike(principal, q.id, liked = true) }
-        assertThat(likes.findAll()).isEmpty()
+        assertThat(likes.findAll().toList()).isEmpty()
     }
 
     @Test
-    fun `comment truncates body and comments page returns comment authors`() {
+    fun `comment truncates body and comments page returns comment authors`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val longBody = "x".repeat(1_050)
 
@@ -183,22 +192,22 @@ class CommunityStudyServiceTest {
         assertThat(saved.body).hasSize(1_000)
         assertThat(saved.author.displayName).isEqualTo("Viewer")
         assertThat(page.totalCount).isEqualTo(1)
-        assertThat(stats.findById(q.id).orElseThrow().commentCount).isEqualTo(1)
+        assertThat(stats.findById(q.id)!!.commentCount).isEqualTo(1)
         val result = page.comments.single()
         assertThat(result.body).hasSize(1_000)
         assertThat(result.author.displayName).isEqualTo("Viewer")
     }
 
     @Test
-    fun `comments page returns oldest comments first so the newest comment appears at the bottom`() {
+    fun `comments page returns oldest comments first so the newest comment appears at the bottom`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val first = community.createComment(principal, q.id, "first")
         val second = community.createComment(principal, q.id, "second")
-        comments.save(comments.findById(first.id.toLong()).orElseThrow().apply {
+        comments.save(comments.findById(first.id.toLong())!!.apply {
             createdAt = now.plusSeconds(1)
             updatedAt = now.plusSeconds(1)
         })
-        comments.save(comments.findById(second.id.toLong()).orElseThrow().apply {
+        comments.save(comments.findById(second.id.toLong())!!.apply {
             createdAt = now.plusSeconds(2)
             updatedAt = now.plusSeconds(2)
         })
@@ -209,7 +218,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `comment owner can delete comment and deleted comments are hidden`() {
+    fun `comment owner can delete comment and deleted comments are hidden`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val saved = community.createComment(principal, q.id, "delete me")
 
@@ -219,23 +228,23 @@ class CommunityStudyServiceTest {
         assertThat(response.ok).isTrue()
         assertThat(response.id).isEqualTo(saved.id)
         assertThat(page.totalCount).isZero()
-        assertThat(stats.findById(q.id).orElseThrow().commentCount).isZero()
-        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNotNull()
+        assertThat(stats.findById(q.id)!!.commentCount).isZero()
+        assertThat(comments.findById(saved.id.toLong())!!.deletedAt).isNotNull()
     }
 
     @Test
-    fun `comment delete rejects other users and missing comments`() {
+    fun `comment delete rejects other users and missing comments`(): Unit = runBlocking {
         val q = answeredPublicQuestion(author, "SwiftUI")
         val saved = community.createComment(principal, q.id, "not yours")
         val otherPrincipal = Principal(userId = author.id, deviceId = "device-author", sessionId = 2, anonymous = false)
 
         assertRecordNotFound { community.deleteComment(otherPrincipal, q.id, saved.id.toLong()) }
         assertRecordNotFound { community.deleteComment(principal, q.id, 999_999) }
-        assertThat(comments.findById(saved.id.toLong()).orElseThrow().deletedAt).isNull()
+        assertThat(comments.findById(saved.id.toLong())!!.deletedAt).isNull()
     }
 
     @Test
-    fun `comment and comments reject non public answered records`() {
+    fun `comment and comments reject non public answered records`(): Unit = runBlocking {
         val q = pendingPublicQuestion(author, "SwiftUI")
 
         assertRecordNotFound { community.createComment(principal, q.id, "body") }
@@ -244,7 +253,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `report is saved only for public answered records`() {
+    fun `report is saved only for public answered records`(): Unit = runBlocking {
         val publicQuestion = answeredPublicQuestion(author, "SwiftUI")
         val privateQuestion = answeredPublicQuestion(author, "Private", publicQuestion = false)
 
@@ -259,7 +268,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `records exclude pending questions while pending endpoint returns them`() {
+    fun `records exclude pending questions while pending endpoint returns them`(): Unit = runBlocking {
         val graded = answeredPublicQuestion(viewer, "SwiftUI")
         val pending = pendingPublicQuestion(viewer, "Kotlin")
 
@@ -271,7 +280,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `study page includes the current pending question for each study`() {
+    fun `study page includes the current pending question for each study`(): Unit = runBlocking {
         val room = studies.save(
             StudyEntity(
                 deviceId = principal.deviceId,
@@ -296,7 +305,7 @@ class CommunityStudyServiceTest {
     }
 
     @Test
-    fun `publicity can only publish already graded questions`() {
+    fun `publicity can only publish already graded questions`(): Unit = runBlocking {
         val graded = answeredPublicQuestion(viewer, "SwiftUI", publicQuestion = false)
         val pending = pendingPublicQuestion(viewer, "Kotlin")
 
@@ -305,8 +314,8 @@ class CommunityStudyServiceTest {
 
         assertThat(published.isPublic).isTrue()
         assertThat(pendingPublish.isPublic).isFalse()
-        assertThat(questions.findById(graded.id).orElseThrow().publicQuestion).isTrue()
-        assertThat(questions.findById(pending.id).orElseThrow().publicQuestion).isFalse()
+        assertThat(questions.findById(graded.id)!!.publicQuestion).isTrue()
+        assertThat(questions.findById(pending.id)!!.publicQuestion).isFalse()
     }
 
     private fun user(providerId: String, name: String, allowPublic: Boolean): UserEntity =
@@ -321,7 +330,7 @@ class CommunityStudyServiceTest {
             updatedAt = now,
         )
 
-    private fun answeredPublicQuestion(
+    private suspend fun answeredPublicQuestion(
         user: UserEntity,
         topic: String,
         createdAt: Instant = now,
@@ -354,7 +363,7 @@ class CommunityStudyServiceTest {
             )
         )
 
-    private fun pendingPublicQuestion(user: UserEntity, topic: String, createdAt: Instant = now): QuestionEntity =
+    private suspend fun pendingPublicQuestion(user: UserEntity, topic: String, createdAt: Instant = now): QuestionEntity =
         questions.save(
             QuestionEntity(
                 deviceId = "device-${user.id}",
@@ -372,8 +381,8 @@ class CommunityStudyServiceTest {
             )
         )
 
-    private fun assertRecordNotFound(block: () -> Unit) {
-        assertThatThrownBy(block)
+    private suspend fun assertRecordNotFound(block: suspend () -> Unit) {
+        assertThatThrownBy { runBlocking { block() } }
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
             .isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)

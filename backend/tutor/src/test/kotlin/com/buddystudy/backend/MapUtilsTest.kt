@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -15,7 +17,7 @@ class MapUtilsTest {
     )
 
     @Test
-    fun `object converts to string map without null or blank values`() {
+    fun `object converts to string map without null or blank values`(): Unit = runBlocking {
         val result = SamplePayload(
             questionId = 10,
             userId = null,
@@ -33,7 +35,7 @@ class MapUtilsTest {
     }
 
     @Test
-    fun `map converts to string map without null or blank values`() {
+    fun `map converts to string map without null or blank values`(): Unit = runBlocking {
         val result = mapOf(
             "questionId" to 20L,
             "userId" to null,

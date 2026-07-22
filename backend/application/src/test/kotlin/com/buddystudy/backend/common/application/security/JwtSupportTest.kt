@@ -1,5 +1,7 @@
 package com.buddystudy.backend.common.application.security
 
+import kotlinx.coroutines.runBlocking
+
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.security.KeyPairGenerator
@@ -10,7 +12,7 @@ import java.util.Base64
 
 class JwtSupportTest {
     @Test
-    fun `es256 returns a compact JWT with a JOSE signature`() {
+    fun `es256 returns a compact JWT with a JOSE signature`(): Unit = runBlocking {
         val keyPair = KeyPairGenerator.getInstance("EC").apply {
             initialize(ECGenParameterSpec("secp256r1"))
         }.generateKeyPair()

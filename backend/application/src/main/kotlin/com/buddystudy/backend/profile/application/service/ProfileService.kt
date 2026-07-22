@@ -41,10 +41,10 @@ class ProfileService(
     private val log = LoggerFactory.getLogger(ProfileService::class.java)
 
     @Transactional(readOnly = true)
-    override fun profile(principal: Principal): UserProfileResponse = user(principal.userId).toProfile()
+    override suspend fun profile(principal: Principal): UserProfileResponse = user(principal.userId).toProfile()
 
     @Transactional(readOnly = true)
-    override fun avatarCatalog(principal: Principal): AvatarCatalogResponse {
+    override suspend fun avatarCatalog(principal: Principal): AvatarCatalogResponse {
         val user = user(principal.userId)
         val categories = avatarCatalog.activeCategories()
         val items = avatarCatalog.availableItems(user.id)
@@ -58,7 +58,7 @@ class ProfileService(
     }
 
     @Transactional
-    override fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse {
+    override suspend fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse {
         val user = user(principal.userId)
         val config = validateAvatarConfig(command.avatarConfig, user.id)
         user.avatarMode = command.avatarMode.ifBlank { BUILDER_AVATAR_MODE }.take(32)
@@ -78,7 +78,7 @@ class ProfileService(
     }
 
     @Transactional
-    override fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse {
+    override suspend fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse {
         val user = user(principal.userId)
         log.info(
             "profile_update_command userId={} displayNamePresent={} bioPresent={} avatarSymbolName={} avatarColorSeed={}",
@@ -110,7 +110,7 @@ class ProfileService(
     }
 
     @Transactional
-    override fun withdrawProfile(principal: Principal): AccessTokenResponse {
+    override suspend fun withdrawProfile(principal: Principal): AccessTokenResponse {
         if (principal.anonymous) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Account deletion requires an active login.")
         }
@@ -125,16 +125,15 @@ class ProfileService(
         return AccessTokenResponse(token.first, token.second)
     }
 
-    private fun user(id: Long) = users.findById(id).orElseThrow {
-        ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
-    }
+    private suspend fun user(id: Long) = users.findById(id)
+        ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
 
-    private fun currentAvatarConfig(rawConfig: String?): Map<String, String> =
+    private suspend fun currentAvatarConfig(rawConfig: String?): Map<String, String> =
         rawConfig.toAvatarConfigMap()
             ?.takeIf { it.isNotEmpty() }
             ?: defaultAvatarConfig
 
-    private fun validateAvatarConfig(input: Map<String, String>, userId: Long): Map<String, String> {
+    private suspend fun validateAvatarConfig(input: Map<String, String>, userId: Long): Map<String, String> {
         val requested = (defaultAvatarConfig + input)
             .mapValues { (_, value) -> value.trim() }
             .filterValues { it.isNotBlank() }
@@ -173,10 +172,10 @@ class ProfileService(
         return normalized.toSortedMap()
     }
 
-    private fun validation(message: String) =
+    private suspend fun validation(message: String) =
         ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, message)
 
-    private fun baseSymbolName(itemKey: String): String = when (itemKey) {
+    private suspend fun baseSymbolName(itemKey: String): String = when (itemKey) {
         "base-cat" -> "pixel-cat-laptop"
         "base-fox" -> "pixel-fox-scholar"
         "base-rabbit" -> "pixel-rabbit-reader"

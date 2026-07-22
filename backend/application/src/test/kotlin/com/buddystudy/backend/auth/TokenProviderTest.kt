@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -10,7 +12,7 @@ import java.util.Base64
 
 class TokenProviderTest {
     @Test
-    fun `validate returns true for a signed non expired token`() {
+    fun `validate returns true for a signed non expired token`(): Unit = runBlocking {
         val provider = tokenProvider()
         val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
 
@@ -18,23 +20,26 @@ class TokenProviderTest {
     }
 
     @Test
-    fun `validate returns false for a malformed token`() {
+    fun `validate returns false for a malformed token`(): Unit = runBlocking {
         val provider = tokenProvider()
 
         assertThat(provider.validate("not-a-token")).isFalse()
     }
 
     @Test
-    fun `validate returns false for a token with a tampered signature`() {
+    fun `validate returns false for a token with a tampered signature`(): Unit = runBlocking {
         val provider = tokenProvider()
         val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
-        val tampered = token.dropLast(1) + if (token.last() == 'a') "b" else "a"
+        val parts = token.split(".")
+        val signature = parts[2]
+        val tamperedSignature = (if (signature.first() == 'a') 'b' else 'a') + signature.drop(1)
+        val tampered = "${parts[0]}.${parts[1]}.$tamperedSignature"
 
         assertThat(provider.validate(tampered)).isFalse()
     }
 
     @Test
-    fun `parse returns principal from a valid token`() {
+    fun `parse returns principal from a valid token`(): Unit = runBlocking {
         val provider = tokenProvider()
         val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
 
@@ -44,7 +49,7 @@ class TokenProviderTest {
     }
 
     @Test
-    fun `created token does not contain permission claims`() {
+    fun `created token does not contain permission claims`(): Unit = runBlocking {
         val provider = tokenProvider()
         val token = provider.create(userId = 7, deviceId = "dev-1", sessionId = 11, anonymous = false, status = "ACTIVE").first
 
@@ -56,7 +61,7 @@ class TokenProviderTest {
     }
 
     @Test
-    fun `parse throws unified auth error for an invalid token`() {
+    fun `parse throws unified auth error for an invalid token`(): Unit = runBlocking {
         val provider = tokenProvider()
 
         assertThatThrownBy { provider.parse("not-a-token") }

@@ -7,18 +7,18 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageRes
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
 
 interface ScheduledJobRunPort {
-    fun isEnabled(jobName: String): Boolean
-    fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun
-    fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun
-    fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
-    fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot>
+    suspend fun isEnabled(jobName: String): Boolean
+    suspend fun start(jobName: String, triggerType: JobTriggerType, retryOfRunId: Long?, createdBy: String): ScheduledJobRun
+    suspend fun finish(runId: Long, status: JobRunStatus, summary: String?, errorMessage: String?, durationMs: Long): ScheduledJobRun
+    suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
+    suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot>
 }
 
 interface ScheduledJobAlertPort {
-    fun notifyFailed(run: ScheduledJobRun)
+    suspend fun notifyFailed(run: ScheduledJobRun)
 }
 
 interface JobLockPort {
-    fun tryAcquire(jobName: String): Boolean
-    fun release(jobName: String)
+    suspend fun tryAcquire(jobName: String): Boolean
+    suspend fun release(jobName: String)
 }

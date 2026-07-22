@@ -3,8 +3,9 @@ package com.buddystudy.backend.community.adapter.inbound.stream
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
-import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
+import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -19,6 +21,7 @@ class QuestionStatsStreamListener(
     private val properties: BuddyStudyProperties,
     private val consumer: RedisStreamConsumer,
     private val handler: QuestionStatsStreamEventHandler,
+    private val coroutineScope: ApplicationCoroutineScope,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-view"
@@ -28,11 +31,11 @@ class QuestionStatsStreamListener(
     @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
     fun pollQuestionViews() {
         consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
-            onQuestionViewed(it)
+            coroutineScope.launch { onQuestionViewed(it) }
         }
     }
 
-    fun onQuestionViewed(message: RedisStreamMessage) {
+    suspend fun onQuestionViewed(message: RedisStreamMessage) {
         if (message.fields["eventType"] != eventType) {
             consumer.acknowledge(message, group)
             return
@@ -40,7 +43,7 @@ class QuestionStatsStreamListener(
         consume("buddystudy-question-view-listener", message) { handler.processViewEvent(message.fields) }
     }
 
-    private fun consume(listenerId: String, message: RedisStreamMessage, block: () -> Unit) {
+    private suspend fun consume(listenerId: String, message: RedisStreamMessage, block: suspend () -> Unit) {
         logger.info("Consuming $listenerId")
         try {
             logger.debug(
@@ -84,12 +87,12 @@ class QuestionStatsStreamListener(
 
 @Component
 class QuestionStatsStreamEventHandler(
-    private val stats: QuestionStatsRepository,
+    private val stats: QuestionStatsPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @Transactional
-    fun processViewEvent(fields: Map<String, String>) {
+    suspend fun processViewEvent(fields: Map<String, String>) {
         val questionId = fields.questionIdOrNull() ?: run {
             logger.debug(
                 "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
@@ -109,7 +112,7 @@ class QuestionStatsStreamEventHandler(
         )
     }
 
-    private fun increment(questionId: Long, update: () -> Int) {
+    private suspend fun increment(questionId: Long, update: suspend () -> Int) {
         if (update() == 0) {
             stats.save(QuestionStatsEntity(questionId = questionId, updatedAt = Instant.now()))
             update()

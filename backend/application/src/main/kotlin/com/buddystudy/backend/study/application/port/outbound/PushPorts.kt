@@ -56,11 +56,11 @@ data class QuestionPushOutboxCommand(
 }
 
 interface QuestionPushOutboxPort {
-    fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
+    suspend fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
 }
 
 interface QuestionPushOutboxDispatchPort {
-    fun dispatchOutbox(outboxId: Long)
+    suspend fun dispatchOutbox(outboxId: Long)
 }
 
 enum class PushMessageType {
@@ -125,13 +125,15 @@ data class FcmQuestionMessage(
 }
 
 interface PushNotificationPort {
-    fun sendQuestion(message: PushQuestionMessage)
-    fun pushForAll(messages: Iterable<PushQuestionMessage>) {
-        messages.forEach(::sendQuestion)
+    suspend fun sendQuestion(message: PushQuestionMessage)
+    suspend fun pushForAll(messages: Iterable<PushQuestionMessage>) {
+        for (message in messages) {
+            sendQuestion(message)
+        }
     }
 }
 
 interface PushQuestionSender {
     val type: PushMessageType
-    fun sendQuestion(message: PushQuestionMessage)
+    suspend fun sendQuestion(message: PushQuestionMessage)
 }

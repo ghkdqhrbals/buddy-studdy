@@ -44,7 +44,7 @@ class AuthController(
 ) {
     @Operation(summary = "Register an iOS device", description = "Creates or refreshes an anonymous device session and returns device credentials plus an access token. This is the only app API call that cannot send X-Device-Id and X-Client-Secret because they do not exist yet.")
     @PostMapping("/devices/register")
-    fun register(@Valid @RequestBody body: DeviceRegisterRequest) = auth.register(body)
+    suspend fun register(@Valid @RequestBody body: DeviceRegisterRequest) = auth.register(body)
 
     @Operation(summary = "Issue an access token from device credentials", description = "Returns a fresh access token for a known device. iOS should send X-Device-Id and X-Client-Secret headers.")
     @ApiResponses(
@@ -52,7 +52,7 @@ class AuthController(
         ApiResponse(responseCode = "401", description = "Invalid device credentials."),
     )
     @PostMapping("/auth/token")
-    fun token(
+    suspend fun token(
         @Parameter(description = "Registered device id.", required = true)
         @RequestHeader("X-Device-Id") deviceId: String,
         @Parameter(description = "Device client secret returned only at registration.", required = true)
@@ -61,7 +61,7 @@ class AuthController(
 
     @Operation(summary = "Sign in with Google", description = "Links the current device session to a Google account and returns a user profile plus a 90-day access token. Send device credentials on every login request; a stale bearer token is ignored on this public endpoint.")
     @PostMapping("/auth/google")
-    fun google(
+    suspend fun google(
         @RequestBody body: GoogleLoginRequest,
         authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
@@ -70,7 +70,7 @@ class AuthController(
 
     @Operation(summary = "Request email verification code", description = "Sends a short-lived email verification code for sign-up or email login. Verification sessions are held in Redis with a short TTL.")
     @PostMapping("/auth/email/code")
-    fun emailCode(
+    suspend fun emailCode(
         @Valid @RequestBody body: EmailVerificationCodeRequest,
         authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
@@ -79,7 +79,7 @@ class AuthController(
 
     @Operation(summary = "Sign in with email", description = "Signs in with email/password and optional verification code, then links the authenticated account to the current device session.")
     @PostMapping("/auth/email")
-    fun email(
+    suspend fun email(
         @Valid @RequestBody body: EmailLoginRequest,
         authentication: Authentication?,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
@@ -88,29 +88,29 @@ class AuthController(
 
     @Operation(summary = "Sign out current session", description = "Logs out the current user-device session. iOS should delete the stored access token after calling this endpoint.")
     @PostMapping("/auth/logout")
-    fun logout(authentication: Authentication): ResponseEntity<Unit> =
+    suspend fun logout(authentication: Authentication): ResponseEntity<Unit> =
         auth.logout(authentication)
 
     @Operation(summary = "List logged-in devices", description = "Returns active device sessions for the authenticated user.")
     @GetMapping("/me/devices")
-    fun loggedInDevices(authentication: Authentication) =
+    suspend fun loggedInDevices(authentication: Authentication) =
         auth.loggedInDevices(authentication)
 
     @Operation(summary = "Update push token", description = "Stores the latest APNs token and environment for the authenticated device.")
     @PutMapping("/push-token")
-    fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
+    suspend fun pushToken(@RequestBody body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> =
         auth.pushToken(body, authentication)
 }
 
 interface AuthWebPort {
-    fun register(body: DeviceRegisterRequest): Any
-    fun token(deviceId: String, clientSecret: String): Any
-    fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
-    fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
-    fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
-    fun logout(authentication: Authentication): ResponseEntity<Unit>
-    fun loggedInDevices(authentication: Authentication): Any
-    fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit>
+    suspend fun register(body: DeviceRegisterRequest): Any
+    suspend fun token(deviceId: String, clientSecret: String): Any
+    suspend fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
+    suspend fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
+    suspend fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
+    suspend fun logout(authentication: Authentication): ResponseEntity<Unit>
+    suspend fun loggedInDevices(authentication: Authentication): Any
+    suspend fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit>
 }
 
 @Component
@@ -120,35 +120,35 @@ class AuthWebAdapter(
     private val login: LoginUseCase,
     private val updatePushToken: UpdatePushTokenUseCase,
 ) : AuthWebPort {
-    override fun register(body: DeviceRegisterRequest) = registerDevice.register(body.toCommand())
+    override suspend fun register(body: DeviceRegisterRequest) = registerDevice.register(body.toCommand())
 
-    override fun token(deviceId: String, clientSecret: String) = issueDeviceToken.token(deviceId, clientSecret)
+    override suspend fun token(deviceId: String, clientSecret: String) = issueDeviceToken.token(deviceId, clientSecret)
 
-    override fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
+    override suspend fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
         login.googleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
 
-    override fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
+    override suspend fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
         loginPrincipal(authentication, deviceId, clientSecret)
         return login.emailCode(body.email)
     }
 
-    override fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
+    override suspend fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
         login.emailLogin(loginPrincipal(authentication, deviceId, clientSecret), body.toCommand())
 
-    override fun logout(authentication: Authentication): ResponseEntity<Unit> {
+    override suspend fun logout(authentication: Authentication): ResponseEntity<Unit> {
         login.logout(authentication.principalOrThrow())
         return ResponseEntity.noContent().build()
     }
 
-    override fun loggedInDevices(authentication: Authentication) =
+    override suspend fun loggedInDevices(authentication: Authentication) =
         login.loggedInDevices(authentication.principalOrThrow())
 
-    override fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> {
+    override suspend fun pushToken(body: PushTokenRequest, authentication: Authentication): ResponseEntity<Unit> {
         updatePushToken.updatePushToken(authentication.principalOrThrow(), body.toCommand())
         return ResponseEntity.noContent().build()
     }
 
-    private fun loginPrincipal(authentication: Authentication?, deviceId: String?, clientSecret: String?): Principal =
+    private suspend fun loginPrincipal(authentication: Authentication?, deviceId: String?, clientSecret: String?): Principal =
         if (!deviceId.isNullOrBlank() && !clientSecret.isNullOrBlank()) {
             issueDeviceToken.authenticateDevice(deviceId, clientSecret)
         } else {

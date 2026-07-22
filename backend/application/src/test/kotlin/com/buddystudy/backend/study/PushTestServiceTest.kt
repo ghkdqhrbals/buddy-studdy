@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
@@ -18,7 +20,7 @@ import org.junit.jupiter.api.Test
 
 class PushTestServiceTest {
     @Test
-    fun `send test push uses authenticated device apns token`() {
+    fun `send test push uses authenticated device apns token`(): Unit = runBlocking {
         val devices = FakeDevicePort(
             DeviceEntity(
                 deviceId = "dev-1",
@@ -56,7 +58,7 @@ class PushTestServiceTest {
     }
 
     @Test
-    fun `send test push fails when apns token is missing`() {
+    fun `send test push fails when apns token is missing`(): Unit = runBlocking {
         val service = PushTestService(
             FakeDevicePort(DeviceEntity(deviceId = "dev-1", userId = 1, apnsToken = "")),
             CapturingPushNotificationPort(),
@@ -64,10 +66,12 @@ class PushTestServiceTest {
         )
 
         assertThatThrownBy {
-            service.sendTestPush(
-                Principal(userId = 1, deviceId = "dev-1", sessionId = 10, anonymous = false),
-                PushTestCommand(),
-            )
+            runBlocking {
+                service.sendTestPush(
+                    Principal(userId = 1, deviceId = "dev-1", sessionId = 10, anonymous = false),
+                    PushTestCommand(),
+                )
+            }
         }
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
@@ -75,7 +79,7 @@ class PushTestServiceTest {
     }
 
     @Test
-    fun `publish test push event sends request to push stream publisher`() {
+    fun `publish test push event sends request to push stream publisher`(): Unit = runBlocking {
         val pushEvents = FakePushEventPublisher()
         val service = PushTestService(FakeDevicePort(), CapturingPushNotificationPort(), pushEvents)
         val response = service.publishTestPushEvent(
@@ -110,16 +114,16 @@ class PushTestServiceTest {
     }
 
     private class FakeDevicePort(private val device: DeviceEntity? = null) : DevicePort {
-        override fun save(entity: DeviceEntity): DeviceEntity = entity
-        override fun findByDeviceId(deviceId: String): DeviceEntity? = device?.takeIf { it.deviceId == deviceId }
-        override fun findAllByUserId(userId: Long): List<DeviceEntity> =
+        override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
+        override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = device?.takeIf { it.deviceId == deviceId }
+        override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             device?.takeIf { it.userId == userId }?.let { listOf(it) }.orEmpty()
     }
 
     private class CapturingPushNotificationPort : PushNotificationPort {
         lateinit var message: PushQuestionMessage
 
-        override fun sendQuestion(message: PushQuestionMessage) {
+        override suspend fun sendQuestion(message: PushQuestionMessage) {
             this.message = message
         }
     }

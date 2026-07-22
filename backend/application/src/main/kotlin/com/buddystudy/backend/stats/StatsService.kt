@@ -38,10 +38,10 @@ class StatsService(
     private val stats: QuestionStatsPort,
     private val topicStatsAssembler: TopicStatsAssembler = TopicStatsAssembler(),
 ) : GetStudyStatsUseCase {
-    override fun stats(principal: Principal, limit: Int, offset: Int, query: StatsQuery): StatsResponse =
+    override suspend fun stats(principal: Principal, limit: Int, offset: Int, query: StatsQuery): StatsResponse =
         stats(principal.userId, limit, offset, query)
 
-    override fun activity(principal: Principal, startAt: Instant?, endAt: Instant?): StatsActivityResponse {
+    override suspend fun activity(principal: Principal, startAt: Instant?, endAt: Instant?): StatsActivityResponse {
         val now = Instant.now()
         val today = LocalDate.now(ZoneOffset.UTC)
         val startDate = startAt?.atZone(ZoneOffset.UTC)?.toLocalDate() ?: today.minusDays(364)
@@ -86,7 +86,7 @@ class StatsService(
         )
     }
 
-    private fun stats(userId: Long, limit: Int, offset: Int, query: StatsQuery): StatsResponse {
+    private suspend fun stats(userId: Long, limit: Int, offset: Int, query: StatsQuery): StatsResponse {
         val bounds = query.dateBounds()
         val search = query.search?.trim()?.takeIf { it.isNotEmpty() }
         val overview = userStats.overviewByUser(userId, bounds.startDate, bounds.endDate, search)
@@ -120,7 +120,7 @@ class StatsService(
         )
     }
 
-    private fun latestRecordsByTopicKey(
+    private suspend fun latestRecordsByTopicKey(
         userId: Long,
         topicGroups: List<List<UserStatsEntity>>,
     ): Map<String, List<StudyRecordResponse>> {
@@ -251,7 +251,7 @@ class StatsRefreshService(
     private val userStats: UserStatsPort,
     private val rowBuilder: UserStatsRowBuilder = UserStatsRowBuilder(),
 ) : RefreshUserStatsUseCase {
-    override fun refreshAll(now: Instant) {
+    override suspend fun refreshAll(now: Instant) {
         val rows = rowBuilder.build(questions.findAllGradedForStats(PageRequest.of(0, MAX_REFRESH_QUESTIONS)).content, now)
         userStats.syncAll(rows)
     }

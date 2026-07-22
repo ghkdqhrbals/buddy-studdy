@@ -9,6 +9,7 @@ import org.springframework.boot.ApplicationArguments
 import org.springframework.boot.ApplicationRunner
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import kotlinx.coroutines.runBlocking
 import java.time.Instant
 
 @Component
@@ -17,17 +18,20 @@ class PermissionSeedInitializer(
     private val permissions: PermissionRepository,
     private val rolePermissions: RolePermissionRepository,
 ) : ApplicationRunner {
-    @Transactional
-    override fun run(args: ApplicationArguments) {
-        val rolesByCode = ROLE_DEFINITIONS.associate { (code, name) -> code to upsertRole(code, name) }
-        val permissionsByCode = PERMISSION_DEFINITIONS.associate { definition ->
-            definition.code to upsertPermission(definition)
+    override fun run(args: ApplicationArguments) = runBlocking {
+        val rolesByCode = mutableMapOf<String, RoleEntity>()
+        for ((code, name) in ROLE_DEFINITIONS) {
+            rolesByCode[code] = upsertRole(code, name)
+        }
+        val permissionsByCode = mutableMapOf<String, PermissionEntity>()
+        for (definition in PERMISSION_DEFINITIONS) {
+            permissionsByCode[definition.code] = upsertPermission(definition)
         }
 
-        ROLE_PERMISSION_DEFINITIONS.forEach { (roleCode, permissionCodes) ->
-            val role = rolesByCode[roleCode] ?: return@forEach
-            permissionCodes.forEach { permissionCode ->
-                val permission = permissionsByCode[permissionCode] ?: return@forEach
+        for ((roleCode, permissionCodes) in ROLE_PERMISSION_DEFINITIONS) {
+            val role = rolesByCode[roleCode] ?: continue
+            for (permissionCode in permissionCodes) {
+                val permission = permissionsByCode[permissionCode] ?: continue
                 if (!rolePermissions.existsByRoleIdAndPermissionId(role.id, permission.id)) {
                     val now = Instant.now()
                     rolePermissions.save(RolePermissionEntity(roleId = role.id, permissionId = permission.id, createdAt = now, updatedAt = now))
@@ -36,7 +40,7 @@ class PermissionSeedInitializer(
         }
     }
 
-    private fun upsertRole(code: String, name: String): RoleEntity {
+    private suspend fun upsertRole(code: String, name: String): RoleEntity {
         val now = Instant.now()
         val role = roles.findByCode(code) ?: RoleEntity(code = code, name = name, createdAt = now)
         role.name = name
@@ -44,7 +48,7 @@ class PermissionSeedInitializer(
         return roles.save(role)
     }
 
-    private fun upsertPermission(definition: PermissionDefinition): PermissionEntity {
+    private suspend fun upsertPermission(definition: PermissionDefinition): PermissionEntity {
         val now = Instant.now()
         val permission = permissions.findByCode(definition.code) ?: PermissionEntity(code = definition.code, createdAt = now)
         permission.description = definition.description

@@ -21,20 +21,16 @@ spring:
       moderation: none
   profiles:
     default: dev
-  datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/buddystudy}
+  r2dbc:
+    url: ${R2DBC_DATABASE_URL:r2dbc:postgresql://localhost:5432/buddystudy}
     username: ${DATABASE_USERNAME:}
     password: ${DATABASE_PASSWORD:}
-    hikari:
-      maximum-pool-size: ${DB_POOL_MAX:10}
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
-    properties:
-      hibernate:
-        jdbc:
-          time_zone: UTC
+    pool:
+      enabled: true
+      initial-size: ${DB_POOL_INITIAL:2}
+      max-size: ${DB_POOL_MAX:10}
+      max-idle-time: ${DB_POOL_MAX_IDLE_TIME:30m}
+      max-acquire-time: ${DB_POOL_MAX_ACQUIRE_TIME:5s}
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
     baseline-on-migrate: true
@@ -68,12 +64,6 @@ management:
         include: health,info
 
 buddystudy:
-  webflux:
-    blocking:
-      core-size: ${WEBFLUX_BLOCKING_CORE_SIZE:8}
-      max-size: ${WEBFLUX_BLOCKING_MAX_SIZE:16}
-      queue-capacity: ${WEBFLUX_BLOCKING_QUEUE_CAPACITY:64}
-      keep-alive-seconds: ${WEBFLUX_BLOCKING_KEEP_ALIVE_SECONDS:60}
   auth:
     jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}

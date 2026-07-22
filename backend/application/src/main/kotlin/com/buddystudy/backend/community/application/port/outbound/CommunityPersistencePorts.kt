@@ -8,30 +8,30 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
 interface QuestionLikePort {
-    fun save(entity: QuestionLikeEntity): QuestionLikeEntity
-    fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
-    fun findLikedQuestionIds(userId: Long, questionIds: Collection<Long>): Set<Long>
-    fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
+    suspend fun save(entity: QuestionLikeEntity): QuestionLikeEntity
+    suspend fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
+    suspend fun findLikedQuestionIds(userId: Long, questionIds: Collection<Long>): Set<Long>
+    suspend fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long
 }
 
 interface QuestionCommentPort {
-    fun save(entity: QuestionCommentEntity): QuestionCommentEntity
-    fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity?
-    fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity>
+    suspend fun save(entity: QuestionCommentEntity): QuestionCommentEntity
+    suspend fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity?
+    suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity>
 }
 
 interface ReportPort {
-    fun save(entity: ReportEntity): ReportEntity
+    suspend fun save(entity: ReportEntity): ReportEntity
 }
 
 interface QuestionSearchPort {
-    fun save(entity: QuestionSearchEntity): QuestionSearchEntity
-    fun deleteByQuestionId(questionId: Long): Long
-    fun deleteByStudyId(studyId: Long, userId: Long): Long
-    fun deleteByUserIdAndTopic(userId: Long, topic: String): Long
-    fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult
-    fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
-    fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
+    suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity
+    suspend fun deleteByQuestionId(questionId: Long): Long
+    suspend fun deleteByStudyId(studyId: Long, userId: Long): Long
+    suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long
+    suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult
+    suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
+    suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
 }
 
 data class SearchResult(

@@ -36,7 +36,7 @@ class SlackScheduledJobAlertAdapter internal constructor(
             .build(),
     )
 
-    override fun notifyFailed(run: ScheduledJobRun) {
+    override suspend fun notifyFailed(run: ScheduledJobRun) {
         val webhookUrl = properties.monitoring.slackWebhookUrl.trim()
         if (webhookUrl.isBlank()) return
         val now = clock.instant()

@@ -1,8 +1,8 @@
 package com.buddystudy.backend.auth.adapter.outbound.persistence
 
 import com.buddystudy.auth.domain.entity.RoleEntity
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 
-interface RoleRepository : JpaRepository<RoleEntity, Long> {
-    fun findByCode(code: String): RoleEntity?
+interface RoleRepository : CoroutineCrudRepository<RoleEntity, Long> {
+    suspend fun findByCode(code: String): RoleEntity?
 }

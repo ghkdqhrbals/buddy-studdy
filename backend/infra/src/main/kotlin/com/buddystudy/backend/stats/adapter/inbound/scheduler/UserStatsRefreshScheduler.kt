@@ -16,7 +16,7 @@ class UserStatsRefreshScheduler(
     private val userStatsRefreshJob: UserStatsRefreshJob,
 ) {
     @Scheduled(cron = "\${buddystudy.stats.cron:0 */5 * * * *}")
-    fun refresh() {
+    suspend fun refresh() {
         jobs.execute(userStatsRefreshJob, JobTriggerType.SCHEDULED)
     }
 }
@@ -27,7 +27,7 @@ class UserStatsRefreshJob(
 ) : ManagedJob {
     override val name: String = "user-stats-refresh"
 
-    override fun run(): String {
+    override suspend fun run(): String {
         val now = Instant.now()
         refreshUserStats.refreshAll(now)
         return "refreshedAt=$now"

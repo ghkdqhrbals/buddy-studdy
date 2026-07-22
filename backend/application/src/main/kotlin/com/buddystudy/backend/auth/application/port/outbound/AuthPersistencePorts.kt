@@ -5,39 +5,38 @@ import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.account.domain.entity.UserEntity
 import java.time.Duration
 import java.time.Instant
-import java.util.Optional
 
 interface UserPort {
-    fun save(entity: UserEntity): UserEntity
-    fun findById(id: Long): Optional<UserEntity>
-    fun findAllById(ids: Iterable<Long>): MutableList<UserEntity>
-    fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity?
-    fun findByEmailAndProvider(email: String, provider: String): UserEntity?
+    suspend fun save(entity: UserEntity): UserEntity
+    suspend fun findById(id: Long): UserEntity?
+    suspend fun findAllById(ids: Iterable<Long>): List<UserEntity>
+    suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity?
+    suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity?
 }
 
 interface DevicePort {
-    fun save(entity: DeviceEntity): DeviceEntity
-    fun findByDeviceId(deviceId: String): DeviceEntity?
-    fun findAllByUserId(userId: Long): List<DeviceEntity>
+    suspend fun save(entity: DeviceEntity): DeviceEntity
+    suspend fun findByDeviceId(deviceId: String): DeviceEntity?
+    suspend fun findAllByUserId(userId: Long): List<DeviceEntity>
 }
 
 interface AccountDeletionPort {
-    fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant)
+    suspend fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant)
 }
 
 interface UserDevicePort {
-    fun save(entity: UserDeviceEntity): UserDeviceEntity
-    fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity?
-    fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
-    fun findActiveByUserId(userId: Long): List<UserDeviceEntity>
-    fun hasActiveSession(userId: Long, deviceId: String): Boolean
+    suspend fun save(entity: UserDeviceEntity): UserDeviceEntity
+    suspend fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity?
+    suspend fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
+    suspend fun findActiveByUserId(userId: Long): List<UserDeviceEntity>
+    suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean
 }
 
 interface EmailVerificationCodePort {
-    fun save(email: String, code: String, ttl: Duration)
-    fun consume(email: String, code: String): Boolean
+    suspend fun save(email: String, code: String, ttl: Duration)
+    suspend fun consume(email: String, code: String): Boolean
 }
 
 interface EmailVerificationSenderPort {
-    fun send(email: String, code: String, ttl: Duration)
+    suspend fun send(email: String, code: String, ttl: Duration)
 }

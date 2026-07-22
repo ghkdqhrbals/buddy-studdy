@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
@@ -9,7 +11,7 @@ import org.junit.jupiter.api.Test
 
 class PublicQuestionReactionRedisStreamPublisherTest {
     @Test
-    fun `publish view returns false when streams are disabled`() {
+    fun `publish view returns false when streams are disabled`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = service(enabled = false, publisher = publisher)
 
@@ -18,7 +20,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `view event publishes typed field map`() {
+    fun `view event publishes typed field map`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, publisher = publisher)
 
@@ -32,7 +34,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     }
 
     @Test
-    fun `publish view returns false when publisher throws`() {
+    fun `publish view returns false when publisher throws`(): Unit = runBlocking {
         val service = service(enabled = true, publisher = RecordingPublisher(fail = true))
 
         assertThat(service.publishViewed(1, 2)).isFalse()

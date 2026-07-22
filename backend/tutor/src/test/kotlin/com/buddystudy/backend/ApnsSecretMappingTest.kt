@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.PropertiesConfig
 import org.assertj.core.api.Assertions.assertThat
@@ -11,7 +13,7 @@ class ApnsSecretMappingTest {
         .withUserConfiguration(PropertiesConfig::class.java)
 
     @Test
-    fun `apns properties can be sourced from aws secret property names`() {
+    fun `apns properties can be sourced from aws secret property names`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "notificatoin.push.apns.team-id=TEAM123",

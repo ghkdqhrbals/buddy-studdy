@@ -20,7 +20,7 @@ class SmtpEmailVerificationSender(
 ) : EmailVerificationSenderPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun send(email: String, code: String, ttl: Duration) {
+    override suspend fun send(email: String, code: String, ttl: Duration) {
         try {
             val message = mailSender.createMimeMessage()
             val helper = MimeMessageHelper(message, false, Charsets.UTF_8.name())

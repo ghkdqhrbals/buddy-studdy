@@ -31,51 +31,51 @@ class ProfileController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/profile")
-    fun profile(authentication: Authentication) = profiles.profile(authentication)
+    suspend fun profile(authentication: Authentication) = profiles.profile(authentication)
 
     @Operation(summary = "Update my profile", description = "Updates editable profile fields such as display name, avatar choice/color, and public-question preference.")
     @PatchMapping("/profile")
-    fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
+    suspend fun updateProfile(@RequestBody body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(body, authentication)
 
     @Operation(summary = "Fetch avatar catalog", description = "Returns avatar builder categories, available items, and the user's selected avatar configuration.")
     @GetMapping("/profile/avatar/catalog")
-    fun avatarCatalog(authentication: Authentication) = profiles.avatarCatalog(authentication)
+    suspend fun avatarCatalog(authentication: Authentication) = profiles.avatarCatalog(authentication)
 
     @Operation(summary = "Update avatar builder configuration", description = "Updates the selected avatar slots for the active user's builder avatar.")
     @PatchMapping("/profile/avatar")
-    fun updateAvatar(@RequestBody body: AvatarUpdateRequest, authentication: Authentication) =
+    suspend fun updateAvatar(@RequestBody body: AvatarUpdateRequest, authentication: Authentication) =
         profiles.updateAvatar(body, authentication)
 
     @Operation(summary = "Delete my account", description = "Deletes the active member account and reconnects the current device as anonymous.")
     @DeleteMapping("/profile")
-    fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
+    suspend fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
 }
 
 interface ProfileWebPort {
-    fun profile(authentication: Authentication): Any
-    fun avatarCatalog(authentication: Authentication): Any
-    fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication): Any
-    fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
-    fun withdrawProfile(authentication: Authentication): Any
+    suspend fun profile(authentication: Authentication): Any
+    suspend fun avatarCatalog(authentication: Authentication): Any
+    suspend fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication): Any
+    suspend fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
+    suspend fun withdrawProfile(authentication: Authentication): Any
 }
 
 @Component
 class ProfileWebAdapter(
     private val profiles: ProfileUseCase,
 ) : ProfileWebPort {
-    override fun profile(authentication: Authentication) = profiles.profile(authentication.principalOrThrow())
+    override suspend fun profile(authentication: Authentication) = profiles.profile(authentication.principalOrThrow())
 
-    override fun avatarCatalog(authentication: Authentication) =
+    override suspend fun avatarCatalog(authentication: Authentication) =
         profiles.avatarCatalog(authentication.principalOrThrow())
 
-    override fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication) =
+    override suspend fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication) =
         profiles.updateAvatar(authentication.principalOrThrow(), body.toCommand())
 
-    override fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
+    override suspend fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(authentication.principalOrThrow(), body.toCommand())
 
-    override fun withdrawProfile(authentication: Authentication) =
+    override suspend fun withdrawProfile(authentication: Authentication) =
         profiles.withdrawProfile(authentication.principalOrThrow())
 }
 

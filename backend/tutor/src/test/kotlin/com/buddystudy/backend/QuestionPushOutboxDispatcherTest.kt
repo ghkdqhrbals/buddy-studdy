@@ -1,9 +1,11 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.adapter.inbound.scheduler.QuestionPushOutboxDispatchJob
 import com.buddystudy.backend.study.adapter.inbound.scheduler.QuestionPushOutboxDispatcher
-import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxJpaRepository
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
@@ -19,26 +21,23 @@ import java.time.Instant
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.datasource.url=jdbc:h2:mem:buddystudy-push-outbox;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "spring.datasource.driver-class-name=org.h2.Driver",
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class QuestionPushOutboxDispatcherTest {
-    @Autowired lateinit var outbox: QuestionPushOutboxJpaRepository
+class QuestionPushOutboxDispatcherTest : PostgresIntegrationTestSupport() {
+    @Autowired lateinit var outbox: QuestionPushOutboxRepository
 
     @BeforeEach
-    fun clearOutbox() {
+    fun clearOutbox(): Unit = runBlocking {
         outbox.deleteAll()
+        Unit
     }
 
     @Test
-    fun `dispatcher publishes pending push outbox and marks published`() {
+    fun `dispatcher publishes pending push outbox and marks published`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val item = outbox.save(
             QuestionPushOutboxEntity(
@@ -70,7 +69,7 @@ class QuestionPushOutboxDispatcherTest {
 
         dispatcher.dispatchPendingPushes()
 
-        val published = outbox.findById(item.id).orElseThrow()
+        val published = outbox.findById(item.id)!!
         assertThat(publisher.requests).hasSize(1)
         assertThat(publisher.requests[0].recordId).isEqualTo(10)
         assertThat(published.status).isEqualTo("PUBLISHED")
@@ -79,7 +78,7 @@ class QuestionPushOutboxDispatcherTest {
     }
 
     @Test
-    fun `dispatcher keeps failed publish pending for retry`() {
+    fun `dispatcher keeps failed publish pending for retry`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val item = outbox.save(
             QuestionPushOutboxEntity(
@@ -104,7 +103,7 @@ class QuestionPushOutboxDispatcherTest {
 
         dispatcher.dispatchPendingPushes()
 
-        val retry = outbox.findById(item.id).orElseThrow()
+        val retry = outbox.findById(item.id)!!
         assertThat(retry.status).isEqualTo("PENDING")
         assertThat(retry.attempts).isEqualTo(1)
         assertThat(retry.nextAttemptAt).isAfter(now)
@@ -112,7 +111,7 @@ class QuestionPushOutboxDispatcherTest {
     }
 
     @Test
-    fun `dispatcher isolates publish exception and continues remaining items`() {
+    fun `dispatcher isolates publish exception and continues remaining items`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         val failing = outbox.save(
             QuestionPushOutboxEntity(
@@ -147,10 +146,10 @@ class QuestionPushOutboxDispatcherTest {
             ThrowingThenCapturingPushPublisher(failingRecordId = 12),
         )
 
-        assertThatCode { dispatcher.dispatchPendingPushes() }.doesNotThrowAnyException()
+        assertThatCode { runBlocking { dispatcher.dispatchPendingPushes() } }.doesNotThrowAnyException()
 
-        val retry = outbox.findById(failing.id).orElseThrow()
-        val published = outbox.findById(succeeding.id).orElseThrow()
+        val retry = outbox.findById(failing.id)!!
+        val published = outbox.findById(succeeding.id)!!
         assertThat(retry.status).isEqualTo("PENDING")
         assertThat(retry.attempts).isEqualTo(1)
         assertThat(retry.lastError).contains("boom")
@@ -159,7 +158,7 @@ class QuestionPushOutboxDispatcherTest {
     }
 
     @Test
-    fun `managed job dispatches pending push outbox and returns processed summary`() {
+    fun `managed job dispatches pending push outbox and returns processed summary`(): Unit = runBlocking {
         val now = Instant.parse("2026-06-10T00:00:00Z")
         outbox.save(
             QuestionPushOutboxEntity(

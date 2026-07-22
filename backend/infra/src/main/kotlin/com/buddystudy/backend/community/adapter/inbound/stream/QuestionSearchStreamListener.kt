@@ -3,6 +3,7 @@ package com.buddystudy.backend.community.adapter.inbound.stream
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -12,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -19,6 +21,7 @@ class QuestionSearchStreamListener(
     private val properties: BuddyStudyProperties,
     private val consumer: RedisStreamConsumer,
     private val questionSearch: QuestionSearchSyncManager,
+    private val coroutineScope: ApplicationCoroutineScope,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-question-search"
@@ -28,11 +31,11 @@ class QuestionSearchStreamListener(
     @Scheduled(fixedDelayString = "\${CREATE_QUESTION_CONSUMER_POLL_DELAY_MS:1000}")
     fun pollCreatedQuestions() {
         consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
-            onQuestionCreated(it)
+            coroutineScope.launch { onQuestionCreated(it) }
         }
     }
 
-    fun onQuestionCreated(message: RedisStreamMessage) {
+    suspend fun onQuestionCreated(message: RedisStreamMessage) {
         try {
             if (message.fields["eventType"] != eventType) {
                 consumer.acknowledge(message, group)

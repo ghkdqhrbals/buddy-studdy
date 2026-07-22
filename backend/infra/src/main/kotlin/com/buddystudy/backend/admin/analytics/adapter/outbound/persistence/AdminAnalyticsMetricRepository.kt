@@ -2,132 +2,86 @@ package com.buddystudy.backend.admin.analytics.adapter.outbound.persistence
 
 import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetricPoint
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
+import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
+import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
+import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.dao.DuplicateKeyException
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
-import java.sql.Date
-import java.sql.ResultSet
-import java.sql.Timestamp
 import java.time.Instant
 import java.time.LocalDate
 
 @Repository
 class AdminAnalyticsMetricPersistenceAdapter(
-    @param:Qualifier("adminAnalyticsJdbcTemplate")
-    private val jdbc: NamedParameterJdbcTemplate,
+    @param:Qualifier("adminAnalyticsDatabaseClient") private val client: DatabaseClient,
 ) : AdminAnalyticsMetricPort {
-    fun ensureSchema() {
-        jdbc.jdbcTemplate.execute(
+    private suspend fun ensureSchema() {
+        client.sql(
             """
             create table if not exists admin_daily_metrics (
-                id bigserial primary key,
-                metric_date date not null,
-                metric_key varchar(80) not null,
-                dimension varchar(160) not null default '',
-                "value" double precision not null,
-                sample_count bigint not null default 0,
-                created_at timestamp not null,
-                updated_at timestamp not null,
+                id bigserial primary key, metric_date date not null, metric_key varchar(80) not null,
+                dimension varchar(160) not null default '', "value" double precision not null,
+                sample_count bigint not null default 0, created_at timestamp not null, updated_at timestamp not null,
                 constraint uq_admin_daily_metrics_day_key_dimension unique (metric_date, metric_key, dimension)
             )
-            """.trimIndent()
-        )
-        jdbc.jdbcTemplate.execute("create index if not exists idx_admin_daily_metrics_key_date on admin_daily_metrics (metric_key, metric_date)")
-        jdbc.jdbcTemplate.execute("create index if not exists idx_admin_daily_metrics_date on admin_daily_metrics (metric_date)")
-    }
-
-    override fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
-        ensureSchema()
-        val now = Timestamp.from(Instant.now())
-        points.forEach { point ->
-            val params = MapSqlParameterSource()
-                .addValue("metricDate", Date.valueOf(point.date))
-                .addValue("metricKey", point.metricKey)
-                .addValue("dimension", point.dimension.orEmpty())
-                .addValue("value", point.value)
-                .addValue("sampleCount", point.sampleCount)
-                .addValue("now", now)
-            val updated = updateMetric(params)
-            if (updated == 0) {
-                try {
-                    insertMetric(params)
-                } catch (_: DuplicateKeyException) {
-                    updateMetric(params)
-                }
-            }
-        }
-    }
-
-    private fun updateMetric(params: MapSqlParameterSource): Int =
-        jdbc.update(
-            """
-            update admin_daily_metrics
-            set "value" = :value,
-                sample_count = :sampleCount,
-                updated_at = :now
-            where metric_date = :metricDate
-              and metric_key = :metricKey
-              and dimension = :dimension
             """.trimIndent(),
-            params,
-        )
-
-    private fun insertMetric(params: MapSqlParameterSource) {
-        jdbc.update(
-                """
-                insert into admin_daily_metrics (
-                    metric_date,
-                    metric_key,
-                    dimension,
-                    "value",
-                    sample_count,
-                    created_at,
-                    updated_at
-                ) values (
-                    :metricDate,
-                    :metricKey,
-                    :dimension,
-                    :value,
-                    :sampleCount,
-                    :now,
-                    :now
-                )
-                """.trimIndent(),
-            params,
-        )
+        ).fetch().rowsUpdated().awaitSingle()
+        client.sql("create index if not exists idx_admin_daily_metrics_key_date on admin_daily_metrics (metric_key, metric_date)")
+            .fetch().rowsUpdated().awaitSingle()
+        client.sql("create index if not exists idx_admin_daily_metrics_date on admin_daily_metrics (metric_date)")
+            .fetch().rowsUpdated().awaitSingle()
     }
 
-    override fun findDailyMetrics(startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): List<AdminDailyMetricPoint> {
+    override suspend fun upsertDailyMetrics(points: Collection<AdminDailyMetricPoint>) {
         ensureSchema()
-        val params = MapSqlParameterSource()
-            .addValue("startDate", Date.valueOf(startDate))
-            .addValue("endDate", Date.valueOf(endDate))
-        val metricFilter = if (metricKeys.isEmpty()) {
-            ""
-        } else {
-            params.addValue("metricKeys", metricKeys)
-            "and metric_key in (:metricKeys)"
+        val now = Instant.now()
+        points.forEach { point ->
+            val updated = client.sql(
+                """
+                update admin_daily_metrics set
+                    "value" = :value, sample_count = :sampleCount, updated_at = :now
+                where metric_date = :date and metric_key = :key and dimension = :dimension
+                """.trimIndent(),
+            ).bind("date", point.date).bind("key", point.metricKey).bind("dimension", point.dimension.orEmpty())
+                .bind("value", point.value).bind("sampleCount", point.sampleCount).bind("now", now)
+                .fetch().rowsUpdated().awaitSingle()
+            if (updated > 0) return@forEach
+
+            client.sql(
+                """
+                insert into admin_daily_metrics
+                    (metric_date, metric_key, dimension, "value", sample_count, created_at, updated_at)
+                values (:date, :key, :dimension, :value, :sampleCount, :now, :now)
+                """.trimIndent(),
+            ).bind("date", point.date).bind("key", point.metricKey).bind("dimension", point.dimension.orEmpty())
+                .bind("value", point.value).bind("sampleCount", point.sampleCount).bind("now", now)
+                .fetch().rowsUpdated().awaitSingle()
         }
-        return jdbc.query(
+    }
+
+    override suspend fun findDailyMetrics(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        metricKeys: Set<String>,
+    ): List<AdminDailyMetricPoint> {
+        ensureSchema()
+        val filter = if (metricKeys.isEmpty()) "" else "and metric_key in (${indexedBindMarkers("metricKey", metricKeys.size)})"
+        var spec = client.sql(
             """
-            select metric_date, metric_key, dimension, "value", sample_count
-            from admin_daily_metrics
-            where metric_date between :startDate and :endDate
-              $metricFilter
+            select metric_date, metric_key, dimension, "value", sample_count from admin_daily_metrics
+            where metric_date between :startDate and :endDate $filter
             order by metric_key asc, dimension asc, metric_date asc
             """.trimIndent(),
-            params,
-        ) { resultSet, _ -> resultSet.toPoint() }
+        ).bind("startDate", startDate).bind("endDate", endDate)
+        if (metricKeys.isNotEmpty()) spec = spec.bindIndexed("metricKey", metricKeys.toList())
+        return spec.map { row, _ ->
+            AdminDailyMetricPoint(
+                date = row.get("metric_date", LocalDate::class.java)!!,
+                metricKey = row.get("metric_key", String::class.java)!!,
+                dimension = row.get("dimension", String::class.java)!!.ifBlank { null },
+                value = (row.get("value") as Number).toDouble(),
+                sampleCount = (row.get("sample_count") as Number).toLong(),
+            )
+        }.all().collectList().awaitSingle()
     }
-
-    private fun ResultSet.toPoint(): AdminDailyMetricPoint =
-        AdminDailyMetricPoint(
-            date = getDate("metric_date").toLocalDate(),
-            metricKey = getString("metric_key"),
-            dimension = getString("dimension").ifBlank { null },
-            value = getDouble("value"),
-            sampleCount = getLong("sample_count"),
-        )
 }

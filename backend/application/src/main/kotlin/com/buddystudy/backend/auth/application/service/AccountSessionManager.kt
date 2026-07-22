@@ -22,19 +22,19 @@ class AccountSessionManager(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
 ) {
-    fun device(deviceId: String): DeviceEntity = devices.findByDeviceId(deviceId)
+    suspend fun device(deviceId: String): DeviceEntity = devices.findByDeviceId(deviceId)
         ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.DEVICE_NOT_FOUND, "Device not found.")
 
-    fun findSession(sessionId: Long, userId: Long): UserDeviceEntity? =
+    suspend fun findSession(sessionId: Long, userId: Long): UserDeviceEntity? =
         userDevices.findByIdAndUserId(sessionId, userId)
 
-    fun saveSessionState(session: UserDeviceEntity): UserDeviceEntity =
+    suspend fun saveSessionState(session: UserDeviceEntity): UserDeviceEntity =
         userDevices.save(session)
 
-    fun activeSessions(userId: Long): List<UserDeviceEntity> =
+    suspend fun activeSessions(userId: Long): List<UserDeviceEntity> =
         userDevices.findActiveByUserId(userId)
 
-    fun ensureAnonymousUser(device: DeviceEntity): UserEntity {
+    suspend fun ensureAnonymousUser(device: DeviceEntity): UserEntity {
         val now = Instant.now()
         val user = users.findByProviderAndProviderId("ANONYMOUS", device.deviceId)
             ?: users.save(
@@ -49,10 +49,11 @@ class AccountSessionManager(
                 )
             )
         device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
+        devices.save(device)
         return user
     }
 
-    fun saveSession(userId: Long, deviceId: String, now: Instant, expiresAt: Instant?): UserDeviceEntity {
+    suspend fun saveSession(userId: Long, deviceId: String, now: Instant, expiresAt: Instant?): UserDeviceEntity {
         val session = userDevices.findByUserIdAndDeviceId(userId, deviceId)
             ?: UserDeviceEntity(userId = userId, deviceId = deviceId, createdAt = now)
         session.lastLoginAt = now
@@ -66,7 +67,7 @@ class AccountSessionManager(
         return saved
     }
 
-    private fun revokeOtherActiveSessions(userId: Long, currentDeviceId: String, now: Instant) {
+    private suspend fun revokeOtherActiveSessions(userId: Long, currentDeviceId: String, now: Instant) {
         userDevices.findActiveByUserId(userId)
             .filter { it.deviceId != currentDeviceId }
             .forEach { session ->
@@ -76,11 +77,11 @@ class AccountSessionManager(
             }
     }
 
-    private fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
 
-    private fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
+    private suspend fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
 
-    private fun DeviceEntity.apply(attachment: DeviceAttachment) {
+    private suspend fun DeviceEntity.apply(attachment: DeviceAttachment) {
         userId = attachment.userId
         updatedAt = attachment.updatedAt
     }

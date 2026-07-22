@@ -1,289 +1,300 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
-import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.backend.config.saveEntity
+import com.buddystudy.backend.config.selectPage
+import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
+import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.study.domain.entity.QuestionEntity
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Modifying
-import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
+import org.springframework.data.domain.Sort
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
+import org.springframework.data.relational.core.query.Criteria
+import org.springframework.data.relational.core.query.Query
+import org.springframework.data.relational.core.query.Update
+import org.springframework.stereotype.Repository
 import java.time.Instant
 
-interface QuestionRepository : JpaRepository<QuestionEntity, Long>, QuestionPort {
-    override fun findQuestionById(id: Long): java.util.Optional<QuestionEntity> = findById(id)
+@Repository
+class QuestionRepository(
+    private val template: R2dbcEntityTemplate,
+) : QuestionPort {
+    override suspend fun save(entity: QuestionEntity): QuestionEntity = template.saveEntity(entity, entity.id)
 
-    override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
+    suspend fun findById(id: Long): QuestionEntity? = findQuestionById(id)
 
-    @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and q.score is not null order by q.createdAt desc")
-    override fun findGradedByUser(@Param("userId") userId: Long, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findAll(): List<QuestionEntity> =
+        template.select(Query.empty(), QuestionEntity::class.java).collectList().awaitSingle()
 
-    @Query(
-        """
-        select q from QuestionEntity q
-        where q.userId = :userId
-          and q.deletedAt is null
-          and q.score is not null
-          and (
-            lower(q.topic) like concat('%', lower(:query), '%')
-            or lower(q.question) like concat('%', lower(:query), '%')
-            or lower(q.answer) like concat('%', lower(:query), '%')
-            or lower(q.feedback) like concat('%', lower(:query), '%')
-            or lower(q.explanation) like concat('%', lower(:query), '%')
-            or str(q.difficultyLevel) like concat('%', :query, '%')
-          )
-        order by q.createdAt desc
-        """
-    )
-    override fun findGradedByUserAndQuery(
-        @Param("userId") userId: Long,
-        @Param("query") query: String,
+    suspend fun deleteAll(): Long = template.delete(QuestionEntity::class.java).all().awaitSingle()
+
+    override suspend fun findQuestionById(id: Long): QuestionEntity? = findOne(Criteria.where("id").`is`(id))
+
+    override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
+        findOne(Criteria.where("id").`is`(id).and("user_id").`is`(userId).and("deleted_at").isNull)
+
+    override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
+        page(Criteria.where("user_id").`is`(userId).and("deleted_at").isNull.and("score").isNotNull, pageable)
+
+    override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> =
+        page(
+            Criteria.where("user_id").`is`(userId)
+                .and("deleted_at").isNull
+                .and("score").isNotNull
+                .and(textSearch(query)),
+            pageable,
+        )
+
+    override suspend fun findGradedByUserAndTopics(
+        userId: Long,
+        topics: Collection<String>,
         pageable: Pageable,
-    ): Page<QuestionEntity>
+    ): Page<QuestionEntity> {
+        if (topics.isEmpty()) return Page.empty(pageable)
+        return page(
+            Criteria.where("user_id").`is`(userId).and("deleted_at").isNull
+                .and("score").isNotNull.and("topic").`in`(topics),
+            pageable,
+        )
+    }
 
-    @Query(
-        """
-        select q from QuestionEntity q
-        where q.userId = :userId
-          and q.deletedAt is null
-          and q.score is not null
-          and q.topic in :topics
-        order by q.createdAt desc
-        """
-    )
-    override fun findGradedByUserAndTopics(
-        @Param("userId") userId: Long,
-        @Param("topics") topics: Collection<String>,
+    override suspend fun findLatestGradedByUserAndTopics(
+        userId: Long,
+        topics: Collection<String>,
+        perTopicLimit: Int,
+    ): List<QuestionEntity> {
+        if (topics.isEmpty()) return emptyList()
+        val topicMarkers = indexedBindMarkers("topic", topics.size)
+        val ids = template.databaseClient.sql(
+            """
+            select id from (
+                select q.id,
+                       row_number() over (
+                           partition by q.topic
+                           order by coalesce(q.answered_at, q.created_at) desc, q.created_at desc, q.id desc
+                       ) as topic_rank
+                from questions q
+                where q.user_id = :userId and q.deleted_at is null and q.score is not null
+                  and q.topic in ($topicMarkers)
+            ) ranked
+            where topic_rank <= :perTopicLimit
+            order by id desc
+            """.trimIndent(),
+        ).bind("userId", userId).bindIndexed("topic", topics.toList()).bind("perTopicLimit", perTopicLimit)
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        return findOrdered(ids)
+    }
+
+    override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> =
+        page(Criteria.where("deleted_at").isNull.and("score").isNotNull, pageable, "answered_at")
+
+    override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> =
+        page(pendingCriteria().and("user_id").`is`(userId), pageable)
+
+    override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> =
+        page(pendingCriteria().and("study_id").`is`(studyId), pageable)
+
+    override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> {
+        if (studyIds.isEmpty()) return emptyList()
+        val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
+        val ids = template.databaseClient.sql(
+            """
+            select id from (
+                select q.id, row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
+                from questions q
+                where q.study_id in ($studyMarkers) and q.deleted_at is null
+                  and q.score is null and q.skipped_at is null
+            ) ranked where study_rank = 1
+            """.trimIndent(),
+        ).bindIndexed("studyId", studyIds.toList())
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        return findOrdered(ids)
+    }
+
+    override suspend fun findVisibleByUser(
+        userId: Long,
+        includePending: Boolean,
         pageable: Pageable,
-    ): Page<QuestionEntity>
+    ): Page<QuestionEntity> {
+        var criteria = Criteria.where("user_id").`is`(userId).and("deleted_at").isNull
+        if (!includePending) criteria = criteria.and("score").isNotNull
+        return page(criteria, pageable)
+    }
 
-    @Query(
-        value = """
-        select *
-        from (
-            select q.*,
-                   row_number() over (
-                       partition by q.topic
-                       order by coalesce(q.answered_at, q.created_at) desc, q.created_at desc, q.id desc
-                   ) as topic_rank
-            from questions q
-            where q.user_id = :userId
-              and q.deleted_at is null
-              and q.score is not null
-              and q.topic in (:topics)
-        ) ranked
-        where ranked.topic_rank <= :perTopicLimit
-        order by coalesce(ranked.answered_at, ranked.created_at) desc, ranked.created_at desc, ranked.id desc
-        """,
-        nativeQuery = true,
-    )
-    override fun findLatestGradedByUserAndTopics(
-        @Param("userId") userId: Long,
-        @Param("topics") topics: Collection<String>,
-        @Param("perTopicLimit") perTopicLimit: Int,
-    ): List<QuestionEntity>
-
-    @Query("select q from QuestionEntity q where q.deletedAt is null and q.score is not null order by q.answeredAt desc, q.createdAt desc")
-    override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity>
-
-    @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and q.score is null and q.skippedAt is null order by q.createdAt desc")
-    override fun findPendingByUser(@Param("userId") userId: Long, pageable: Pageable): Page<QuestionEntity>
-
-    @Query("select q from QuestionEntity q where q.studyId = :studyId and q.deletedAt is null and q.score is null and q.skippedAt is null order by q.createdAt desc")
-    override fun findPendingByStudyId(@Param("studyId") studyId: Long, pageable: Pageable): Page<QuestionEntity>
-
-    @Query(
-        value = """
-        select *
-        from (
-            select q.*,
-                   row_number() over (
-                       partition by q.study_id
-                       order by q.created_at desc, q.id desc
-                   ) as study_rank
-            from questions q
-            where q.study_id in (:studyIds)
-              and q.deleted_at is null
-              and q.score is null
-              and q.skipped_at is null
-        ) ranked
-        where ranked.study_rank = 1
-        """,
-        nativeQuery = true,
-    )
-    fun findLatestPendingByStudyIdsInternal(@Param("studyIds") studyIds: Collection<Long>): List<QuestionEntity>
-
-    override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> =
-        if (studyIds.isEmpty()) emptyList() else findLatestPendingByStudyIdsInternal(studyIds)
-
-    @Query("select q from QuestionEntity q where q.userId = :userId and q.deletedAt is null and (:includePending = true or q.score is not null) order by q.createdAt desc")
-    override fun findVisibleByUser(@Param("userId") userId: Long, @Param("includePending") includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
-
-    @Query(
-        """
-        select q from QuestionEntity q
-        where q.userId = :userId
-          and q.deletedAt is null
-          and (:includePending = true or q.score is not null)
-          and (
-            lower(q.topic) like concat('%', lower(:query), '%')
-            or lower(q.question) like concat('%', lower(:query), '%')
-            or lower(q.answer) like concat('%', lower(:query), '%')
-            or lower(q.feedback) like concat('%', lower(:query), '%')
-            or lower(q.explanation) like concat('%', lower(:query), '%')
-            or str(q.difficultyLevel) like concat('%', :query, '%')
-          )
-        order by q.createdAt desc
-        """
-    )
-    override fun findVisibleByUserAndQuery(
-        @Param("userId") userId: Long,
-        @Param("includePending") includePending: Boolean,
-        @Param("query") query: String,
+    override suspend fun findVisibleByUserAndQuery(
+        userId: Long,
+        includePending: Boolean,
+        query: String,
         pageable: Pageable,
-    ): Page<QuestionEntity>
+    ): Page<QuestionEntity> {
+        var criteria = Criteria.where("user_id").`is`(userId).and("deleted_at").isNull.and(textSearch(query))
+        if (!includePending) criteria = criteria.and("score").isNotNull
+        return page(criteria, pageable)
+    }
 
-    @Query(
-        """
-        select q.question from QuestionEntity q
-        where q.studyId = :studyId
-          and q.deletedAt is null
-          and lower(q.topic) = lower(:topic)
-        order by q.createdAt desc, q.id desc
-        """
-    )
-    override fun findRecentQuestionTextsByStudyIdAndTopic(
-        @Param("studyId") studyId: Long,
-        @Param("topic") topic: String,
+    override suspend fun findRecentQuestionTextsByStudyIdAndTopic(
+        studyId: Long,
+        topic: String,
         pageable: Pageable,
-    ): List<String>
+    ): List<String> = recentTexts("study_id", studyId, topic, pageable)
 
-    @Query(
-        """
-        select q.question from QuestionEntity q
-        where q.userId = :userId
-          and q.deletedAt is null
-          and lower(q.topic) = lower(:topic)
-        order by q.createdAt desc, q.id desc
-        """
-    )
-    override fun findRecentQuestionTextsByUserIdAndTopic(
-        @Param("userId") userId: Long,
-        @Param("topic") topic: String,
+    override suspend fun findRecentQuestionTextsByUserIdAndTopic(
+        userId: Long,
+        topic: String,
         pageable: Pageable,
-    ): List<String>
+    ): List<String> = recentTexts("user_id", userId, topic, pageable)
 
-    @Query("select count(q) from QuestionEntity q where q.studyId = :studyId and q.deletedAt is null and q.skippedAt is null and q.score is null")
-    override fun countPendingForStudy(@Param("studyId") studyId: Long): Long
+    override suspend fun countPendingForStudy(studyId: Long): Long =
+        template.count(Query.query(pendingCriteria().and("study_id").`is`(studyId)), QuestionEntity::class.java)
+            .awaitSingle()
 
-    @Query(
-        """
-        select q.studyId as studyId, count(q) as pendingCount
-        from QuestionEntity q
-        where q.studyId in :studyIds
-          and q.deletedAt is null
-          and q.skippedAt is null
-          and q.score is null
-        group by q.studyId
-        """
+    override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
+        if (studyIds.isEmpty()) return emptyMap()
+        val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
+        return template.databaseClient.sql(
+            """
+            select study_id, count(*) as pending_count from questions
+            where study_id in ($studyMarkers) and deleted_at is null and skipped_at is null and score is null
+            group by study_id
+            """.trimIndent(),
+        ).bindIndexed("studyId", studyIds.toList())
+            .map { row, _ ->
+                row.get("study_id", java.lang.Long::class.java)!!.toLong() to
+                    row.get("pending_count", java.lang.Long::class.java)!!.toLong()
+            }.all().collectList().awaitSingle().toMap()
+    }
+
+    override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = publicPage(null, pageable)
+
+    override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> =
+        publicPage(topic to false, pageable)
+
+    override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> =
+        publicPage(query to true, pageable)
+
+    override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? =
+        publicIds("q.id = :value", id, 1, 0).firstOrNull()?.let { findQuestionById(it) }
+
+    override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> {
+        if (ids.isEmpty()) return emptyList()
+        val idMarkers = indexedBindMarkers("questionId", ids.size)
+        val visible = template.databaseClient.sql(
+            """
+            select q.id from questions q join users u on u.id = q.user_id
+            where q.id in ($idMarkers) and q.is_public = true and q.deleted_at is null
+              and q.score is not null and u.allow_public_questions = true
+            """.trimIndent(),
+        ).bindIndexed("questionId", ids.toList())
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        return findOrdered(visible)
+    }
+
+    override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = updateDeleted(
+        Criteria.where("id").`is`(id).and("user_id").`is`(userId), now,
     )
-    fun findPendingCountsByStudyIds(@Param("studyIds") studyIds: Collection<Long>): List<PendingCountRow>
 
-    override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> =
-        if (studyIds.isEmpty()) {
-            emptyMap()
-        } else {
-            findPendingCountsByStudyIds(studyIds).associate { it.studyId to it.pendingCount }
+    override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = updateDeleted(
+        Criteria.where("study_id").`is`(studyId).and("user_id").`is`(userId).and("deleted_at").isNull, now,
+    )
+
+    override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = updateDeleted(
+        Criteria.where("user_id").`is`(userId).and("topic").`is`(topic).and("deleted_at").isNull, now,
+    )
+
+    private suspend fun findOne(criteria: Criteria): QuestionEntity? =
+        template.selectOne(Query.query(criteria), QuestionEntity::class.java).awaitSingleOrNull()
+
+    private suspend fun page(
+        criteria: Criteria,
+        pageable: Pageable,
+        sortColumn: String = "created_at",
+    ): Page<QuestionEntity> {
+        val query = Query.query(criteria).sort(Sort.by(Sort.Direction.DESC, sortColumn, "id"))
+        return template.selectPage(query, Query.query(criteria), QuestionEntity::class.java, pageable)
+    }
+
+    private fun pendingCriteria(): Criteria =
+        Criteria.where("deleted_at").isNull.and("score").isNull.and("skipped_at").isNull
+
+    private fun textSearch(value: String): Criteria {
+        val pattern = "%${value.lowercase()}%"
+        return Criteria.where("topic").like(pattern).ignoreCase(true)
+            .or("question").like(pattern).ignoreCase(true)
+            .or("answer").like(pattern).ignoreCase(true)
+            .or("feedback").like(pattern).ignoreCase(true)
+            .or("explanation").like(pattern).ignoreCase(true)
+    }
+
+    private suspend fun recentTexts(column: String, id: Long, topic: String, pageable: Pageable): List<String> =
+        template.databaseClient.sql(
+            """
+            select question from questions
+            where $column = :id and deleted_at is null and lower(topic) = lower(:topic)
+            order by created_at desc, id desc limit :limit offset :offset
+            """.trimIndent(),
+        ).bind("id", id).bind("topic", topic).bind("limit", pageable.pageSize).bind("offset", pageable.offset)
+            .map { row, _ -> row.get("question", String::class.java)!! }
+            .all().collectList().awaitSingle()
+
+    private suspend fun publicPage(filter: Pair<String, Boolean>?, pageable: Pageable): Page<QuestionEntity> {
+        val condition = when {
+            filter == null -> "true"
+            filter.second -> "(lower(q.topic) like :pattern or lower(q.question) like :pattern or lower(coalesce(q.answer, '')) like :pattern or lower(coalesce(q.feedback, '')) like :pattern or lower(coalesce(q.explanation, '')) like :pattern or lower(u.display_name) like :pattern)"
+            else -> "lower(q.topic) like :pattern"
         }
+        var idsSpec = template.databaseClient.sql(publicSelectSql(condition))
+            .bind("limit", pageable.pageSize).bind("offset", pageable.offset)
+        var countSpec = template.databaseClient.sql(publicCountSql(condition))
+        if (filter != null) {
+            val pattern = "%${filter.first.lowercase()}%"
+            idsSpec = idsSpec.bind("pattern", pattern)
+            countSpec = countSpec.bind("pattern", pattern)
+        }
+        val ids = idsSpec.map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        val total = countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        return PageImpl(findOrdered(ids), pageable, total)
+    }
 
-    @Query(
-        """
-        select q from QuestionEntity q
-        join UserEntity u on u.id = q.userId
-        where q.publicQuestion = true
-          and q.deletedAt is null
-          and q.score is not null
-          and u.allowPublicQuestions = true
-        order by q.createdAt desc
-        """
-    )
-    override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
+    private suspend fun publicIds(condition: String, value: Any, limit: Int, offset: Long): List<Long> =
+        template.databaseClient.sql(publicSelectSql(condition))
+            .bind("value", value).bind("limit", limit).bind("offset", offset)
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
 
-    @Query(
+    private fun publicSelectSql(condition: String) =
         """
-        select q from QuestionEntity q
-        join UserEntity u on u.id = q.userId
-        where q.publicQuestion = true
-          and q.deletedAt is null
-          and q.score is not null
-          and u.allowPublicQuestions = true
-          and lower(q.topic) like concat('%', lower(:topic), '%')
-        order by q.createdAt desc
+        select q.id from questions q join users u on u.id = q.user_id
+        where q.is_public = true and q.deleted_at is null and q.score is not null
+          and u.allow_public_questions = true and ($condition)
+        order by q.created_at desc, q.id desc limit :limit offset :offset
+        """.trimIndent()
+
+    private fun publicCountSql(condition: String) =
         """
-    )
-    override fun findPublicAnsweredByTopic(@Param("topic") topic: String, pageable: Pageable): Page<QuestionEntity>
+        select count(*) as total from questions q join users u on u.id = q.user_id
+        where q.is_public = true and q.deleted_at is null and q.score is not null
+          and u.allow_public_questions = true and ($condition)
+        """.trimIndent()
 
-    @Query(
-        """
-        select q from QuestionEntity q
-        join UserEntity u on u.id = q.userId
-        where q.publicQuestion = true
-          and q.deletedAt is null
-          and q.score is not null
-          and u.allowPublicQuestions = true
-          and (
-            lower(q.topic) like concat('%', lower(:query), '%')
-            or lower(q.question) like concat('%', lower(:query), '%')
-            or lower(q.answer) like concat('%', lower(:query), '%')
-            or lower(q.feedback) like concat('%', lower(:query), '%')
-            or lower(q.explanation) like concat('%', lower(:query), '%')
-            or lower(u.displayName) like concat('%', lower(:query), '%')
-            or str(q.difficultyLevel) like concat('%', :query, '%')
-          )
-        order by q.createdAt desc
-        """
-    )
-    override fun findPublicAnsweredByQuery(@Param("query") query: String, pageable: Pageable): Page<QuestionEntity>
+    private suspend fun findOrdered(ids: List<Long>): List<QuestionEntity> {
+        if (ids.isEmpty()) return emptyList()
+        val byId = template.select(Query.query(Criteria.where("id").`in`(ids)), QuestionEntity::class.java)
+            .collectList().awaitSingle().associateBy { it.id }
+        return ids.mapNotNull(byId::get)
+    }
 
-    @Query(
-        """
-        select q from QuestionEntity q
-        join UserEntity u on u.id = q.userId
-        where q.id = :id and q.publicQuestion = true and q.deletedAt is null and q.score is not null and u.allowPublicQuestions = true
-        """
-    )
-    override fun findPublicAnsweredById(@Param("id") id: Long): QuestionEntity?
-
-    @Query(
-        """
-        select q from QuestionEntity q
-        join UserEntity u on u.id = q.userId
-        where q.id in :ids
-          and q.publicQuestion = true
-          and q.deletedAt is null
-          and q.score is not null
-          and u.allowPublicQuestions = true
-        """
-    )
-    fun findPublicAnsweredByIdsInternal(@Param("ids") ids: Collection<Long>): List<QuestionEntity>
-
-    override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> =
-        if (ids.isEmpty()) emptyList() else findPublicAnsweredByIdsInternal(ids)
-
-    @Modifying
-    @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.id = :id and q.userId = :userId")
-    override fun softDelete(@Param("id") id: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
-
-    @Modifying
-    @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.studyId = :studyId and q.userId = :userId and q.deletedAt is null")
-    override fun softDeleteByStudyId(@Param("studyId") studyId: Long, @Param("userId") userId: Long, @Param("now") now: Instant): Int
-
-    @Modifying
-    @Query("update QuestionEntity q set q.deletedAt = :now, q.updatedAt = :now where q.userId = :userId and lower(q.topic) = lower(:topic) and q.deletedAt is null")
-    override fun softDeleteByUserIdAndTopic(@Param("userId") userId: Long, @Param("topic") topic: String, @Param("now") now: Instant): Int
-}
-
-interface PendingCountRow {
-    val studyId: Long
-    val pendingCount: Long
+    private suspend fun updateDeleted(criteria: Criteria, now: Instant): Int =
+        template.update(QuestionEntity::class.java)
+            .matching(Query.query(criteria))
+            .apply(Update.update("deleted_at", now).set("updated_at", now))
+            .awaitSingle().toInt()
 }

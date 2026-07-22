@@ -2,57 +2,92 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Modifying
-import org.springframework.data.jpa.repository.Query
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.reactive.awaitSingle
+import org.springframework.data.r2dbc.repository.Modifying
+import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
+import org.springframework.stereotype.Component
+import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Instant
 
-interface QuestionStatsRepository : JpaRepository<QuestionStatsEntity, Long>, QuestionStatsPort {
-    override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> =
-        if (ids.isEmpty()) emptyList() else findAllById(ids)
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+interface QuestionStatsRepository : CoroutineCrudRepository<QuestionStatsEntity, Long> {
+    @Modifying
     @Query(
         """
-        update QuestionStatsEntity s
-           set s.viewCount = case when s.viewCount + :delta < 0 then 0 else s.viewCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
+        update question_stats
+           set view_count = greatest(view_count + :delta, 0), updated_at = :now
+         where question_id = :questionId
         """
     )
-    override fun incrementView(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
+    suspend fun incrementView(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying
     @Query(
         """
-        update QuestionStatsEntity s
-           set s.likeCount = case when s.likeCount + :delta < 0 then 0 else s.likeCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
+        update question_stats
+           set like_count = greatest(like_count + :delta, 0), updated_at = :now
+         where question_id = :questionId
         """
     )
-    override fun incrementLike(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
+    suspend fun incrementLike(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying
     @Query(
         """
-        update QuestionStatsEntity s
-           set s.commentCount = case when s.commentCount + :delta < 0 then 0 else s.commentCount + :delta end,
-               s.updatedAt = :now
-         where s.questionId = :questionId
+        update question_stats
+           set comment_count = greatest(comment_count + :delta, 0), updated_at = :now
+         where question_id = :questionId
         """
     )
-    override fun incrementComment(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
+    suspend fun incrementComment(@Param("questionId") questionId: Long, @Param("delta") delta: Int, @Param("now") now: Instant): Int
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Modifying
     @Query(
         """
-        update QuestionStatsEntity s
-           set s.likeCount = :count,
-               s.updatedAt = :now
-         where s.questionId = :questionId
+        update question_stats set like_count = :count, updated_at = :now
+         where question_id = :questionId
         """
     )
-    override fun setLikeCount(@Param("questionId") questionId: Long, @Param("count") count: Int, @Param("now") now: Instant): Int
+    suspend fun setLikeCount(@Param("questionId") questionId: Long, @Param("count") count: Int, @Param("now") now: Instant): Int
+}
+
+@Component
+class QuestionStatsPersistenceAdapter(
+    private val repository: QuestionStatsRepository,
+    private val databaseClient: DatabaseClient,
+) : QuestionStatsPort {
+    override suspend fun save(entity: QuestionStatsEntity): QuestionStatsEntity {
+        var statement = databaseClient.sql(
+            """
+            insert into question_stats (
+                question_id, like_count, comment_count, view_count, verified_at, updated_at
+            ) values (
+                :questionId, :likeCount, :commentCount, :viewCount, :verifiedAt, :updatedAt
+            )
+            on conflict (question_id) do update set
+                like_count = excluded.like_count,
+                comment_count = excluded.comment_count,
+                view_count = excluded.view_count,
+                verified_at = excluded.verified_at,
+                updated_at = excluded.updated_at
+            """.trimIndent(),
+        ).bind("questionId", entity.questionId)
+            .bind("likeCount", entity.likeCount)
+            .bind("commentCount", entity.commentCount)
+            .bind("viewCount", entity.viewCount)
+            .bind("updatedAt", entity.updatedAt)
+        statement = entity.verifiedAt?.let { statement.bind("verifiedAt", it) }
+            ?: statement.bindNull("verifiedAt", Instant::class.java)
+        statement.fetch().rowsUpdated().awaitSingle()
+        return entity
+    }
+    override suspend fun findById(id: Long) = repository.findById(id)
+    override suspend fun findAllByIds(ids: Collection<Long>) =
+        if (ids.isEmpty()) emptyList() else repository.findAllById(ids).toList()
+    override suspend fun incrementView(questionId: Long, delta: Int, now: Instant) = repository.incrementView(questionId, delta, now)
+    override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant) = repository.incrementLike(questionId, delta, now)
+    override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant) = repository.incrementComment(questionId, delta, now)
+    override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant) = repository.setLikeCount(questionId, count, now)
 }

@@ -6,9 +6,9 @@ import com.buddystudy.backend.profile.application.model.AvatarCatalogResponse
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 
 interface ProfileUseCase {
-    fun profile(principal: Principal): UserProfileResponse
-    fun avatarCatalog(principal: Principal): AvatarCatalogResponse
-    fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse
-    fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse
-    fun withdrawProfile(principal: Principal): AccessTokenResponse
+    suspend fun profile(principal: Principal): UserProfileResponse
+    suspend fun avatarCatalog(principal: Principal): AvatarCatalogResponse
+    suspend fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse
+    suspend fun updateProfile(principal: Principal, command: ProfileUpdateCommand): UserProfileResponse
+    suspend fun withdrawProfile(principal: Principal): AccessTokenResponse
 }

@@ -55,12 +55,12 @@ class CommunityService(
     private val notifications: PublishNotificationUseCase,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override suspend fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         return getPublicQuestionsV2(principal, query, language, limit, offset)
     }
 
     @Transactional(readOnly = true)
-    override fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override suspend fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
         val result = search.searchPublic(normalizedQuery, language, limit, offset)
         if (result.questionIds.isEmpty() && normalizedQuery != null) {
@@ -77,7 +77,7 @@ class CommunityService(
         return CommunityQuestionsResponse(rows, result.totalCount, limit, offset)
     }
 
-    private fun publicQuestionsFromOrigin(
+    private suspend fun publicQuestionsFromOrigin(
         principal: Principal?,
         query: String,
         language: String,
@@ -93,14 +93,14 @@ class CommunityService(
     }
 
     @Transactional
-    override fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse {
+    override suspend fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
         reactions.publishViewed(id, principal?.userId)
         return community(q, communityContext(listOf(q), principal), search.findPublicByQuestionIdAndLanguage(id, language))
     }
 
     @Transactional
-    override fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
+    override suspend fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse {
         val question = publicAnsweredQuestion(id)
         var changed = false
         if (liked) {
@@ -131,7 +131,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
+    override suspend fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
         val question = publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         incrementCommentCount(id, 1)
@@ -148,7 +148,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse {
+    override suspend fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse {
         publicAnsweredQuestion(id)
         val comment = comments.findByIdAndQuestionIdAndDeletedAtIsNull(commentId, id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Comment not found.")
@@ -165,7 +165,7 @@ class CommunityService(
     }
 
     @Transactional(readOnly = true)
-    override fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
+    override suspend fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(id, PageRequest.of(offset / limit, limit))
         val profiles = page.content
@@ -183,7 +183,7 @@ class CommunityService(
     }
 
     @Transactional
-    override fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand) {
+    override suspend fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand) {
         publicAnsweredQuestion(id)
         reports.save(
             ReportEntity(
@@ -196,7 +196,7 @@ class CommunityService(
         )
     }
 
-    private fun communityContext(questions: List<QuestionEntity>, principal: Principal?): CommunityContext {
+    private suspend fun communityContext(questions: List<QuestionEntity>, principal: Principal?): CommunityContext {
         if (questions.isEmpty()) return CommunityContext()
         val userIds = questions.mapNotNull { it.userId }.distinct()
         val questionIds = questions.map { it.id }
@@ -207,7 +207,7 @@ class CommunityService(
         )
     }
 
-    private fun community(q: QuestionEntity, context: CommunityContext, translated: QuestionSearchEntity? = null): CommunityQuestionResponse {
+    private suspend fun community(q: QuestionEntity, context: CommunityContext, translated: QuestionSearchEntity? = null): CommunityQuestionResponse {
         val author = q.userId?.let { context.authorsById[it]?.toAuthorProjection() }
         val stats = context.statsByQuestionId[q.id]
         val liked = q.id in context.likedQuestionIds
@@ -217,11 +217,11 @@ class CommunityService(
             .withTranslatedText(translated)
     }
 
-    private fun publicAnsweredQuestion(id: Long): QuestionEntity =
+    private suspend fun publicAnsweredQuestion(id: Long): QuestionEntity =
         questions.findPublicAnsweredById(id)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
 
-    private fun incrementLikeCount(questionId: Long, delta: Int): Int {
+    private suspend fun incrementLikeCount(questionId: Long, delta: Int): Int {
         val now = Instant.now()
         if (questionStats.incrementLike(questionId, delta, now) == 0) {
             return questionStats.save(
@@ -235,10 +235,10 @@ class CommunityService(
         return currentLikeCount(questionId)
     }
 
-    private fun currentLikeCount(questionId: Long): Int =
-        questionStats.findById(questionId).map { it.likeCount }.orElse(0)
+    private suspend fun currentLikeCount(questionId: Long): Int =
+        questionStats.findById(questionId)?.likeCount ?: 0
 
-    private fun incrementCommentCount(questionId: Long, delta: Int) {
+    private suspend fun incrementCommentCount(questionId: Long, delta: Int) {
         val now = Instant.now()
         if (questionStats.incrementComment(questionId, delta, now) == 0) {
             questionStats.save(
@@ -251,16 +251,17 @@ class CommunityService(
         }
     }
 
-    private fun userProfile(id: Long) = users.findById(id).orElseThrow {
-        ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
-    }.toProfile()
+    private suspend fun userProfile(id: Long) = (
+        users.findById(id)
+            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
+        ).toProfile()
 
-    private fun translatedRows(questionIds: Collection<Long>, language: String): Map<Long, QuestionSearchEntity> =
+    private suspend fun translatedRows(questionIds: Collection<Long>, language: String): Map<Long, QuestionSearchEntity> =
         questionIds.mapNotNull { id ->
             search.findPublicByQuestionIdAndLanguage(id, language)?.let { id to it }
         }.toMap()
 
-    private fun publishThreadNotification(
+    private suspend fun publishThreadNotification(
         ownerUserId: Long?,
         actorUserId: Long,
         eventId: String,
@@ -288,7 +289,7 @@ class CommunityService(
     }
 }
 
-private fun CommunityQuestionResponse.withTranslatedText(translated: QuestionSearchEntity?): CommunityQuestionResponse {
+private suspend fun CommunityQuestionResponse.withTranslatedText(translated: QuestionSearchEntity?): CommunityQuestionResponse {
     if (translated == null) return this
     return copy(
         question = translated.question,
@@ -306,7 +307,7 @@ private data class CommunityContext(
     val likedQuestionIds: Set<Long> = emptySet(),
 )
 
-private fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
+private suspend fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
     id = id,
     displayName = displayName,
     bio = bio,
@@ -316,7 +317,7 @@ private fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(
     publicQuestionsAllowed = allowPublicQuestions,
 )
 
-private fun QuestionEntity.toPublicQuestionState() = PublicQuestionState(
+private suspend fun QuestionEntity.toPublicQuestionState() = PublicQuestionState(
     id = id,
     question = question,
     answer = answer,
@@ -332,7 +333,7 @@ private fun QuestionEntity.toPublicQuestionState() = PublicQuestionState(
     answeredAt = answeredAt,
 )
 
-private fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(
+private suspend fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(
     likeCount = likeCount,
     commentCount = commentCount,
     viewCount = viewCount,

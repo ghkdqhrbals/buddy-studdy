@@ -29,7 +29,7 @@ class OpenAIQuestionKeyProvider(
     private val properties: BuddyStudyProperties,
     private val memberships: QuestionMembershipPort,
 ) {
-    fun resolveForQuestionGeneration(user: UserEntity?): OpenAIQuestionKey {
+    suspend fun resolveForQuestionGeneration(user: UserEntity?): OpenAIQuestionKey {
         val systemApiKey = properties.openai.apiKey.takeIf { it.isNotBlank() }
             ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
 
@@ -57,11 +57,11 @@ class OpenAIQuestionKeyProvider(
         )
     }
 
-    fun markQuestionCreated(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
+    suspend fun markQuestionCreated(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         if (!key.usesSystemMembershipQuota) return
     }
 
-    fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
+    suspend fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         val reservation = key.quotaReservation ?: return
         memberships.refundMonthlySystemQuestion(reservation.userId, reservation.yearMonth, now)
     }

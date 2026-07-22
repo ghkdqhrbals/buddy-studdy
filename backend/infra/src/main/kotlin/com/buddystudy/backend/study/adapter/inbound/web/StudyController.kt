@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
+import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.settings.adapter.inbound.web.SettingsWebPort
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.model.StatsActivityResponse
@@ -38,6 +39,7 @@ import java.time.Instant
 class StudyController(
     private val study: StudyWebPort,
     private val settings: SettingsWebPort,
+    private val permissionGuard: PermissionWebGuard,
 ) {
 
     @Operation(summary = "Fetch one study room settings", description = "Returns settings for a single study room. Use this instead of the old broad startup settings state when editing one study.")
@@ -47,7 +49,7 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Study settings not found."),
     )
     @GetMapping("/studies/{studyId}/settings")
-    fun studySettings(
+    suspend fun studySettings(
         @PathVariable studyId: Long,
         authentication: Authentication,
     ) = settings.studySettings(studyId, authentication)
@@ -61,7 +63,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Missing, invalid, or expired access token/device credentials."),
     )
     @GetMapping("/studies")
-    fun study(
+    suspend fun study(
         @Parameter(description = "Maximum number of studies to include. Server clamps this to 1..1000.", example = "500")
         @RequestParam(defaultValue = "500") limit: Int,
         @Parameter(description = "Zero-based study offset for pagination.", example = "0")
@@ -82,10 +84,13 @@ class StudyController(
     )
     @PostMapping("/study")
     @RequirePermission(Permissions.STUDY_CREATE)
-    fun createStudy(
+    suspend fun createStudy(
         @Valid @RequestBody body: CreateStudyRequest,
         authentication: Authentication,
-    ): StudyRoomResponse = study.createStudy(body, authentication)
+    ): StudyRoomResponse {
+        permissionGuard.check(authentication, Permissions.STUDY_CREATE)
+        return study.createStudy(body, authentication)
+    }
 
     @Operation(summary = "Delete a study", description = "Deletes one study room owned by the authenticated user and removes its related questions from active records/search.")
     @ApiResponses(
@@ -95,11 +100,14 @@ class StudyController(
     )
     @DeleteMapping("/studies/{studyId}")
     @RequirePermission(Permissions.STUDY_DELETE)
-    fun deleteStudy(
+    suspend fun deleteStudy(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
         authentication: Authentication,
-    ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
+    ): ResponseEntity<Unit> {
+        permissionGuard.check(authentication, Permissions.STUDY_DELETE)
+        return study.deleteStudy(studyId, authentication)
+    }
 
     @Operation(
         summary = "List my graded records",
@@ -110,7 +118,7 @@ class StudyController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/records")
-    fun records(
+    suspend fun records(
         @Parameter(description = "Maximum number of records to return. Server clamps this to 1..500.", example = "100")
         @RequestParam(defaultValue = "100") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
@@ -130,7 +138,10 @@ class StudyController(
     )
     @DeleteMapping("/records")
     @RequirePermission(Permissions.RECORD_DELETE)
-    fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = study.clearRecords(authentication)
+    suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> {
+        permissionGuard.check(authentication, Permissions.RECORD_DELETE)
+        return study.clearRecords(authentication)
+    }
 
     @Operation(summary = "Fetch one record", description = "Returns one study record owned by the authenticated user.")
     @ApiResponses(
@@ -139,7 +150,7 @@ class StudyController(
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @GetMapping("/records/{id}")
-    fun record(
+    suspend fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         @Parameter(description = "Response language code.", example = "ko")
@@ -150,13 +161,15 @@ class StudyController(
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/records/{id}/answer")
     @RequirePermission(Permissions.RECORD_UPDATE)
-    fun saveAnswer(
+    suspend fun saveAnswer(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: AnswerRequest,
         authentication: Authentication,
-    ): StudyRecordResponse =
-        study.saveAnswer(id, body, authentication)
+    ): StudyRecordResponse {
+        permissionGuard.check(authentication, Permissions.RECORD_UPDATE)
+        return study.saveAnswer(id, body, authentication)
+    }
 
     @Operation(summary = "Submit an answer for grading", description = "Submits the answer, asks the tutor model to grade it, and returns the updated record with score, correctness, feedback, and explanation.")
     @ApiResponses(
@@ -166,22 +179,27 @@ class StudyController(
     )
     @PostMapping("/records/{id}/answer")
     @RequirePermission(Permissions.RECORD_UPDATE)
-    fun grade(
+    suspend fun grade(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: AnswerRequest,
         authentication: Authentication,
-    ): StudyRecordResponse =
-        study.grade(id, body, authentication)
+    ): StudyRecordResponse {
+        permissionGuard.check(authentication, Permissions.RECORD_UPDATE)
+        return study.grade(id, body, authentication)
+    }
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
     @PostMapping("/records/{id}/skip")
     @RequirePermission(Permissions.RECORD_UPDATE)
-    fun skip(
+    suspend fun skip(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         authentication: Authentication,
-    ): StudyRecordResponse = study.skip(id, authentication)
+    ): StudyRecordResponse {
+        permissionGuard.check(authentication, Permissions.RECORD_UPDATE)
+        return study.skip(id, authentication)
+    }
 
     @Operation(summary = "Delete one record", description = "Immediately deletes a record owned by the authenticated user.")
     @ApiResponses(
@@ -191,26 +209,31 @@ class StudyController(
     )
     @DeleteMapping("/records/{id}")
     @RequirePermission(Permissions.RECORD_DELETE)
-    fun delete(
+    suspend fun delete(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         authentication: Authentication,
-    ): ResponseEntity<Unit> = study.delete(id, authentication)
+    ): ResponseEntity<Unit> {
+        permissionGuard.check(authentication, Permissions.RECORD_DELETE)
+        return study.delete(id, authentication)
+    }
 
     @Operation(summary = "Update record visibility", description = "Sets whether a completed record can be included in public questions. The user's global public-question setting must also allow public sharing.")
     @PatchMapping("/records/{id}/publicity")
     @RequirePermission(Permissions.RECORD_PUBLISH)
-    fun publicity(
+    suspend fun publicity(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
         @RequestBody body: RecordPublicityRequest,
         authentication: Authentication,
-    ): StudyRecordResponse =
-        study.publicity(id, body, authentication)
+    ): StudyRecordResponse {
+        permissionGuard.check(authentication, Permissions.RECORD_PUBLISH)
+        return study.publicity(id, body, authentication)
+    }
 
     @Operation(summary = "Fetch topic statistics", description = "Returns topic-first statistics for the authenticated user. Topics are sorted by answer count and include level-range information; the app should not compute global score averages locally.")
     @GetMapping("/stats")
-    fun stats(
+    suspend fun stats(
         @Parameter(description = "Maximum number of topic stat cards to return.", example = "8")
         @RequestParam(defaultValue = "8") limit: Int,
         @Parameter(description = "Zero-based topic offset for pagination.", example = "0")
@@ -229,7 +252,7 @@ class StudyController(
 
     @Operation(summary = "Fetch daily study activity", description = "Returns compact daily activity for the authenticated user. The app uses this to render a one-year contribution-style activity graph.")
     @GetMapping("/stats/activity")
-    fun statsActivity(
+    suspend fun statsActivity(
         @Parameter(description = "Optional inclusive UTC start timestamp. Defaults to 365 days including today.", example = "2025-06-18T00:00:00Z")
         @RequestParam(required = false) startAt: Instant?,
         @Parameter(description = "Optional exclusive UTC end timestamp. Defaults to tomorrow UTC.", example = "2026-06-19T00:00:00Z")
@@ -241,10 +264,12 @@ class StudyController(
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/studies/{studyId}/questions")
     @RequirePermission(Permissions.STUDY_CREATE)
-    fun createQuestion(
+    suspend fun createQuestion(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
         authentication: Authentication,
-    ): StudyRecordResponse =
-        study.createQuestion(studyId, authentication)
+    ): StudyRecordResponse {
+        permissionGuard.check(authentication, Permissions.STUDY_CREATE)
+        return study.createQuestion(studyId, authentication)
+    }
 }

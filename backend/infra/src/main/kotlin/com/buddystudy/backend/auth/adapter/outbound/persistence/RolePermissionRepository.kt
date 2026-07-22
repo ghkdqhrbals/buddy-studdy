@@ -1,8 +1,8 @@
 package com.buddystudy.backend.auth.adapter.outbound.persistence
 
 import com.buddystudy.auth.domain.entity.RolePermissionEntity
-import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 
-interface RolePermissionRepository : JpaRepository<RolePermissionEntity, Long> {
-    fun existsByRoleIdAndPermissionId(roleId: Long, permissionId: Long): Boolean
+interface RolePermissionRepository : CoroutineCrudRepository<RolePermissionEntity, Long> {
+    suspend fun existsByRoleIdAndPermissionId(roleId: Long, permissionId: Long): Boolean
 }

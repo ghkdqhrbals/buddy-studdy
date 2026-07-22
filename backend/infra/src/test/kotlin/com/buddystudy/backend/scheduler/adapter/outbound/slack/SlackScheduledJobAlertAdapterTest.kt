@@ -1,5 +1,7 @@
 package com.buddystudy.backend.scheduler.adapter.outbound.slack
 
+import kotlinx.coroutines.runBlocking
+
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -30,7 +32,7 @@ class SlackScheduledJobAlertAdapterTest {
     private val objectMapper = jacksonObjectMapper()
 
     @Test
-    fun `notifyFailed posts scheduler failure to Slack webhook`() {
+    fun `notifyFailed posts scheduler failure to Slack webhook`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -65,7 +67,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed encodes scheduler run url query parameters`() {
+    fun `notifyFailed encodes scheduler run url query parameters`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -86,7 +88,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed is no-op when Slack webhook is not configured`() {
+    fun `notifyFailed is no-op when Slack webhook is not configured`(): Unit = runBlocking {
         val builder = RestClient.builder()
         val server = MockRestServiceServer.bindTo(builder).build()
         val adapter = SlackScheduledJobAlertAdapter(BuddyStudyProperties(), builder.build())
@@ -97,7 +99,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed propagates Slack delivery failure`() {
+    fun `notifyFailed propagates Slack delivery failure`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -111,14 +113,14 @@ class SlackScheduledJobAlertAdapterTest {
             .andExpect(method(HttpMethod.POST))
             .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).body("slack unavailable"))
 
-        assertThatThrownBy { adapter.notifyFailed(failedRun()) }
+        assertThatThrownBy { runBlocking { adapter.notifyFailed(failedRun()) } }
             .hasMessageContaining("500")
 
         server.verify()
     }
 
     @Test
-    fun `slack timeout is bounded`() {
+    fun `slack timeout is bounded`(): Unit = runBlocking {
         val low = SlackScheduledJobAlertAdapter(
             BuddyStudyProperties(monitoring = BuddyStudyProperties.Monitoring(slackTimeoutMs = 1)),
             RestClient.builder(),
@@ -133,7 +135,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed bounds Slack block text lengths`() {
+    fun `notifyFailed bounds Slack block text lengths`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -173,7 +175,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed suppresses repeated failure alerts within repeat interval`() {
+    fun `notifyFailed suppresses repeated failure alerts within repeat interval`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -197,7 +199,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed sends repeated failure alert after repeat interval`() {
+    fun `notifyFailed sends repeated failure alert after repeat interval`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",
@@ -222,7 +224,7 @@ class SlackScheduledJobAlertAdapterTest {
     }
 
     @Test
-    fun `notifyFailed preserves error label when payload values are long`() {
+    fun `notifyFailed preserves error label when payload values are long`(): Unit = runBlocking {
         val properties = BuddyStudyProperties(
             monitoring = BuddyStudyProperties.Monitoring(
                 slackWebhookUrl = "https://hooks.slack.test/scheduler",

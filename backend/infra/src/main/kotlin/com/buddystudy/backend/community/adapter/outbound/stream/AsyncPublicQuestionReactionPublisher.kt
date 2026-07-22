@@ -8,6 +8,7 @@ import org.springframework.context.SmartLifecycle
 import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,9 +24,8 @@ class AsyncPublicQuestionReactionPublisher(
     private val queue = ArrayBlockingQueue<ViewEvent>(properties.streams.viewQueueCapacity.coerceAtLeast(1))
     private val running = AtomicBoolean(false)
     private val workerCount = properties.streams.viewPublisherConcurrency.coerceAtLeast(1)
-    private val executor = Executors.newFixedThreadPool(workerCount) { task ->
-        Thread(task, "public-question-view-publisher").apply { isDaemon = true }
-    }
+    @Volatile
+    private var executor: ExecutorService? = null
 
     override fun publishViewed(questionId: Long, userId: Long?): Boolean {
         if (!properties.streams.enabled) return false
@@ -41,19 +41,27 @@ class AsyncPublicQuestionReactionPublisher(
         return accepted
     }
 
+    @Synchronized
     override fun start() {
         if (running.compareAndSet(false, true)) {
+            val startedExecutor = Executors.newFixedThreadPool(workerCount) { task ->
+                Thread(task, "public-question-view-publisher").apply { isDaemon = true }
+            }
+            executor = startedExecutor
             repeat(workerCount) {
-                executor.execute(::publishLoop)
+                startedExecutor.execute(::publishLoop)
             }
         }
     }
 
+    @Synchronized
     override fun stop() {
         running.set(false)
-        executor.shutdownNow()
+        val stoppedExecutor = executor ?: return
+        executor = null
+        stoppedExecutor.shutdownNow()
         try {
-            executor.awaitTermination(1, TimeUnit.SECONDS)
+            stoppedExecutor.awaitTermination(1, TimeUnit.SECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }

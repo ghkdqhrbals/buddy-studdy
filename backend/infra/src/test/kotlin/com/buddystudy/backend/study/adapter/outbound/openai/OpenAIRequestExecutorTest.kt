@@ -1,11 +1,13 @@
 package com.buddystudy.backend.study.adapter.outbound.openai
 
+import kotlinx.coroutines.runBlocking
+
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class OpenAIRequestExecutorTest {
     @Test
-    fun `coverage blueprint parser preserves unlimited nested concepts`() {
+    fun `coverage blueprint parser preserves unlimited nested concepts`(): Unit = runBlocking {
         val concepts = parseQuestionCoverageConcepts(
             """
             {

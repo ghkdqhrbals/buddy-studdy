@@ -34,11 +34,11 @@ class PermissionPolicyController(
     private val notificationPreferences: NotificationPreferenceUseCase,
 ) {
     @GetMapping("/terms/active")
-    fun activeTerms(authentication: Authentication): List<TermsResponse> =
+    suspend fun activeTerms(authentication: Authentication): List<TermsResponse> =
         terms.activeTerms(authentication.principalOrThrow())
 
     @PostMapping("/terms/agreements")
-    fun agreements(
+    suspend fun agreements(
         authentication: Authentication,
         request: ServerHttpRequest,
         @RequestBody body: TermsAgreementRequest,
@@ -58,7 +58,7 @@ class PermissionPolicyController(
         )
 
     @GetMapping("/me/permissions")
-    fun permissions(
+    suspend fun permissions(
         authentication: Authentication,
         @RequestHeader("X-App-Version", required = false) appVersion: String?,
     ): PermissionEvaluationsResponse {
@@ -76,11 +76,11 @@ class PermissionPolicyController(
     }
 
     @GetMapping("/notification-preferences")
-    fun notificationPreferences(authentication: Authentication): List<NotificationPreferenceResponse> =
+    suspend fun notificationPreferences(authentication: Authentication): List<NotificationPreferenceResponse> =
         notificationPreferences.notificationPreferences(authentication.principalOrThrow())
 
     @PostMapping("/notification-preferences")
-    fun saveNotificationPreference(
+    suspend fun saveNotificationPreference(
         authentication: Authentication,
         @RequestBody body: NotificationPreferenceRequest,
     ): NotificationPreferenceResponse {
@@ -104,7 +104,7 @@ class TermsAgreementRequest {
     var action: String = "AGREED"
     var source: String = "SETTINGS"
 
-    fun resolvedType(): String = type.ifBlank { code }
+    suspend fun resolvedType(): String = type.ifBlank { code }
 }
 
 class NotificationPreferenceRequest {
@@ -112,5 +112,5 @@ class NotificationPreferenceRequest {
     var key: String = ""
     var enabled: Boolean = false
 
-    fun resolvedType(): String = type.ifBlank { key }
+    suspend fun resolvedType(): String = type.ifBlank { key }
 }

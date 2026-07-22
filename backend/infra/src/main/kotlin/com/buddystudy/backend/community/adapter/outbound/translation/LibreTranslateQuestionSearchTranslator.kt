@@ -14,7 +14,7 @@ class LibreTranslateQuestionSearchTranslator(
         .baseUrl(properties.translation.baseUrl.trimEnd('/'))
         .build()
 
-    override fun translateSearchText(
+    override suspend fun translateSearchText(
         sourceLanguage: String,
         targetLanguage: String,
         topic: String,

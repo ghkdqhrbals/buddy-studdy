@@ -4,11 +4,11 @@ import com.buddystudy.stats.domain.entity.UserStatsEntity
 import java.time.LocalDate
 
 interface UserStatsPort {
-    fun replaceAll(rows: Collection<UserStatsEntity>)
-    fun syncAll(rows: Collection<UserStatsEntity>)
-    fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity>
-    fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview
-    fun findTopicKeysByUser(
+    suspend fun replaceAll(rows: Collection<UserStatsEntity>)
+    suspend fun syncAll(rows: Collection<UserStatsEntity>)
+    suspend fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity>
+    suspend fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview
+    suspend fun findTopicKeysByUser(
         userId: Long,
         startDate: LocalDate?,
         endDate: LocalDate?,
@@ -16,7 +16,7 @@ interface UserStatsPort {
         limit: Int,
         offset: Int,
     ): List<String>
-    fun findByUserAndTopicKeys(
+    suspend fun findByUserAndTopicKeys(
         userId: Long,
         startDate: LocalDate?,
         endDate: LocalDate?,

@@ -15,18 +15,18 @@ import org.springframework.security.core.Authentication
 import java.time.Instant
 
 interface StudyWebPort {
-    fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): StudyPageResponse
-    fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication): RecordsPageResponse
-    fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
-    fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse
-    fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
-    fun grade(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
-    fun skip(id: Long, authentication: Authentication): StudyRecordResponse
-    fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
-    fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): StudyRecordResponse
-    fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication): StatsResponse
-    fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
-    fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
-    fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
-    fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
+    suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): StudyPageResponse
+    suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication): RecordsPageResponse
+    suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
+    suspend fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse
+    suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
+    suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
+    suspend fun skip(id: Long, authentication: Authentication): StudyRecordResponse
+    suspend fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
+    suspend fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): StudyRecordResponse
+    suspend fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication): StatsResponse
+    suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
+    suspend fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
+    suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
+    suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
 }

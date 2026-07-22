@@ -1,5 +1,7 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -11,7 +13,7 @@ import java.time.Instant
 
 class RedisStreamPushPublisherTest {
     @Test
-    fun `publish methods return false when streams are disabled`() {
+    fun `publish methods return false when streams are disabled`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = service(enabled = false, publisher = publisher)
 
@@ -20,7 +22,7 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `push event publishes to configured stream`() {
+    fun `push event publishes to configured stream`(): Unit = runBlocking {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, publisher = publisher)
 
@@ -44,7 +46,7 @@ class RedisStreamPushPublisherTest {
     }
 
     @Test
-    fun `publish methods return false when publisher throws`() {
+    fun `publish methods return false when publisher throws`(): Unit = runBlocking {
         val service = service(enabled = true, publisher = RecordingPublisher(fail = true))
 
         assertThat(service.publishPush(pushEvent())).isFalse()

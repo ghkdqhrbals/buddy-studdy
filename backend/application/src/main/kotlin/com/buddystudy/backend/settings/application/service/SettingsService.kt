@@ -29,13 +29,13 @@ class SettingsService(
     private val cipher: KeyCipher,
 ) : SettingsUseCase {
     @Transactional
-    override fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
+    override suspend fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
         val items = command.schedules?.takeIf { it.isNotEmpty() } ?: listOf(
             ScheduleItemCommand(command.topic.ifBlank { "SwiftUI" }, command.difficultyLevel, command.customPrompt, command.openaiModel)
         )
-        users.findById(principal.userId).orElse(null)?.let { user ->
+        users.findById(principal.userId)?.let { user ->
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
@@ -70,10 +70,10 @@ class SettingsService(
                 anonymous = principal.anonymous,
                 now = now,
             ))
-            val saved = studies.save(study)
-            if (saved.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
-                saved.reschedule(now)
+            if (study.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+                study.reschedule(now)
             }
+            val saved = studies.save(study)
             studiesByTopic[item.topic] = saved
             next = saved.nextDueAt
         }
@@ -81,21 +81,21 @@ class SettingsService(
     }
 
     @Transactional(readOnly = true)
-    override fun settings(principal: Principal): StudySettingsResponse {
-        val user = users.findById(principal.userId).orElse(null)
+    override suspend fun settings(principal: Principal): StudySettingsResponse {
+        val user = users.findById(principal.userId)
         return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId).toSettings(user)
     }
 
     @Transactional(readOnly = true)
-    override fun studySettings(principal: Principal, studyId: Long): StudySettingsResponse {
-        val user = users.findById(principal.userId).orElse(null)
+    override suspend fun studySettings(principal: Principal, studyId: Long): StudySettingsResponse {
+        val user = users.findById(principal.userId)
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
         return study.toSettings(user)
     }
 
     @Transactional
-    override fun upsertStudySettings(principal: Principal, studyId: Long, command: ScheduleCommand): ScheduleResponse {
+    override suspend fun upsertStudySettings(principal: Principal, studyId: Long, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
@@ -103,7 +103,7 @@ class SettingsService(
         val previousIntervalMinutes = study.intervalMinutes
         val previousNextDueAt = study.nextDueAt
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
-        users.findById(principal.userId).orElse(null)?.let { user ->
+        users.findById(principal.userId)?.let { user ->
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
@@ -128,19 +128,19 @@ class SettingsService(
         ))
         study.topic = command.topic.ifBlank { study.topic }
         study.deviceId = principal.deviceId
-        val saved = studies.save(study)
-        if (saved.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
-            saved.reschedule(now)
+        if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+            study.reschedule(now)
         }
+        val saved = studies.save(study)
         return ScheduleResponse(principal.deviceId, saved.enabled, saved.nextDueAt)
     }
 
-    private fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
+    private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
         openaiApiKeyCipher = null,
         nextDueAt = nextDueAt,
     )
 
-    private fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
+    private suspend fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
         difficultyLevel = update.difficultyLevel
         intervalMinutes = update.intervalMinutes
         enabled = update.enabled
@@ -151,12 +151,12 @@ class SettingsService(
         updatedAt = update.updatedAt
     }
 
-    private fun StudyEntity.reschedule(now: Instant) {
+    private suspend fun StudyEntity.reschedule(now: Instant) {
         nextDueAt = if (enabled) now.plusSeconds(intervalMinutes.toLong() * 60) else null
         updatedAt = now
     }
 
-    private fun StudyEntity.shouldReschedule(
+    private suspend fun StudyEntity.shouldReschedule(
         isNewStudy: Boolean,
         previousEnabled: Boolean,
         previousIntervalMinutes: Int,

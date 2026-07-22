@@ -38,7 +38,7 @@ class PermissionPolicyService(
     private val users: UserPort,
 ) : TermsUseCase, PermissionEvaluationUseCase, NotificationPreferenceUseCase {
     @Transactional(readOnly = true)
-    override fun activeTerms(principal: Principal?): List<TermsResponse> {
+    override suspend fun activeTerms(principal: Principal?): List<TermsResponse> {
         val userId = principal?.userId?.takeUnless { principal.anonymous }
         val deviceId = principal?.deviceId
         return terms.activeTerms(userId, deviceId, Instant.now()).map {
@@ -47,7 +47,7 @@ class PermissionPolicyService(
     }
 
     @Transactional
-    override fun saveAgreement(principal: Principal, command: TermsAgreementCommand): PermissionEvaluationsResponse {
+    override suspend fun saveAgreement(principal: Principal, command: TermsAgreementCommand): PermissionEvaluationsResponse {
         val action = command.action.trim().uppercase()
         if (action !in AGREEMENT_ACTIONS) {
             throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid terms agreement action.")
@@ -88,7 +88,7 @@ class PermissionPolicyService(
     }
 
     @Transactional(readOnly = true)
-    override fun permissions(
+    override suspend fun permissions(
         principal: Principal,
         context: PermissionEvaluationContext,
     ): PermissionEvaluationsResponse =
@@ -109,7 +109,7 @@ class PermissionPolicyService(
                 .sortedBy { it.permissionCode }
         )
 
-    private fun com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult.toResponse(): PermissionEvaluationResponse =
+    private suspend fun com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult.toResponse(): PermissionEvaluationResponse =
         PermissionEvaluationResponse(
             permissionCode = permissionCode,
             granted = granted,
@@ -129,7 +129,7 @@ class PermissionPolicyService(
             metadata = metadata,
         )
 
-    private fun com.buddystudy.backend.auth.application.port.outbound.ActiveTermsProjection.toResponse(): TermsResponse =
+    private suspend fun com.buddystudy.backend.auth.application.port.outbound.ActiveTermsProjection.toResponse(): TermsResponse =
         TermsResponse(
             type = TermsType.parse(code),
             code = code,
@@ -143,7 +143,7 @@ class PermissionPolicyService(
         )
 
     @Transactional(readOnly = true)
-    override fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse> =
+    override suspend fun notificationPreferences(principal: Principal): List<NotificationPreferenceResponse> =
         listOf(
             NotificationPreferenceResponse(
                 type = NotificationPreferenceType.QUESTION_NOTIFICATION,
@@ -166,7 +166,7 @@ class PermissionPolicyService(
         )
 
     @Transactional
-    override fun saveNotificationPreference(
+    override suspend fun saveNotificationPreference(
         principal: Principal,
         command: NotificationPreferenceCommand,
     ): NotificationPreferenceResponse {
@@ -185,9 +185,9 @@ class PermissionPolicyService(
         return NotificationPreferenceResponse(type = type, key = key, enabled = command.enabled)
     }
 
-    private fun activateUserIfRequiredTermsAreAgreed(principal: Principal) {
+    private suspend fun activateUserIfRequiredTermsAreAgreed(principal: Principal) {
         if (principal.anonymous) return
-        val user = users.findById(principal.userId).orElse(null) ?: return
+        val user = users.findById(principal.userId) ?: return
         if (user.status != "PENDING_TERMS") return
         if (!terms.hasRequiredAgreements(user.id, principal.deviceId, Instant.now())) return
         user.status = "ACTIVE"

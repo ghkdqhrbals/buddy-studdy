@@ -33,7 +33,7 @@ class NotificationService(
     PublishNotificationUseCase {
 
     @Transactional(readOnly = true)
-    override fun notifications(principal: Principal, limit: Int, offset: Int): AppNotificationsResponse {
+    override suspend fun notifications(principal: Principal, limit: Int, offset: Int): AppNotificationsResponse {
         val page = notificationStore.findVisible(
             visibleUserId(principal),
             principal.deviceId,
@@ -53,11 +53,11 @@ class NotificationService(
     }
 
     @Transactional(readOnly = true)
-    override fun unreadCount(principal: Principal): NotificationUnreadCountResponse =
+    override suspend fun unreadCount(principal: Principal): NotificationUnreadCountResponse =
         NotificationUnreadCountResponse(notificationStore.countVisibleUnread(visibleUserId(principal), principal.deviceId))
 
     @Transactional
-    override fun markRead(principal: Principal, id: Long): NotificationMutationResponse {
+    override suspend fun markRead(principal: Principal, id: Long): NotificationMutationResponse {
         val notification = owned(id, principal)
         if (notification.readAt == null) {
             val now = Instant.now()
@@ -72,7 +72,7 @@ class NotificationService(
     }
 
     @Transactional
-    override fun delete(principal: Principal, id: Long): NotificationMutationResponse {
+    override suspend fun delete(principal: Principal, id: Long): NotificationMutationResponse {
         val notification = owned(id, principal)
         if (notification.deletedAt == null) {
             val now = Instant.now()
@@ -84,13 +84,13 @@ class NotificationService(
     }
 
     @Transactional
-    override fun deleteAll(principal: Principal): NotificationMutationResponse {
+    override suspend fun deleteAll(principal: Principal): NotificationMutationResponse {
         notificationStore.markVisibleDeleted(visibleUserId(principal), principal.deviceId, Instant.now())
         return NotificationMutationResponse()
     }
 
     @Transactional
-    override fun process(command: NotificationRequestCommand): Long {
+    override suspend fun process(command: NotificationRequestCommand): Long {
         require(command.userId != null || !command.deviceId.isNullOrBlank()) {
             "Notification owner is required."
         }
@@ -122,19 +122,19 @@ class NotificationService(
         }
     }
 
-    override fun publish(command: NotificationRequestCommand): Boolean =
+    override suspend fun publish(command: NotificationRequestCommand): Boolean =
         publisher.publishNotification(command)
 
-    private fun owned(id: Long, principal: Principal): AppNotificationEntity =
+    private suspend fun owned(id: Long, principal: Principal): AppNotificationEntity =
         visibleUserId(principal)
             ?.let { notificationStore.findByIdAndUserIdAndDeletedAtIsNull(id, it) }
             ?: notificationStore.findByIdAndDeviceIdAndUserIdIsNullAndDeletedAtIsNull(id, principal.deviceId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Notification not found.")
 
-    private fun visibleUserId(principal: Principal): Long? =
+    private suspend fun visibleUserId(principal: Principal): Long? =
         principal.userId.takeUnless { principal.anonymous }
 
-    private fun toResponse(notification: AppNotificationEntity): AppNotificationResponse =
+    private suspend fun toResponse(notification: AppNotificationEntity): AppNotificationResponse =
         AppNotificationResponse(
             id = notification.id.toString(),
             type = notification.type,

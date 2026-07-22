@@ -1,134 +1,84 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.study.domain.entity.StudyQuestionConceptEntity
 import com.buddystudy.study.domain.entity.StudyQuestionCoverageEntity
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Modifying
-import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
+import org.springframework.data.relational.core.query.Criteria
+import org.springframework.data.relational.core.query.Query
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-interface StudyQuestionConceptRepository : JpaRepository<StudyQuestionConceptEntity, Long> {
-    fun existsByStudyId(studyId: Long): Boolean
-}
-
-interface StudyQuestionCoverageJpaRepository : JpaRepository<StudyQuestionCoverageEntity, Long> {
-    fun findByConceptIdAndAngleKey(conceptId: Long, angleKey: String): StudyQuestionCoverageEntity?
-
-    @Query(
-        """
-        select c.id as coverageId,
-               c.conceptId as conceptId,
-               concept.conceptKey as conceptKey,
-               concept.conceptName as conceptName,
-               concept.path as conceptKeyPath,
-               concept.conceptPath as conceptPath,
-               c.angleKey as angleKey,
-               c.angleName as angleName
-        from StudyQuestionCoverageEntity c
-        join StudyQuestionConceptEntity concept on concept.id = c.conceptId
-        where c.studyId = :studyId
-        order by c.askedCount asc,
-                 case when c.lastAskedAt is null then 0 else 1 end asc,
-                 c.lastAskedAt asc,
-                 c.id asc
-        """
-    )
-    fun selectNextInternal(@Param("studyId") studyId: Long, pageable: org.springframework.data.domain.Pageable): List<QuestionCoverageSelectionRow>
-
-    @Modifying
-    @Query(
-        """
-        update StudyQuestionCoverageEntity c
-        set c.askedCount = c.askedCount + 1,
-            c.lastAskedAt = :now,
-            c.updatedAt = :now
-        where c.id = :coverageId
-        """
-    )
-    fun incrementAsked(@Param("coverageId") coverageId: Long, @Param("now") now: Instant): Int
-
-    @Modifying
-    @Query(
-        """
-        update StudyQuestionCoverageEntity c
-        set c.answerCount = c.answerCount + 1,
-            c.scoreSum = c.scoreSum + :score,
-            c.correctCount = c.correctCount + :correctDelta,
-            c.updatedAt = :now
-        where c.conceptId = :conceptId and c.angleKey = :angleKey
-        """
-    )
-    fun incrementAnswered(
-        @Param("conceptId") conceptId: Long,
-        @Param("angleKey") angleKey: String,
-        @Param("score") score: Int,
-        @Param("correctDelta") correctDelta: Int,
-        @Param("now") now: Instant,
-    ): Int
-}
-
-interface QuestionCoverageSelectionRow {
-    val coverageId: Long
-    val conceptId: Long
-    val conceptKey: String
-    val conceptName: String
-    val conceptKeyPath: String
-    val conceptPath: String
-    val angleKey: String
-    val angleName: String
-}
-
 @Component
 class StudyQuestionCoveragePersistenceAdapter(
-    private val concepts: StudyQuestionConceptRepository,
-    private val coverage: StudyQuestionCoverageJpaRepository,
+    private val template: R2dbcEntityTemplate,
 ) : QuestionCoveragePort {
     @Transactional
-    override fun ensureCoverage(studyId: Long, topic: String, concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>) {
-        if (concepts.isEmpty() || this.concepts.existsByStudyId(studyId)) return
-        val now = Instant.now()
-        saveConceptTree(
-            studyId = studyId,
-            parentConceptId = null,
-            depth = 0,
-            parentKeyPath = "",
-            parentNamePath = "",
-            concepts = concepts,
-            now = now,
-        )
+    override suspend fun ensureCoverage(
+        studyId: Long,
+        topic: String,
+        concepts: List<QuestionCoveragePort.CoverageConceptBlueprint>,
+    ) {
+        if (concepts.isEmpty() || conceptExists(studyId)) return
+        saveConceptTree(studyId, null, 0, "", "", concepts, Instant.now())
     }
 
-    override fun selectNext(studyId: Long): QuestionCoverageSelection? =
-        coverage.selectNextInternal(studyId, PageRequest.of(0, 1)).firstOrNull()?.let {
+    override suspend fun selectNext(studyId: Long): QuestionCoverageSelection? =
+        template.databaseClient.sql(
+            """
+            select c.id as coverage_id, c.concept_id, concept.concept_key, concept.concept_name,
+                   concept.path as concept_key_path, concept.concept_path,
+                   c.angle_key, c.angle_name
+            from study_question_coverage c
+            join study_question_concepts concept on concept.id = c.concept_id
+            where c.study_id = :studyId
+            order by c.asked_count asc,
+                     case when c.last_asked_at is null then 0 else 1 end asc,
+                     c.last_asked_at asc, c.id asc
+            limit 1
+            """.trimIndent(),
+        ).bind("studyId", studyId).map { row, _ ->
             QuestionCoverageSelection(
-                conceptId = it.conceptId,
-                coverageId = it.coverageId,
-                conceptKey = it.conceptKey,
-                conceptName = it.conceptName,
-                angleKey = it.angleKey,
-                angleName = it.angleName,
-                conceptKeyPath = it.conceptKeyPath,
-                conceptPath = it.conceptPath,
+                coverageId = row.get("coverage_id", java.lang.Long::class.java)!!.toLong(),
+                conceptId = row.get("concept_id", java.lang.Long::class.java)!!.toLong(),
+                conceptKey = row.get("concept_key", String::class.java)!!,
+                conceptName = row.get("concept_name", String::class.java)!!,
+                conceptKeyPath = row.get("concept_key_path", String::class.java)!!,
+                conceptPath = row.get("concept_path", String::class.java)!!,
+                angleKey = row.get("angle_key", String::class.java)!!,
+                angleName = row.get("angle_name", String::class.java)!!,
             )
-        }
+        }.one().awaitSingleOrNull()
 
-    @Transactional
-    override fun markAsked(selection: QuestionCoverageSelection, now: Instant) {
-        coverage.incrementAsked(selection.coverageId, now)
+    override suspend fun markAsked(selection: QuestionCoverageSelection, now: Instant) {
+        template.databaseClient.sql(
+            "update study_question_coverage set asked_count = asked_count + 1, last_asked_at = :now, updated_at = :now where id = :id",
+        ).bind("now", now).bind("id", selection.coverageId).fetch().rowsUpdated().awaitSingle()
     }
 
-    @Transactional
-    override fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
-        coverage.incrementAnswered(conceptId, angleKey, score.coerceIn(0, 100), if (correct) 1 else 0, now)
+    override suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
+        template.databaseClient.sql(
+            """
+            update study_question_coverage
+            set answer_count = answer_count + 1, score_sum = score_sum + :score,
+                correct_count = correct_count + :correctDelta, updated_at = :now
+            where concept_id = :conceptId and angle_key = :angleKey
+            """.trimIndent(),
+        ).bind("score", score.coerceIn(0, 100)).bind("correctDelta", if (correct) 1 else 0)
+            .bind("now", now).bind("conceptId", conceptId).bind("angleKey", angleKey)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
-    private fun saveConceptTree(
+    private suspend fun conceptExists(studyId: Long): Boolean =
+        template.exists(Query.query(Criteria.where("study_id").`is`(studyId)), StudyQuestionConceptEntity::class.java)
+            .awaitSingle()
+
+    private suspend fun saveConceptTree(
         studyId: Long,
         parentConceptId: Long?,
         depth: Int,
@@ -140,56 +90,35 @@ class StudyQuestionCoveragePersistenceAdapter(
         concepts.forEachIndexed { index, concept ->
             val key = concept.key.normalizedCoverageKey()
             val name = concept.name.ifBlank { concept.key.ifBlank { key } }
-            val keyPath = listOf(parentKeyPath, key).filter { it.isNotBlank() }.joinToString("/")
-            val namePath = listOf(parentNamePath, name).filter { it.isNotBlank() }.joinToString(" > ")
+            val keyPath = listOf(parentKeyPath, key).filter(String::isNotBlank).joinToString("/")
+            val namePath = listOf(parentNamePath, name).filter(String::isNotBlank).joinToString(" > ")
             val leaf = concept.children.isEmpty()
-            val savedConcept = this.concepts.save(
+            val saved = template.saveEntity(
                 StudyQuestionConceptEntity(
-                    studyId = studyId,
-                    parentConceptId = parentConceptId,
-                    conceptKey = key,
-                    conceptName = name,
-                    depth = depth,
-                    path = keyPath,
-                    conceptPath = namePath,
-                    leaf = leaf,
-                    displayOrder = index,
-                    createdAt = now,
-                    updatedAt = now,
-                )
+                    studyId = studyId, parentConceptId = parentConceptId, conceptKey = key, conceptName = name,
+                    depth = depth, path = keyPath, conceptPath = namePath, leaf = leaf, displayOrder = index,
+                    createdAt = now, updatedAt = now,
+                ),
+                0,
             )
             if (leaf) {
-                concept.angles
-                    .ifEmpty { listOf(QuestionCoveragePort.CoverageAngleBlueprint("general", "General")) }
+                concept.angles.ifEmpty { listOf(QuestionCoveragePort.CoverageAngleBlueprint("general", "General")) }
                     .forEach { angle ->
-                        coverage.save(
+                        template.saveEntity(
                             StudyQuestionCoverageEntity(
-                                studyId = studyId,
-                                conceptId = savedConcept.id,
+                                studyId = studyId, conceptId = saved.id,
                                 angleKey = angle.key.normalizedCoverageKey(),
-                                angleName = angle.name.ifBlank { angle.key },
-                                createdAt = now,
-                                updatedAt = now,
-                            )
+                                angleName = angle.name.ifBlank { angle.key }, createdAt = now, updatedAt = now,
+                            ),
+                            0,
                         )
                     }
             } else {
-                saveConceptTree(
-                    studyId = studyId,
-                    parentConceptId = savedConcept.id,
-                    depth = depth + 1,
-                    parentKeyPath = keyPath,
-                    parentNamePath = namePath,
-                    concepts = concept.children,
-                    now = now,
-                )
+                saveConceptTree(studyId, saved.id, depth + 1, keyPath, namePath, concept.children, now)
             }
         }
     }
 }
 
 private fun String.normalizedCoverageKey(): String =
-    lowercase()
-        .replace(Regex("[^\\p{L}\\p{N}]+"), "_")
-        .trim('_')
-        .ifBlank { "general" }
+    lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "_").trim('_').ifBlank { "general" }

@@ -17,21 +17,21 @@ class AdminService(
     private val users: UserPort,
     private val studies: StudyPort,
 ) : AdminUseCase {
-    override fun models() = listOf(
+    override suspend fun models() = listOf(
         OpenAIModelOptionResponse("gpt-5.4", "GPT-5.4"),
         OpenAIModelOptionResponse("gpt-5.2", "GPT-5.2"),
         OpenAIModelOptionResponse("gpt-4.1", "GPT-4.1", supportsTextVerbosity = false, supportsReasoning = false, defaultReasoningEffort = null),
     )
 
     @Transactional(readOnly = true)
-    override fun apiStatus(principal: Principal): APIStatusResponse {
-        val user = users.findById(principal.userId).orElse(null)
+    override suspend fun apiStatus(principal: Principal): APIStatusResponse {
+        val user = users.findById(principal.userId)
         val fallbackStudy = studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
         return APIStatusResponse(!user?.openaiApiKeyCipher.isNullOrBlank(), fallbackStudy?.openaiModel ?: properties.openai.model)
     }
 
     @Transactional(readOnly = true)
-    override fun validateApi(principal: Principal): APIValidationResponse {
+    override suspend fun validateApi(principal: Principal): APIValidationResponse {
         val status = apiStatus(principal)
         return APIValidationResponse(status.openaiKeyConfigured, status.openaiKeyConfigured, status.openaiModel)
     }

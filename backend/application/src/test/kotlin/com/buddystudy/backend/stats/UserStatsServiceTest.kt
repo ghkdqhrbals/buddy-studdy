@@ -1,5 +1,7 @@
 package com.buddystudy.backend.stats
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.port.outbound.UserStatsPort
@@ -27,7 +29,7 @@ class UserStatsServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `refresh rebuilds user stats from graded questions`() {
+    fun `refresh rebuilds user stats from graded questions`(): Unit = runBlocking {
         questions.rows += gradedQuestion(topic = "Swift UI", difficultyLevel = 5, score = 80, correct = true, answeredAt = "2026-06-10T02:00:00Z")
         questions.rows += gradedQuestion(topic = "swift  ui", difficultyLevel = 5, score = 60, correct = false, answeredAt = "2026-06-10T03:00:00Z")
         questions.rows += gradedQuestion(topic = "SwiftUI", difficultyLevel = 6, score = 90, correct = true, answeredAt = "2026-06-11T04:00:00Z")
@@ -41,7 +43,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `stats reads aggregated user stats by selected date range`() {
+    fun `stats reads aggregated user stats by selected date range`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-01"),
@@ -89,7 +91,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `level range treats 50 as current level and 80 as plus one level`() {
+    fun `level range treats 50 as current level and 80 as plus one level`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -113,7 +115,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `activity returns compact daily counts and streak`() {
+    fun `activity returns compact daily counts and streak`(): Unit = runBlocking {
         val today = LocalDate.now(java.time.ZoneOffset.UTC)
         userStats.rows += UserStatsEntity(
             userId = 7,
@@ -174,7 +176,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `level range averages estimates across multiple levels by score count`() {
+    fun `level range averages estimates across multiple levels by score count`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -212,7 +214,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `topic stats assembler keeps level range bounded and sample count based`() {
+    fun `topic stats assembler keeps level range bounded and sample count based`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -238,7 +240,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `stats loads latest records and record stats in batches`() {
+    fun `stats loads latest records and record stats in batches`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -281,7 +283,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `stats preserves latest records for each selected topic when one topic dominates recent records`() {
+    fun `stats preserves latest records for each selected topic when one topic dominates recent records`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -327,7 +329,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `stats skips record stats lookup when selected topics have no latest records`() {
+    fun `stats skips record stats lookup when selected topics have no latest records`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,
             statDate = LocalDate.parse("2026-06-10"),
@@ -350,7 +352,7 @@ class UserStatsServiceTest {
     }
 
     @Test
-    fun `stats skips topic detail lookup when no topics are selected`() {
+    fun `stats skips topic detail lookup when no topics are selected`(): Unit = runBlocking {
         val response = service.stats(principal, limit = 10, offset = 0, query = fixtureStatsQuery())
 
         assertThat(response.topics).isEmpty()
@@ -401,24 +403,24 @@ class UserStatsServiceTest {
         var findTopicKeysByUserCalls = 0
         var findByUserAndTopicKeysCalls = 0
 
-        override fun replaceAll(rows: Collection<UserStatsEntity>) {
+        override suspend fun replaceAll(rows: Collection<UserStatsEntity>) {
             replaceAllCalls += 1
             this.rows.clear()
             this.rows.addAll(rows)
         }
 
-        override fun syncAll(rows: Collection<UserStatsEntity>) {
+        override suspend fun syncAll(rows: Collection<UserStatsEntity>) {
             syncAllCalls += 1
             this.rows.clear()
             this.rows.addAll(rows)
         }
 
-        override fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> {
+        override suspend fun findByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): List<UserStatsEntity> {
             findByUserCalls += 1
             return filtered(userId, startDate, endDate, query)
         }
 
-        override fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview {
+        override suspend fun overviewByUser(userId: Long, startDate: LocalDate?, endDate: LocalDate?, query: String?): UserStatsOverview {
             overviewByUserCalls += 1
             val rows = filtered(userId, startDate, endDate, query)
             return UserStatsOverview(
@@ -427,7 +429,7 @@ class UserStatsServiceTest {
             )
         }
 
-        override fun findTopicKeysByUser(
+        override suspend fun findTopicKeysByUser(
             userId: Long,
             startDate: LocalDate?,
             endDate: LocalDate?,
@@ -445,7 +447,7 @@ class UserStatsServiceTest {
                 .map { it.key }
         }
 
-        override fun findByUserAndTopicKeys(
+        override suspend fun findByUserAndTopicKeys(
             userId: Long,
             startDate: LocalDate?,
             endDate: LocalDate?,
@@ -470,12 +472,12 @@ class UserStatsServiceTest {
         var findGradedByUserAndTopicsCalls = 0
         var findLatestGradedByUserAndTopicsCalls = 0
         var findAllGradedForStatsCalls = 0
-        override fun save(entity: QuestionEntity): QuestionEntity = entity
-        override fun findQuestionById(id: Long): Optional<QuestionEntity> = Optional.ofNullable(rows.firstOrNull { it.id == id })
-        override fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
-        override fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null })
-        override fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null && it.topic.contains(query, ignoreCase = true) })
-        override fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> {
+        override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
+        override suspend fun findQuestionById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
+        override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null })
+        override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.filter { it.userId == userId && it.score != null && it.topic.contains(query, ignoreCase = true) })
+        override suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity> {
             findGradedByUserAndTopicsCalls += 1
             val content = rows
                 .filter { it.userId == userId && it.score != null && it.topic in topics }
@@ -484,7 +486,7 @@ class UserStatsServiceTest {
                 .take(pageable.pageSize)
             return PageImpl(content)
         }
-        override fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> {
+        override suspend fun findLatestGradedByUserAndTopics(userId: Long, topics: Collection<String>, perTopicLimit: Int): List<QuestionEntity> {
             findLatestGradedByUserAndTopicsCalls += 1
             return rows
                 .filter { it.userId == userId && it.score != null && it.topic in topics }
@@ -493,27 +495,27 @@ class UserStatsServiceTest {
                 .flatMap { topicRows -> topicRows.sortedByDescending { it.answeredAt ?: it.createdAt }.take(perTopicLimit) }
                 .sortedByDescending { it.answeredAt ?: it.createdAt }
         }
-        override fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> {
+        override suspend fun findAllGradedForStats(pageable: Pageable): Page<QuestionEntity> {
             findAllGradedForStatsCalls += 1
             return PageImpl(rows.filter { it.score != null && it.deletedAt == null })
         }
-        override fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
-        override fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
-        override fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
-        override fun countPendingForStudy(studyId: Long): Long = 0
-        override fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
-        override fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
-        override fun findPublicAnsweredById(id: Long): QuestionEntity? = null
-        override fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
-        override fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
-        override fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
+        override suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = emptyList()
+        override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
+        override suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
+        override suspend fun countPendingForStudy(studyId: Long): Long = 0
+        override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
+        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
+        override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -521,20 +523,20 @@ class UserStatsServiceTest {
         var findByIdCalls = 0
         var findAllByIdsCalls = 0
 
-        override fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
-        override fun findById(id: Long): Optional<QuestionStatsEntity> {
+        override suspend fun save(entity: QuestionStatsEntity): QuestionStatsEntity = entity
+        override suspend fun findById(id: Long): QuestionStatsEntity? {
             findByIdCalls += 1
-            return Optional.ofNullable(rows.firstOrNull { it.questionId == id })
+            return rows.firstOrNull { it.questionId == id }
         }
 
-        override fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
+        override suspend fun findAllByIds(ids: Collection<Long>): List<QuestionStatsEntity> {
             findAllByIdsCalls += 1
             return rows.filter { it.questionId in ids }
         }
 
-        override fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
-        override fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
+        override suspend fun incrementView(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int = 0
+        override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int = 0
     }
 }

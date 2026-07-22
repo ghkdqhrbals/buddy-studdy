@@ -64,7 +64,7 @@ enum class PermissionRequiredAction {
 }
 
 interface PermissionEvaluator {
-    fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult =
+    suspend fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult =
         evaluate(
             userId = principal.userId,
             deviceId = principal.deviceId,
@@ -77,7 +77,7 @@ interface PermissionEvaluator {
             ),
         )
 
-    fun evaluate(
+    suspend fun evaluate(
         userId: Long,
         deviceId: String,
         permissionCode: String,
@@ -152,7 +152,7 @@ data class RequirementEvaluationResult(
 
 interface PermissionRequirementEvaluator {
     fun supports(type: PermissionRequirementType): Boolean
-    fun evaluate(
+    suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -183,7 +183,7 @@ class DatabasePermissionEvaluator(
     private val users: UserStatusQueryPort,
     private val evaluators: List<PermissionRequirementEvaluator>,
 ) : PermissionEvaluator {
-    override fun evaluate(
+    override suspend fun evaluate(
         userId: Long,
         deviceId: String,
         permissionCode: String,
@@ -248,7 +248,7 @@ class TermsAgreedRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.TERMS_AGREED
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -288,7 +288,7 @@ class PreferenceEnabledRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.PREFERENCE_ENABLED
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -313,7 +313,7 @@ class QuotaAvailableRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.QUOTA_AVAILABLE
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -339,7 +339,7 @@ class DeviceRegisteredRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.DEVICE_REGISTERED
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -370,7 +370,7 @@ class UserStatusRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.USER_STATUS
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -395,7 +395,7 @@ class EmailVerifiedRequirementEvaluator(
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.EMAIL_VERIFIED
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,
@@ -416,7 +416,7 @@ class MinAppVersionRequirementEvaluator : PermissionRequirementEvaluator {
     override fun supports(type: PermissionRequirementType): Boolean =
         type == PermissionRequirementType.MIN_APP_VERSION
 
-    override fun evaluate(
+    override suspend fun evaluate(
         subject: PermissionEvaluationSubject,
         requirement: PermissionRequirementProjection,
         context: PermissionEvaluationContext,

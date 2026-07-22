@@ -1,71 +1,49 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.study.domain.entity.QuestionEmbeddingEntity
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
+import kotlinx.coroutines.reactive.awaitSingle
+import org.springframework.data.domain.Sort
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
+import org.springframework.data.relational.core.query.Criteria
+import org.springframework.data.relational.core.query.Query
+import org.springframework.stereotype.Repository
 import java.time.Instant
 
-interface QuestionEmbeddingRepository : JpaRepository<QuestionEmbeddingEntity, Long>, QuestionEmbeddingPort {
-    override fun save(
-        questionId: Long,
-        userId: Long,
-        studyId: Long,
-        topic: String,
-        question: String,
-        embedding: List<Float>,
+@Repository
+class QuestionEmbeddingRepository(private val template: R2dbcEntityTemplate) : QuestionEmbeddingPort {
+    override suspend fun save(
+        questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>,
     ): QuestionEmbeddingCandidate {
         val now = Instant.now()
-        val entity = QuestionEmbeddingEntity(
-            questionId = questionId,
-            userId = userId,
-            studyId = studyId,
-            topic = topic,
-            topicKey = topic.normalizedTopicKey(),
-            question = question,
-            embedding = embedding.toEmbeddingText(),
-            createdAt = now,
-            updatedAt = now,
-        )
-        val saved = save(entity)
-        return saved.toCandidate()
+        return template.saveEntity(
+            QuestionEmbeddingEntity(
+                questionId = questionId, userId = userId, studyId = studyId, topic = topic,
+                topicKey = topic.normalizedTopicKey(), question = question, embedding = embedding.joinToString(","),
+                createdAt = now, updatedAt = now,
+            ),
+            0,
+        ).toCandidate()
     }
 
-    override fun findRecentByStudyIdAndTopic(studyId: Long, topic: String, limit: Int): List<QuestionEmbeddingCandidate> =
-        findRecentByStudyIdAndTopicKeyInternal(studyId, topic.normalizedTopicKey(), PageRequest.of(0, limit.coerceAtLeast(1)))
-            .map { it.toCandidate() }
-
-    @Query(
-        """
-        select e from QuestionEmbeddingEntity e
-        where e.studyId = :studyId and e.topicKey = :topicKey
-        order by e.createdAt desc, e.questionId desc
-        """
-    )
-    fun findRecentByStudyIdAndTopicKeyInternal(
-        @Param("studyId") studyId: Long,
-        @Param("topicKey") topicKey: String,
-        pageable: org.springframework.data.domain.Pageable,
-    ): List<QuestionEmbeddingEntity>
+    override suspend fun findRecentByStudyIdAndTopic(
+        studyId: Long,
+        topic: String,
+        limit: Int,
+    ): List<QuestionEmbeddingCandidate> = template.select(
+        Query.query(
+            Criteria.where("study_id").`is`(studyId).and("topic_key").`is`(topic.normalizedTopicKey()),
+        ).sort(Sort.by(Sort.Direction.DESC, "created_at", "question_id")).limit(limit.coerceAtLeast(1)),
+        QuestionEmbeddingEntity::class.java,
+    ).collectList().awaitSingle().map { it.toCandidate() }
 }
 
-private fun QuestionEmbeddingEntity.toCandidate(): QuestionEmbeddingCandidate =
-    QuestionEmbeddingCandidate(
-        questionId = questionId,
-        question = question,
-        embedding = embedding.toFloatList(),
-    )
+private fun QuestionEmbeddingEntity.toCandidate() = QuestionEmbeddingCandidate(
+    questionId = questionId,
+    question = question,
+    embedding = embedding.split(',').mapNotNull { it.trim().toFloatOrNull() },
+)
 
-private fun List<Float>.toEmbeddingText(): String = joinToString(",")
-
-private fun String.toFloatList(): List<Float> =
-    split(',')
-        .mapNotNull { it.trim().toFloatOrNull() }
-
-private fun String.normalizedTopicKey(): String =
-    lowercase()
-        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-        .trim()
+private fun String.normalizedTopicKey() = lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()

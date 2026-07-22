@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth
 
+import kotlinx.coroutines.runBlocking
+
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.auth.application.permission.DatabasePermissionEvaluator
 import com.buddystudy.backend.auth.application.permission.DeviceRegisteredRequirementEvaluator
@@ -54,7 +56,7 @@ class DatabasePermissionEvaluatorTest {
     )
 
     @Test
-    fun `permission with no active requirements is granted from database permission`() {
+    fun `permission with no active requirements is granted from database permission`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.RECORD_READ, requiresActiveAccount = false)
 
         val result = evaluator.evaluate(principal(), Permissions.RECORD_READ)
@@ -64,7 +66,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `latest terms agreement failure includes terms content hash`() {
+    fun `latest terms agreement failure includes terms content hash`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -92,7 +94,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `user status requirement uses database status instead of JWT status`() {
+    fun `user status requirement uses database status instead of JWT status`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "SUSPENDED"
         requirements.rows += requirement(
@@ -111,7 +113,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `preference off fails notification permission`() {
+    fun `preference off fails notification permission`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection("notification:receive-marketing", requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -131,7 +133,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `terms agreement changes the next evaluation without issuing a new token`() {
+    fun `terms agreement changes the next evaluation without issuing a new token`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -160,7 +162,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `old terms agreement does not satisfy latest terms requirement`() {
+    fun `old terms agreement does not satisfy latest terms requirement`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -189,7 +191,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `quota shortage fails with quota exceeded metadata`() {
+    fun `quota shortage fails with quota exceeded metadata`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -209,7 +211,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `device registration requirement fails when device is missing`() {
+    fun `device registration requirement fails when device is missing`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection("notification:receive-info", requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -228,7 +230,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `email verification requirement fails when email is not verified`() {
+    fun `email verification requirement fails when email is not verified`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -246,7 +248,7 @@ class DatabasePermissionEvaluatorTest {
     }
 
     @Test
-    fun `minimum app version requirement fails with upgrade metadata`() {
+    fun `minimum app version requirement fails with upgrade metadata`(): Unit = runBlocking {
         permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
@@ -297,7 +299,7 @@ class DatabasePermissionEvaluatorTest {
     private class FakePermissionQueryPort : PermissionQueryPort {
         val rows = mutableSetOf<UserPermissionProjection>()
         var calls = 0
-        override fun permissionsForUser(userId: Long): Set<UserPermissionProjection> {
+        override suspend fun permissionsForUser(userId: Long): Set<UserPermissionProjection> {
             calls += 1
             return rows
         }
@@ -305,46 +307,46 @@ class DatabasePermissionEvaluatorTest {
 
     private class FakePermissionRequirementQueryPort : PermissionRequirementQueryPort {
         val rows = mutableListOf<PermissionRequirementProjection>()
-        override fun activeRequirements(permissionCode: String, now: Instant): List<PermissionRequirementProjection> =
+        override suspend fun activeRequirements(permissionCode: String, now: Instant): List<PermissionRequirementProjection> =
             rows.filter { it.permissionCode == permissionCode }
     }
 
     private class FakeTermsAgreementQueryPort : TermsAgreementQueryPort {
         val activeByCode = mutableMapOf<String, ActiveTermsProjection>()
         val agreedTermIds = mutableSetOf<Long>()
-        override fun activeTerms(now: Instant): List<ActiveTermsProjection> = activeByCode.values.toList()
-        override fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> =
+        override suspend fun activeTerms(now: Instant): List<ActiveTermsProjection> = activeByCode.values.toList()
+        override suspend fun activeTerms(userId: Long?, deviceId: String?, now: Instant): List<ActiveTermsProjection> =
             activeTerms(now).map { it.copy(agreed = hasAgreement(userId, deviceId, it.id)) }
-        override fun activeTerms(code: String, now: Instant): ActiveTermsProjection? = activeByCode[code]
-        override fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean = termsId in agreedTermIds
-        override fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean =
+        override suspend fun activeTerms(code: String, now: Instant): ActiveTermsProjection? = activeByCode[code]
+        override suspend fun hasAgreement(userId: Long?, deviceId: String?, termsId: Long): Boolean = termsId in agreedTermIds
+        override suspend fun hasRequiredAgreements(userId: Long, deviceId: String?, now: Instant): Boolean =
             activeTerms(now).filter { it.required }.all { it.id in agreedTermIds }
     }
 
     private class FakeNotificationPreferenceQueryPort : NotificationPreferenceQueryPort {
         var enabled = true
-        override fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean = enabled
+        override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean = enabled
     }
 
     private class FakePermissionQuotaQueryPort : PermissionQuotaQueryPort {
         var remaining = 1L
-        override fun remaining(userId: Long, key: String, now: Instant): Long = remaining
+        override suspend fun remaining(userId: Long, key: String, now: Instant): Long = remaining
     }
 
     private class FakeDevicePort : DevicePort {
         var device: DeviceEntity? = DeviceEntity(deviceId = "dev-1", apnsToken = "token")
-        override fun save(entity: DeviceEntity): DeviceEntity = entity
-        override fun findByDeviceId(deviceId: String): DeviceEntity? = device
-        override fun findAllByUserId(userId: Long): List<DeviceEntity> = emptyList()
+        override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
+        override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = device
+        override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> = emptyList()
     }
 
     private class FakeUserStatusQueryPort : UserStatusQueryPort {
         val statusByUser = mutableMapOf<Long, String>()
-        override fun status(userId: Long): String? = statusByUser[userId]
+        override suspend fun status(userId: Long): String? = statusByUser[userId]
     }
 
     private class FakeEmailVerificationQueryPort : EmailVerificationQueryPort {
         var verified = true
-        override fun isVerified(userId: Long): Boolean = verified
+        override suspend fun isVerified(userId: Long): Boolean = verified
     }
 }

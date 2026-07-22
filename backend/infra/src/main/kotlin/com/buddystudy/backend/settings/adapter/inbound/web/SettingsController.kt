@@ -3,6 +3,7 @@ package com.buddystudy.backend.settings.adapter.inbound.web
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
+import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemCommand
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController
 @Tag(name = "Settings", description = "Authenticated study settings and schedule configuration APIs.")
 class SettingsController(
     private val settings: SettingsWebPort,
+    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "Save study settings",
@@ -36,7 +38,7 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @PutMapping("/settings")
-    fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
+    suspend fun schedule(@Valid @RequestBody body: ScheduleRequest, authentication: Authentication) =
         settings.schedule(body, authentication)
 
     @Operation(summary = "Fetch study settings", description = "Returns the authenticated user's saved study settings, including per-study rooms and public-question preference. Secret values are returned only in the form intended for the app.")
@@ -45,7 +47,7 @@ class SettingsController(
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
     @GetMapping("/settings")
-    fun settings(authentication: Authentication) = settings.settings(authentication)
+    suspend fun settings(authentication: Authentication) = settings.settings(authentication)
 
     @Operation(summary = "Save one study room settings", description = "Updates settings for a single study room. Global interval and OpenAI key fields are accepted for compatibility but the route is scoped to one study room.")
     @ApiResponses(
@@ -55,33 +57,36 @@ class SettingsController(
     )
     @PutMapping("/studies/{studyId}/settings")
     @RequirePermission(Permissions.STUDY_UPDATE)
-    fun saveStudySettings(
+    suspend fun saveStudySettings(
         @PathVariable studyId: Long,
         @Valid @RequestBody body: ScheduleRequest,
         authentication: Authentication,
-    ) = settings.studySettings(studyId, body, authentication)
+    ): Any {
+        permissionGuard.check(authentication, Permissions.STUDY_UPDATE)
+        return settings.studySettings(studyId, body, authentication)
+    }
 }
 
 interface SettingsWebPort {
-    fun schedule(body: ScheduleRequest, authentication: Authentication): Any
-    fun settings(authentication: Authentication): Any
-    fun studySettings(studyId: Long, authentication: Authentication): Any
-    fun studySettings(studyId: Long, body: ScheduleRequest, authentication: Authentication): Any
+    suspend fun schedule(body: ScheduleRequest, authentication: Authentication): Any
+    suspend fun settings(authentication: Authentication): Any
+    suspend fun studySettings(studyId: Long, authentication: Authentication): Any
+    suspend fun studySettings(studyId: Long, body: ScheduleRequest, authentication: Authentication): Any
 }
 
 @Component
 class SettingsWebAdapter(
     private val settings: SettingsUseCase,
 ) : SettingsWebPort {
-    override fun schedule(body: ScheduleRequest, authentication: Authentication) =
+    override suspend fun schedule(body: ScheduleRequest, authentication: Authentication) =
         settings.upsertSchedule(authentication.principalOrThrow(), body.toCommand())
 
-    override fun settings(authentication: Authentication) = settings.settings(authentication.principalOrThrow())
+    override suspend fun settings(authentication: Authentication) = settings.settings(authentication.principalOrThrow())
 
-    override fun studySettings(studyId: Long, authentication: Authentication) =
+    override suspend fun studySettings(studyId: Long, authentication: Authentication) =
         settings.studySettings(authentication.principalOrThrow(), studyId)
 
-    override fun studySettings(studyId: Long, body: ScheduleRequest, authentication: Authentication) =
+    override suspend fun studySettings(studyId: Long, body: ScheduleRequest, authentication: Authentication) =
         settings.upsertStudySettings(authentication.principalOrThrow(), studyId, body.toCommand())
 }
 

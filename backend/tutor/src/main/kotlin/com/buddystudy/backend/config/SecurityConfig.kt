@@ -15,7 +15,6 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -36,7 +35,7 @@ import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilter
 import org.springframework.web.server.WebFilterChain
 import reactor.core.publisher.Mono
-import reactor.core.scheduler.Scheduler
+import kotlinx.coroutines.reactor.mono
 import java.util.UUID
 
 @Configuration
@@ -100,7 +99,6 @@ class BearerTokenFilter(
     private val userDevices: UserDevicePort,
     private val objectMapper: ObjectMapper,
     private val errorResponseFactory: ApiErrorResponseFactory,
-    @param:Qualifier("webFluxBlockingScheduler") private val blockingScheduler: Scheduler,
 ) : WebFilter {
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val authorization = exchange.request.headers.getFirst("Authorization")
@@ -131,10 +129,9 @@ class BearerTokenFilter(
     }
 
     private fun authentication(request: ServerHttpRequest, authorization: String): Mono<Authentication> =
-        Mono.fromCallable { authenticateBlocking(request, authorization) }
-            .subscribeOn(blockingScheduler)
+        mono { authenticate(request, authorization) }
 
-    private fun authenticateBlocking(request: ServerHttpRequest, authorization: String): Authentication {
+    private suspend fun authenticate(request: ServerHttpRequest, authorization: String): Authentication {
         if (!authorization.startsWith("Bearer ")) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid access token.")
         }

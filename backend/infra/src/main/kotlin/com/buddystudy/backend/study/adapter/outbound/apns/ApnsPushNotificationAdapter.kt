@@ -32,7 +32,7 @@ class ApnsPushNotificationAdapter(
         .version(HttpClient.Version.HTTP_2)
         .build()
 
-    override fun sendQuestion(message: PushQuestionMessage) {
+    override suspend fun sendQuestion(message: PushQuestionMessage) {
         require(message is ApnsQuestionMessage) { "APNs adapter cannot send ${message.type} messages." }
         val token = message.token.takeIf { it.isNotBlank() }
         if (token == null) {
