@@ -83,6 +83,10 @@ def max_value(values):
     return max(values) if values else 0.0
 
 
+def max_sample_value(samples, section, *keys):
+    return max((max_value(sample_values(samples, section, key)) for key in keys), default=0.0)
+
+
 def counter_delta(values):
     return max(0.0, values[-1] - values[0]) if len(values) >= 2 else 0.0
 
@@ -149,9 +153,16 @@ def load_telemetry_run(directory, runtime, round_number, scenario, target_rps=No
         "allocation_mib_per_second": (counter_delta(allocated) / 1024**2) / measured_seconds,
         "hikari_active_max": max_value(sample_values(samples, "actuator", "hikari.active")),
         "hikari_pending_max": max_value(sample_values(samples, "actuator", "hikari.pending")),
+        "r2dbc_acquired_max": max_value(sample_values(samples, "actuator", "r2dbc.acquired")),
+        "r2dbc_pending_max": max_value(sample_values(samples, "actuator", "r2dbc.pending")),
         "tomcat_busy_max": max_value(sample_values(samples, "actuator", "tomcat.busy")),
-        "webflux_active_max": max_value(sample_values(samples, "actuator", "webflux.executor.active")),
-        "webflux_queued_max": max_value(sample_values(samples, "actuator", "webflux.executor.queued")),
+        "http_active_max": max_sample_value(samples, "actuator", "http.active", "http.active.active_tasks"),
+        "reactor_pending_max": max_sample_value(
+            samples,
+            "actuator",
+            "reactor.pending_tasks",
+            "reactor.pending_tasks.value",
+        ),
         "pg_connections_max": max_value(sample_values(samples, "postgres", "connections_total")),
         "pg_active_max": max_value(sample_values(samples, "postgres", "connections_active")),
         "pg_waiting_max": max_value(sample_values(samples, "postgres", "connections_waiting")),
@@ -186,7 +197,7 @@ def main():
     parser.add_argument("--heap", required=True)
     parser.add_argument("--cpu-count", required=True)
     parser.add_argument("--db-pool", required=True)
-    parser.add_argument("--blocking-concurrency", required=True)
+    parser.add_argument("--mvc-http-workers", required=True)
     parser.add_argument("--logging", required=True)
     parser.add_argument("--telemetry-interval", required=True)
     parser.add_argument("--jfr", required=True)
@@ -202,8 +213,8 @@ def main():
         f"- Rounds: {args.rounds} (median reported, execution order alternated)",
         f"- Load: constant arrival rates {', '.join(str(rate) for rate in target_rates)} RPS for {args.duration} per endpoint",
         f"- JVM: `-Xms{args.heap} -Xmx{args.heap} -XX:ActiveProcessorCount={args.cpu_count}`",
-        f"- Hikari maximum pool: {args.db_pool}",
-        f"- Blocking request concurrency: {args.blocking_concurrency} for both MVC/Tomcat and WebFlux",
+        f"- Database connection pool maximum: {args.db_pool} (Hikari for MVC, R2DBC Pool for WebFlux)",
+        f"- MVC Tomcat worker maximum: {args.mvc_http_workers}; WebFlux uses Reactor Netty event loops sized from the visible CPU count",
         f"- API exchange logging: {args.logging}",
         f"- Telemetry sampling interval: {args.telemetry_interval}s",
         f"- JFR profile recording: {args.jfr}; Native Memory Tracking: {args.nmt}",
@@ -249,9 +260,9 @@ def main():
             "## Interpretation Rules",
             "",
             "- `health` isolates HTTP runtime and serialization; it does not predict DB-backed API capacity.",
-            "- `public-questions` measures JPA reads and a response containing 20 records.",
-            "- `studies` measures JWT verification, session/device DB lookup, JPA pagination, and a 100-row response.",
-            "- This project still uses blocking JPA. WebFlux should be judged primarily on event-loop safety, tail latency under slow clients, and overload behavior, not only peak RPS.",
+            "- `public-questions` measures database reads, mapping, and a response containing 20 records.",
+            "- `studies` measures JWT verification, session/device DB lookup, database pagination, and a 100-row response.",
+            "- MVC uses blocking JDBC/JPA while the current WebFlux runtime uses coroutine-based R2DBC end to end on the request path.",
             "- The 1,000-3,000 RPS sweep reveals the saturation knee; repeat around the first stage that drops iterations with smaller RPS increments.",
             "- The load generator and backend share one host in this harness. Use a separate load-generator host for production capacity decisions.",
         ]
@@ -297,7 +308,7 @@ def main():
                 "",
                 "## Pools and Dependencies",
                 "",
-                "| Endpoint | Target RPS | Runtime | Hikari active / pending max | Runtime workers active / queued max | PostgreSQL total / active / waiting max | PG cache hit | PG CPU / memory MiB | Redis CPU / memory MiB / ops max |",
+                "| Endpoint | Target RPS | Runtime | DB pool acquired / pending max | HTTP work active / queued max | PostgreSQL total / active / waiting max | PG cache hit | PG CPU / memory MiB | Redis CPU / memory MiB / ops max |",
                 "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
@@ -307,11 +318,13 @@ def main():
                     row = telemetry[(runtime, scenario, target_rps)]
                     if not row:
                         continue
-                    worker_active = row["tomcat_busy_max"] if runtime == "mvc" else row["webflux_active_max"]
-                    worker_queued = 0.0 if runtime == "mvc" else row["webflux_queued_max"]
+                    pool_active = row["hikari_active_max"] if runtime == "mvc" else row["r2dbc_acquired_max"]
+                    pool_pending = row["hikari_pending_max"] if runtime == "mvc" else row["r2dbc_pending_max"]
+                    worker_active = row["tomcat_busy_max"] if runtime == "mvc" else row["http_active_max"]
+                    worker_queued = 0.0 if runtime == "mvc" else row["reactor_pending_max"]
                     lines.append(
                         f"| {scenario} | {target_rps} | {label} | "
-                        f"{row['hikari_active_max']:.0f} / {row['hikari_pending_max']:.0f} | "
+                        f"{pool_active:.0f} / {pool_pending:.0f} | "
                         f"{worker_active:.0f} / {worker_queued:.0f} | {row['pg_connections_max']:.0f} / "
                         f"{row['pg_active_max']:.0f} / {row['pg_waiting_max']:.0f} | {row['pg_cache_hit_percent']:.2f}% | "
                         f"{row['postgres_cpu_median']:.1f}% / {row['postgres_memory_peak_mib']:.1f} | "

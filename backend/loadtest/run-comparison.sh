@@ -190,6 +190,7 @@ start_app() {
     APP_PORT="$APP_PORT" \
     SPRING_PROFILES_ACTIVE=benchmark \
     DATABASE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/buddystudy" \
+    R2DBC_DATABASE_URL="r2dbc:postgresql://127.0.0.1:$POSTGRES_PORT/buddystudy" \
     DATABASE_USERNAME=buddystudy \
     DATABASE_PASSWORD=benchmark-password \
     DB_POOL_MAX="$DB_POOL_MAX" \
@@ -201,6 +202,8 @@ start_app() {
     REDIS_PORT="$REDIS_PORT" \
     FLYWAY_ENABLED=true \
     SCHEDULER_ENABLED=false \
+    ADMIN_ANALYTICS_ENABLED=false \
+    ADMIN_ANALYTICS_DATABASE_NAME= \
     REACTION_STREAM_ENABLED=false \
     ENABLE_OPENAPI_DOCS=false \
     WEBFLUX_BLOCKING_CORE_SIZE="$BLOCKING_MAX_SIZE" \
@@ -208,6 +211,7 @@ start_app() {
     WEBFLUX_BLOCKING_QUEUE_CAPACITY="$BLOCKING_QUEUE_CAPACITY" \
     MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,metrics \
     LOGGING_LEVEL_COM_BUDDYSTUDY_BACKEND_COMMON_ADAPTER_INBOUND_WEB="$BENCHMARK_LOGGING" \
+    LOGGING_LEVEL_REACTOR_CORE_SCHEDULER_SCHEDULERS="$BENCHMARK_LOGGING" \
     "$JAVA_BIN" "${jvm_options[@]}" -jar "$jar" \
     >"$log_file" 2>&1 &
   APP_PID=$!
@@ -251,6 +255,7 @@ run_scenario() {
   local telemetry_file="$RESULTS_DIR/telemetry/${runtime}-round${round}-${stage}.jsonl"
   local timeseries_file="$RESULTS_DIR/timeseries/${runtime}-round${round}-${stage}.json"
   local k6_dashboard_file="$RESULTS_DIR/k6-dashboard/${runtime}-round${round}-${stage}.html"
+  local k6_log_file="$RESULTS_DIR/logs/k6-${runtime}-round${round}-${stage}.log"
   local recording_name="${runtime}_round${round}_${scenario//-/_}_rps${target_rps}"
   local jfr_file="$RESULTS_DIR/jfr/${runtime}-round${round}-${stage}.jfr"
 
@@ -263,7 +268,7 @@ run_scenario() {
     REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
     DURATION="$WARMUP_DURATION" \
     SUMMARY_PATH="$prefix-warmup.json" \
-    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null
+    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >"$k6_log_file" 2>&1
 
   if [[ "$ENABLE_NMT" == "true" && -x "$JCMD_BIN" ]]; then
     "$JCMD_BIN" "$APP_PID" VM.native_memory baseline >"$diagnostic_prefix-nmt-baseline.txt" 2>&1 || true
@@ -288,7 +293,7 @@ run_scenario() {
     REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
     DURATION="$DURATION" \
     SUMMARY_PATH="$prefix.json" \
-    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >/dev/null &
+    k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >>"$k6_log_file" 2>&1 &
   LOAD_PID=$!
 
   python3 "$SCRIPT_DIR/telemetry.py" \
@@ -358,7 +363,7 @@ write_report() {
     --heap "$JVM_HEAP" \
     --cpu-count "$JVM_CPU_COUNT" \
     --db-pool "$DB_POOL_MAX" \
-    --blocking-concurrency "$BLOCKING_MAX_SIZE" \
+    --mvc-http-workers "$BLOCKING_MAX_SIZE" \
     --logging "$BENCHMARK_LOGGING" \
     --telemetry-interval "$TELEMETRY_INTERVAL" \
     --jfr "$ENABLE_JFR" \

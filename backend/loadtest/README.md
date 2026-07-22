@@ -1,14 +1,14 @@
 # MVC vs WebFlux Load Test
 
-This benchmark compares the last MVC runtime with the current WebFlux runtime using the same application code, PostgreSQL fixture, Redis instance, JVM heap, visible CPU count, and Hikari pool size.
+This benchmark compares the last MVC/JDBC runtime with the current WebFlux/R2DBC runtime using the same PostgreSQL fixture, Redis instance, JVM heap, visible CPU count, and database connection-pool size.
 
 ## Compared Workloads
 
 | Scenario | Endpoint | What it measures |
 | --- | --- | --- |
 | `health` | `GET /health` | HTTP server, routing, and JSON serialization without persistence |
-| `public-questions` | `GET /api/v1/public/questions?limit=20...` | JPA reads, multiple repository lookups, and a 20-row response |
-| `studies` | `GET /api/v1/studies?limit=100...` | JWT verification, DB-backed session validation, JPA pagination, and a 100-row response |
+| `public-questions` | `GET /api/v1/public/questions?limit=20...` | Database reads, multiple repository lookups, and a 20-row response |
+| `studies` | `GET /api/v1/studies?limit=100...` | JWT verification, DB-backed session validation, database pagination, and a 100-row response |
 
 The fixture contains one registered user, 100 studies, and 500 graded public questions. Testing an empty database is intentionally avoided because it hides query, mapping, and serialization costs.
 
@@ -37,9 +37,10 @@ The default comparison is:
 - MVC: `eca7e320`, the commit immediately before the WebFlux migration
 - WebFlux: `HEAD`
 - JVM: 512 MiB fixed heap and four visible processors
-- Hikari: 10 connections
-- Blocking request concurrency: 16 for both MVC/Tomcat and WebFlux
+- Database pool: 10 connections (Hikari for MVC, R2DBC Pool for WebFlux)
+- MVC Tomcat workers: 16; WebFlux uses Reactor Netty event loops based on the four visible processors
 - API exchange logging: disabled for framework isolation
+- Scheduler, stream consumers, and admin analytics jobs: disabled for API isolation
 - Constant arrival-rate stages: 1,000, 1,500, 2,000, 2,500, and 3,000 RPS per API
 - Latency percentiles: p50, p90, p95, and p99, reported with HTTP RPS, successful RPS, failures, and dropped iterations
 
@@ -51,8 +52,8 @@ Each measured API interval collects the following at a two-second default cadenc
 
 - JVM process CPU, normalized process/host CPU, RSS, virtual memory, open files, and OS/JVM thread counts.
 - Heap, non-heap, and direct-buffer memory; allocation rate; GC count and pause time.
-- Hikari active, idle, pending, and configured connections.
-- MVC Tomcat busy/current threads or WebFlux blocking-executor active/queued workers.
+- Hikari active/pending connections for MVC and R2DBC Pool acquired/pending connections for WebFlux.
+- MVC Tomcat busy workers or WebFlux active HTTP requests and Reactor Netty pending tasks.
 - PostgreSQL active/idle/waiting connections, transaction and buffer-cache counters, plus container CPU and memory.
 - Redis clients, memory, operations, cache/eviction counters, plus container CPU and memory.
 - Per-scenario JFR `profile` recordings, JVM thread dumps, heap summaries, and Native Memory Tracking diffs.
@@ -94,7 +95,7 @@ MIN_FREE_DISK_MB=2048 backend/loadtest/run-comparison.sh
 - Run k6 from a different machine before treating the absolute RPS as production capacity. A same-host run is useful for regression comparison but introduces CPU contention between k6, the JVM, and Docker Desktop.
 - Compare achieved RPS, dropped iterations, error rate, and then p90/p95/p99. At saturation, completed-request latency alone is selection-biased.
 - `health` is not evidence that DB-backed APIs improved.
-- Because persistence remains JPA/JDBC, Hikari and PostgreSQL still determine the useful DB concurrency.
+- MVC uses JPA/JDBC/Hikari; current WebFlux uses coroutine repositories over R2DBC Pool. PostgreSQL capacity still bounds useful DB concurrency in both cases.
 - A WebFlux result with similar peak RPS can still be preferable if it maintains lower tail latency with slow clients and rejects overload predictably.
 - Compare CPU at the same RPS as well as maximum RPS. A framework that reaches a similar RPS with more CPU has less production headroom.
 - macOS `ps` process CPU can exceed 100% because it counts CPU cores. Actuator process CPU is normalized to the JVM-visible processor count and host CPU includes k6 and Docker Desktop contention.
