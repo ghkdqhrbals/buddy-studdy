@@ -9,12 +9,15 @@ MVC_REF="${MVC_REF:-eca7e320}"
 WEBFLUX_REF="${WEBFLUX_REF:-HEAD}"
 ROUNDS="${ROUNDS:-3}"
 TARGET_RPS_LIST="${TARGET_RPS_LIST:-1000,1500,2000,2500,3000}"
+SCENARIO_LIST="${SCENARIO_LIST:-health,public-questions,studies}"
 DURATION="${DURATION:-30s}"
 WARMUP_DURATION="${WARMUP_DURATION:-10s}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-5s}"
+STUDIES_LIMIT="${STUDIES_LIMIT:-100}"
 PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-}"
 MAX_VUS="${MAX_VUS:-}"
 STAGE_COOLDOWN_SECONDS="${STAGE_COOLDOWN_SECONDS:-5}"
+RESTART_APP_PER_STAGE="${RESTART_APP_PER_STAGE:-false}"
 JVM_HEAP="${JVM_HEAP:-512m}"
 JVM_CPU_COUNT="${JVM_CPU_COUNT:-4}"
 DB_POOL_MAX="${DB_POOL_MAX:-10}"
@@ -27,11 +30,25 @@ ENABLE_NMT="${ENABLE_NMT:-true}"
 MIN_FREE_DISK_MB="${MIN_FREE_DISK_MB:-4096}"
 RESULTS_DIR="${RESULTS_DIR:-$SCRIPT_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)}"
 IFS=',' read -r -a TARGET_RATES <<< "$TARGET_RPS_LIST"
+IFS=',' read -r -a SCENARIOS <<< "$SCENARIO_LIST"
 for target_rps in "${TARGET_RATES[@]}"; do
   if [[ ! "$target_rps" =~ ^[1-9][0-9]*$ ]]; then
     echo "TARGET_RPS_LIST must contain positive integers: $TARGET_RPS_LIST" >&2
     exit 1
   fi
+done
+if [[ ! "$STUDIES_LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "STUDIES_LIMIT must be a positive integer: $STUDIES_LIMIT" >&2
+  exit 1
+fi
+for scenario in "${SCENARIOS[@]}"; do
+  case "$scenario" in
+    health|public-questions|studies) ;;
+    *)
+      echo "SCENARIO_LIST contains an unsupported scenario: $scenario" >&2
+      exit 1
+      ;;
+  esac
 done
 
 if [[ -n "${BENCHMARK_JAVA_BIN:-}" ]]; then
@@ -266,6 +283,7 @@ run_scenario() {
     PRE_ALLOCATED_VUS="$PRE_ALLOCATED_VUS" \
     MAX_VUS="$MAX_VUS" \
     REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
+    STUDIES_LIMIT="$STUDIES_LIMIT" \
     DURATION="$WARMUP_DURATION" \
     SUMMARY_PATH="$prefix-warmup.json" \
     k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >"$k6_log_file" 2>&1
@@ -291,6 +309,7 @@ run_scenario() {
     PRE_ALLOCATED_VUS="$PRE_ALLOCATED_VUS" \
     MAX_VUS="$MAX_VUS" \
     REQUEST_TIMEOUT="$REQUEST_TIMEOUT" \
+    STUDIES_LIMIT="$STUDIES_LIMIT" \
     DURATION="$DURATION" \
     SUMMARY_PATH="$prefix.json" \
     k6 run --quiet "$SCRIPT_DIR/k6/api-benchmark.js" >>"$k6_log_file" 2>&1 &
@@ -341,10 +360,15 @@ run_runtime() {
   start_app "$runtime" "$round" "$jar"
   seed_data
 
-  for scenario in health public-questions studies; do
+  local stage_index=0
+  for scenario in "${SCENARIOS[@]}"; do
     for target_rps in "${TARGET_RATES[@]}"; do
+      if [[ "$RESTART_APP_PER_STAGE" == "true" && "$stage_index" -gt 0 ]]; then
+        start_app "$runtime" "$round" "$jar"
+      fi
       echo "[$runtime round $round] $scenario at $target_rps RPS"
       run_scenario "$runtime" "$round" "$scenario" "$target_rps"
+      stage_index=$((stage_index + 1))
     done
   done
 
@@ -359,7 +383,9 @@ write_report() {
     --webflux-ref "$WEBFLUX_COMMIT" \
     --rounds "$ROUNDS" \
     --target-rps-list "$TARGET_RPS_LIST" \
+    --scenario-list "$SCENARIO_LIST" \
     --duration "$DURATION" \
+    --studies-limit "$STUDIES_LIMIT" \
     --heap "$JVM_HEAP" \
     --cpu-count "$JVM_CPU_COUNT" \
     --db-pool "$DB_POOL_MAX" \
@@ -371,6 +397,7 @@ write_report() {
   python3 "$SCRIPT_DIR/render_dashboard.py" "$RESULTS_DIR" \
     --rounds "$ROUNDS" \
     --target-rps-list "$TARGET_RPS_LIST" \
+    --scenario-list "$SCENARIO_LIST" \
     --duration "$DURATION"
 }
 

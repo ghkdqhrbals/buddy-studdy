@@ -8,7 +8,7 @@ This benchmark compares the last MVC/JDBC runtime with the current WebFlux/R2DBC
 | --- | --- | --- |
 | `health` | `GET /health` | HTTP server, routing, and JSON serialization without persistence |
 | `public-questions` | `GET /api/v1/public/questions?limit=20...` | Database reads, multiple repository lookups, and a 20-row response |
-| `studies` | `GET /api/v1/studies?limit=100...` | JWT verification, DB-backed session validation, database pagination, and a 100-row response |
+| `studies` | `GET /api/v1/studies?limit=<STUDIES_LIMIT>...` | JWT verification, DB-backed session validation, database pagination, and a configurable response size (default 100) |
 
 The fixture contains one registered user, 100 studies, and 500 graded public questions. Testing an empty database is intentionally avoided because it hides query, mapping, and serialization costs.
 
@@ -39,7 +39,7 @@ The default comparison is:
 - JVM: 512 MiB fixed heap and four visible processors
 - Database pool: 10 connections (Hikari for MVC, R2DBC Pool for WebFlux)
 - MVC Tomcat workers: 16; WebFlux uses Reactor Netty event loops based on the four visible processors
-- API exchange logging: disabled for framework isolation
+- API exchange log emission: disabled. The current filter still captures bodies and formats messages before SLF4J drops them; account for that cost until the filter is made log-level aware.
 - Scheduler, stream consumers, and admin analytics jobs: disabled for API isolation
 - Constant arrival-rate stages: 1,000, 1,500, 2,000, 2,500, and 3,000 RPS per API
 - Latency percentiles: p50, p90, p95, and p99, reported with HTTP RPS, successful RPS, failures, and dropped iterations
@@ -70,6 +70,14 @@ BENCHMARK_LOGGING=INFO ROUNDS=3 DURATION=30s backend/loadtest/run-comparison.sh
 
 # Finer sweep around an observed saturation knee
 TARGET_RPS_LIST=1500,1750,2000,2250,2500 ROUNDS=5 DURATION=60s \
+  backend/loadtest/run-comparison.sh
+
+# Isolate one endpoint and restart the application before every measured rate
+SCENARIO_LIST=studies TARGET_RPS_LIST=100,200,300,400,500,600 \
+  RESTART_APP_PER_STAGE=true backend/loadtest/run-comparison.sh
+
+# Control response-row materialization cost
+SCENARIO_LIST=studies TARGET_RPS_LIST=400 STUDIES_LIMIT=1 \
   backend/loadtest/run-comparison.sh
 
 # Explicit refs

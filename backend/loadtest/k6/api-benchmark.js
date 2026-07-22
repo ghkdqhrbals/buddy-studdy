@@ -7,6 +7,7 @@ const vus = Number(__ENV.VUS || 50);
 const targetRps = Number(__ENV.TARGET_RPS || 0);
 const duration = __ENV.DURATION || "30s";
 const requestTimeout = __ENV.REQUEST_TIMEOUT || "5s";
+const studiesLimit = Number(__ENV.STUDIES_LIMIT || 100);
 const preAllocatedVUs = Number(
   __ENV.PRE_ALLOCATED_VUS || Math.max(100, Math.ceil(targetRps * 0.25)),
 );
@@ -62,7 +63,7 @@ function requestDefinition() {
         throw new Error("ACCESS_TOKEN is required for the studies scenario.");
       }
       return {
-        path: "/api/v1/studies?limit=100&offset=0",
+        path: `/api/v1/studies?limit=${studiesLimit}&offset=0`,
         params: {
           ...commonParams,
           headers: { Authorization: `Bearer ${__ENV.ACCESS_TOKEN}` },

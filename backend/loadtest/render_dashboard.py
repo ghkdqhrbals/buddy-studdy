@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-SCENARIOS = ("health", "public-questions", "studies")
 RUNTIMES = ("mvc", "webflux")
 POINT_METRICS = (
     "rps", "p50Ms", "p90Ms", "p95Ms", "p99Ms", "failureRate", "dropped", "vus"
@@ -72,9 +71,9 @@ def read_json(path):
         return json.load(handle)
 
 
-def load_data(results_dir, rounds, rates):
-    data = {scenario: {} for scenario in SCENARIOS}
-    for scenario in SCENARIOS:
+def load_data(results_dir, rounds, rates, scenarios):
+    data = {scenario: {} for scenario in scenarios}
+    for scenario in scenarios:
         for rate in rates:
             data[scenario][str(rate)] = {}
             for runtime in RUNTIMES:
@@ -125,7 +124,7 @@ main{max-width:1520px;margin:auto;padding:24px}.toolbar{display:flex;align-items
 @media(max-width:900px){main{padding:14px}.cards,.grid{grid-template-columns:1fr}.chart.full{grid-column:auto}.meta{width:100%;margin:0}}
 </style></head><body>
 <header><strong>BuddyStudy Load Test</strong><span>MVC vs WebFlux · constant arrival rate</span></header><main>
-<div class="toolbar"><div class="field"><label>Endpoint</label><select id="scenario"><option value="health">GET /health</option><option value="public-questions">GET /api/v1/public/questions</option><option value="studies">GET /api/v1/studies</option></select></div><div class="field"><label>Target RPS</label><div class="rates" id="rates"></div></div><div class="meta" id="meta"></div></div>
+<div class="toolbar"><div class="field"><label>Endpoint</label><select id="scenario"></select></div><div class="field"><label>Target RPS</label><div class="rates" id="rates"></div></div><div class="meta" id="meta"></div></div>
 <section class="cards" id="cards"></section><section class="grid">
 <article class="chart full"><div class="chart-head"><h2>Successful TPS over time</h2><div class="legend"></div></div><canvas id="tps"></canvas></article>
 <article class="chart"><div class="chart-head"><h2>Response time p90 / p95</h2><div class="legend"></div></div><canvas id="latency"></canvas></article>
@@ -138,7 +137,7 @@ main{max-width:1520px;margin:auto;padding:24px}.toolbar{display:flex;align-items
 <div class="table-wrap"><table><thead><tr><th>Target RPS</th><th>Runtime</th><th>HTTP RPS</th><th>Successful RPS</th><th>Success target</th><th>p90 ms</th><th>p95 ms</th><th>p99 ms</th><th>Failed</th><th>Dropped</th></tr></thead><tbody id="rows"></tbody></table></div>
 <p class="note">Medians across rounds. HTTP RPS includes failed responses; Successful RPS excludes them. At saturation, judge successful TPS, dropped work, and failures before latency percentiles. The load generator and server shared this host.</p>
 </main><script>
-const DATA=__DATA__,META=__META__,colors={mvc:'#2563eb',webflux:'#ea580c',target:'#475467'},params=new URLSearchParams(location.search);let rate=META.rates.map(String).includes(params.get('rate'))?params.get('rate'):String(META.rates[0]);const scenario=document.getElementById('scenario'),rates=document.getElementById('rates');if(Object.hasOwn(DATA,params.get('scenario')))scenario.value=params.get('scenario');META.rates.forEach(v=>{const b=document.createElement('button');b.textContent=v;b.onclick=()=>{rate=String(v);render()};rates.appendChild(b)});scenario.onchange=render;window.onresize=drawAll;
+const DATA=__DATA__,META=__META__,colors={mvc:'#2563eb',webflux:'#ea580c',target:'#475467'},params=new URLSearchParams(location.search),scenarioLabels={health:'GET /health','public-questions':'GET /api/v1/public/questions',studies:'GET /api/v1/studies'};let rate=META.rates.map(String).includes(params.get('rate'))?params.get('rate'):String(META.rates[0]);const scenario=document.getElementById('scenario'),rates=document.getElementById('rates');META.scenarios.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=scenarioLabels[value]||value;scenario.appendChild(option)});if(Object.hasOwn(DATA,params.get('scenario')))scenario.value=params.get('scenario');META.rates.forEach(v=>{const b=document.createElement('button');b.textContent=v;b.onclick=()=>{rate=String(v);render()};rates.appendChild(b)});scenario.onchange=render;window.onresize=drawAll;
 const legend=items=>items.map(i=>`<span><i style="background:${i.color}"></i>${i.name}</span>`).join('');const selected=()=>DATA[scenario.value][rate];
 function series(runtime,source,key,name,color,dash=[]){return{name,color,dash,points:selected()[runtime][source].map(p=>({x:p.elapsedSeconds,y:Number(p[key]||0)}))}}
 function draw(id,input,unit='',floor=0){const canvas=document.getElementById(id),ratio=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;c=canvas.getContext('2d');canvas.width=w*ratio;canvas.height=h*ratio;c.scale(ratio,ratio);const pad={l:56,r:18,t:16,b:30},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b,pts=input.flatMap(s=>s.points),maxX=Math.max(1,...pts.map(p=>p.x)),maxY=Math.max(floor,...pts.map(p=>p.y))*1.12||1,sx=x=>pad.l+x/maxX*pw,sy=y=>pad.t+ph-y/maxY*ph;c.font='11px -apple-system';c.fillStyle='#667085';c.strokeStyle='#e4e7ec';c.lineWidth=1;for(let i=0;i<=4;i++){const y=pad.t+ph*i/4;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();const v=maxY*(1-i/4);c.fillText(`${v>=100?v.toFixed(0):v.toFixed(1)}${unit}`,4,y+4)}for(let i=0;i<=5;i++){const x=pad.l+pw*i/5;c.fillText(`${Math.round(maxX*i/5)}s`,x-8,h-8)}input.forEach(s=>{c.strokeStyle=s.color;c.lineWidth=2;c.setLineDash(s.dash);c.beginPath();s.points.forEach((p,i)=>i?c.lineTo(sx(p.x),sy(p.y)):c.moveTo(sx(p.x),sy(p.y)));c.stroke();c.setLineDash([])});canvas.parentElement.querySelector('.legend').innerHTML=legend(input)}
@@ -153,11 +152,13 @@ def main():
     parser.add_argument("results_dir", type=Path)
     parser.add_argument("--rounds", type=int, required=True)
     parser.add_argument("--target-rps-list", required=True)
+    parser.add_argument("--scenario-list", required=True)
     parser.add_argument("--duration", required=True)
     args = parser.parse_args()
     rates = [int(value) for value in args.target_rps_list.split(",")]
-    data = load_data(args.results_dir, args.rounds, rates)
-    metadata = {"rounds": args.rounds, "rates": rates, "duration": args.duration, "generated": args.results_dir.name}
+    scenarios = [value for value in args.scenario_list.split(",") if value]
+    data = load_data(args.results_dir, args.rounds, rates, scenarios)
+    metadata = {"rounds": args.rounds, "rates": rates, "scenarios": scenarios, "duration": args.duration, "generated": args.results_dir.name}
     (args.results_dir / "DASHBOARD_DATA.json").write_text(json.dumps(data, separators=(",", ":")) + "\n")
     html = HTML.replace("__DATA__", json.dumps(data, separators=(",", ":"))).replace("__META__", json.dumps(metadata, separators=(",", ":")))
     (args.results_dir / "DASHBOARD.html").write_text(html)

@@ -193,7 +193,9 @@ def main():
     parser.add_argument("--webflux-ref", required=True)
     parser.add_argument("--rounds", type=int, required=True)
     parser.add_argument("--target-rps-list", required=True)
+    parser.add_argument("--scenario-list", required=True)
     parser.add_argument("--duration", required=True)
+    parser.add_argument("--studies-limit", type=int, required=True)
     parser.add_argument("--heap", required=True)
     parser.add_argument("--cpu-count", required=True)
     parser.add_argument("--db-pool", required=True)
@@ -204,6 +206,7 @@ def main():
     parser.add_argument("--nmt", required=True)
     args = parser.parse_args()
     target_rates = [int(value) for value in args.target_rps_list.split(",")]
+    scenarios = [value for value in args.scenario_list.split(",") if value]
 
     lines = [
         "# MVC vs WebFlux Load-Test Result",
@@ -212,6 +215,7 @@ def main():
         f"- WebFlux ref: `{args.webflux_ref}`",
         f"- Rounds: {args.rounds} (median reported, execution order alternated)",
         f"- Load: constant arrival rates {', '.join(str(rate) for rate in target_rates)} RPS for {args.duration} per endpoint",
+        f"- Studies page size: {args.studies_limit}",
         f"- JVM: `-Xms{args.heap} -Xmx{args.heap} -XX:ActiveProcessorCount={args.cpu_count}`",
         f"- Database connection pool maximum: {args.db_pool} (Hikari for MVC, R2DBC Pool for WebFlux)",
         f"- MVC Tomcat worker maximum: {args.mvc_http_workers}; WebFlux uses Reactor Netty event loops sized from the visible CPU count",
@@ -225,7 +229,7 @@ def main():
     ]
 
     comparisons = []
-    for scenario in ("health", "public-questions", "studies"):
+    for scenario in scenarios:
         for target_rps in target_rates:
             mvc = load_results(args.results_dir, "mvc", args.rounds, scenario, target_rps)
             webflux = load_results(args.results_dir, "webflux", args.rounds, scenario, target_rps)
@@ -261,7 +265,7 @@ def main():
             "",
             "- `health` isolates HTTP runtime and serialization; it does not predict DB-backed API capacity.",
             "- `public-questions` measures database reads, mapping, and a response containing 20 records.",
-            "- `studies` measures JWT verification, session/device DB lookup, database pagination, and a 100-row response.",
+            f"- `studies` measures JWT verification, session/device DB lookup, database pagination, and a {args.studies_limit}-row response.",
             "- MVC uses blocking JDBC/JPA while the current WebFlux runtime uses coroutine-based R2DBC end to end on the request path.",
             "- The 1,000-3,000 RPS sweep reveals the saturation knee; repeat around the first stage that drops iterations with smaller RPS increments.",
             "- The load generator and backend share one host in this harness. Use a separate load-generator host for production capacity decisions.",
@@ -271,7 +275,7 @@ def main():
     telemetry = {
         (runtime, scenario, target_rps): load_telemetry(args.results_dir, runtime, args.rounds, scenario, target_rps)
         for runtime in ("mvc", "webflux")
-        for scenario in ("health", "public-questions", "studies")
+        for scenario in scenarios
         for target_rps in target_rates
     }
     if any(telemetry.values()):
@@ -286,7 +290,7 @@ def main():
                 "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
-        for scenario in ("health", "public-questions", "studies"):
+        for scenario in scenarios:
             for target_rps in target_rates:
                 for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
                     row = telemetry[(runtime, scenario, target_rps)]
@@ -312,7 +316,7 @@ def main():
                 "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
-        for scenario in ("health", "public-questions", "studies"):
+        for scenario in scenarios:
             for target_rps in target_rates:
                 for runtime, label in (("mvc", "MVC"), ("webflux", "WebFlux")):
                     row = telemetry[(runtime, scenario, target_rps)]
