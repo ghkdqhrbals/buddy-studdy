@@ -21,7 +21,3 @@ interface NotificationPersistencePort {
     suspend fun markPushSent(id: Long, now: Instant): Int
     suspend fun markPushFailed(id: Long, error: String, now: Instant): Int
 }
-
-interface NotificationStreamPublishPort {
-    suspend fun publishNotification(command: com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand): Boolean
-}

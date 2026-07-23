@@ -78,6 +78,9 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Stores generated questions in PostgreSQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
   - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through direct Redis Streams.
+  - Transactional domain writes append typed events to `redis_event_outbox` in the same R2DBC transaction. A single polling dispatcher claims rows with `FOR UPDATE SKIP LOCKED`, publishes them to Redis Streams, and retries failures with a lease and exponential backoff.
+  - Redis delivery is at-least-once. `(event_type, event_id)` is the producer idempotency key, and consumers must keep their existing event-id deduplication because a crash can occur after Redis accepts an event but before the outbox row is marked published.
+  - Outbox SQL uses jOOQ classes generated from the ordered Flyway migration history, so table and column changes fail at compile/code-generation time instead of relying on untyped row maps.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
 
 - `Views`

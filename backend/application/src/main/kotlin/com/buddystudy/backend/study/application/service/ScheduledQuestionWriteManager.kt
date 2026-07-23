@@ -1,12 +1,12 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.backend.common.application.transaction.afterReactiveCommit
+import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
-import com.buddystudy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -14,7 +14,6 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -27,11 +26,9 @@ class ScheduledQuestionWriteManager(
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
-    private val questionCreatedPublisher: QuestionCreatedPublishPort,
+    private val outbox: RedisEventOutboxPort,
     private val notifications: PublishNotificationUseCase,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
-
     @Transactional
     suspend fun complete(
         study: StudyEntity,
@@ -58,26 +55,15 @@ class ScheduledQuestionWriteManager(
         questionKeys.markQuestionCreated(questionKey, now)
         study.markScheduleCompleted(now)
         studies.save(study)
-        afterReactiveCommit {
-            runCatching { questionCreatedPublisher.publishQuestionCreated(saved.id, appLanguage, now) }
-                .onFailure { error ->
-                    log.warn(
-                        "scheduled_question_after_commit_event_failed studyId={} questionId={} error={}",
-                        study.id,
-                        saved.id,
-                        error.message,
-                    )
-                }
-            runCatching { notifications.publish(saved.toQuestionNotification(study, appLanguage)) }
-                .onFailure { error ->
-                    log.warn(
-                        "scheduled_question_after_commit_notification_failed studyId={} questionId={} error={}",
-                        study.id,
-                        saved.id,
-                        error.message,
-                    )
-                }
-        }
+        outbox.appendQuestionCreated(
+            QuestionCreatedOutboxEvent(
+                eventId = "question-created-${saved.id}",
+                questionId = saved.id,
+                language = appLanguage,
+                createdAt = now,
+            ),
+        )
+        notifications.publish(saved.toQuestionNotification(study, appLanguage))
         return saved
     }
 

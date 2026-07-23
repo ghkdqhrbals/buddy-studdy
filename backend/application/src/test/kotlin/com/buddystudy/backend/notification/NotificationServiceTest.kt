@@ -3,9 +3,11 @@ package com.buddystudy.backend.notification
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
+import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.port.outbound.NotificationStreamPublishPort
 import com.buddystudy.backend.notification.application.service.NotificationService
 import com.buddystudy.notification.domain.entity.AppNotificationEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -18,8 +20,8 @@ import java.time.Instant
 
 class NotificationServiceTest {
     private val store = FakeNotificationStore()
-    private val publisher = FakeNotificationPublisher()
-    private val service = NotificationService(store, publisher)
+    private val outbox = FakeRedisEventOutbox()
+    private val service = NotificationService(store, outbox)
     private val principal = Principal(userId = 10, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
@@ -121,11 +123,11 @@ class NotificationServiceTest {
     }
 
     @Test
-    fun `publish delegates to stream publisher`(): Unit = runBlocking {
+    fun `publish appends notification to transactional outbox`(): Unit = runBlocking {
         val command = NotificationRequestCommand(eventId = "event-2", userId = 10, title = "Title", body = "Body")
 
         assertThat(service.publish(command)).isTrue()
-        assertThat(publisher.commands).containsExactly(command)
+        assertThat(outbox.notifications).containsExactly(command)
     }
 
     @Test
@@ -244,11 +246,27 @@ class NotificationServiceTest {
         }
     }
 
-    private class FakeNotificationPublisher : NotificationStreamPublishPort {
-        val commands = mutableListOf<NotificationRequestCommand>()
-        override suspend fun publishNotification(command: NotificationRequestCommand): Boolean {
-            commands += command
-            return true
+    private class FakeRedisEventOutbox : RedisEventOutboxPort {
+        val notifications = mutableListOf<NotificationRequestCommand>()
+
+        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long = 1
+
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
+            notifications += command
+            return notifications.size.toLong()
         }
+
+        override suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent> =
+            emptyList()
+
+        override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = true
+
+        override suspend fun markRetry(
+            id: Long,
+            attempts: Int,
+            nextAttemptAt: Instant,
+            error: String,
+            updatedAt: Instant,
+        ): Boolean = true
     }
 }

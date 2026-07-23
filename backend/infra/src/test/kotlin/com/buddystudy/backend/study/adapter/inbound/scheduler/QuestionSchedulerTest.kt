@@ -4,6 +4,9 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
+import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
@@ -23,7 +26,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSe
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -54,7 +56,7 @@ class QuestionSchedulerTest {
     private val questionStats = FakeQuestionStatsPort()
     private val questionEmbeddings = FakeQuestionEmbeddingPort()
     private val questionCoverage = FakeQuestionCoveragePort()
-    private val questionCreatedPublisher = FakeQuestionCreatedPublisher()
+    private val outbox = FakeRedisEventOutbox()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
     private val memberships = FakeQuestionMembershipPort()
@@ -70,7 +72,7 @@ class QuestionSchedulerTest {
         questionEmbeddings = questionEmbeddings,
         questionCoverage = questionCoverage,
         questionKeys = questionKeys,
-        questionCreatedPublisher = questionCreatedPublisher,
+        outbox = outbox,
         notifications = notifications,
     )
     private val scheduler = ScheduledQuestionService(
@@ -122,7 +124,7 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).hasSize(2)
-        assertThat(questionCreatedPublisher.questionIds).containsExactly(1, 2)
+        assertThat(outbox.questionIds).containsExactly(1, 2)
         assertThat(notifications.commands).hasSize(2)
         assertThat(notifications.commands).allSatisfy { command ->
             assertThat(command.shouldPush).isTrue()
@@ -545,11 +547,23 @@ class QuestionSchedulerTest {
         }
     }
 
-    private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
+    private class FakeRedisEventOutbox : RedisEventOutboxPort {
         val questionIds = mutableListOf<Long>()
-        override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean {
-            questionIds += questionId
-            return true
+
+        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long {
+            questionIds += event.questionId
+            return questionIds.size.toLong()
         }
+
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long = 1
+        override suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent> = emptyList()
+        override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = true
+        override suspend fun markRetry(
+            id: Long,
+            attempts: Int,
+            nextAttemptAt: Instant,
+            error: String,
+            updatedAt: Instant,
+        ): Boolean = true
     }
 }

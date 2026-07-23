@@ -4,6 +4,9 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
+import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.community.application.port.outbound.QuestionSearchPort
@@ -16,7 +19,6 @@ import com.buddystudy.backend.notification.application.port.inbound.PublishNotif
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionCreatedPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
@@ -86,7 +88,7 @@ class StudyServiceTest {
             questionEmbeddings = questionEmbeddings,
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
-            questionCreatedPublisher = FakeQuestionCreatedPublisher(),
+            outbox = FakeRedisEventOutbox(),
             notifications = FakeNotificationPublisher(),
         ),
         recordWriter = StudyRecordWriteManager(questions, questionCoverage, questionSearch),
@@ -731,8 +733,18 @@ class StudyServiceTest {
         }
     }
 
-    private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
-        override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean = true
+    private class FakeRedisEventOutbox : RedisEventOutboxPort {
+        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long = 1
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long = 1
+        override suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent> = emptyList()
+        override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = true
+        override suspend fun markRetry(
+            id: Long,
+            attempts: Int,
+            nextAttemptAt: Instant,
+            error: String,
+            updatedAt: Instant,
+        ): Boolean = true
     }
 
     private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {

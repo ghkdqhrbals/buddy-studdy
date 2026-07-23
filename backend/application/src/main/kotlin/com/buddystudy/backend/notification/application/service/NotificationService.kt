@@ -1,6 +1,7 @@
 package com.buddystudy.backend.notification.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
@@ -13,7 +14,6 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.port.outbound.NotificationStreamPublishPort
 import com.buddystudy.notification.domain.entity.AppNotificationEntity
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
@@ -26,7 +26,7 @@ import java.time.Instant
 @Service
 class NotificationService(
     private val notificationStore: NotificationPersistencePort,
-    private val publisher: NotificationStreamPublishPort,
+    private val outbox: RedisEventOutboxPort,
 ) : BrowseNotificationsUseCase,
     MutateNotificationsUseCase,
     ProcessNotificationEventUseCase,
@@ -122,8 +122,10 @@ class NotificationService(
         }
     }
 
-    override suspend fun publish(command: NotificationRequestCommand): Boolean =
-        publisher.publishNotification(command)
+    override suspend fun publish(command: NotificationRequestCommand): Boolean {
+        outbox.appendNotification(command)
+        return true
+    }
 
     private suspend fun owned(id: Long, principal: Principal): AppNotificationEntity =
         visibleUserId(principal)

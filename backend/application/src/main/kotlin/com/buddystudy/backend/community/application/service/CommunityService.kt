@@ -4,7 +4,6 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import com.buddystudy.backend.common.application.transaction.afterReactiveCommit
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
@@ -37,7 +36,6 @@ import com.buddystudy.backend.community.application.model.toResponse
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.account.domain.entity.UserEntity
-import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -56,8 +54,6 @@ class CommunityService(
     private val search: QuestionSearchPort,
     private val notifications: PublishNotificationUseCase,
 ) : CommunityUseCase {
-    private val log = LoggerFactory.getLogger(javaClass)
-
     @Transactional(readOnly = true)
     override suspend fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         return getPublicQuestionsV2(principal, query, language, limit, offset)
@@ -125,7 +121,7 @@ class CommunityService(
             currentLikeCount(id)
         }
         if (changed && liked) {
-            publishThreadNotificationAfterCommit(
+            publishThreadNotification(
                 ownerUserId = question.userId,
                 actorUserId = principal.userId,
                 eventId = "question-like-$id-${principal.userId}",
@@ -143,7 +139,7 @@ class CommunityService(
         val question = publicAnsweredQuestion(id)
         val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
         incrementCommentCount(id, 1)
-        publishThreadNotificationAfterCommit(
+        publishThreadNotification(
             ownerUserId = question.userId,
             actorUserId = principal.userId,
             eventId = "question-comment-${saved.id}",
@@ -296,36 +292,6 @@ class CommunityService(
         )
     }
 
-    private suspend fun publishThreadNotificationAfterCommit(
-        ownerUserId: Long?,
-        actorUserId: Long,
-        eventId: String,
-        title: String,
-        body: String,
-        questionId: Long,
-        shouldPush: Boolean,
-    ) {
-        afterReactiveCommit {
-            runCatching {
-                publishThreadNotification(
-                    ownerUserId = ownerUserId,
-                    actorUserId = actorUserId,
-                    eventId = eventId,
-                    title = title,
-                    body = body,
-                    questionId = questionId,
-                    shouldPush = shouldPush,
-                )
-            }.onFailure { error ->
-                log.warn(
-                    "community_notification_after_commit_failed eventId={} questionId={} error={}",
-                    eventId,
-                    questionId,
-                    error.message,
-                )
-            }
-        }
-    }
 }
 
 private suspend fun CommunityQuestionResponse.withTranslatedText(translated: QuestionSearchEntity?): CommunityQuestionResponse {

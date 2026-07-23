@@ -120,10 +120,6 @@ interface QuestionMembershipPort {
     suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
 }
 
-interface QuestionCreatedPublishPort {
-    suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant = Instant.now()): Boolean
-}
-
 interface QuestionSearchTranslationPort {
     suspend fun translateSearchText(
         sourceLanguage: String,
