@@ -839,7 +839,7 @@ final class AppState: ObservableObject {
             clearErrorMessage(target)
             pageAccessPrompt = nil
             pendingTermsRequirementRetry = termsRetry
-            setSelectedTab(.settings)
+            isRequiredTermsGatePresented = true
             Task { [weak self] in
                 await self?.refreshPermissionEvaluations(reason: "terms-required")
             }
@@ -4238,6 +4238,7 @@ final class AppState: ObservableObject {
                 log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
             },
             onFailure: { error in
+                statusMessage = nil
                 if handleAppError(
                     error,
                     fallback: "",
@@ -4250,7 +4251,6 @@ final class AppState: ObservableObject {
                     return
                 }
                 handleOpenAIError(error)
-                statusMessage = nil
                 log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
             }
         )

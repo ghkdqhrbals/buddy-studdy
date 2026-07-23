@@ -1983,6 +1983,34 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testQuestionCreationTermsErrorPresentsAgreementGateWithoutOpeningSettings() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionErrors = [
+            Self.backendError(
+                code: "TERMS_AGREEMENT_REQUIRED",
+                status: 403,
+                message: "Latest terms agreement is required."
+            )
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.generateQuestion(manual: true, studyCategoryID: "16")
+
+        XCTAssertEqual(backend.createQuestionStudyIDs, [16])
+        XCTAssertTrue(appState.isRequiredTermsGatePresented)
+        XCTAssertEqual(appState.selectedTab, .home)
+        XCTAssertNil(appState.statusMessage)
+        XCTAssertNil(appState.errorMessage)
+    }
+
+    @MainActor
     func testManualQuestionSyncsSavedModelBeforeCreateQuestion() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4502,6 +4530,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var createQuestionStudyIDs: [Int] = []
     var createQuestionResult: StudyRecord?
     var createQuestionResults: [StudyRecord] = []
+    var createQuestionErrors: [Error] = []
     var fetchRecordsRequests: [(limit: Int, offset: Int, query: String, language: AppLanguage)] = []
     var fetchStatsRequests: [(
         period: BackendStatsPeriod,
@@ -5048,6 +5077,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         createQuestionCallCount += 1
         createQuestionStudyIDs.append(studyID)
         callEvents.append("createQuestion:\(studyID)")
+        if !createQuestionErrors.isEmpty {
+            throw createQuestionErrors.removeFirst()
+        }
         if !createQuestionResults.isEmpty {
             return createQuestionResults.removeFirst()
         }
