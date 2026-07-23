@@ -1,6 +1,7 @@
 package com.buddystudy.backend.config
 
 import org.flywaydb.core.Flyway
+import org.postgresql.ds.PGSimpleDataSource
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -11,13 +12,9 @@ import org.springframework.core.env.Environment
 class FlywayMigrationConfig {
     @Bean
     fun flyway(environment: Environment): Flyway {
-        val dataSource = FlywayDataSourceSettings.from(environment)
+        val dataSource = FlywayDataSourceSettings.from(environment).toDataSource()
         return Flyway.configure()
-            .dataSource(
-                dataSource.url,
-                dataSource.username,
-                dataSource.password,
-            )
+            .dataSource(dataSource)
             .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration").split(",").map { it.trim() }.toTypedArray())
             .baselineOnMigrate(environment.getProperty("spring.flyway.baseline-on-migrate", Boolean::class.java, true))
             .baselineVersion(environment.getProperty("spring.flyway.baseline-version", "0"))
@@ -58,6 +55,13 @@ internal data class FlywayDataSourceSettings(
     val username: String,
     val password: String,
 ) {
+    fun toDataSource(): PGSimpleDataSource =
+        PGSimpleDataSource().also {
+            it.setURL(url)
+            it.user = username
+            it.password = password
+        }
+
     companion object {
         fun from(environment: Environment): FlywayDataSourceSettings =
             FlywayDataSourceSettings(

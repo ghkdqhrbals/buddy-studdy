@@ -5,12 +5,30 @@ import org.springframework.boot.r2dbc.autoconfigure.R2dbcConnectionDetails
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
+import org.springframework.core.convert.converter.Converter
+import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.r2dbc.convert.R2dbcCustomConversions
+import org.springframework.data.r2dbc.dialect.PostgresDialect
+import java.time.Instant
+import java.time.OffsetDateTime
 
 @Configuration(proxyBeanMethods = false)
 class R2dbcConnectionDetailsConfig {
     @Bean
     fun r2dbcConnectionDetails(environment: Environment): R2dbcConnectionDetails =
         EnvironmentR2dbcConnectionDetails(environment)
+
+    @Bean
+    fun r2dbcCustomConversions(): R2dbcCustomConversions =
+        R2dbcCustomConversions.of(
+            PostgresDialect.INSTANCE,
+            OffsetDateTimeToInstantConverter,
+        )
+}
+
+@ReadingConverter
+internal object OffsetDateTimeToInstantConverter : Converter<OffsetDateTime, Instant> {
+    override fun convert(source: OffsetDateTime): Instant = source.toInstant()
 }
 
 internal class EnvironmentR2dbcConnectionDetails(

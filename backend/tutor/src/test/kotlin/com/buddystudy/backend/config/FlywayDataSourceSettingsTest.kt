@@ -40,6 +40,25 @@ class FlywayDataSourceSettingsTest {
     }
 
     @Test
+    fun `creates an explicit PostgreSQL data source for native runtime`() {
+        val settings =
+            FlywayDataSourceSettings(
+                url = "jdbc:postgresql://db:5432/migrations?sslmode=require",
+                username = "flyway-user",
+                password = "flyway-password",
+            )
+
+        val dataSource = settings.toDataSource()
+
+        assertThat(dataSource.serverNames).containsExactly("db")
+        assertThat(dataSource.portNumbers).containsExactly(5432)
+        assertThat(dataSource.databaseName).isEqualTo("migrations")
+        assertThat(dataSource.sslMode).isEqualTo("require")
+        assertThat(dataSource.user).isEqualTo("flyway-user")
+        assertThat(dataSource.password).isEqualTo("flyway-password")
+    }
+
+    @Test
     fun `ignores blank username overrides`() {
         val environment =
             MockEnvironment()
