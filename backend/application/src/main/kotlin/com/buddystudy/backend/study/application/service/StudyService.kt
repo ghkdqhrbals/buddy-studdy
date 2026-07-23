@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.auth.application.permission.Permissions
+import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -59,6 +61,7 @@ class StudyService(
     private val questionSearch: QuestionSearchSyncManager,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
+    @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse =
         createQuestionAsync(principal, studyId)
 

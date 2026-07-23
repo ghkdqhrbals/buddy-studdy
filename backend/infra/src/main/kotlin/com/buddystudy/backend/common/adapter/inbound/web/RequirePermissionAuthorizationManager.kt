@@ -1,5 +1,6 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.PermissionChecker
 import com.buddystudy.backend.auth.application.permission.PermissionEvaluationContext
 import com.buddystudy.backend.auth.application.permission.RequirePermission
@@ -32,31 +33,42 @@ class RequirePermissionAuthorizationManager(
         return authentication
             .flatMap { current ->
                 mono<AuthorizationResult> {
-                    val principal = current.optionalPrincipal()
+                    val principal = current.optionalPrincipal() ?: invocation.principalArgument()
                     val requestDetails = current.details as? ReactiveRequestDetails
-                    permissionChecker.check(
-                        principal = principal,
-                        requiredPermissions = requiredPermissions,
-                        context = principal?.let {
-                            PermissionEvaluationContext(
-                                now = Instant.now(),
-                                appVersion = requestDetails?.appVersion,
-                                sessionId = it.sessionId,
-                                status = it.status,
-                                anonymous = it.anonymous,
-                            )
-                        },
-                    )
+                    check(principal, requiredPermissions, requestDetails?.appVersion)
                     AuthorizationDecision(true)
                 }
             }
             .switchIfEmpty(
                 mono<AuthorizationResult> {
-                    permissionChecker.check(null, requiredPermissions)
+                    check(invocation.principalArgument(), requiredPermissions)
                     AuthorizationDecision(true)
                 },
             )
     }
+
+    private suspend fun check(
+        principal: Principal?,
+        requiredPermissions: List<String>,
+        appVersion: String? = null,
+    ) {
+        permissionChecker.check(
+            principal = principal,
+            requiredPermissions = requiredPermissions,
+            context = principal?.let {
+                PermissionEvaluationContext(
+                    now = Instant.now(),
+                    appVersion = appVersion,
+                    sessionId = it.sessionId,
+                    status = it.status,
+                    anonymous = it.anonymous,
+                )
+            },
+        )
+    }
+
+    private fun MethodInvocation.principalArgument(): Principal? =
+        arguments.firstNotNullOfOrNull { it as? Principal }
 
     private fun requiredPermissions(invocation: MethodInvocation): List<String> {
         val targetClass = invocation.`this`

@@ -21,22 +21,12 @@ class RequirePermissionAdvisorTest {
         val manager = RequirePermissionAuthorizationManager(PermissionChecker(evaluator))
         val target = SecuredHandler()
         val proxy = ProxyFactory(target).apply {
-            isProxyTargetClass = true
             addAdvisor(SecurityConfig().requirePermissionAdvisor(manager))
-        }.proxy as SecuredHandler
-        val authentication = UsernamePasswordAuthenticationToken(
-            Principal(
-                userId = 7,
-                deviceId = "device-7",
-                sessionId = 11,
-                anonymous = false,
-                status = "ACTIVE",
-            ),
-            null,
-            emptyList(),
-        )
+        }.proxy as SecuredHandlerPort
+        val principal = principal()
+        val authentication = UsernamePasswordAuthenticationToken(principal, null, emptyList())
 
-        val result = mono { proxy.handle() }
+        val result = mono { proxy.handle(principal) }
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication))
             .block()
 
@@ -45,15 +35,43 @@ class RequirePermissionAdvisorTest {
         assertThat(evaluator.permissions).containsExactly("sample:execute")
     }
 
-    private open class SecuredHandler {
+    @Test
+    fun `advisor uses the function principal outside an http security context`() {
+        val evaluator = RecordingPermissionEvaluator()
+        val manager = RequirePermissionAuthorizationManager(PermissionChecker(evaluator))
+        val target = SecuredHandler()
+        val proxy = ProxyFactory(target).apply {
+            addAdvisor(SecurityConfig().requirePermissionAdvisor(manager))
+        }.proxy as SecuredHandlerPort
+
+        val result = mono { proxy.handle(principal()) }.block()
+
+        assertThat(result).isEqualTo("handled")
+        assertThat(target.invocations).isEqualTo(1)
+        assertThat(evaluator.permissions).containsExactly("sample:execute")
+    }
+
+    private interface SecuredHandlerPort {
+        suspend fun handle(principal: Principal): String
+    }
+
+    private open class SecuredHandler : SecuredHandlerPort {
         var invocations = 0
 
         @RequirePermission("sample:execute")
-        open suspend fun handle(): String {
+        override suspend fun handle(principal: Principal): String {
             invocations += 1
             return "handled"
         }
     }
+
+    private fun principal() = Principal(
+        userId = 7,
+        deviceId = "device-7",
+        sessionId = 11,
+        anonymous = false,
+        status = "ACTIVE",
+    )
 
     private class RecordingPermissionEvaluator : PermissionEvaluator {
         val permissions = mutableListOf<String>()

@@ -238,7 +238,6 @@ class StudyController(
 
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/studies/{studyId}/questions")
-    @RequirePermission(Permissions.STUDY_CREATE)
     suspend fun createQuestion(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
