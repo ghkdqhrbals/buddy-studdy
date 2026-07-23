@@ -11,6 +11,8 @@ import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceComman
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
+import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
+import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -34,6 +36,7 @@ class LoginServiceEmailVerificationTest {
     private val emailCodes = CapturingEmailCodePort()
     private val emailSender = CapturingEmailSender()
     private val roles = InMemoryRoleAssignmentPort()
+    private val googleIdentities = StubGoogleIdentityPort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
         email.verificationTtlSeconds = 180
@@ -48,6 +51,7 @@ class LoginServiceEmailVerificationTest {
         emailCodes = emailCodes,
         emailSender = emailSender,
         roles = roles,
+        googleIdentities = googleIdentities,
     )
 
     @Test
@@ -203,6 +207,38 @@ class LoginServiceEmailVerificationTest {
         assertThat(users.findByEmailAndProvider("new@example.com", "EMAIL")).isNull()
     }
 
+    @Test
+    fun `google login uses identity returned by verifier`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+
+        val response = login.googleLogin(
+            Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
+            "google-id-token",
+        )
+
+        assertThat(response.profile.email).isEqualTo("google@example.com")
+        assertThat(response.profile.displayName).isEqualTo("Google User")
+        assertThat(users.findByProviderAndProviderId("GOOGLE", "google-provider-id")).isNotNull
+    }
+
+    @Test
+    fun `google login rejects token not accepted by verifier`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        googleIdentities.identity = null
+
+        assertThatThrownBy {
+            runBlocking {
+                login.googleLogin(
+                    Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true),
+                    "invalid-token",
+                )
+            }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN)
+    }
+
     private class CapturingEmailCodePort : EmailVerificationCodePort {
         lateinit var savedEmail: String
         lateinit var savedCode: String
@@ -234,6 +270,16 @@ class LoginServiceEmailVerificationTest {
             sentEmail = email
             sentCode = code
         }
+    }
+
+    private class StubGoogleIdentityPort : GoogleIdentityPort {
+        var identity: GoogleIdentity? = GoogleIdentity(
+            providerId = "google-provider-id",
+            email = "google@example.com",
+            name = "Google User",
+        )
+
+        override suspend fun verify(idToken: String): GoogleIdentity? = identity
     }
 
     private class InMemoryUserPort : UserPort {

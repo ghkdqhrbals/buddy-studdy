@@ -11,6 +11,7 @@ import com.buddystudy.auth.domain.PushTokenUpdate
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
+import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
@@ -36,7 +37,6 @@ import com.buddystudy.backend.profile.application.model.toProfile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.web.client.RestClient
 import java.time.Instant
 import java.time.Duration
 import java.security.SecureRandom
@@ -52,8 +52,8 @@ class LoginService(
     private val emailCodes: EmailVerificationCodePort,
     private val emailSender: EmailVerificationSenderPort,
     private val roles: RoleAssignmentPort,
+    private val googleIdentities: GoogleIdentityPort,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
-    private val googleRest = RestClient.builder().baseUrl("https://oauth2.googleapis.com").build()
     private val secureRandom = SecureRandom()
 
     @Transactional
@@ -215,20 +215,15 @@ class LoginService(
 
     @Transactional
     override suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
-        val tokenInfo = googleRest.get()
-            .uri { it.path("/tokeninfo").queryParam("id_token", idToken).build() }
-            .retrieve()
-            .body(Map::class.java)
+        val identity = googleIdentities.verify(idToken)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Google token.")
-        val providerId = tokenInfo["sub"]?.toString()?.takeIf { it.isNotBlank() }
-            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Google token.")
-        val email = tokenInfo["email"]?.toString() ?: ""
-        val name = tokenInfo["name"]?.toString()?.takeIf { it.isNotBlank() } ?: email.substringBefore("@").ifBlank { "Buddy" }
+        val email = identity.email
+        val name = identity.name?.takeIf { it.isNotBlank() } ?: email.substringBefore("@").ifBlank { "Buddy" }
         val now = Instant.now()
-        val user = users.findByProviderAndProviderId("GOOGLE", providerId) ?: users.save(
+        val user = users.findByProviderAndProviderId("GOOGLE", identity.providerId) ?: users.save(
             UserEntity(
                 provider = "GOOGLE",
-                providerId = providerId,
+                providerId = identity.providerId,
                 email = email,
                 status = "PENDING_TERMS",
                 displayName = name,
