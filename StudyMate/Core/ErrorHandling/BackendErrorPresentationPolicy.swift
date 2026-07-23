@@ -12,9 +12,13 @@ struct BackendErrorPresentation: Equatable {
 }
 
 enum BackendErrorPresentationPolicy {
-    static func presentation(for error: Error, fallback: String) -> BackendErrorPresentation {
+    static func presentation(
+        for error: Error,
+        fallback: String,
+        language: AppLanguage? = nil
+    ) -> BackendErrorPresentation {
         if let backendError = error as? RemotePushBackendError {
-            return presentation(for: backendError, fallback: fallback)
+            return presentation(for: backendError, fallback: fallback, language: language)
         }
 
         if isCancellationLike(error) {
@@ -43,8 +47,12 @@ enum BackendErrorPresentationPolicy {
         )
     }
 
-    static func presentation(for error: RemotePushBackendError, fallback: String) -> BackendErrorPresentation {
-        let message = userFacingMessage(for: error, fallback: fallback)
+    static func presentation(
+        for error: RemotePushBackendError,
+        fallback: String,
+        language: AppLanguage? = nil
+    ) -> BackendErrorPresentation {
+        let message = userFacingMessage(for: error, fallback: fallback, language: language)
         let requiresEmailVerification = requiresEmailVerification(error)
         let requiresTermsAgreement = requiresTermsAgreement(error)
         let requiresLogin = requiresEmailVerification ? false : requiresLogin(error)
@@ -214,11 +222,23 @@ enum BackendErrorPresentationPolicy {
         }
     }
 
-    static func userFacingMessage(for error: RemotePushBackendError, fallback: String) -> String {
+    static func userFacingMessage(
+        for error: RemotePushBackendError,
+        fallback: String,
+        language: AppLanguage? = nil
+    ) -> String {
         switch error {
         case .httpStatus(_, _, let apiError):
             if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
                !message.isEmpty {
+                if apiError?.code == "QUOTA_EXCEEDED",
+                   let language,
+                   let resetAt = apiError?.metadata?.quotaResetDate {
+                    return AppStrings(language: language).monthlyQuotaExceededMessage(
+                        serverMessage: message,
+                        resetAt: resetAt
+                    )
+                }
                 return message
             }
         case .invalidResponse:

@@ -7374,7 +7374,11 @@ final class AppState: ObservableObject {
     }
 
     private func appErrorResolution(_ error: Error, fallback: String) -> AppErrorHandlingResolution {
-        appErrorHandlingUseCase.resolve(error, fallback: fallback)
+        appErrorHandlingUseCase.resolve(
+            error,
+            fallback: fallback,
+            language: settings.appLanguage
+        )
     }
 
     private func recordMatching(questionCreatedAt: TimeInterval?) -> StudyRecord? {

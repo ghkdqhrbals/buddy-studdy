@@ -11,6 +11,7 @@ import com.buddystudy.backend.auth.application.port.outbound.PermissionRequireme
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.UserStatusQueryPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import org.springframework.stereotype.Component
 import java.time.Instant
 
@@ -326,7 +327,10 @@ class QuotaAvailableRequirementEvaluator(
             RequirementEvaluationResult.denied(
                 requirement.failureCode,
                 reason = "Quota is exceeded.",
-                metadata = mapOf("remaining" to remaining, "required" to required),
+                metadata = MonthlyQuotaWindow.exceededMetadata(
+                    context.now,
+                    additional = mapOf("remaining" to remaining, "required" to required),
+                ),
             )
         }
     }

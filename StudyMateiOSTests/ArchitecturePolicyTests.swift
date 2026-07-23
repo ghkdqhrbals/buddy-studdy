@@ -1214,6 +1214,46 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testQuotaErrorDecodesResetTimeAndPresentsItInAppLanguage() throws {
+        let payload = try XCTUnwrap(
+            """
+            {
+              "error": {
+                "errorCode": "QUOTA_EXCEEDED",
+                "code": 305,
+                "message": "월간 질문 한도에 도달했습니다.",
+                "status": 403,
+                "metadata": {
+                  "quotaPeriod": "MONTHLY",
+                  "quotaResetAt": "2026-08-01T00:00:00Z",
+                  "quotaTimeZone": "Z",
+                  "remaining": 0,
+                  "required": 1
+                }
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let response = try JSONDecoder().decode(BackendAPIErrorResponse.self, from: payload)
+        let resetAt = try XCTUnwrap(response.error.metadata?.quotaResetDate)
+        let expectedResetAt = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-08-01T00:00:00Z")
+        )
+        let error = RemotePushBackendError.httpStatus(403, "", response.error)
+        let resolution = AppErrorHandlingPolicy.resolve(
+            error,
+            fallback: "fallback",
+            language: .korean
+        )
+
+        XCTAssertEqual(resetAt, expectedResetAt)
+        XCTAssertEqual(response.error.metadata?.quotaPeriod, "MONTHLY")
+        XCTAssertEqual(response.error.metadata?.remaining, 0)
+        XCTAssertTrue(resolution.featureMessage?.contains("월간 질문 한도에 도달했습니다.") == true)
+        XCTAssertTrue(resolution.featureMessage?.contains("다시 사용할 수 있습니다.") == true)
+    }
+
     func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopup() {
         let apiError = BackendAPIError(
             code: "101",

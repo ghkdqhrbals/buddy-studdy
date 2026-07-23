@@ -1,8 +1,12 @@
 import Foundation
 
 struct AppErrorHandlingUseCase {
-    func resolve(_ error: Error, fallback: String) -> AppErrorHandlingResolution {
-        AppErrorHandlingPolicy.resolve(error, fallback: fallback)
+    func resolve(
+        _ error: Error,
+        fallback: String,
+        language: AppLanguage? = nil
+    ) -> AppErrorHandlingResolution {
+        AppErrorHandlingPolicy.resolve(error, fallback: fallback, language: language)
     }
 
     func isAPIKeyError(_ error: Error) -> Bool {

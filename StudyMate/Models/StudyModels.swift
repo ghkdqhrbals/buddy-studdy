@@ -1514,6 +1514,18 @@ struct AppStrings {
     var statisticsLoginAction: String { text("로그인하고 통계 보기", "Sign in to view stats") }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }
+    func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")
+        formatter.timeZone = .current
+        formatter.dateStyle = .long
+        formatter.timeStyle = .short
+        let resetAtText = formatter.string(from: resetAt)
+        return text(
+            "\(serverMessage) \(resetAtText)에 다시 사용할 수 있습니다.",
+            "\(serverMessage) You can create questions again on \(resetAtText)."
+        )
+    }
     func homePath(_ category: String) -> String {
         category
     }

@@ -2579,6 +2579,7 @@ struct BackendAPIError: Decodable, Equatable {
     var requiredPermissions: [String]?
     var requiredTerms: [BackendTerms]?
     var requiredActions: [String]?
+    var metadata: BackendAPIErrorMetadata?
 
     private enum CodingKeys: String, CodingKey {
         case code
@@ -2592,6 +2593,7 @@ struct BackendAPIError: Decodable, Equatable {
         case requiredPermissions
         case requiredTerms
         case requiredActions
+        case metadata
     }
 
     init(
@@ -2605,7 +2607,8 @@ struct BackendAPIError: Decodable, Equatable {
         status: Int? = nil,
         requiredPermissions: [String]? = nil,
         requiredTerms: [BackendTerms]? = nil,
-        requiredActions: [String]? = nil
+        requiredActions: [String]? = nil,
+        metadata: BackendAPIErrorMetadata? = nil
     ) {
         self.code = code
         self.numericCode = numericCode
@@ -2618,6 +2621,7 @@ struct BackendAPIError: Decodable, Equatable {
         self.requiredPermissions = requiredPermissions
         self.requiredTerms = requiredTerms
         self.requiredActions = requiredActions
+        self.metadata = metadata
     }
 
     init(from decoder: Decoder) throws {
@@ -2644,6 +2648,29 @@ struct BackendAPIError: Decodable, Equatable {
         requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)
         requiredTerms = try container.decodeIfPresent([BackendTerms].self, forKey: .requiredTerms)
         requiredActions = try container.decodeIfPresent([String].self, forKey: .requiredActions)
+        metadata = try container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
+    }
+}
+
+struct BackendAPIErrorMetadata: Decodable, Equatable {
+    var quotaPeriod: String?
+    var quotaResetAt: String?
+    var quotaTimeZone: String?
+    var remaining: Int64?
+    var required: Int64?
+
+    var quotaResetDate: Date? {
+        guard let quotaResetAt else {
+            return nil
+        }
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: quotaResetAt) {
+            return date
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: quotaResetAt)
     }
 }
 

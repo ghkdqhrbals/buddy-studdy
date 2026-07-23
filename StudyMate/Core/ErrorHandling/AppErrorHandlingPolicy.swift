@@ -12,8 +12,16 @@ struct AppErrorHandlingResolution: Equatable {
 }
 
 enum AppErrorHandlingPolicy {
-    static func resolve(_ error: Error, fallback: String) -> AppErrorHandlingResolution {
-        let presentation = BackendErrorPresentationPolicy.presentation(for: error, fallback: fallback)
+    static func resolve(
+        _ error: Error,
+        fallback: String,
+        language: AppLanguage? = nil
+    ) -> AppErrorHandlingResolution {
+        let presentation = BackendErrorPresentationPolicy.presentation(
+            for: error,
+            fallback: fallback,
+            language: language
+        )
         let suppressFeatureMessage = presentation.requiresLogin ||
             presentation.isPageAccessDenied ||
             presentation.requiresTermsAgreement ||

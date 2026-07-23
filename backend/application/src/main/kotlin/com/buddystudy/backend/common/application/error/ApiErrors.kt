@@ -61,9 +61,11 @@ class ApiException(
     val code: ApiErrorCode,
     override val message: String,
     requiredPermissions: List<String>? = null,
+    metadata: Map<String, Any?>? = null,
 ) : ApiRuntimeException(
     errorCode = code,
     message = message,
     statusOverride = status,
     requiredPermissions = requiredPermissions,
+    metadata = metadata,
 )

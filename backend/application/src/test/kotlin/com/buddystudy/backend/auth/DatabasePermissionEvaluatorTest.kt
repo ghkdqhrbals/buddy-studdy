@@ -203,11 +203,24 @@ class DatabasePermissionEvaluatorTest {
         )
         quotas.remaining = 0
 
-        val result = evaluator.evaluate(principal(status = "ACTIVE"), Permissions.STUDY_CREATE)
+        val result = evaluator.evaluate(
+            userId = 7,
+            deviceId = "dev-1",
+            permissionCode = Permissions.STUDY_CREATE,
+            context = PermissionEvaluationContext(
+                now = Instant.parse("2026-07-23T12:34:56Z"),
+                sessionId = 1,
+                status = "ACTIVE",
+            ),
+        )
 
         assertThat(result.granted).isFalse()
         assertThat(result.failureCode).isEqualTo(ApiErrorCode.QUOTA_EXCEEDED)
         assertThat(result.metadata["remaining"]).isEqualTo(0L)
+        assertThat(result.metadata["required"]).isEqualTo(1L)
+        assertThat(result.metadata["quotaPeriod"]).isEqualTo("MONTHLY")
+        assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-01T00:00:00Z")
+        assertThat(result.metadata["quotaTimeZone"]).isEqualTo("Z")
     }
 
     @Test
