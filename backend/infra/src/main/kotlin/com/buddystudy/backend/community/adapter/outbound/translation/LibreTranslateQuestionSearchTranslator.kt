@@ -3,15 +3,30 @@ package com.buddystudy.backend.community.adapter.outbound.translation
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.TranslatedQuestionSearchText
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.netty.channel.ChannelOption
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.stereotype.Component
-import org.springframework.web.client.RestClient
+import org.springframework.web.reactive.function.client.WebClient
+import reactor.netty.http.client.HttpClient
+import java.time.Duration
 
 @Component
 class LibreTranslateQuestionSearchTranslator(
     properties: BuddyStudyProperties,
+    webClientBuilder: WebClient.Builder,
+    private val objectMapper: ObjectMapper,
 ) : QuestionSearchTranslationPort {
-    private val rest = RestClient.builder()
+    private val client = webClientBuilder
         .baseUrl(properties.translation.baseUrl.trimEnd('/'))
+        .clientConnector(
+            ReactorClientHttpConnector(
+                HttpClient.create()
+                    .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, CONNECT_TIMEOUT_MILLIS)
+                    .responseTimeout(RESPONSE_TIMEOUT),
+            ),
+        )
         .build()
 
     override suspend fun translateSearchText(
@@ -31,27 +46,34 @@ class LibreTranslateQuestionSearchTranslator(
             explanation = explanation.translateNullable(sourceLanguage, targetLanguage),
         )
 
-    private fun String?.translateNullable(sourceLanguage: String, targetLanguage: String): String? =
+    private suspend fun String?.translateNullable(sourceLanguage: String, targetLanguage: String): String? =
         this?.takeIf { it.isNotBlank() }?.let { translate(it, sourceLanguage, targetLanguage) }
 
-    private fun translate(text: String, sourceLanguage: String, targetLanguage: String): String {
+    private suspend fun translate(text: String, sourceLanguage: String, targetLanguage: String): String {
         if (text.isBlank() || sourceLanguage == targetLanguage) return text
-        val response = rest.post()
+        val response = client.post()
             .uri("/translate")
-            .body(
+            .bodyValue(
                 mapOf(
                     "q" to text,
                     "source" to sourceLanguage,
                     "target" to targetLanguage,
                     "format" to "text",
-                )
+                ),
             )
             .retrieve()
-            .body(LibreTranslateResponse::class.java)
-        return response?.translatedText?.takeIf { it.isNotBlank() } ?: text
+            .bodyToMono(String::class.java)
+            .awaitSingleOrNull()
+        return response
+            ?.let(objectMapper::readTree)
+            ?.path("translatedText")
+            ?.asText()
+            ?.takeIf(String::isNotBlank)
+            ?: text
+    }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_MILLIS = 3_000
+        val RESPONSE_TIMEOUT: Duration = Duration.ofSeconds(8)
     }
 }
-
-private data class LibreTranslateResponse(
-    val translatedText: String = "",
-)

@@ -24,6 +24,8 @@ interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
+    suspend fun lockByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
+        findByIdAndUserIdAndDeletedAtIsNull(id, userId)
     suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity>
     suspend fun findGradedByUserAndTopics(userId: Long, topics: Collection<String>, pageable: Pageable): Page<QuestionEntity>

@@ -5,6 +5,8 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import jakarta.mail.internet.InternetAddress
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.mail.MailException
@@ -20,7 +22,7 @@ class SmtpEmailVerificationSender(
 ) : EmailVerificationSenderPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun send(email: String, code: String, ttl: Duration) {
+    override suspend fun send(email: String, code: String, ttl: Duration) = withContext(Dispatchers.IO) {
         try {
             val message = mailSender.createMimeMessage()
             val helper = MimeMessageHelper(message, false, Charsets.UTF_8.name())

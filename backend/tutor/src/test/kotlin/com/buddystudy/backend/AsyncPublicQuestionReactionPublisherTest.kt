@@ -39,10 +39,17 @@ class AsyncPublicQuestionReactionPublisherTest {
 
     @Test
     fun `view publish returns false when async queue is full`(): Unit = runBlocking {
-        val publisher = asyncPublisher(SlowRecordingReactionPublisher(), capacity = 1)
+        val delegate = BlockingReactionPublisher()
+        val publisher = asyncPublisher(delegate, capacity = 1).also {
+            closeables += it
+            it.start()
+        }
 
         assertThat(publisher.publishViewed(1, null)).isTrue()
-        assertThat(publisher.publishViewed(2, null)).isFalse()
+        assertThat(delegate.awaitStarted(1, TimeUnit.SECONDS)).isTrue()
+        assertThat(publisher.publishViewed(2, null)).isTrue()
+        assertThat(publisher.publishViewed(3, null)).isFalse()
+        delegate.release()
     }
 
     private fun asyncPublisher(
@@ -52,6 +59,7 @@ class AsyncPublicQuestionReactionPublisherTest {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = true
             streams.viewQueueCapacity = capacity
+            streams.viewPublisherConcurrency = 1
         }
         return AsyncPublicQuestionReactionPublisher(properties, delegate)
     }
@@ -64,7 +72,7 @@ class AsyncPublicQuestionReactionPublisherTest {
         private val latch = CountDownLatch(1)
         val events = mutableListOf<ViewEvent>()
 
-        override fun publishViewed(questionId: Long, userId: Long?): Boolean {
+        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
             if (delayMs > 0) Thread.sleep(delayMs)
             events += ViewEvent(questionId, userId)
             latch.countDown()
@@ -73,5 +81,23 @@ class AsyncPublicQuestionReactionPublisherTest {
 
         fun await(timeout: Long, unit: TimeUnit): Boolean =
             latch.await(timeout, unit)
+    }
+
+    private class BlockingReactionPublisher : PublicQuestionReactionPublishPort {
+        private val started = CountDownLatch(1)
+        private val release = CountDownLatch(1)
+
+        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
+            started.countDown()
+            release.await()
+            return true
+        }
+
+        fun awaitStarted(timeout: Long, unit: TimeUnit): Boolean =
+            started.await(timeout, unit)
+
+        fun release() {
+            release.countDown()
+        }
     }
 }

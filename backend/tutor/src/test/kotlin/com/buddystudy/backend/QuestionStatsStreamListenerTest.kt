@@ -101,7 +101,7 @@ class QuestionStatsStreamListenerTest : PostgresIntegrationTestSupport() {
     private class RecordingPublisher : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
+        override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
             requests += PublishRequest(streamKey, fields)
             return RedisStreamPublishedMessage(streamKey, "record-1")
         }

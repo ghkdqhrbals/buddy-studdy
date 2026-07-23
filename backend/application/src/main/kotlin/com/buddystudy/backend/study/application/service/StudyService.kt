@@ -58,6 +58,7 @@ class StudyService(
     private val questionPrompts: QuestionPromptProvider,
     private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteManager,
+    private val recordWriter: StudyRecordWriteManager,
     private val questionSearch: QuestionSearchSyncManager,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
@@ -116,24 +117,17 @@ class StudyService(
                     .toQuestionEntity()
                     .applyCoverage(coverageSelection)
                 val saved = questionWriter.saveQuestionWithNotification(
-                    question,
-                    { saved -> saved.toQuestionNotification(study, appLanguage) },
-                    now,
-                )
-                coverageSelection?.let { questionCoverage.markAsked(it, now) }
-                questionEmbeddings.save(
-                    questionId = saved.id,
-                    userId = principal.userId,
-                    studyId = study.id,
-                    topic = study.topic,
-                    question = saved.question,
                     embedding = generated.embedding,
+                    coverage = coverageSelection,
+                    questionKey = questionKey,
+                    question = question,
+                    notification = { saved -> saved.toQuestionNotification(study, appLanguage) },
+                    now = now,
                 )
                 saved
             }
 
             val question = questionDeferred.await()
-            questionKeys.markQuestionCreated(questionKey, now)
             question.toStudyRecord().toProjection().toRecordResponse()
         } catch (error: Exception) {
             questionKeys.releaseQuestionReservation(questionKey)
@@ -141,33 +135,34 @@ class StudyService(
         }
     }
 
-    @Transactional
     override suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
-        val q = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
+        val question = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val record = q.toStudyRecord()
-        q.apply(record.answer(answer))
         val user = users.findById(principal.userId)
-        if (grade && q.score == null) {
-            val study = q.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
-                ?: studies.findByUserIdAndTopic(principal.userId, q.topic)
+        val graded = if (grade && question.score == null) {
+            val study = question.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
+                ?: studies.findByUserIdAndTopic(principal.userId, question.topic)
                 ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
-            val graded = openAI.grade(
+            openAI.grade(
                 apiKeyFor(user),
                 openAIModelFor(study),
-                q.question,
+                question.question,
                 answer,
-                q.topic,
-                q.difficultyLevel,
+                question.topic,
+                question.difficultyLevel,
                 user?.appLanguage ?: "ko",
             )
-            q.apply(record.grade(graded.score, graded.isCorrect, graded.feedback, graded.explanation))
-            if (q.conceptId != null && q.angleKey != null) {
-                questionCoverage.markAnswered(q.conceptId!!, q.angleKey!!, graded.score, graded.isCorrect, Instant.now())
-            }
+        } else {
+            null
         }
-        val saved = questions.save(q)
-        questionSearch.refreshIndexedQuestion(saved, user)
+        val saved = recordWriter.answer(
+            userId = principal.userId,
+            recordId = recordId,
+            answer = answer,
+            grade = graded,
+            user = user,
+            now = Instant.now(),
+        )
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
@@ -202,32 +197,17 @@ class StudyService(
             .withTranslatedText(questionSearch.findIndexedQuestion(question.id, language))
     }
 
-    @Transactional
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
-        val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        q.apply(q.toStudyRecord().skip())
-        val saved = questions.save(q)
-        questionSearch.refreshIndexedQuestion(saved)
+        val saved = recordWriter.skip(principal.userId, id)
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
-    @Transactional
     override suspend fun delete(principal: Principal, id: Long) {
-        val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val now = Instant.now()
-        questions.softDelete(id, principal.userId, now)
-        questionSearch.removeIndexedQuestion(id)
+        recordWriter.delete(principal.userId, id, Instant.now())
     }
 
-    @Transactional
     override suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
-        val q = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        q.apply(q.toStudyRecord().restrictPublicity(isPublic))
-        val saved = questions.save(q)
-        questionSearch.refreshIndexedQuestion(saved)
+        val saved = recordWriter.updatePublicity(principal.userId, id, isPublic)
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 

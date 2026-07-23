@@ -6,7 +6,6 @@ import com.buddystudy.backend.auth.sha256
 import com.buddystudy.auth.domain.Account
 import com.buddystudy.auth.domain.AccountDevice
 import com.buddystudy.auth.domain.AccountUser
-import com.buddystudy.auth.domain.DeviceAttachment
 import com.buddystudy.auth.domain.PushTokenUpdate
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
@@ -33,7 +32,6 @@ import com.buddystudy.backend.auth.application.model.EmailVerificationCodeRespon
 import com.buddystudy.backend.auth.application.model.GoogleLoginResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDeviceResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse
-import com.buddystudy.backend.profile.application.model.toProfile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -53,6 +51,7 @@ class LoginService(
     private val emailSender: EmailVerificationSenderPort,
     private val roles: RoleAssignmentPort,
     private val googleIdentities: GoogleIdentityPort,
+    private val authenticatedLogins: AuthenticatedLoginManager,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val secureRandom = SecureRandom()
 
@@ -166,12 +165,11 @@ class LoginService(
         )
     }
 
-    @Transactional
     override suspend fun emailLogin(principal: Principal, command: EmailLoginCommand): GoogleLoginResponse {
-        val now = Instant.now()
         val normalized = command.email.trim().lowercase()
-        var user = users.findByEmailAndProvider(normalized, "EMAIL")
-        if (user == null) {
+        val passwordHash = sha256(command.password)
+        val existingUser = users.findByEmailAndProvider(normalized, "EMAIL")
+        if (existingUser == null) {
             val verificationCode = command.verificationCode
             if (verificationCode.isNullOrBlank()) {
                 throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Email verification code is required.")
@@ -179,29 +177,10 @@ class LoginService(
             if (!emailCodes.consume(normalized, verificationCode)) {
                 throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Invalid or expired email verification code.")
             }
-            user = users.save(
-                UserEntity(
-                    provider = "EMAIL",
-                    providerId = normalized,
-                    email = normalized,
-                    passwordHash = sha256(command.password),
-                    status = "PENDING_TERMS",
-                    displayName = normalized.substringBefore("@"),
-                    avatarColorSeed = "avatar-color-mint",
-                    createdAt = now,
-                    updatedAt = now,
-                )
-            )
-        } else if (user.passwordHash != sha256(command.password)) {
+        } else if (existingUser.passwordHash != passwordHash) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
         }
-        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
-        val device = sessions.device(principal.deviceId)
-        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
-        devices.save(device)
-        val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
-        val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
-        return GoogleLoginResponse(user.toProfile(), token.first, token.second)
+        return authenticatedLogins.attachEmailIdentity(principal, normalized, passwordHash, Instant.now())
     }
 
     override suspend fun emailCode(email: String): EmailVerificationCodeResponse {
@@ -213,32 +192,10 @@ class LoginService(
         return EmailVerificationCodeResponse(normalized, ttl.seconds)
     }
 
-    @Transactional
     override suspend fun googleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
         val identity = googleIdentities.verify(idToken)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Google token.")
-        val email = identity.email
-        val name = identity.name?.takeIf { it.isNotBlank() } ?: email.substringBefore("@").ifBlank { "Buddy" }
-        val now = Instant.now()
-        val user = users.findByProviderAndProviderId("GOOGLE", identity.providerId) ?: users.save(
-            UserEntity(
-                provider = "GOOGLE",
-                providerId = identity.providerId,
-                email = email,
-                status = "PENDING_TERMS",
-                displayName = name,
-                avatarColorSeed = "avatar-color-mint",
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
-        roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
-        val device = sessions.device(principal.deviceId)
-        device.apply(Account.of(user.toAccountUser(), device.toAccountDevice()).attachDevice(now))
-        devices.save(device)
-        val session = sessions.saveSession(user.id, device.deviceId, now, now.plusSeconds(90 * 86_400))
-        val token = tokenService.create(user.id, device.deviceId, session.id, false, user.status)
-        return GoogleLoginResponse(user.toProfile(), token.first, token.second)
+        return authenticatedLogins.attachGoogleIdentity(principal, identity, Instant.now())
     }
 
     private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
@@ -261,8 +218,4 @@ class LoginService(
             }
     }
 
-    private suspend fun DeviceEntity.apply(attachment: DeviceAttachment) {
-        userId = attachment.userId
-        updatedAt = attachment.updatedAt
-    }
 }

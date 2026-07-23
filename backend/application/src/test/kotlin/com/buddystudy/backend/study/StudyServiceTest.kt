@@ -33,6 +33,7 @@ import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
+import com.buddystudy.backend.study.application.service.StudyRecordWriteManager
 import com.buddystudy.backend.study.application.service.StudyService
 import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -58,6 +59,14 @@ class StudyServiceTest {
     private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
+    private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
+    private val questionSearch = QuestionSearchSyncManager(
+        BuddyStudyProperties(),
+        questions,
+        users,
+        FakeQuestionSearchPort(),
+        FakeQuestionSearchTranslator(),
+    )
     private val service = StudyService(
         properties = properties,
         studies = serviceStudies,
@@ -68,16 +77,20 @@ class StudyServiceTest {
         questionCoverage = questionCoverage,
         users = users,
         cipher = cipher,
-        questionKeys = OpenAIQuestionKeyProvider(properties, memberships),
+        questionKeys = questionKeys,
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
         questionWriter = QuestionCreationWriteManager(
             questions = questions,
             questionStats = questionStats,
+            questionEmbeddings = questionEmbeddings,
+            questionCoverage = questionCoverage,
+            questionKeys = questionKeys,
             questionCreatedPublisher = FakeQuestionCreatedPublisher(),
             notifications = FakeNotificationPublisher(),
         ),
-        questionSearch = QuestionSearchSyncManager(BuddyStudyProperties(), questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
+        recordWriter = StudyRecordWriteManager(questions, questionCoverage, questionSearch),
+        questionSearch = questionSearch,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 

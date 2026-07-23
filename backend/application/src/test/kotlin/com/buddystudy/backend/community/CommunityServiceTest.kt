@@ -312,7 +312,7 @@ class CommunityServiceTest {
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {
-        override fun publishViewed(questionId: Long, userId: Long?): Boolean = true
+        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean = true
     }
 
     private class FakeQuestionSearchPort : QuestionSearchPort {

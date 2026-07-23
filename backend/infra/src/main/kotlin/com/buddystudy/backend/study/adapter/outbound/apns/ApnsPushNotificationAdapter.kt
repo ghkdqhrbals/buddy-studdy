@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayloa
 import com.buddystudy.backend.study.application.port.outbound.PushMessageType
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionSender
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -19,6 +20,10 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @Component
 class ApnsPushNotificationAdapter(
@@ -41,7 +46,7 @@ class ApnsPushNotificationAdapter(
         }
         val jwt = apnsJwt()
         val request = buildRequest(message, jwt)
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
         if (response.statusCode() !in 200..299) {
             throw IllegalStateException("APNs failed status=${response.statusCode()} body=${response.body()}")
         }
@@ -123,3 +128,15 @@ class ApnsPushNotificationAdapter(
         """.trimIndent()
     }
 }
+
+private suspend fun <T> CompletableFuture<T>.await(): T =
+    suspendCancellableCoroutine { continuation ->
+        whenComplete { value, error ->
+            if (error == null) {
+                continuation.resume(value)
+            } else {
+                continuation.resumeWithException((error as? CompletionException)?.cause ?: error)
+            }
+        }
+        continuation.invokeOnCancellation { cancel(true) }
+    }

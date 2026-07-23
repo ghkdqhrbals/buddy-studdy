@@ -130,7 +130,7 @@ class PushTestServiceTest {
 
     private class FakePushEventPublisher : QuestionPushPublishPort {
         val requests = mutableListOf<QuestionPushRequest>()
-        override fun publishPush(request: QuestionPushRequest): Boolean {
+        override suspend fun publishPush(request: QuestionPushRequest): Boolean {
             requests += request
             return true
         }

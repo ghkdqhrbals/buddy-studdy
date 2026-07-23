@@ -23,5 +23,5 @@ interface NotificationPersistencePort {
 }
 
 interface NotificationStreamPublishPort {
-    fun publishNotification(command: com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand): Boolean
+    suspend fun publishNotification(command: com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand): Boolean
 }

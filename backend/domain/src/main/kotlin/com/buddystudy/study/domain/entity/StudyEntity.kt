@@ -20,6 +20,7 @@ class StudyEntity(
     var openaiModel: String = "gpt-5.4",
     var maxHistoryCount: Int = 100,
     var nextDueAt: Instant? = null,
+    var scheduleClaimedUntil: Instant? = null,
     var lastSentAt: Instant? = null,
     var lastError: String? = null,
     var createdAt: Instant = Instant.now(),

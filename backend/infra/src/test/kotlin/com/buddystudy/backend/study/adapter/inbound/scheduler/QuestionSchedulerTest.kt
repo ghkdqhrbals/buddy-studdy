@@ -33,6 +33,7 @@ import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.ScheduledQuestionService
+import com.buddystudy.backend.study.application.service.ScheduledQuestionWriteManager
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -61,20 +62,29 @@ class QuestionSchedulerTest {
         scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
         openai = BuddyStudyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
     )
+    private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
+    private val writer = ScheduledQuestionWriteManager(
+        studies = studies,
+        questions = questions,
+        questionStats = questionStats,
+        questionEmbeddings = questionEmbeddings,
+        questionCoverage = questionCoverage,
+        questionKeys = questionKeys,
+        questionCreatedPublisher = questionCreatedPublisher,
+        notifications = notifications,
+    )
     private val scheduler = ScheduledQuestionService(
         properties = properties,
         studies = studies,
         users = users,
         questions = questions,
-        questionStats = questionStats,
         questionEmbeddings = questionEmbeddings,
         questionCoverage = questionCoverage,
-        questionCreatedPublisher = questionCreatedPublisher,
-        notifications = notifications,
         openAI = openAI,
-        questionKeys = OpenAIQuestionKeyProvider(properties, memberships),
+        questionKeys = questionKeys,
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
+        writer = writer,
     )
 
     @Test

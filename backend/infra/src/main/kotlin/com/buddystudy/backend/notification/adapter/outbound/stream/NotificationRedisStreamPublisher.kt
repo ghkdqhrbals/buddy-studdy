@@ -14,7 +14,7 @@ class NotificationRedisStreamPublisher(
 ) : NotificationStreamPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun publishNotification(command: NotificationRequestCommand): Boolean {
+    override suspend fun publishNotification(command: NotificationRequestCommand): Boolean {
         if (!properties.streams.enabled) {
             logger.debug("redis_stream_publish_skipped reason=streams_disabled streamKey={} eventId={}", properties.streams.key, command.eventId)
             return false

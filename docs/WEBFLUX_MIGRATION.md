@@ -51,12 +51,24 @@ WebFlux does not make CPU-heavy work faster. It also does not increase PostgreSQ
 ## Boundaries
 
 - PostgreSQL request-path I/O uses R2DBC.
-- Redis data access is reactive; coroutine listeners launch suspend handlers.
+- Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is deliberately confined to Spring scheduler threads, then coroutine listeners launch suspend handlers.
 - Request and response logging streams bounded payload previews without joining unbounded bodies.
 - Flyway uses JDBC only during startup because migration execution is not request traffic.
-- Google OAuth, LibreTranslate, SMTP, APNs, and Slack integrations are separate boundaries. Some currently use blocking clients and must not be interpreted as non-blocking merely because their caller is a suspend function. They should be migrated to reactive clients or explicitly isolated if load measurements show event-loop blocking.
-- Redis stream lifecycle shutdown performs one bounded `.block(timeout)` outside request handling.
+- Google OAuth, LibreTranslate, and Slack use Reactor Netty `WebClient`; APNs uses Java `HttpClient.sendAsync`.
+- SMTP is the remaining synchronous integration and is explicitly isolated on `Dispatchers.IO`.
 - Permission seed initialization uses `runBlocking` during application startup only.
+
+## Transaction Boundaries
+
+WebFlux transactions are carried in Reactor context, not thread-local state. A coroutine can resume on another thread and still use the same R2DBC transaction, provided the work remains in the structured suspend call chain.
+
+- Do not wrap external HTTP, OpenAI, SMTP, APNs, or Redis publication in a database transaction.
+- Use a dedicated write manager for multi-table mutations so the atomic boundary is visible and testable.
+- Do not launch an application coroutine from inside a transaction for database work.
+- Register non-durable integrations with `afterReactiveCommit`; use a transactional outbox when losing an event during a process crash is unacceptable.
+- R2DBC entities are detached values. Every mutation requires an explicit `save` or update statement.
+
+The scheduled-question flow claims work in a short transaction, releases the connection while OpenAI runs, and completes or fails in a second short transaction. The claim has an expiry, allowing another worker to recover work after a process crash.
 
 ## Verification
 

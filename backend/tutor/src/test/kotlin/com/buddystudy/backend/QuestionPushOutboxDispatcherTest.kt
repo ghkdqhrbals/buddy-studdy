@@ -189,14 +189,14 @@ class QuestionPushOutboxDispatcherTest : PostgresIntegrationTestSupport() {
     private class CapturingPushPublisher(private val result: Boolean) : QuestionPushPublishPort {
         val requests = mutableListOf<QuestionPushRequest>()
 
-        override fun publishPush(request: QuestionPushRequest): Boolean {
+        override suspend fun publishPush(request: QuestionPushRequest): Boolean {
             requests += request
             return result
         }
     }
 
     private class ThrowingThenCapturingPushPublisher(private val failingRecordId: Long) : QuestionPushPublishPort {
-        override fun publishPush(request: QuestionPushRequest): Boolean {
+        override suspend fun publishPush(request: QuestionPushRequest): Boolean {
             if (request.recordId == failingRecordId) {
                 throw IllegalStateException("boom")
             }

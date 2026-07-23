@@ -9,9 +9,11 @@ import org.springframework.data.redis.connection.stream.ReadOffset
 import org.springframework.data.redis.connection.stream.RecordId
 import org.springframework.data.redis.connection.stream.StreamOffset
 import org.springframework.data.redis.connection.stream.StreamReadOptions
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
 import java.time.Duration
+import kotlinx.coroutines.reactor.awaitSingle
 
 data class RedisStreamPublishedMessage(
     val streamKey: String,
@@ -19,7 +21,7 @@ data class RedisStreamPublishedMessage(
 )
 
 interface RedisStreamPublishOperations {
-    fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage
+    suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage
 }
 
 data class RedisStreamMessage(
@@ -30,21 +32,21 @@ data class RedisStreamMessage(
 
 @Component
 class RedisStreamPublisher(
-    private val redis: StringRedisTemplate,
+    private val redis: ReactiveStringRedisTemplate,
     private val properties: BuddyStudyProperties,
 ) : RedisStreamPublishOperations {
-    override fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
+    override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
         val record = MapRecord.create(streamKey, fields)
         val id = redis.opsForStream<String, String>().add(record)
-            ?: error("Redis stream publish returned null id for stream=$streamKey")
+            .awaitSingle()
         trim(streamKey)
         return RedisStreamPublishedMessage(streamKey = streamKey, recordId = id.value)
     }
 
-    private fun trim(streamKey: String) {
+    private suspend fun trim(streamKey: String) {
         val maxLen = properties.streams.maxLen
         if (maxLen > 0) {
-            redis.opsForStream<String, String>().trim(streamKey, maxLen, true)
+            redis.opsForStream<String, String>().trim(streamKey, maxLen, true).awaitSingle()
         }
     }
 }
@@ -52,7 +54,8 @@ class RedisStreamPublisher(
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class RedisStreamConsumer(
-    private val redis: StringRedisTemplate,
+    private val blockingRedis: StringRedisTemplate,
+    private val reactiveRedis: ReactiveStringRedisTemplate,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -86,7 +89,7 @@ class RedisStreamConsumer(
         timeout: Duration,
         offset: ReadOffset,
     ): List<MapRecord<String, String, String>> =
-        redis.opsForStream<String, String>().read(
+        blockingRedis.opsForStream<String, String>().read(
             Consumer.from(group, consumer),
             StreamReadOptions.empty()
                 .count(count)
@@ -94,13 +97,15 @@ class RedisStreamConsumer(
             StreamOffset.create(streamKey, offset),
         ).orEmpty()
 
-    fun acknowledge(message: RedisStreamMessage, group: String) {
-        redis.opsForStream<String, String>().acknowledge(message.streamKey, group, RecordId.of(message.recordId))
+    suspend fun acknowledge(message: RedisStreamMessage, group: String) {
+        reactiveRedis.opsForStream<String, String>()
+            .acknowledge(message.streamKey, group, RecordId.of(message.recordId))
+            .awaitSingle()
     }
 
     private fun ensureGroup(streamKey: String, group: String) {
         try {
-            redis.connectionFactory?.connection?.use { connection ->
+            blockingRedis.connectionFactory?.connection?.use { connection ->
                 connection.execute(
                     "XGROUP",
                     "CREATE".toByteArray(),

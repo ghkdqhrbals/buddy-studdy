@@ -2,15 +2,18 @@ package com.buddystudy.backend.community.adapter.outbound.stream
 
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.config.BuddyStudyProperties
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.SmartLifecycle
 import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Primary
@@ -21,15 +24,16 @@ class AsyncPublicQuestionReactionPublisher(
     private val delegate: PublicQuestionReactionPublishPort,
 ) : PublicQuestionReactionPublishPort, SmartLifecycle {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val queue = ArrayBlockingQueue<ViewEvent>(properties.streams.viewQueueCapacity.coerceAtLeast(1))
     private val running = AtomicBoolean(false)
     private val workerCount = properties.streams.viewPublisherConcurrency.coerceAtLeast(1)
     @Volatile
-    private var executor: ExecutorService? = null
+    private var workerScope: CoroutineScope? = null
+    @Volatile
+    private var queue: Channel<ViewEvent>? = null
 
-    override fun publishViewed(questionId: Long, userId: Long?): Boolean {
+    override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
         if (!properties.streams.enabled) return false
-        val accepted = queue.offer(ViewEvent(questionId, userId))
+        val accepted = queue?.trySend(ViewEvent(questionId, userId))?.isSuccess == true
         if (!accepted) {
             logger.warn(
                 "view_event_queue_full questionId={} userId={} capacity={}",
@@ -44,12 +48,14 @@ class AsyncPublicQuestionReactionPublisher(
     @Synchronized
     override fun start() {
         if (running.compareAndSet(false, true)) {
-            val startedExecutor = Executors.newFixedThreadPool(workerCount) { task ->
-                Thread(task, "public-question-view-publisher").apply { isDaemon = true }
-            }
-            executor = startedExecutor
+            val startedQueue = Channel<ViewEvent>(properties.streams.viewQueueCapacity.coerceAtLeast(1))
+            val startedScope = CoroutineScope(
+                SupervisorJob() + Dispatchers.IO + CoroutineName("public-question-view-publisher"),
+            )
+            queue = startedQueue
+            workerScope = startedScope
             repeat(workerCount) {
-                startedExecutor.execute(::publishLoop)
+                startedScope.launch { publishLoop(startedQueue) }
             }
         }
     }
@@ -57,14 +63,10 @@ class AsyncPublicQuestionReactionPublisher(
     @Synchronized
     override fun stop() {
         running.set(false)
-        val stoppedExecutor = executor ?: return
-        executor = null
-        stoppedExecutor.shutdownNow()
-        try {
-            stoppedExecutor.awaitTermination(1, TimeUnit.SECONDS)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
+        queue?.close()
+        queue = null
+        workerScope?.cancel()
+        workerScope = null
     }
 
     override fun stop(callback: Runnable) {
@@ -78,10 +80,10 @@ class AsyncPublicQuestionReactionPublisher(
 
     override fun getPhase(): Int = Int.MAX_VALUE
 
-    private fun publishLoop() {
-        while (running.get() && !Thread.currentThread().isInterrupted) {
+    private suspend fun publishLoop(events: Channel<ViewEvent>) {
+        for (event in events) {
+            if (!running.get()) break
             try {
-                val event = queue.take()
                 val published = delegate.publishViewed(event.questionId, event.userId)
                 if (!published) {
                     logger.warn(
@@ -90,8 +92,6 @@ class AsyncPublicQuestionReactionPublisher(
                         event.userId,
                     )
                 }
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
             } catch (error: Exception) {
                 logger.warn("view_event_publish_loop_failed error={}", error.message)
             }

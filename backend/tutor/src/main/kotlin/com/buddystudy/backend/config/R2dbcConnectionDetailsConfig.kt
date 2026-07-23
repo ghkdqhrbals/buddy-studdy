@@ -36,20 +36,21 @@ internal class EnvironmentR2dbcConnectionDetails(
 ) : R2dbcConnectionDetails {
     override fun getConnectionFactoryOptions(): ConnectionFactoryOptions {
         val url =
-            environment.firstNonBlank("R2DBC_DATABASE_URL")
+            environment.firstNonBlank("spring.r2dbc.url")
+                ?: environment.firstNonBlank("R2DBC_DATABASE_URL")
                 ?: environment.firstNonBlank("DATABASE_URL")?.toR2dbcUrl()
-                ?: environment.requiredNonBlank("spring.r2dbc.url")
+                ?: error("R2DBC database URL is required.")
         val username =
             environment.firstNonBlank(
+                "spring.r2dbc.username",
                 "R2DBC_DATABASE_USERNAME",
                 "DATABASE_USERNAME",
-                "spring.r2dbc.username",
             )
         val password =
-            environment.firstDefined(
+            environment.firstNonBlank(
+                "spring.r2dbc.password",
                 "R2DBC_DATABASE_PASSWORD",
                 "DATABASE_PASSWORD",
-                "spring.r2dbc.password",
             )
         val parsed = ConnectionFactoryOptions.parse(url)
         val builder = parsed.mutate()
@@ -63,15 +64,8 @@ internal class EnvironmentR2dbcConnectionDetails(
         return builder.build()
     }
 
-    private fun Environment.requiredNonBlank(vararg names: String): String =
-        firstNonBlank(*names)
-            ?: error("R2DBC database URL is required.")
-
     private fun Environment.firstNonBlank(vararg names: String): String? =
         names.firstNotNullOfOrNull { getProperty(it)?.takeIf(String::isNotBlank) }
-
-    private fun Environment.firstDefined(vararg names: String): String? =
-        names.firstNotNullOfOrNull(::getProperty)
 
     private fun String.toR2dbcUrl(): String =
         when {

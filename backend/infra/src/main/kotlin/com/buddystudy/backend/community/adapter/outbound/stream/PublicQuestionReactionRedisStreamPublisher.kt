@@ -14,7 +14,7 @@ class PublicQuestionReactionRedisStreamPublisher(
 ) : PublicQuestionReactionPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun publishViewed(questionId: Long, userId: Long?): Boolean {
+    override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
         if (!properties.streams.enabled) {
             logPublishSkipped("streams_disabled", properties.streams.key, "CONTENT_VIEWED", questionId, userId)
             return false
@@ -23,7 +23,7 @@ class PublicQuestionReactionRedisStreamPublisher(
         return publish(properties.streams.key, questionId, fields)
     }
 
-    private fun publish(
+    private suspend fun publish(
         streamKey: String,
         questionId: Long,
         fields: Map<String, String>,

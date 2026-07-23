@@ -246,7 +246,7 @@ class NotificationServiceTest {
 
     private class FakeNotificationPublisher : NotificationStreamPublishPort {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override fun publishNotification(command: NotificationRequestCommand): Boolean {
+        override suspend fun publishNotification(command: NotificationRequestCommand): Boolean {
             commands += command
             return true
         }

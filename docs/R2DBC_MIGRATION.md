@@ -87,6 +87,23 @@ Rules:
 4. Publish external events after commit. `afterReactiveCommit` registers a reactive transaction synchronization so Redis notifications are not visible before the corresponding rows commit.
 5. Prefer a durable transactional outbox when an event must survive process failure between database commit and broker publish. An after-commit callback preserves ordering but is not a durable delivery guarantee.
 
+BuddyStudy keeps external work out of write transactions:
+
+- Google token verification, OpenAI generation/grading, translation, SMTP, APNs, and Slack calls execute before or after the database transaction.
+- `AuthenticatedLoginManager`, `QuestionCreationWriteManager`, `ScheduledQuestionWriteManager`, and `StudyRecordWriteManager` own short, readable atomic write boundaries.
+- Question and record mutations explicitly save every changed entity. There is no persistence context or dirty checking to flush in-memory mutations.
+- Record answer/delete/publicity writes lock the selected question row before applying a state transition, preventing concurrent requests from persisting changes from the same stale snapshot.
+- Question creation persists the question, stats row, coverage state, embedding, quota finalization, and schedule state in one transaction. A failure in a later persistence step rolls back the earlier inserts.
+- Search, notification, and stream publication is registered after commit and each publication is failure-isolated so one integration failure does not suppress another.
+
+Scheduled question processing uses a two-phase lease:
+
+1. A short transaction claims due study IDs with `FOR UPDATE SKIP LOCKED` and stores `schedule_claimed_until`.
+2. OpenAI and other external work executes without holding a database connection or row lock.
+3. A short completion transaction persists all generated-question state and clears the lease.
+4. A failure transaction refunds the quota reservation, stores retry state, and clears the lease.
+5. If a process dies after claiming, another worker may reclaim the study after the bounded lease expires.
+
 ## Persistence Adapter Choices
 
 - Use `CoroutineCrudRepository` for simple single-table CRUD and derived queries.
@@ -123,18 +140,26 @@ DATABASE_USERNAME=...
 DATABASE_PASSWORD=...
 ```
 
+The custom runtime connection details resolve canonical Spring properties first, followed by deployment fallbacks:
+
+1. `spring.r2dbc.url`, username, and password;
+2. `R2DBC_DATABASE_*`;
+3. converted JDBC `DATABASE_*` settings.
+
+This ordering is required for Testcontainers and other runtime overrides. Flyway and R2DBC must point to the same database in integration tests; otherwise migrations can succeed against one database while application repositories query another.
+
 The migration does not require a new schema format. Existing Flyway migrations remain the schema source of truth. `dev` enables Flyway by default; `prod` enables it only when `FLYWAY_ENABLED=true`.
 
 ## Remaining Blocking Boundaries
 
-The database request path is non-blocking, but the process is not yet universally non-blocking:
+The database request path is non-blocking. Deliberate blocking boundaries are isolated from request and Reactor event-loop threads:
 
 - Flyway JDBC migration: startup only.
 - Permission seed `runBlocking`: startup only.
-- Redis stream lifecycle `.block(timeout)`: bounded start/stop lifecycle operation.
-- Google OAuth, LibreTranslate, SMTP, and selected delivery integrations still use blocking client libraries in parts of the codebase.
+- Redis Stream `XREAD BLOCK`: invoked only by Spring `@Scheduled` polling threads; stream publication and ACK use reactive Redis APIs.
+- JavaMail SMTP: the library is synchronous, so delivery runs on `Dispatchers.IO`.
 
-These boundaries must be measured separately. A blocking external call on a Netty event loop can still stall unrelated requests even when the database is fully R2DBC.
+Google OAuth, LibreTranslate, Slack, APNs, Redis request operations, and PostgreSQL runtime access use asynchronous clients. A new blocking integration must either be replaced with an asynchronous client or be explicitly isolated and load-tested.
 
 ## Performance Expectations
 
@@ -156,8 +181,9 @@ Warm both variants, use the same dataset and indexes, run at least three rounds 
 
 - Pool acquisition timeout should fail promptly rather than retain requests until client timeouts.
 - Transaction rollback occurs on exceptions propagated through the suspend/reactive chain.
+- Integration tests force a late question-write failure and verify that both the question and its stats row are absent after rollback.
 - Cancellation should release subscriptions and connections; adapters must not swallow cancellation exceptions.
-- Scheduler claims and outbox operations use atomic SQL/transactions to prevent duplicate workers.
+- Scheduler claims use atomic SQL and an expiring lease to prevent concurrent workers while permitting crash recovery.
 - External event publication after commit can still be lost on process failure; use the transactional outbox where delivery is business-critical.
 
 ## Verification Checklist

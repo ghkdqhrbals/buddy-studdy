@@ -16,7 +16,7 @@ class RedisStreamPushPublisher(
 ) : QuestionPushPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override fun publishPush(request: QuestionPushRequest): Boolean {
+    override suspend fun publishPush(request: QuestionPushRequest): Boolean {
         if (!properties.streams.enabled) {
             logger.info(
                 "redis_stream_publish_skipped reason=streams_disabled eventType={} recordId={} deviceId={} userId={}",

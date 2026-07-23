@@ -19,6 +19,7 @@ import org.springframework.test.context.TestPropertySource
     properties = [
         "spring.flyway.locations=classpath:db/migration",
         "buddystudy.scheduler.enabled=false",
+        "buddystudy.scheduler.processing-timeout-seconds=30",
         "buddystudy.streams.enabled=false",
         "buddystudy.analytics.datasource.database-name=",
         "buddystudy.crypto.master-key=test-master-key",
@@ -102,5 +103,38 @@ class FlywaySchemaIntegrationTest : PostgresIntegrationTestSupport() {
         assertThat(selected?.conceptKeyPath).isEqualTo("persistence/aof/recovery")
         assertThat(selected?.conceptPath).isEqualTo("Persistence > AOF > Recovery")
         assertThat(selected?.angleKey).isEqualTo("failure_mode")
+    }
+
+    @Test
+    fun `due study claim is exclusive until its lease expires`(): Unit = runBlocking {
+        studies.deleteAll()
+        val now = java.time.Instant.parse("2030-01-01T00:00:00Z")
+        val user = users.save(
+            UserEntity(
+                provider = "EMAIL",
+                providerId = "schedule-lease@example.com",
+                email = "schedule-lease@example.com",
+                status = "ACTIVE",
+            ),
+        )
+        val study = studies.save(
+            StudyEntity(
+                deviceId = "schedule-lease-device",
+                userId = user.id,
+                topic = "Schedule Lease",
+                enabled = true,
+                nextDueAt = now.minusSeconds(1),
+            ),
+        )
+
+        val firstClaim = studies.claimDue(now, 1)
+        val duplicateClaim = studies.claimDue(now.plusSeconds(29), 1)
+        val reclaimed = studies.claimDue(now.plusSeconds(31), 1)
+
+        assertThat(firstClaim.map { it.id }).containsExactly(study.id)
+        assertThat(firstClaim.single().scheduleClaimedUntil).isEqualTo(now.plusSeconds(30))
+        assertThat(duplicateClaim).isEmpty()
+        assertThat(reclaimed.map { it.id }).containsExactly(study.id)
+        assertThat(reclaimed.single().scheduleClaimedUntil).isEqualTo(now.plusSeconds(61))
     }
 }

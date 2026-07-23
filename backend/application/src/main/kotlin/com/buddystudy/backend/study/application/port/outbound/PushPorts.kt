@@ -22,7 +22,7 @@ data class QuestionPushRequest(
 )
 
 interface QuestionPushPublishPort {
-    fun publishPush(request: QuestionPushRequest): Boolean
+    suspend fun publishPush(request: QuestionPushRequest): Boolean
 }
 
 data class QuestionPushOutboxCommand(

@@ -3,12 +3,14 @@ package com.buddystudy.backend.scheduler.adapter.outbound.slack
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
+import io.netty.channel.ChannelOption
+import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
-import org.springframework.http.client.JdkClientHttpRequestFactory
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.stereotype.Component
-import org.springframework.web.client.RestClient
-import java.net.http.HttpClient
+import org.springframework.web.reactive.function.client.WebClient
+import reactor.netty.http.client.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
@@ -20,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
 @Component
 class SlackScheduledJobAlertAdapter internal constructor(
     private val properties: BuddyStudyProperties,
-    private val restClient: RestClient,
+    private val webClient: WebClient,
     private val clock: Clock = Clock.systemUTC(),
 ) : ScheduledJobAlertPort {
     private val lastSuccessfulAlertAtByJob = ConcurrentHashMap<String, Instant>()
@@ -28,12 +30,10 @@ class SlackScheduledJobAlertAdapter internal constructor(
     @Autowired
     constructor(
         properties: BuddyStudyProperties,
-        restClientBuilder: RestClient.Builder,
+        webClientBuilder: WebClient.Builder,
     ) : this(
         properties,
-        restClientBuilder
-            .requestFactory(slackRequestFactory(properties))
-            .build(),
+        slackWebClient(properties, webClientBuilder),
     )
 
     override suspend fun notifyFailed(run: ScheduledJobRun) {
@@ -42,12 +42,13 @@ class SlackScheduledJobAlertAdapter internal constructor(
         val now = clock.instant()
         if (isSuppressed(run.jobName, now)) return
 
-        restClient.post()
+        webClient.post()
             .uri(webhookUrl)
             .contentType(MediaType.APPLICATION_JSON)
-            .body(payload(run))
+            .bodyValue(payload(run))
             .retrieve()
             .toBodilessEntity()
+            .awaitSingle()
         lastSuccessfulAlertAtByJob[run.jobName] = now
     }
 
@@ -137,14 +138,14 @@ class SlackScheduledJobAlertAdapter internal constructor(
         fun schedulerFailureAlertRepeat(properties: BuddyStudyProperties): Duration =
             Duration.ofSeconds(properties.monitoring.schedulerFailureAlertRepeatSeconds.coerceIn(60, 86_400))
 
-        fun slackRequestFactory(properties: BuddyStudyProperties): JdkClientHttpRequestFactory {
+        fun slackWebClient(properties: BuddyStudyProperties, builder: WebClient.Builder): WebClient {
             val timeout = slackTimeout(properties)
-            val client = HttpClient.newBuilder()
-                .connectTimeout(timeout)
+            val client = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeout.toMillis().toInt())
+                .responseTimeout(timeout)
+            return builder
+                .clientConnector(ReactorClientHttpConnector(client))
                 .build()
-            return JdkClientHttpRequestFactory(client).apply {
-                setReadTimeout(timeout)
-            }
         }
 
         fun truncateSlackText(value: String, maxLength: Int): String {

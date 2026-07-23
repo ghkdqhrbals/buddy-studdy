@@ -17,6 +17,7 @@ import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
+import com.buddystudy.backend.auth.application.service.AuthenticatedLoginManager
 import com.buddystudy.backend.auth.application.service.LoginService
 import com.buddystudy.backend.auth.application.service.RandomTokenGenerator
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -41,17 +42,20 @@ class LoginServiceEmailVerificationTest {
         auth.jwtSecret = "test-jwt-secret"
         email.verificationTtlSeconds = 180
     }
+    private val sessions = AccountSessionManager(users, devices, userDevices)
+    private val tokenProvider = TokenProvider(properties)
     private val login = LoginService(
         properties = properties,
         users = users,
         devices = devices,
-        tokenService = TokenProvider(properties),
-        sessions = AccountSessionManager(users, devices, userDevices),
+        tokenService = tokenProvider,
+        sessions = sessions,
         tokens = RandomTokenGenerator(),
         emailCodes = emailCodes,
         emailSender = emailSender,
         roles = roles,
         googleIdentities = googleIdentities,
+        authenticatedLogins = AuthenticatedLoginManager(users, devices, sessions, roles, tokenProvider),
     )
 
     @Test

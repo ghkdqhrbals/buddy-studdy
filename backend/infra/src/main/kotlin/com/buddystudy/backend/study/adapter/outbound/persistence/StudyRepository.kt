@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.config.selectPage
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.reactive.awaitSingle
@@ -12,12 +13,15 @@ import org.springframework.data.domain.Sort
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
 import org.springframework.data.relational.core.query.Criteria
 import org.springframework.data.relational.core.query.Query
+import org.springframework.data.relational.core.query.Update
 import org.springframework.stereotype.Repository
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 @Repository
 class StudyRepository(
     private val template: R2dbcEntityTemplate,
+    private val properties: BuddyStudyProperties,
 ) : StudyPort {
     override suspend fun save(entity: StudyEntity): StudyEntity = template.saveEntity(entity, entity.id)
 
@@ -79,11 +83,14 @@ class StudyRepository(
         return template.selectPage(select, Query.query(criteria), StudyEntity::class.java, pageable)
     }
 
+    @Transactional
     override suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity> {
+        val claimUntil = now.plusSeconds(properties.scheduler.processingTimeoutSeconds.coerceIn(30, 3_600))
         val ids = template.databaseClient.sql(
             """
             select id from studies
             where enabled = true and next_due_at is not null and next_due_at <= :now
+              and (schedule_claimed_until is null or schedule_claimed_until <= :now)
             order by next_due_at asc, id asc
             limit :limit for update skip locked
             """.trimIndent(),
@@ -91,6 +98,13 @@ class StudyRepository(
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
             .all().collectList().awaitSingle()
         if (ids.isEmpty()) return emptyList()
+        template.update(StudyEntity::class.java)
+            .matching(Query.query(Criteria.where("id").`in`(ids)))
+            .apply(
+                Update.update("schedule_claimed_until", claimUntil)
+                    .set("updated_at", now),
+            )
+            .awaitSingle()
         val byId = template.select(Query.query(Criteria.where("id").`in`(ids)), StudyEntity::class.java)
             .collectList().awaitSingle().associateBy { it.id }
         return ids.mapNotNull(byId::get)

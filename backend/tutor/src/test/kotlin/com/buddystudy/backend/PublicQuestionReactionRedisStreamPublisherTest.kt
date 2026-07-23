@@ -53,7 +53,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     private class RecordingPublisher(private val fail: Boolean = false) : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
+        override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
             if (fail) throw IllegalStateException("publish failed")
             requests += PublishRequest(streamKey, fields)
             return RedisStreamPublishedMessage(streamKey, "record-1")
