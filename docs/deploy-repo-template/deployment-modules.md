@@ -11,6 +11,7 @@ one workflow run just because they share a host.
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs dashboard, Grafana, Loki, monitoring auth |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
+| Portfolio domain | `Configure Portfolio Domain` | manual | GitHub-hosted | `buddystudy.lowfidev.cloud` DNS and Sites ownership validation |
 
 ## Rules
 
@@ -46,5 +47,8 @@ one workflow run just because they share a host.
   deploy.
 - Grafana/Loki/API Logs dashboard changes: run monitoring deploy.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
+- Portfolio hostname or Sites validation changes: run the portfolio domain
+  workflow in the app repository. It changes DNS records only and must not
+  deploy the backend, monitoring stack, or admin frontend.
 - Nginx public routing changes: update the owning module workflow template and
   state which module is responsible for reloading nginx.

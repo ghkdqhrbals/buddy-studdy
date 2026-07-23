@@ -1,0 +1,115 @@
+name: Configure Portfolio Domain
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: configure-portfolio-domain
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    name: Configure Cloudflare DNS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ZONE_NAME: lowfidev.cloud
+      PORTFOLIO_HOSTNAME: buddystudy.lowfidev.cloud
+      PORTFOLIO_CNAME_TARGET: custom-domains.chatgpt.site
+      OPENAI_VALIDATION_NAME: _openai-site-verification.buddystudy.lowfidev.cloud
+      OPENAI_VALIDATION_VALUE: openai-site-verification=9WgsEm7drN2OfOPJ2iAW8RTMeOy0hWoD2dTgUH_pqR0
+      CLOUDFLARE_VALIDATION_NAME: _cf-custom-hostname.buddystudy.lowfidev.cloud
+      CLOUDFLARE_VALIDATION_VALUE: 7b89f32c-fc41-419c-b9be-7bf43bba24aa
+
+    steps:
+      - name: Upsert portfolio DNS records
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "Missing CLOUDFLARE_API_TOKEN." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ["CLOUDFLARE_API_TOKEN"]
+          records = [
+              {
+                  "type": "CNAME",
+                  "name": os.environ["PORTFOLIO_HOSTNAME"],
+                  "content": os.environ["PORTFOLIO_CNAME_TARGET"],
+                  "ttl": 1,
+                  "proxied": False,
+              },
+              {
+                  "type": "TXT",
+                  "name": os.environ["OPENAI_VALIDATION_NAME"],
+                  "content": os.environ["OPENAI_VALIDATION_VALUE"],
+                  "ttl": 1,
+              },
+              {
+                  "type": "TXT",
+                  "name": os.environ["CLOUDFLARE_VALIDATION_NAME"],
+                  "content": os.environ["CLOUDFLARE_VALIDATION_VALUE"],
+                  "ttl": 1,
+              },
+          ]
+
+          def request(method, path, body=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(
+                  f"https://api.cloudflare.com/client/v4{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Content-Type": "application/json",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  payload = json.loads(response.read().decode())
+              if not payload.get("success"):
+                  raise RuntimeError(payload.get("errors") or "Cloudflare API request failed")
+              return payload
+
+          zone_query = urllib.parse.urlencode({"name": os.environ["CLOUDFLARE_ZONE_NAME"]})
+          zones = request("GET", f"/zones?{zone_query}").get("result", [])
+          if len(zones) != 1:
+              raise RuntimeError(
+                  f"Expected one zone named {os.environ['CLOUDFLARE_ZONE_NAME']}, found {len(zones)}"
+              )
+          zone_id = zones[0]["id"]
+
+          for desired in records:
+              query = urllib.parse.urlencode({"name": desired["name"]})
+              current = request("GET", f"/zones/{zone_id}/dns_records?{query}").get("result", [])
+              compatible = next(
+                  (record for record in current if record["type"] == desired["type"]),
+                  None,
+              )
+
+              if compatible is None:
+                  request("POST", f"/zones/{zone_id}/dns_records", desired)
+              else:
+                  request(
+                      "PUT",
+                      f"/zones/{zone_id}/dns_records/{compatible['id']}",
+                      desired,
+                  )
+
+              for conflicting in current:
+                  if compatible is None or conflicting["id"] != compatible["id"]:
+                      request(
+                          "DELETE",
+                          f"/zones/{zone_id}/dns_records/{conflicting['id']}",
+                      )
+
+              print(f"Configured {desired['type']} {desired['name']}")
+          PY
