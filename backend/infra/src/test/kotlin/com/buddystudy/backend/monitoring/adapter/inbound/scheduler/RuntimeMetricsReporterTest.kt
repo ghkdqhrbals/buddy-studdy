@@ -49,6 +49,11 @@ class RuntimeMetricsReporterTest {
     fun `formats a flat Loki-friendly runtime metric payload`() {
         val snapshot = RuntimeMetricsSnapshot(
             capturedAtEpochMs = 1_700_000_000_000,
+            runtimeKind = "native-image",
+            runtimeName = "GraalVM Native Image",
+            runtimeVersion = "25",
+            runtimeMetricsDegraded = true,
+            runtimeMetricsUnavailable = "heapMemoryUsage",
             availableProcessors = 2,
             processCpuPercent = 14.5,
             systemCpuPercent = 38.2,
@@ -95,8 +100,6 @@ class RuntimeMetricsReporterTest {
             reactorNettyEventLoopMaxPendingTasks = 2.0,
             reactorNettyActiveConnections = 4.0,
             reactorNettyDirectMemoryBytes = 1_024.0,
-            jvmName = "GraalVM",
-            jvmVersion = "25",
         )
 
         val payload = ObjectMapper().readTree(formatRuntimeMetrics(ObjectMapper(), snapshot))
@@ -109,7 +112,10 @@ class RuntimeMetricsReporterTest {
         assertThat(payload["networkTransmitBytesTotal"].longValue()).isEqualTo(20_000)
         assertThat(payload["reactorNettyEventLoopPendingTasks"].doubleValue()).isEqualTo(3.0)
         assertThat(payload["reactorNettyActiveConnections"].doubleValue()).isEqualTo(4.0)
-        assertThat(payload["jvmVersion"].textValue()).isEqualTo("25")
+        assertThat(payload["runtimeKind"].textValue()).isEqualTo("native-image")
+        assertThat(payload["runtimeVersion"].textValue()).isEqualTo("25")
+        assertThat(payload["runtimeMetricsDegraded"].booleanValue()).isTrue()
+        assertThat(payload["runtimeMetricsUnavailable"].textValue()).isEqualTo("heapMemoryUsage")
     }
 
     @Test

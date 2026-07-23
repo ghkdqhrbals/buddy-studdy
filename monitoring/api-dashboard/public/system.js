@@ -17,9 +17,10 @@ import {
   parseRuntimeMetrics,
   percentagePoints,
   ratioPoints,
-} from "./metrics.js?v=2026072302";
+} from "./metrics.js?v=2026072303";
 
 const RUNTIME_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics "';
+const RUNTIME_FAILURE_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics_collection_failed"';
 const COLORS = {
   blue: "#2563eb",
   red: "#c7354a",
@@ -34,6 +35,7 @@ const COLORS = {
 const state = {
   range: null,
   snapshots: [],
+  collectionFailures: [],
   requestRate: [],
   clientErrorRate: [],
   serverErrorRate: [],
@@ -245,6 +247,7 @@ async function loadMetrics() {
 
     const [
       runtimeValues,
+      runtimeFailureValues,
       requestValues,
       clientErrorValues,
       serverErrorValues,
@@ -253,6 +256,7 @@ async function loadMetrics() {
       p99Values,
     ] = await Promise.all([
       lokiQueryRange(RUNTIME_QUERY, range),
+      lokiQueryRange(RUNTIME_FAILURE_QUERY, range, { limit: 100 }),
       lokiQueryRange(buildRequestRateQuery(window), range, { limit: 1000, step }),
       lokiQueryRange(buildClientErrorRateQuery(window), range, { limit: 1000, step }),
       lokiQueryRange(buildErrorRateQuery(window), range, { limit: 1000, step }),
@@ -273,6 +277,12 @@ async function loadMetrics() {
       })
       .filter(Boolean)
       .sort((a, b) => a.ms - b.ms);
+    state.collectionFailures = runtimeFailureValues
+      .map(([timestamp, line]) => ({
+        ms: Number(BigInt(timestamp) / 1_000_000n),
+        line,
+      }))
+      .sort((a, b) => a.ms - b.ms);
     state.requestRate = parseLokiMetricValues(requestValues);
     state.clientErrorRate = parseLokiMetricValues(clientErrorValues);
     state.serverErrorRate = parseLokiMetricValues(serverErrorValues);
@@ -282,7 +292,14 @@ async function loadMetrics() {
     render();
 
     const hasData = state.snapshots.length || state.requestRate.length;
-    setStatus(hasData ? "Ready" : "Waiting for server samples", hasData ? "ready" : "loading");
+    const latest = state.snapshots.at(-1);
+    if (latest?.runtimeMetricsDegraded) {
+      setStatus("Ready with partial runtime metrics", "warning");
+    } else if (state.collectionFailures.length && !state.snapshots.length) {
+      setStatus("Runtime metric collection failed", "error");
+    } else {
+      setStatus(hasData ? "Ready" : "Waiting for server samples", hasData ? "ready" : "loading");
+    }
   } finally {
     els.refreshButton.disabled = false;
   }
@@ -377,13 +394,26 @@ function renderDiagnosis() {
     issues.push(["warning", `Reactor Netty has ${formatCount(latest.reactorNettyEventLoopMaxPendingTasks)} pending tasks on the busiest event loop.`]);
   }
   if (Number(latest?.threadsBlocked) > 0) {
-    issues.push(["warning", `${formatCount(latest.threadsBlocked)} JVM threads are blocked.`]);
+    issues.push(["warning", `${formatCount(latest.threadsBlocked)} runtime threads are blocked.`]);
   }
   if (Number(heapSaturation) >= 85) {
     issues.push(["warning", `Heap usage is ${formatPercent(heapSaturation)} of maximum. Compare the post-GC floor over time.`]);
   }
   if (Number(diskSaturation) >= 85) {
     issues.push(["critical", `Root filesystem usage is ${formatPercent(diskSaturation)}.`]);
+  }
+  if (latest?.runtimeMetricsDegraded) {
+    issues.push([
+      "warning",
+      `Runtime metrics are partial. Unavailable collectors: ${latest.runtimeMetricsUnavailable || "unknown"}.`,
+    ]);
+  }
+  if (!latest && state.collectionFailures.length) {
+    const failure = state.collectionFailures.at(-1);
+    issues.push([
+      "critical",
+      `Runtime metric collection failed at ${formatKst(failure.ms)}. Inspect backend logs for the stack trace.`,
+    ]);
   }
 
   els.diagnosisList.innerHTML = "";
@@ -394,7 +424,7 @@ function renderDiagnosis() {
       hasData ? "ready" : "neutral",
       hasData
         ? "No immediate error or saturation threshold is crossed. Compare trends before declaring the service healthy."
-        : "Waiting for server and request samples.",
+        : "No runtime sample was emitted in this range. Check the backend reporter and Loki forwarding.",
     ]);
   }
   for (const [tone, message] of visibleIssues) {
@@ -414,7 +444,11 @@ function renderDetails() {
   }
   els.snapshotTimestamp.textContent = formatKst(latest.ms);
   const details = [
-    ["JVM", `${latest.jvmName} ${latest.jvmVersion}`],
+    ["Runtime", `${latest.runtimeName || latest.jvmName || "Unknown"} ${latest.runtimeVersion || latest.jvmVersion || ""}`.trim()],
+    ["Runtime mode", latest.runtimeKind || "jvm"],
+    ["Collector", latest.runtimeMetricsDegraded
+      ? `Partial: ${latest.runtimeMetricsUnavailable || "unknown"}`
+      : "Complete"],
     ["Uptime", formatDurationSeconds(latest.processUptimeSeconds)],
     ["Processors", formatCount(latest.availableProcessors)],
     ["1m load average", finiteNumber(latest.systemLoadAverage1m, 2)],
@@ -423,7 +457,7 @@ function renderDetails() {
     ["Open file descriptors", formatCount(latest.processOpenFileDescriptors)],
     ["Heap", `${formatBytes(latest.heapUsedBytes)} / ${formatBytes(latest.heapCommittedBytes)} committed / ${formatBytes(latest.heapMaxBytes)} max`],
     ["Non-heap", `${formatBytes(latest.nonHeapUsedBytes)} / ${formatBytes(latest.nonHeapCommittedBytes)} committed`],
-    ["JVM direct buffers", `${formatCount(latest.directBufferCount)} buffers, ${formatBytes(latest.directBufferMemoryUsedBytes)}`],
+    ["Runtime direct buffers", `${formatCount(latest.directBufferCount)} buffers, ${formatBytes(latest.directBufferMemoryUsedBytes)}`],
     ["Netty direct memory", formatBytes(latest.reactorNettyDirectMemoryBytes)],
     ["Threads", `${formatCount(latest.threadsLive)} live, ${formatCount(latest.threadsDaemon)} daemon, ${formatCount(latest.threadsPeak)} peak`],
     ["Thread states", `${formatCount(latest.threadsRunnable)} runnable, ${formatCount(latest.threadsWaiting)} waiting, ${formatCount(latest.threadsTimedWaiting)} timed, ${formatCount(latest.threadsBlocked)} blocked`],

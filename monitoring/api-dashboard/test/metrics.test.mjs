@@ -18,14 +18,17 @@ import {
 test("parseRuntimeMetrics extracts the flat runtime payload", () => {
   const value = [
     "1784790000000000000",
-    '2026-07-23T03:00:00Z INFO runtime_metrics {"capturedAtEpochMs":1784790000000,"processCpuPercent":12.5,"heapUsedBytes":1048576,"threadsLive":18}',
+    '2026-07-23T03:00:00Z INFO runtime_metrics {"capturedAtEpochMs":1784790000000,"runtimeKind":"native-image","runtimeMetricsDegraded":true,"runtimeMetricsUnavailable":"heapMemoryUsage","processCpuPercent":12.5,"heapUsedBytes":null,"threadsLive":18}',
   ];
 
   const parsed = parseRuntimeMetrics(value);
 
   assert.equal(parsed.ms, 1784790000000);
   assert.equal(parsed.processCpuPercent, 12.5);
-  assert.equal(parsed.heapUsedBytes, 1048576);
+  assert.equal(parsed.runtimeKind, "native-image");
+  assert.equal(parsed.runtimeMetricsDegraded, true);
+  assert.equal(parsed.runtimeMetricsUnavailable, "heapMemoryUsage");
+  assert.equal(parsed.heapUsedBytes, null);
   assert.equal(parsed.threadsLive, 18);
 });
 

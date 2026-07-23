@@ -622,6 +622,12 @@ button {
   color: var(--blue);
 }
 
+.status-message[data-tone="warning"] {
+  border-color: #fde68a;
+  background: var(--yellow-soft);
+  color: var(--yellow);
+}
+
 .status-message[data-tone="error"] {
   border-color: #fecdd3;
   background: var(--red-soft);

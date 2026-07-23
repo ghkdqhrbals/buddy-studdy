@@ -32,9 +32,10 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
     - Traffic: RPS time series.
     - Latency: p50, p95, and p99 time series derived by Loki.
     - Errors: 4xx and 5xx request ratios.
-    - Saturation: process/system CPU, host/JVM/direct memory, disk, network, JVM threads and GC, R2DBC pool usage and pending acquires, and Reactor Netty event-loop pending tasks and active connections.
+    - Saturation: process/system CPU, host/runtime/direct memory, disk, network, best-effort runtime threads and GC, R2DBC pool usage and pending acquires, and Reactor Netty event-loop pending tasks and active connections.
   - The server dashboard queries aggregated Loki metric series instead of downloading all API logs into the browser.
   - Runtime metric snapshots are emitted every 30 seconds by the backend and retained according to Loki retention.
+  - Production runs as a GraalVM Native Image. Runtime collectors are isolated so an unsupported MXBean produces a partial sample instead of dropping every host and pool metric. See `docs/observability/runtime-metrics.md`.
   - Timestamps are rendered in KST with millisecond precision.
 - Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
   - See `docs/observability/slack-codex-log-search.md`.

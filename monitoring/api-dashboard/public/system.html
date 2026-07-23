@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Server Dashboard</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072302" />
+    <link rel="stylesheet" href="/styles.css?v=2026072303" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -24,7 +24,7 @@
         <header class="topbar">
           <div>
             <h1>Server Dashboard</h1>
-            <p>Golden signals, WebFlux runtime pressure, JVM, database pool, and host resources</p>
+            <p>Golden signals, WebFlux runtime pressure, Native Image, database pool, and host resources</p>
           </div>
         </header>
 
@@ -184,8 +184,8 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
-                <h2>JVM &amp; Process Memory</h2>
-                <p>Heap, non-heap, Netty direct memory, and resident memory</p>
+                <h2>Runtime &amp; Process Memory</h2>
+                <p>Available Native Image memory counters, Netty direct memory, and resident memory</p>
               </div>
               <div id="jvmMemoryLegend" class="chart-legend"></div>
             </div>
@@ -206,7 +206,7 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
-                <h2>JVM Threads</h2>
+                <h2>Runtime Threads</h2>
                 <p>Live, runnable, waiting, and blocked threads</p>
               </div>
               <div id="threadsLegend" class="chart-legend"></div>
@@ -260,6 +260,6 @@
       </div>
     </div>
 
-    <script type="module" src="/system.js?v=2026072302"></script>
+    <script type="module" src="/system.js?v=2026072303"></script>
   </body>
 </html>

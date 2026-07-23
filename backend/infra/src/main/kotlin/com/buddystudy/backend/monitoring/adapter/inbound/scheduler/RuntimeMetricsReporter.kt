@@ -39,7 +39,12 @@ class RuntimeMetricsReporter(
         runCatching {
             logger.info("runtime_metrics {}", formatRuntimeMetrics(objectMapper, sampler.snapshot()))
         }.onFailure { error ->
-            logger.warn("runtime_metrics_collection_failed message={}", error.message)
+            logger.warn(
+                "runtime_metrics_collection_failed errorType={} message={}",
+                error.javaClass.simpleName,
+                error.message,
+                error,
+            )
         }
     }
 }
@@ -48,65 +53,121 @@ internal class RuntimeMetricsSampler(
     private val meterRegistry: MeterRegistry,
     private val connectionFactoryProvider: ObjectProvider<ConnectionFactory>,
 ) {
-    private val memory = ManagementFactory.getMemoryMXBean()
-    private val threads = ManagementFactory.getThreadMXBean()
-    private val runtime = ManagementFactory.getRuntimeMXBean()
-    private val operatingSystem = ManagementFactory.getOperatingSystemMXBean()
-    private val classes = ManagementFactory.getClassLoadingMXBean()
-    private val garbageCollectors = ManagementFactory.getGarbageCollectorMXBeans()
-    private val directBuffer = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean::class.java)
-        .firstOrNull { it.name.equals("direct", ignoreCase = true) }
-
     fun snapshot(): RuntimeMetricsSnapshot {
-        val heap = memory.heapMemoryUsage
-        val nonHeap = memory.nonHeapMemoryUsage
-        val threadStates = threadStateCounts()
-        val hostMemory = readHostMemory()
-        val rootDisk = readRootDisk()
-        val network = readNetworkIo()
-        val pool = connectionPoolMetrics()
-        val eventLoopPendingTasks = gaugeAggregate("reactor.netty.eventloop.pending.tasks")
-        val activeConnections = gaugeAggregate("reactor.netty.http.server.connections.active")
-        val nettyDirectMemory = gaugeAggregate("reactor.netty.bytebuf.allocator.active.direct.memory")
+        val unavailable = linkedSetOf<String>()
+        val memory = collect("memoryMxBean", unavailable) { ManagementFactory.getMemoryMXBean() }
+        val threads = collect("threadMxBean", unavailable) { ManagementFactory.getThreadMXBean() }
+        val runtime = collect("runtimeMxBean", unavailable) { ManagementFactory.getRuntimeMXBean() }
+        val operatingSystem = collect("operatingSystemMxBean", unavailable) {
+            ManagementFactory.getOperatingSystemMXBean()
+        }
+        val classes = collect("classLoadingMxBean", unavailable) { ManagementFactory.getClassLoadingMXBean() }
+        val garbageCollectors = collect("garbageCollectorMxBeans", unavailable) {
+            ManagementFactory.getGarbageCollectorMXBeans()
+        }
+        val directBuffer = collect("directBufferMxBean", unavailable) {
+            ManagementFactory.getPlatformMXBeans(BufferPoolMXBean::class.java)
+                .firstOrNull { it.name.equals("direct", ignoreCase = true) }
+        }
+        val heap = collect("heapMemoryUsage", unavailable) { memory?.heapMemoryUsage }
+        val nonHeap = collect("nonHeapMemoryUsage", unavailable) { memory?.nonHeapMemoryUsage }
+        val threadStates = collect("threadStates", unavailable) {
+            threads?.let(::threadStateCounts).orEmpty()
+        }.orEmpty()
+        val hostMemory = collect("hostMemory", unavailable) { readHostMemory() }
+        val rootDisk = collect("rootDisk", unavailable) { readRootDisk() }
+        val network = collect("networkIo", unavailable) { readNetworkIo() }
+        val residentMemory = collect("processResidentMemory", unavailable) {
+            readProcessResidentMemoryBytes()
+        }
+        val openFileDescriptors = collect("openFileDescriptors", unavailable) {
+            countOpenFileDescriptors()
+        }
+        val pool = collect("r2dbcPool", unavailable) { connectionPoolMetrics() }
+        val processCpu = collect("processCpu", unavailable) { percentageGauge("process.cpu.usage") }
+        val systemCpu = collect("systemCpu", unavailable) { percentageGauge("system.cpu.usage") }
+        val eventLoopPendingTasks = collect("nettyEventLoopPendingTasks", unavailable) {
+            gaugeAggregate("reactor.netty.eventloop.pending.tasks")
+        } ?: GaugeAggregate(null, null)
+        val activeConnections = collect("nettyActiveConnections", unavailable) {
+            gaugeAggregate("reactor.netty.http.server.connections.active")
+        } ?: GaugeAggregate(null, null)
+        val nettyDirectMemory = collect("nettyDirectMemory", unavailable) {
+            gaugeAggregate("reactor.netty.bytebuf.allocator.active.direct.memory")
+        } ?: GaugeAggregate(null, null)
+        val runtimeKind = runtimeKind()
+        val runtimeName = collect("runtimeName", unavailable) { runtime?.vmName }
+            ?: System.getProperty("java.vm.name")
+            ?: runtimeKind
+        val runtimeVersion = collect("runtimeVersion", unavailable) { runtime?.vmVersion }
+            ?: System.getProperty("java.vm.version")
+            ?: System.getProperty("java.version")
+            ?: "unknown"
+        if (processCpu == null) unavailable += "processCpu"
+        if (systemCpu == null) unavailable += "systemCpu"
+        if (hostMemory == null) unavailable += "hostMemory"
+        if (residentMemory == null) unavailable += "processResidentMemory"
+        if (rootDisk == null) unavailable += "rootDisk"
+        if (network == null) unavailable += "networkIo"
+        if (pool == null) unavailable += "r2dbcPool"
+        if (eventLoopPendingTasks.total == null) unavailable += "nettyEventLoopPendingTasks"
+        if (activeConnections.total == null) unavailable += "nettyActiveConnections"
 
         return RuntimeMetricsSnapshot(
             capturedAtEpochMs = System.currentTimeMillis(),
-            availableProcessors = operatingSystem.availableProcessors,
-            processCpuPercent = percentageGauge("process.cpu.usage"),
-            systemCpuPercent = percentageGauge("system.cpu.usage"),
-            systemLoadAverage1m = operatingSystem.systemLoadAverage.finiteOrNull(),
-            processUptimeSeconds = runtime.uptime / 1_000,
+            runtimeKind = runtimeKind,
+            runtimeName = runtimeName,
+            runtimeVersion = runtimeVersion,
+            availableProcessors = collect("availableProcessors", unavailable) {
+                operatingSystem?.availableProcessors
+            } ?: Runtime.getRuntime().availableProcessors(),
+            processCpuPercent = processCpu,
+            systemCpuPercent = systemCpu,
+            systemLoadAverage1m = collect("systemLoadAverage", unavailable) {
+                operatingSystem?.systemLoadAverage?.finiteOrNull()
+            },
+            processUptimeSeconds = collect("processUptime", unavailable) { runtime?.uptime?.div(1_000) },
             hostMemoryTotalBytes = hostMemory?.totalBytes,
             hostMemoryAvailableBytes = hostMemory?.availableBytes,
             hostMemoryUsedBytes = hostMemory?.usedBytes,
-            processResidentMemoryBytes = readProcessResidentMemoryBytes(),
-            processOpenFileDescriptors = countOpenFileDescriptors(),
+            processResidentMemoryBytes = residentMemory,
+            processOpenFileDescriptors = openFileDescriptors,
             rootDiskTotalBytes = rootDisk?.totalBytes,
             rootDiskUsableBytes = rootDisk?.usableBytes,
             rootDiskUsedBytes = rootDisk?.usedBytes,
             networkReceiveBytesTotal = network?.receiveBytes,
             networkTransmitBytesTotal = network?.transmitBytes,
-            heapUsedBytes = heap.used.nonNegativeOrNull(),
-            heapCommittedBytes = heap.committed.nonNegativeOrNull(),
-            heapMaxBytes = heap.max.nonNegativeOrNull(),
-            nonHeapUsedBytes = nonHeap.used.nonNegativeOrNull(),
-            nonHeapCommittedBytes = nonHeap.committed.nonNegativeOrNull(),
-            directBufferCount = directBuffer?.count?.nonNegativeOrNull(),
-            directBufferMemoryUsedBytes = directBuffer?.memoryUsed?.nonNegativeOrNull(),
-            directBufferCapacityBytes = directBuffer?.totalCapacity?.nonNegativeOrNull(),
-            threadsLive = threads.threadCount,
-            threadsDaemon = threads.daemonThreadCount,
-            threadsPeak = threads.peakThreadCount,
-            threadsStartedTotal = threads.totalStartedThreadCount,
-            threadsRunnable = threadStates[Thread.State.RUNNABLE] ?: 0,
-            threadsBlocked = threadStates[Thread.State.BLOCKED] ?: 0,
-            threadsWaiting = threadStates[Thread.State.WAITING] ?: 0,
-            threadsTimedWaiting = threadStates[Thread.State.TIMED_WAITING] ?: 0,
-            gcCollectionsTotal = garbageCollectors.sumOf { it.collectionCount.coerceAtLeast(0) },
-            gcCollectionTimeMsTotal = garbageCollectors.sumOf { it.collectionTime.coerceAtLeast(0) },
-            classesLoaded = classes.loadedClassCount,
-            classesLoadedTotal = classes.totalLoadedClassCount,
-            classesUnloadedTotal = classes.unloadedClassCount,
+            heapUsedBytes = heap?.used?.nonNegativeOrNull(),
+            heapCommittedBytes = heap?.committed?.nonNegativeOrNull(),
+            heapMaxBytes = heap?.max?.nonNegativeOrNull(),
+            nonHeapUsedBytes = nonHeap?.used?.nonNegativeOrNull(),
+            nonHeapCommittedBytes = nonHeap?.committed?.nonNegativeOrNull(),
+            directBufferCount = collect("directBufferCount", unavailable) {
+                directBuffer?.count?.nonNegativeOrNull()
+            },
+            directBufferMemoryUsedBytes = collect("directBufferMemory", unavailable) {
+                directBuffer?.memoryUsed?.nonNegativeOrNull()
+            },
+            directBufferCapacityBytes = collect("directBufferCapacity", unavailable) {
+                directBuffer?.totalCapacity?.nonNegativeOrNull()
+            },
+            threadsLive = collect("threadsLive", unavailable) { threads?.threadCount },
+            threadsDaemon = collect("threadsDaemon", unavailable) { threads?.daemonThreadCount },
+            threadsPeak = collect("threadsPeak", unavailable) { threads?.peakThreadCount },
+            threadsStartedTotal = collect("threadsStarted", unavailable) { threads?.totalStartedThreadCount },
+            threadsRunnable = threadStates[Thread.State.RUNNABLE],
+            threadsBlocked = threadStates[Thread.State.BLOCKED],
+            threadsWaiting = threadStates[Thread.State.WAITING],
+            threadsTimedWaiting = threadStates[Thread.State.TIMED_WAITING],
+            gcCollectionsTotal = collect("gcCollections", unavailable) {
+                garbageCollectors?.sumOf { it.collectionCount.coerceAtLeast(0) }
+            },
+            gcCollectionTimeMsTotal = collect("gcCollectionTime", unavailable) {
+                garbageCollectors?.sumOf { it.collectionTime.coerceAtLeast(0) }
+            },
+            classesLoaded = collect("classesLoaded", unavailable) { classes?.loadedClassCount },
+            classesLoadedTotal = collect("classesLoadedTotal", unavailable) { classes?.totalLoadedClassCount },
+            classesUnloadedTotal = collect("classesUnloadedTotal", unavailable) { classes?.unloadedClassCount },
             dbPoolAcquired = pool?.acquiredSize(),
             dbPoolAllocated = pool?.allocatedSize(),
             dbPoolIdle = pool?.idleSize(),
@@ -117,8 +178,8 @@ internal class RuntimeMetricsSampler(
             reactorNettyEventLoopMaxPendingTasks = eventLoopPendingTasks.maximum,
             reactorNettyActiveConnections = activeConnections.total,
             reactorNettyDirectMemoryBytes = nettyDirectMemory.total,
-            jvmName = runtime.vmName,
-            jvmVersion = runtime.vmVersion,
+            runtimeMetricsDegraded = unavailable.isNotEmpty(),
+            runtimeMetricsUnavailable = unavailable.takeIf(Set<String>::isNotEmpty)?.joinToString(","),
         )
     }
 
@@ -130,25 +191,47 @@ internal class RuntimeMetricsSampler(
     private fun gaugeAggregate(name: String): GaugeAggregate =
         aggregateGauges(meterRegistry, name)
 
-    private fun threadStateCounts(): Map<Thread.State, Int> =
-        runCatching {
-            threads.getThreadInfo(threads.allThreadIds)
-                .filterNotNull()
-                .groupingBy { it.threadState }
-                .eachCount()
-        }.getOrDefault(emptyMap())
+    private fun threadStateCounts(threads: java.lang.management.ThreadMXBean): Map<Thread.State, Int> =
+        threads.getThreadInfo(threads.allThreadIds)
+            .filterNotNull()
+            .groupingBy { it.threadState }
+            .eachCount()
 
     private fun connectionPoolMetrics(): PoolMetrics? =
         (connectionFactoryProvider.ifAvailable as? ConnectionPool)?.metrics?.orElse(null)
+
+    private fun runtimeKind(): String =
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) {
+            "native-image"
+        } else {
+            "jvm"
+        }
+
+    private inline fun <T> collect(
+        name: String,
+        unavailable: MutableSet<String>,
+        block: () -> T?,
+    ): T? =
+        try {
+            block()
+        } catch (_: Throwable) {
+            unavailable += name
+            null
+        }
 }
 
 internal data class RuntimeMetricsSnapshot(
     val capturedAtEpochMs: Long,
+    val runtimeKind: String,
+    val runtimeName: String,
+    val runtimeVersion: String,
+    val runtimeMetricsDegraded: Boolean,
+    val runtimeMetricsUnavailable: String?,
     val availableProcessors: Int,
     val processCpuPercent: Double?,
     val systemCpuPercent: Double?,
     val systemLoadAverage1m: Double?,
-    val processUptimeSeconds: Long,
+    val processUptimeSeconds: Long?,
     val hostMemoryTotalBytes: Long?,
     val hostMemoryAvailableBytes: Long?,
     val hostMemoryUsedBytes: Long?,
@@ -167,19 +250,19 @@ internal data class RuntimeMetricsSnapshot(
     val directBufferCount: Long?,
     val directBufferMemoryUsedBytes: Long?,
     val directBufferCapacityBytes: Long?,
-    val threadsLive: Int,
-    val threadsDaemon: Int,
-    val threadsPeak: Int,
-    val threadsStartedTotal: Long,
-    val threadsRunnable: Int,
-    val threadsBlocked: Int,
-    val threadsWaiting: Int,
-    val threadsTimedWaiting: Int,
-    val gcCollectionsTotal: Long,
-    val gcCollectionTimeMsTotal: Long,
-    val classesLoaded: Int,
-    val classesLoadedTotal: Long,
-    val classesUnloadedTotal: Long,
+    val threadsLive: Int?,
+    val threadsDaemon: Int?,
+    val threadsPeak: Int?,
+    val threadsStartedTotal: Long?,
+    val threadsRunnable: Int?,
+    val threadsBlocked: Int?,
+    val threadsWaiting: Int?,
+    val threadsTimedWaiting: Int?,
+    val gcCollectionsTotal: Long?,
+    val gcCollectionTimeMsTotal: Long?,
+    val classesLoaded: Int?,
+    val classesLoadedTotal: Long?,
+    val classesUnloadedTotal: Long?,
     val dbPoolAcquired: Int?,
     val dbPoolAllocated: Int?,
     val dbPoolIdle: Int?,
@@ -190,8 +273,6 @@ internal data class RuntimeMetricsSnapshot(
     val reactorNettyEventLoopMaxPendingTasks: Double?,
     val reactorNettyActiveConnections: Double?,
     val reactorNettyDirectMemoryBytes: Double?,
-    val jvmName: String,
-    val jvmVersion: String,
 )
 
 internal data class GaugeAggregate(
