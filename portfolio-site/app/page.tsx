@@ -1,37 +1,8 @@
-"use client";
-
 import Image from "next/image";
-import {
-  Activity,
-  ArrowDown,
-  ArrowUpRight,
-  BellRing,
-  Blocks,
-  BookOpen,
-  Braces,
-  Check,
-  ChevronRight,
-  Cloud,
-  Database,
-  Gauge,
-  GitFork,
-  GraduationCap,
-  KeyRound,
-  Layers3,
-  LockKeyhole,
-  MessageSquareText,
-  Network,
-  RefreshCw,
-  Route,
-  ServerCog,
-  ShieldCheck,
-  Smartphone,
-  TestTube2,
-  TimerReset,
-  Workflow,
-} from "lucide-react";
 
 const navigation = [
+  ["개요", "overview"],
+  ["개선 사항", "improvements"],
   ["제품", "product"],
   ["아키텍처", "architecture"],
   ["성능", "performance"],
@@ -41,424 +12,471 @@ const navigation = [
   ["인터뷰", "interview"],
 ];
 
-const productFeatures = [
+const improvements = [
   {
-    icon: BookOpen,
-    title: "질문부터 채점까지",
-    summary: "주제와 난이도에 맞는 짧은 질문을 만들고, 힌트와 AI 채점 결과를 제공합니다.",
-    detail: "OpenAI 호출은 서버에서만 수행하며 질문, 초안, 채점 결과를 PostgreSQL에 보존합니다.",
+    problem: "대량 목록 조회에서 지연과 메모리 할당이 급증",
+    change: "조회 행 수와 매핑 비용을 분리 측정하고 hot path를 projection 중심으로 재설계",
+    result: "동일 400 RPS 실험에서 p95 780.94ms → 16.53ms, allocation 73.2% 감소",
   },
   {
-    icon: RefreshCw,
-    title: "초안을 지키는 동기화",
-    summary: "새 질문이나 원격 동기화가 진행돼도 사용자가 작성 중인 답변을 덮어쓰지 않습니다.",
-    detail: "백엔드를 원본으로 두되 활성 초안과 복구 상태는 클라이언트 정책으로 보호합니다.",
+    problem: "질문 생성 후 푸시 발송 실패 시 이벤트 유실 가능",
+    change: "도메인 변경과 outbox를 같은 트랜잭션에 기록하고 Redis Streams로 비동기 전달",
+    result: "at-least-once 전달과 consumer idempotency로 실패 복구 경계 명확화",
   },
   {
-    icon: GraduationCap,
-    title: "주제 중심 통계",
-    summary: "점수 하나가 아니라 주제·난이도·기간을 함께 보며 학습 범위를 추정합니다.",
-    detail: "정규화한 topic key와 증분 dirty-key read model로 통계를 제한된 범위만 재계산합니다.",
+    problem: "동기화 중 사용자가 작성하던 답변이 교체될 수 있음",
+    change: "서버 데이터를 원본으로 유지하되 활성 초안은 클라이언트 우선 정책으로 보호",
+    result: "예약·푸시·동기화가 진행돼도 작성 중인 답변 보존",
   },
   {
-    icon: BellRing,
-    title: "APNs 예약 학습",
-    summary: "질문을 먼저 저장한 뒤 푸시를 발송하고, 알림을 눌렀을 때만 학습 화면으로 이동합니다.",
-    detail: "Redis Streams와 transactional outbox가 생성·저장·전송 사이의 실패 경계를 관리합니다.",
+    problem: "Native Image 환경에서 일부 지표 실패가 전체 수집을 중단",
+    change: "JVM·프로세스·OS collector를 격리하고 /proc 기반 fallback 추가",
+    result: "지원되지 않는 지표만 제외하고 CPU·RSS·스레드 진단은 계속 수집",
   },
   {
-    icon: MessageSquareText,
-    title: "공개 질문 커뮤니티",
-    summary: "프로필, 공개 질문, 좋아요, 댓글, 신고와 약관 기반 접근 정책을 제공합니다.",
-    detail: "device identity와 Google-linked user를 분리하고 안정적인 API error code로 앱 동작을 결정합니다.",
+    problem: "DB와 운영 도구가 공용 네트워크에 노출될 위험",
+    change: "Cloudflare Tunnel, WARP /32 private route, localhost bind와 인증 프록시 적용",
+    result: "공개 HTTP와 관리 트래픽을 분리하고 공격 표면 축소",
   },
-  {
-    icon: Smartphone,
-    title: "iOS에 맞춘 사용성",
-    summary: "SwiftUI의 일관된 탭 구조, 페이지네이션, 비동기 갱신, 로그인 복귀 흐름을 설계했습니다.",
-    detail: "기록 10,000건까지 고려해 전체 렌더링을 피하고 화면별 loading state를 분리합니다.",
-  },
+];
+
+const productFlow = [
+  ["1", "질문 생성", "주제·난이도·월간 quota를 확인한 뒤 OpenAI를 통해 질문을 생성합니다."],
+  ["2", "답변 보존", "사용자가 작성 중인 초안을 로컬에 보존하고 원격 동기화와 충돌하지 않게 합니다."],
+  ["3", "AI 채점", "점수뿐 아니라 설명과 피드백을 저장해 다음 복습의 근거로 사용합니다."],
+  ["4", "기록·통계", "주제와 난이도를 기준으로 학습 기록을 집계하고 부족한 범위를 보여줍니다."],
 ];
 
 const screenshots = [
-  { src: "/media/study.png", alt: "BuddyStudy 질문과 답변 화면", label: "Study" },
-  { src: "/media/records.png", alt: "BuddyStudy 학습 기록 화면", label: "Records" },
-  { src: "/media/stats.png", alt: "BuddyStudy 주제 통계 화면", label: "Statistics" },
-  { src: "/media/settings.png", alt: "BuddyStudy 설정 화면", label: "Settings" },
-];
-
-const architectureLayers = [
-  { icon: Smartphone, name: "SwiftUI iOS", note: "상태·초안·오류 표현 정책" },
-  { icon: Route, name: "Cloudflare + Nginx", note: "HTTPS 라우팅과 접근 경계" },
-  { icon: Blocks, name: "Use Cases", note: "도메인 흐름과 권한 정책" },
-  { icon: Database, name: "PostgreSQL + R2DBC", note: "트랜잭션과 원본 데이터" },
-  { icon: Workflow, name: "Redis Streams", note: "outbox 기반 비동기 전달" },
-  { icon: Cloud, name: "OpenAI + APNs", note: "생성·채점·푸시 어댑터" },
+  { src: "/media/study.png", alt: "BuddyStudy 질문과 답변 화면", label: "질문과 답변" },
+  { src: "/media/records.png", alt: "BuddyStudy 학습 기록 화면", label: "학습 기록" },
+  { src: "/media/stats.png", alt: "BuddyStudy 주제별 통계 화면", label: "주제별 통계" },
+  { src: "/media/settings.png", alt: "BuddyStudy 설정 화면", label: "설정" },
 ];
 
 const testMatrix = [
-  ["iOS", "unit + generic build + real device", "초안, 오류 라우팅, 디코딩, 푸시·백그라운드 UX"],
-  ["Backend", "unit + integration", "use case, R2DBC, 트랜잭션, migration, HTTP contract"],
-  ["Infrastructure", "Node test", "Cloudflare Worker 설정, timeout, Slack alert 정책"],
-  ["Monitoring", "parser + query test", "구조화 로그, LogQL, Native Image runtime sample"],
-  ["Performance", "k6 + telemetry + JFR", "RPS, p90/p95/p99, CPU, RSS, thread, DB pool, allocation"],
+  ["iOS", "unit, generic build, real device", "초안 복구, API decoding, 오류 라우팅, 푸시 UX"],
+  ["Backend", "unit, integration", "use case, R2DBC, transaction, migration, HTTP contract"],
+  ["Infrastructure", "Node test", "Worker 설정, timeout, health monitor, Slack 정책"],
+  ["Monitoring", "parser, query test", "구조화 로그, LogQL, Native Image runtime sample"],
+  ["Performance", "k6, telemetry, JFR", "RPS, p90/p95/p99, CPU, RSS, thread, DB pool, allocation"],
 ];
 
 const interviewQuestions = [
   {
     question: "왜 WebFlux를 선택했고, 실제로 더 빨랐나요?",
     answer:
-      "외부 OpenAI·APNs·Redis·DB I/O가 많은 흐름을 coroutine으로 읽기 쉽게 구성하려는 선택이었습니다. 하지만 프레임워크가 자동으로 처리량을 높인다고 가정하지 않았습니다. 동일 조건 실험에서 health는 두 런타임 모두 3,000 RPS를 달성했지만 현재 R2DBC 목록 경로는 10개 연결 뒤에 수천 요청이 대기했습니다. 그래서 결론은 'WebFlux가 빠르다'가 아니라 query/row mapping과 bounded admission을 먼저 개선해야 한다는 것입니다.",
+      "외부 API, Redis, DB처럼 I/O가 많은 흐름을 coroutine으로 일관되게 구성하려는 선택이었습니다. 다만 프레임워크 자체가 처리량을 보장하지는 않습니다. health 경로는 MVC와 WebFlux 모두 3,000 RPS를 처리했지만, DB 목록 경로는 10개 연결 뒤에 요청이 쌓였습니다. 따라서 병목은 런타임보다 query 크기, row mapping, DB pool과 admission control에서 먼저 찾았습니다.",
   },
   {
     question: "비동기 이벤트가 유실되거나 중복되면 어떻게 하나요?",
     answer:
-      "비즈니스 변경과 outbox row를 같은 PostgreSQL 트랜잭션에 기록합니다. dispatcher가 SKIP LOCKED로 claim하고 Redis Stream에 발행합니다. 발행 직후 장애가 나면 재발행될 수 있으므로 delivery는 at-least-once이며 consumer가 event type과 event id로 중복을 제거합니다.",
+      "비즈니스 변경과 outbox row를 동일한 PostgreSQL 트랜잭션에 기록합니다. dispatcher는 SKIP LOCKED로 이벤트를 claim하고 Redis Stream으로 발행합니다. 발행 직후 장애가 나면 재발행될 수 있으므로 delivery는 at-least-once이며, consumer는 event id를 기준으로 멱등 처리합니다.",
   },
   {
-    question: "R2DBC의 @Transactional은 같은 스레드에서 동작하나요?",
+    question: "R2DBC 트랜잭션은 같은 스레드에서만 동작하나요?",
     answer:
-      "트랜잭션은 thread-local이 아니라 Reactor Context를 따라갑니다. coroutine이 다른 스레드에서 재개돼도 동일 reactive transaction에 참여할 수 있습니다. JPA persistence context는 없기 때문에 dirty checking이나 lazy loading을 기대하지 않고 변경을 명시적으로 저장합니다.",
+      "아닙니다. reactive transaction은 thread-local이 아니라 Reactor Context를 따라갑니다. coroutine이 다른 스레드에서 재개되어도 같은 context 안에서는 동일 트랜잭션에 참여합니다. JPA persistence context는 없으므로 dirty checking이나 lazy loading 대신 변경을 명시적으로 저장합니다.",
   },
   {
     question: "운영 보안은 어디까지 고려했나요?",
     answer:
-      "공개 HTTP만 Cloudflare Tunnel과 Nginx로 라우팅합니다. PostgreSQL과 Redis 관리 경로는 WARP private route를 우선 사용하며, Loki와 Grafana는 localhost에 bind하고 인증 프록시만 외부에 노출합니다. 런타임 secret은 AWS Secrets Manager에서 배포 시점에 주입하고 토큰·비밀값은 로그에서 마스킹합니다.",
-  },
-  {
-    question: "다음 성능 개선의 우선순위는 무엇인가요?",
-    answer:
-      "hot list query를 필요한 필드만 읽는 projection으로 바꾸고 content/count 왕복을 줄이는 것이 먼저입니다. 그 다음 인증 query amplification과 불필요한 body logging을 제거하고 cancellation correctness를 고칩니다. 마지막에 실제 DB 처리량에 맞춘 짧은 bounded queue를 적용한 뒤 독립된 load generator에서 재측정합니다.",
+      "공개 HTTP는 Cloudflare Tunnel과 Nginx만 통과시킵니다. PostgreSQL과 Redis 관리 경로는 WARP private route로 제한하고, Loki와 Grafana는 localhost에 bind한 뒤 인증 프록시를 통해서만 접근합니다. secret은 AWS Secrets Manager에서 주입하며 토큰과 민감 헤더는 구조화 로그에서 마스킹합니다.",
   },
 ];
 
+function SectionTitle({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <header className="section-title">
+      <span>{eyebrow}</span>
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
+    </header>
+  );
+}
+
 export default function Home() {
   return (
-    <div className="site">
-      <header className="nav-shell">
-        <a className="brand" href="#top" aria-label="BuddyStudy 처음으로">
-          <Image src="/media/buddystudy-icon.png" alt="" width={34} height={34} priority unoptimized />
-          <span>BuddyStudy</span>
+    <div className="site-shell">
+      <a className="skip-link" href="#content">본문으로 이동</a>
+
+      <header className="topbar">
+        <a className="brand" href="#overview" aria-label="BuddyStudy 개요로 이동">
+          <Image src="/media/buddystudy-icon.png" alt="" width={30} height={30} priority unoptimized />
+          <strong>BuddyStudy</strong>
+          <span>Engineering Notes</span>
         </a>
-        <nav className="primary-nav" aria-label="포트폴리오 섹션">
-          {navigation.map(([label, id]) => (
-            <a href={`#${id}`} key={id}>{label}</a>
-          ))}
-        </nav>
-        <a
-          className="github-link"
-          href="https://github.com/ghkdqhrbals/buddy-studdy"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="GitHub 저장소 열기"
-        >
-          <GitFork size={18} />
-          <span>Repository</span>
-        </a>
+        <div className="topbar-links">
+          <span>SwiftUI · Kotlin · WebFlux</span>
+          <a href="https://github.com/ghkdqhrbals/buddy-studdy" target="_blank" rel="noreferrer">
+            GitHub ↗
+          </a>
+        </div>
       </header>
 
-      <main id="top">
-        <section className="hero">
-          <div className="hero-noise" aria-hidden="true" />
-          <div className="hero-copy">
-            <p className="eyebrow">iOS AI LEARNING SYSTEM · END-TO-END ENGINEERING</p>
+      <div className="document-layout">
+        <aside className="sidebar" aria-label="문서 목차">
+          <p>On this page</p>
+          <nav>
+            {navigation.map(([label, id]) => (
+              <a href={`#${id}`} key={id}>{label}</a>
+            ))}
+          </nav>
+          <div className="sidebar-meta">
+            <span>Last updated</span>
+            <time dateTime="2026-07-24">2026. 07. 24.</time>
+          </div>
+        </aside>
+
+        <main id="content" className="markdown-body">
+          <section id="overview" className="document-hero">
+            <div className="status-line">
+              <span>iOS</span>
+              <span>Production</span>
+              <span>End-to-end</span>
+            </div>
             <h1>BuddyStudy</h1>
-            <p className="hero-lead">
-              질문을 만드는 앱을 넘어, 학습 데이터가 쌓이고 설명 가능한 통계로 돌아오는
-              전체 시스템을 설계했습니다.
-            </p>
-            <p className="hero-detail">
-              SwiftUI · Kotlin · WebFlux · R2DBC · PostgreSQL · Redis Streams · APNs ·
-              Cloudflare · GraalVM Native Image
-            </p>
-            <div className="hero-actions">
-              <a className="primary-action" href="#product">
-                프로젝트 살펴보기 <ArrowDown size={18} />
-              </a>
-              <a className="secondary-action" href="#performance">
-                성능 실험 보기 <Gauge size={18} />
-              </a>
-            </div>
-          </div>
-          <div className="hero-phones" aria-label="BuddyStudy iOS 화면 미리보기">
-            <Image className="phone phone-back" src="/media/records.png" alt="학습 기록 화면" width={340} height={736} priority unoptimized />
-            <Image className="phone phone-main" src="/media/study.png" alt="질문 학습 화면" width={380} height={824} priority unoptimized />
-            <Image className="phone phone-front" src="/media/stats.png" alt="주제 통계 화면" width={340} height={736} priority unoptimized />
-          </div>
-          <div className="hero-facts" aria-label="프로젝트 핵심 수치">
-            <div><strong>3,000</strong><span>RPS 비교 구간</span></div>
-            <div><strong>4</strong><span>독립 배포 모듈</span></div>
-            <div><strong>30s</strong><span>runtime sample</span></div>
-            <div><strong>iOS</strong><span>public release</span></div>
-          </div>
-        </section>
-
-        <section className="intro-band" aria-labelledby="overview-title">
-          <div className="section-heading">
-            <p className="section-index">00 / OVERVIEW</p>
-            <h2 id="overview-title">제품과 시스템을 함께 만들었습니다.</h2>
-          </div>
-          <div className="intro-copy">
-            <p>
-              <strong>쉽게 말하면</strong> BuddyStudy는 관심 주제를 짧게 질문하고, 답변을
-              채점해 부족한 영역을 보여주는 개인 학습 도구입니다.
+            <p className="lead">
+              짧은 질문으로 학습하고, 답변 기록을 주제별 통계로 연결하는
+              <strong> iOS AI 학습 시스템</strong>입니다.
             </p>
             <p>
-              <strong>기술적으로는</strong> 모바일 상태 복구, reactive transaction,
-              transactional outbox, 증분 통계 read model, APNs delivery, 구조화 로그,
-              Native Image 관측, 부하 실험과 private network 운영까지 포함한 시스템입니다.
+              이 문서는 화면 목록보다 <strong>어떤 문제를 발견했고, 어떤 근거로 개선했으며,
+              운영에서 어떻게 검증했는지</strong>를 설명합니다. SwiftUI 앱부터 Kotlin
+              WebFlux/R2DBC 백엔드, 비동기 이벤트, 배포, 관측과 부하 실험까지 한 시스템으로
+              설계했습니다.
             </p>
-          </div>
-        </section>
 
-        <section id="product" className="section product-section">
-          <div className="section-heading">
-            <p className="section-index">01 / PRODUCT</p>
-            <h2>학습의 전체 피드백 루프</h2>
-            <p>질문 생성에서 끝나지 않고, 기록과 통계가 다음 학습을 설명하도록 연결했습니다.</p>
-          </div>
-          <div className="feature-grid">
-            {productFeatures.map(({ icon: Icon, title, summary, detail }) => (
-              <article className="feature-item" key={title}>
-                <Icon size={24} strokeWidth={1.8} />
-                <h3>{title}</h3>
-                <p>{summary}</p>
-                <small>{detail}</small>
-              </article>
-            ))}
-          </div>
-          <div className="screen-gallery">
-            {screenshots.map((screen) => (
-              <figure key={screen.label}>
-                <Image src={screen.src} alt={screen.alt} width={430} height={932} unoptimized />
-                <figcaption>{screen.label}</figcaption>
-              </figure>
-            ))}
-          </div>
-        </section>
+            <blockquote>
+              <strong>핵심 관점</strong>
+              <p>
+                “WebFlux가 빠르다” 같은 결론을 먼저 정하지 않습니다. 요청 지연, DB pool,
+                allocation, queue depth를 함께 측정하고 실제 병목이 있는 경로를 줄였습니다.
+              </p>
+            </blockquote>
 
-        <section id="architecture" className="section architecture-section">
-          <div className="section-heading light">
-            <p className="section-index">02 / ARCHITECTURE</p>
-            <h2>의존성은 안쪽으로, I/O는 바깥으로</h2>
-            <p>프레임워크가 도메인의 언어가 되지 않도록 use case와 port를 경계로 사용합니다.</p>
-          </div>
-          <div className="architecture-flow" aria-label="BuddyStudy 시스템 계층">
-            {architectureLayers.map(({ icon: Icon, name, note }, index) => (
-              <div className="architecture-step" key={name}>
-                <div>
-                  <Icon size={25} />
-                  <strong>{name}</strong>
-                  <span>{note}</span>
-                </div>
-                {index < architectureLayers.length - 1 && <ChevronRight aria-hidden="true" size={20} />}
-              </div>
-            ))}
-          </div>
-          <div className="architecture-notes">
-            <div>
-              <Braces size={22} />
-              <h3>Kotlin coroutine</h3>
-              <p>순차적인 비즈니스 코드를 유지하면서 reactive context의 non-blocking I/O를 사용합니다.</p>
+            <div className="quick-facts" aria-label="프로젝트 요약">
+              <dl>
+                <dt>Client</dt>
+                <dd>SwiftUI / iOS</dd>
+              </dl>
+              <dl>
+                <dt>Backend</dt>
+                <dd>Kotlin / WebFlux / R2DBC</dd>
+              </dl>
+              <dl>
+                <dt>Data</dt>
+                <dd>PostgreSQL / Redis Streams</dd>
+              </dl>
+              <dl>
+                <dt>Operations</dt>
+                <dd>Cloudflare / AWS / PLG</dd>
+              </dl>
             </div>
-            <div>
-              <Layers3 size={22} />
-              <h3>Reactive transaction</h3>
-              <p>스레드가 아니라 Reactor Context에 트랜잭션을 연결하고 변경은 명시적으로 저장합니다.</p>
-            </div>
-            <div>
-              <Workflow size={22} />
-              <h3>Transactional outbox</h3>
-              <p>DB write와 event intent를 원자적으로 남기고 Redis에는 at-least-once로 전달합니다.</p>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section id="performance" className="section performance-section">
-          <div className="section-heading">
-            <p className="section-index">03 / PERFORMANCE</p>
-            <h2>프레임워크가 아니라 병목을 측정했습니다.</h2>
-            <p>같은 CPU, heap, DB fixture와 10개 connection pool에서 MVC/JDBC와 WebFlux/R2DBC를 비교했습니다.</p>
-          </div>
-          <div className="performance-layout">
-            <div className="performance-visual">
+          <hr />
+
+          <section id="improvements">
+            <SectionTitle
+              eyebrow="01 · Improvements"
+              title="무엇을 개선했는가"
+              description="기능의 개수보다 문제, 변경, 검증 결과가 연결되도록 정리했습니다."
+            />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>문제</th>
+                    <th>개선</th>
+                    <th>결과</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {improvements.map((item) => (
+                    <tr key={item.problem}>
+                      <td>{item.problem}</td>
+                      <td>{item.change}</td>
+                      <td><strong>{item.result}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <hr />
+
+          <section id="product">
+            <SectionTitle
+              eyebrow="02 · Product"
+              title="질문에서 복습까지 이어지는 흐름"
+              description="질문 생성 자체가 아니라 사용자의 답변을 안전하게 보존하고 다음 학습으로 연결하는 데 집중했습니다."
+            />
+            <ol className="flow-list">
+              {productFlow.map(([number, title, description]) => (
+                <li key={number}>
+                  <span>{number}</span>
+                  <div>
+                    <h3>{title}</h3>
+                    <p>{description}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+
+            <h3>iOS 화면</h3>
+            <div className="screenshot-grid">
+              {screenshots.map((screen) => (
+                <figure key={screen.label}>
+                  <Image src={screen.src} alt={screen.alt} width={390} height={844} unoptimized />
+                  <figcaption>{screen.label}</figcaption>
+                </figure>
+              ))}
+            </div>
+          </section>
+
+          <hr />
+
+          <section id="architecture">
+            <SectionTitle
+              eyebrow="03 · Architecture"
+              title="의존성은 안쪽으로, I/O는 바깥으로"
+              description="도메인 흐름을 프레임워크와 저장소 구현에서 분리하기 위해 use case와 port를 경계로 사용합니다."
+            />
+            <pre aria-label="BuddyStudy 시스템 아키텍처">
+              <code>{`SwiftUI iOS
+    │  HTTPS / APNs
+    ▼
+Cloudflare Tunnel ── Nginx
+    │
+    ▼
+Inbound Port ── Application Use Case ── Domain
+                       │
+          ┌────────────┼─────────────┐
+          ▼            ▼             ▼
+    PostgreSQL     Redis Streams   OpenAI / APNs
+      R2DBC        + Outbox        Adapters
+
+Observability: structured logs → Promtail → Loki → Grafana`}</code>
+            </pre>
+
+            <h3>경계 규칙</h3>
+            <ul>
+              <li>Controller는 controller-facing port에만 의존합니다.</li>
+              <li>Application service는 inbound use case 계약을 구현합니다.</li>
+              <li>하위 도메인 로직은 service가 아니라 outbound port에 의존합니다.</li>
+              <li>R2DBC 변경은 JPA 영속성 컨텍스트 없이 명시적으로 저장합니다.</li>
+              <li>트랜잭션은 thread-local이 아닌 Reactor Context를 따라갑니다.</li>
+            </ul>
+
+            <h3>비동기 질문 전달</h3>
+            <pre>
+              <code>{`[DB transaction]
+question 저장 + outbox 저장
+        │ commit
+        ▼
+dispatcher ── Redis Stream ── consumer ── APNs
+                   │
+                   └── event_id 기반 멱등 처리`}</code>
+            </pre>
+            <p>
+              DB 저장과 메시지 발행 사이의 dual-write 문제는 transactional outbox로 다룹니다.
+              전달 보장은 <code>at-least-once</code>이고, 중복 가능성은 consumer의 멱등성으로
+              흡수합니다.
+            </p>
+          </section>
+
+          <hr />
+
+          <section id="performance">
+            <SectionTitle
+              eyebrow="04 · Performance"
+              title="프레임워크가 아니라 병목을 비교했습니다"
+              description="같은 API, 같은 DB 조건에서 RPS·지연·CPU·RSS·스레드·DB pool·allocation을 함께 수집했습니다."
+            />
+
+            <h3>주요 실험 결과</h3>
+            <div className="metric-strip">
+              <div><strong>780.94 → 16.53ms</strong><span>p95 latency</span></div>
+              <div><strong>-73.2%</strong><span>allocation rate</span></div>
+              <div><strong>259 → 5</strong><span>DB pool queue</span></div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>실험</th>
+                    <th>관찰</th>
+                    <th>해석</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>No-DB health, 3,000 RPS</td>
+                    <td>MVC와 WebFlux 모두 목표 처리</td>
+                    <td>런타임 자체보다 DB 경로가 먼저 병목</td>
+                  </tr>
+                  <tr>
+                    <td>WebFlux DB list, pool 10</td>
+                    <td>pending acquisition 최대 2,992</td>
+                    <td>무제한 대기는 비동기의 장점이 아니라 tail latency로 전환</td>
+                  </tr>
+                  <tr>
+                    <td>400 RPS, limit 100 → 1</td>
+                    <td>p95 97.9% 감소</td>
+                    <td>row mapping과 allocation이 핵심 비용임을 확인</td>
+                  </tr>
+                  <tr>
+                    <td>median RSS</td>
+                    <td>MVC 903.0MiB / WebFlux 937.2MiB</td>
+                    <td>현재 구현에서 WebFlux의 메모리 우위를 확인하지 못함</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <blockquote>
+              <strong>결론</strong>
+              <p>
+                이 결과는 “MVC가 항상 더 빠르다”는 뜻이 아닙니다. 현재 BuddyStudy의 hot list
+                query에서 가져오는 행 수와 객체 매핑 비용이 런타임 선택보다 큰 변수였다는 뜻입니다.
+              </p>
+            </blockquote>
+
+            <figure className="evidence-figure">
               <Image
                 src="/media/load-test-dashboard.png"
-                alt="BuddyStudy MVC와 WebFlux k6 부하 테스트 대시보드"
-                width={1200}
-                height={2200}
+                alt="MVC와 WebFlux 부하 테스트 결과 대시보드"
+                width={1600}
+                height={900}
                 unoptimized
               />
-            </div>
-            <div className="performance-findings">
-              <p className="finding-kicker">CONTROLLED EXPERIMENT</p>
-              <h3>limit 100 → 1</h3>
-              <div className="finding-number"><strong>97.9%</strong><span>p95 감소</span></div>
-              <div className="finding-number"><strong>73.2%</strong><span>allocation 감소</span></div>
-              <p>
-                400 RPS에서 row 수만 통제하자 reactive path의 pool queue가 259에서 5로
-                줄었습니다. 병목은 Netty 자체가 아니라 100-row materialization과 응답
-                pipeline에 있었습니다.
-              </p>
-              <ul className="check-list">
-                <li><Check size={17} />1,000~3,000 constant arrival rate</li>
-                <li><Check size={17} />p50·p90·p95·p99와 successful RPS</li>
-                <li><Check size={17} />CPU·RSS·thread·GC·allocation·DB pool</li>
-                <li><Check size={17} />JFR와 독립 변수 통제 실험</li>
-              </ul>
-            </div>
-          </div>
-          <div className="result-strip">
-            <div><span>Health</span><strong>3,000 RPS</strong><small>두 런타임 모두 100%</small></div>
-            <div><span>MVC studies</span><strong>2,478 RPS</strong><small>2,500 target, successful</small></div>
-            <div><span>Reactive queue</span><strong>2,992</strong><small>10개 DB connection 뒤 pending</small></div>
-            <div><span>Median RSS</span><strong>+3.8%</strong><small>WebFlux 전체 구간</small></div>
-          </div>
-          <p className="evidence-note">
-            이 결과는 WebFlux나 R2DBC가 본질적으로 느리다는 뜻이 아닙니다. 현재 구현에서
-            admission control과 query 비용이 처리량을 제한한다는 실측 결과입니다.
-          </p>
-        </section>
+              <figcaption>부하 실험 대시보드: 처리량, 지연, CPU, RSS, 스레드와 DB pool을 같은 시간축으로 비교</figcaption>
+            </figure>
+          </section>
 
-        <section id="reliability" className="section reliability-section">
-          <div className="section-heading">
-            <p className="section-index">04 / RELIABILITY</p>
-            <h2>실패할 수 있다는 전제로 연결합니다.</h2>
-          </div>
-          <div className="reliability-timeline">
-            <div><span>01</span><strong>Question write</strong><p>질문과 outbox row를 같은 transaction에 저장</p></div>
-            <ArrowDown aria-hidden="true" />
-            <div><span>02</span><strong>Claim</strong><p>SKIP LOCKED와 lease로 여러 worker의 중복 claim 방지</p></div>
-            <ArrowDown aria-hidden="true" />
-            <div><span>03</span><strong>Publish</strong><p>Redis Stream으로 APNs job 발행, 실패 시 exponential backoff</p></div>
-            <ArrowDown aria-hidden="true" />
-            <div><span>04</span><strong>Deduplicate</strong><p>event type + event id로 consumer의 중복 처리 방지</p></div>
-          </div>
-          <div className="reliability-principles">
-            <article>
-              <TimerReset size={23} />
-              <h3>Eventually consistent</h3>
-              <p>통계와 알림은 원본 write를 막지 않고 재시도 가능한 read model과 outbox로 수렴합니다.</p>
-            </article>
-            <article>
-              <RefreshCw size={23} />
-              <h3>Idempotent refresh</h3>
-              <p>dirty key는 bounded batch로 처리하고 동시 갱신이 있으면 marker를 남겨 다음 실행에서 재처리합니다.</p>
-            </article>
-            <article>
-              <Activity size={23} />
-              <h3>External readiness</h3>
-              <p>배포 순간이 아닌 Cloudflare Cron이 운영 readiness를 확인하고 Slack으로 상태 전이를 알립니다.</p>
-            </article>
-          </div>
-        </section>
+          <hr />
 
-        <section id="security" className="section security-section">
-          <div className="section-heading light">
-            <p className="section-index">05 / SECURITY</p>
-            <h2>공개 트래픽과 운영자 경로를 분리했습니다.</h2>
-            <p>DB와 Redis를 인터넷에 직접 노출하지 않고, 공개 HTTP와 private administration의 경계를 다르게 둡니다.</p>
-          </div>
-          <div className="network-paths">
-            <div className="network-path public-path">
-              <span>PUBLIC HTTPS</span>
-              <div><Cloud size={23} /><strong>Cloudflare Tunnel</strong></div>
-              <ChevronRight />
-              <div><Route size={23} /><strong>Nginx</strong></div>
-              <ChevronRight />
-              <div><ServerCog size={23} /><strong>Backend API</strong></div>
-            </div>
-            <div className="network-path private-path">
-              <span>PRIVATE ADMIN</span>
-              <div><KeyRound size={23} /><strong>Operator</strong></div>
-              <ChevronRight />
-              <div><ShieldCheck size={23} /><strong>WARP /32 route</strong></div>
-              <ChevronRight />
-              <div><Database size={23} /><strong>Postgres · Redis</strong></div>
-            </div>
-          </div>
-          <div className="security-grid">
-            <div><LockKeyhole size={22} /><strong>Secret isolation</strong><p>AWS Secrets Manager에서 배포 시점에 runtime secret을 주입합니다.</p></div>
-            <div><Network size={22} /><strong>Local observability</strong><p>Loki와 Grafana는 localhost에 bind하고 인증 프록시만 노출합니다.</p></div>
-            <div><ShieldCheck size={22} /><strong>Device-bound identity</strong><p>access token의 user와 device를 저장된 관계와 함께 검증합니다.</p></div>
-            <div><Workflow size={22} /><strong>Module deployment</strong><p>backend, admin, monitoring, health monitor를 독립 workflow로 배포합니다.</p></div>
-          </div>
-        </section>
+          <section id="reliability">
+            <SectionTitle
+              eyebrow="05 · Reliability"
+              title="실패가 발생하는 위치를 설계에 포함했습니다"
+            />
+            <h3>사용자 데이터 보호</h3>
+            <ul>
+              <li>예약 질문과 원격 동기화가 활성 답변 초안을 덮어쓰지 않습니다.</li>
+              <li>푸시 수신은 조용히 동기화하고, 사용자의 명시적 탭에서만 화면을 이동합니다.</li>
+              <li>기록 목록은 10,000건까지 고려해 페이지네이션과 lazy rendering을 사용합니다.</li>
+            </ul>
 
-        <section id="testing" className="section testing-section">
-          <div className="section-heading">
-            <p className="section-index">06 / TESTING &amp; OBSERVABILITY</p>
-            <h2>화면, 계약, 운영 지표를 각각 검증합니다.</h2>
-          </div>
-          <div className="test-table" role="table" aria-label="BuddyStudy 테스트 전략">
-            <div className="test-row test-head" role="row">
-              <span role="columnheader">영역</span>
-              <span role="columnheader">방식</span>
-              <span role="columnheader">검증 대상</span>
+            <h3>운영 복구</h3>
+            <ul>
+              <li>Outbox claim은 <code>SKIP LOCKED</code>를 사용해 여러 worker의 중복 경쟁을 줄입니다.</li>
+              <li>Scheduler stale 판정은 lock 미획득과 실제 실행 실패를 구분합니다.</li>
+              <li>Native Image 지표 수집기는 collector별로 격리해 부분 실패를 허용합니다.</li>
+              <li>API 오류는 안정적인 error code를 내려주고 앱이 로그인·약관·일반 오류 흐름을 결정합니다.</li>
+            </ul>
+          </section>
+
+          <hr />
+
+          <section id="security">
+            <SectionTitle
+              eyebrow="06 · Security"
+              title="공개 요청과 관리 트래픽을 분리했습니다"
+            />
+            <pre>
+              <code>{`Internet
+  └─ Cloudflare Tunnel → Nginx → Backend API
+
+Private administration
+  └─ Cloudflare WARP /32
+       ├─ PostgreSQL
+       ├─ Redis
+       └─ localhost-bound Loki / Grafana → auth proxy`}</code>
+            </pre>
+            <ul>
+              <li>런타임 비밀값은 저장소나 이미지에 포함하지 않고 AWS Secrets Manager에서 주입합니다.</li>
+              <li>Authorization, client secret, token과 민감한 body 필드는 구조화 로그에서 마스킹합니다.</li>
+              <li>GitHub-hosted runner가 이미지를 빌드해 GHCR에 저장하고 EC2 runner는 배포만 수행합니다.</li>
+              <li>Backend, admin, monitoring, routing은 독립된 workflow와 배포 단위로 관리합니다.</li>
+            </ul>
+          </section>
+
+          <hr />
+
+          <section id="testing">
+            <SectionTitle
+              eyebrow="07 · Verification"
+              title="레이어별 실패 모드를 따로 검증합니다"
+            />
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>대상</th>
+                    <th>방법</th>
+                    <th>검증 범위</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {testMatrix.map(([target, method, scope]) => (
+                    <tr key={target}>
+                      <td><strong>{target}</strong></td>
+                      <td>{method}</td>
+                      <td>{scope}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            {testMatrix.map(([area, method, scope]) => (
-              <div className="test-row" role="row" key={area}>
-                <strong role="cell">{area}</strong>
-                <span role="cell">{method}</span>
-                <span role="cell">{scope}</span>
-              </div>
-            ))}
-          </div>
-          <div className="observability-band">
+            <p>
+              성능 실험은 성공 RPS만 보지 않습니다. <code>p90/p95/p99</code>, 오류율,
+              event-loop CPU, RSS, thread count, DB pool pending, PostgreSQL CPU와 allocation을
+              같은 시간 구간으로 비교합니다.
+            </p>
+          </section>
+
+          <hr />
+
+          <section id="interview">
+            <SectionTitle
+              eyebrow="08 · Interview Notes"
+              title="설계 결정을 설명하는 방법"
+              description="결론보다 선택의 조건, 관찰한 데이터, 남은 한계를 함께 답할 수 있도록 정리했습니다."
+            />
+            <div className="qa-list">
+              {interviewQuestions.map((item, index) => (
+                <details key={item.question} open={index === 0}>
+                  <summary>{item.question}</summary>
+                  <p>{item.answer}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+
+          <footer className="document-footer">
+            <Image src="/media/buddystudy-icon.png" alt="" width={32} height={32} unoptimized />
             <div>
-              <TestTube2 size={24} />
-              <h3>Request trace</h3>
-              <p>request id로 sanitized request, response, stack trace와 관련 로그를 한 번에 조회합니다.</p>
+              <strong>BuddyStudy</strong>
+              <p>SwiftUI iOS · Kotlin WebFlux · PostgreSQL · Redis Streams</p>
             </div>
-            <div>
-              <Gauge size={24} />
-              <h3>Golden signals</h3>
-              <p>traffic, latency, error, saturation을 같은 시간축에서 비교합니다.</p>
-            </div>
-            <div>
-              <ServerCog size={24} />
-              <h3>Native Image metrics</h3>
-              <p>지원되지 않는 MXBean 하나가 전체 sample을 지우지 않도록 collector를 독립시켰습니다.</p>
-            </div>
-          </div>
-        </section>
-
-        <section id="interview" className="section interview-section">
-          <div className="section-heading">
-            <p className="section-index">07 / INTERVIEW NOTES</p>
-            <h2>결정의 이유와 한계를 함께 설명합니다.</h2>
-            <p>각 답변은 현재 구현과 실측 결과를 기준으로 하며, 계획을 완료된 성과처럼 표현하지 않습니다.</p>
-          </div>
-          <div className="questions">
-            {interviewQuestions.map(({ question, answer }, index) => (
-              <details key={question} open={index === 0}>
-                <summary>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  {question}
-                  <ChevronRight size={20} />
-                </summary>
-                <p>{answer}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <section className="closing-section">
-          <Image src="/media/buddystudy-icon.png" alt="BuddyStudy" width={92} height={92} unoptimized />
-          <p className="section-index">BUILD · MEASURE · EXPLAIN</p>
-          <h2>작동하는 기능과 설명 가능한 근거를 함께 남깁니다.</h2>
-          <p>전체 코드, 상세 성능 보고서와 운영 문서는 저장소에서 확인할 수 있습니다.</p>
-          <a href="https://github.com/ghkdqhrbals/buddy-studdy" target="_blank" rel="noreferrer">
-            GitHub에서 프로젝트 보기 <ArrowUpRight size={18} />
-          </a>
-        </section>
-      </main>
-
-      <footer>
-        <span>BuddyStudy</span>
-        <span>SwiftUI · Kotlin · PostgreSQL · Redis · Cloudflare</span>
-        <a href="#top">맨 위로 <ArrowUpRight size={15} /></a>
-      </footer>
+            <a href="https://github.com/ghkdqhrbals/buddy-studdy" target="_blank" rel="noreferrer">
+              Source code ↗
+            </a>
+          </footer>
+        </main>
+      </div>
     </div>
   );
 }
