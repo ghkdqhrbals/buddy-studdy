@@ -10,16 +10,13 @@ import org.springframework.core.env.Environment
 @ConditionalOnClass(Flyway::class)
 class FlywayMigrationConfig {
     @Bean
-    fun flyway(environment: Environment): Flyway =
-        Flyway.configure()
+    fun flyway(environment: Environment): Flyway {
+        val dataSource = FlywayDataSourceSettings.from(environment)
+        return Flyway.configure()
             .dataSource(
-                environment.getProperty("spring.flyway.url")
-                    ?: environment.getProperty("DATABASE_URL")
-                    ?: "jdbc:postgresql://localhost:5432/buddystudy",
-                environment.getProperty("spring.flyway.user")
-                    ?: environment.getProperty("DATABASE_USERNAME", ""),
-                environment.getProperty("spring.flyway.password")
-                    ?: environment.getProperty("DATABASE_PASSWORD", ""),
+                dataSource.url,
+                dataSource.username,
+                dataSource.password,
             )
             .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration").split(",").map { it.trim() }.toTypedArray())
             .baselineOnMigrate(environment.getProperty("spring.flyway.baseline-on-migrate", Boolean::class.java, true))
@@ -33,6 +30,7 @@ class FlywayMigrationConfig {
                 ),
             )
             .load()
+    }
 
     @Bean
     fun flywayMigration(flyway: Flyway, environment: Environment): Any =
@@ -52,5 +50,46 @@ class FlywayMigrationConfig {
     companion object {
         private fun Environment.getBooleanProperty(vararg names: String, defaultValue: Boolean): Boolean =
             names.firstNotNullOfOrNull { getProperty(it, Boolean::class.java) } ?: defaultValue
+    }
+}
+
+internal data class FlywayDataSourceSettings(
+    val url: String,
+    val username: String,
+    val password: String,
+) {
+    companion object {
+        fun from(environment: Environment): FlywayDataSourceSettings =
+            FlywayDataSourceSettings(
+                url =
+                    environment.firstNonBlank("spring.flyway.url", "DATABASE_URL")
+                        ?: environment.firstNonBlank("spring.r2dbc.url")?.toJdbcUrl()
+                        ?: "jdbc:postgresql://localhost:5432/buddystudy",
+                username =
+                    environment.firstNonBlank(
+                        "spring.flyway.user",
+                        "DATABASE_USERNAME",
+                        "spring.r2dbc.username",
+                    ).orEmpty(),
+                password =
+                    environment.firstDefined(
+                        "spring.flyway.password",
+                        "DATABASE_PASSWORD",
+                        "spring.r2dbc.password",
+                    ).orEmpty(),
+            )
+
+        private fun Environment.firstNonBlank(vararg names: String): String? =
+            names.firstNotNullOfOrNull { getProperty(it)?.takeIf(String::isNotBlank) }
+
+        private fun Environment.firstDefined(vararg names: String): String? =
+            names.firstNotNullOfOrNull(::getProperty)
+
+        private fun String.toJdbcUrl(): String =
+            when {
+                startsWith("r2dbc:postgresql:") -> replaceFirst("r2dbc:postgresql:", "jdbc:postgresql:")
+                startsWith("r2dbc:") -> removePrefix("r2dbc:").let { "jdbc:$it" }
+                else -> this
+            }
     }
 }

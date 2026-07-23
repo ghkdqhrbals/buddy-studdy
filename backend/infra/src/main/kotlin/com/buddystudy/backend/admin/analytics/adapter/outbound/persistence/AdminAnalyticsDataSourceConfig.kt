@@ -15,18 +15,28 @@ class AdminAnalyticsDataSourceConfig {
     fun adminAnalyticsDatabaseClient(
         properties: BuddyStudyProperties,
         @Value("\${spring.r2dbc.url:}") primaryUrl: String,
+        @Value("\${spring.r2dbc.username:}") primaryUsername: String,
+        @Value("\${spring.r2dbc.password:}") primaryPassword: String,
         primaryConnectionFactory: ConnectionFactory,
-    ): DatabaseClient {
+    ): AdminAnalyticsDatabaseClient {
         val datasource = properties.analytics.datasource
         val configured = datasource.url.replace("jdbc:postgresql:", "r2dbc:postgresql:")
         val analyticsUrl = configured.ifBlank { AdminAnalyticsR2dbcUrl.derive(primaryUrl, datasource.databaseName) }
-        if (analyticsUrl.isBlank()) return DatabaseClient.create(primaryConnectionFactory)
-        val builder = ConnectionFactoryOptions.parse(analyticsUrl).mutate()
-        if (datasource.username.isNotBlank()) builder.option(ConnectionFactoryOptions.USER, datasource.username)
-        if (datasource.password.isNotBlank()) builder.option(ConnectionFactoryOptions.PASSWORD, datasource.password)
-        return DatabaseClient.create(ConnectionFactories.get(builder.build()))
+        if (analyticsUrl.isBlank()) {
+            return AdminAnalyticsDatabaseClient(DatabaseClient.create(primaryConnectionFactory))
+        }
+        val options = AdminAnalyticsR2dbcUrl.options(
+            analyticsUrl = analyticsUrl,
+            configuredUsername = datasource.username,
+            configuredPassword = datasource.password,
+            primaryUsername = primaryUsername,
+            primaryPassword = primaryPassword,
+        )
+        return AdminAnalyticsDatabaseClient(DatabaseClient.create(ConnectionFactories.get(options)))
     }
 }
+
+class AdminAnalyticsDatabaseClient(val client: DatabaseClient)
 
 internal object AdminAnalyticsR2dbcUrl {
     private val databasePath = Regex("""/([^/?]+)(\?.*)?$""")
@@ -37,5 +47,25 @@ internal object AdminAnalyticsR2dbcUrl {
         if (result.groupValues.getOrNull(1).orEmpty() != "buddystudy") return ""
         val query = result.groupValues.getOrNull(2).orEmpty()
         return primaryUrl.replaceRange(result.range, "/$analyticsDatabaseName$query")
+    }
+
+    fun options(
+        analyticsUrl: String,
+        configuredUsername: String,
+        configuredPassword: String,
+        primaryUsername: String,
+        primaryPassword: String,
+    ): ConnectionFactoryOptions {
+        val parsed = ConnectionFactoryOptions.parse(analyticsUrl)
+        val builder = parsed.mutate()
+        val username = configuredUsername.ifBlank {
+            (parsed.getValue(ConnectionFactoryOptions.USER) as? String).orEmpty()
+        }.ifBlank { primaryUsername }
+        val password = configuredPassword.ifBlank {
+            parsed.getValue(ConnectionFactoryOptions.PASSWORD)?.toString().orEmpty()
+        }.ifBlank { primaryPassword }
+        if (username.isNotBlank()) builder.option(ConnectionFactoryOptions.USER, username)
+        if (password.isNotBlank()) builder.option(ConnectionFactoryOptions.PASSWORD, password)
+        return builder.build()
     }
 }

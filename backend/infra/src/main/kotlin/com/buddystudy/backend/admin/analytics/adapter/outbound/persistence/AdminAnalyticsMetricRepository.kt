@@ -5,16 +5,16 @@ import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAna
 import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
 import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
 import kotlinx.coroutines.reactive.awaitSingle
-import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.time.LocalDate
 
 @Repository
 class AdminAnalyticsMetricPersistenceAdapter(
-    @param:Qualifier("adminAnalyticsDatabaseClient") private val client: DatabaseClient,
+    analyticsClient: AdminAnalyticsDatabaseClient,
 ) : AdminAnalyticsMetricPort {
+    private val client = analyticsClient.client
+
     private suspend fun ensureSchema() {
         client.sql(
             """

@@ -14,7 +14,7 @@ class AdminAnalyticsMetricPersistenceAdapterTest {
     fun `metrics are stored through the analytics r2dbc client`(): Unit = runBlocking {
         val serviceClient = client("service")
         val analyticsClient = client("analytics")
-        val adapter = AdminAnalyticsMetricPersistenceAdapter(analyticsClient)
+        val adapter = AdminAnalyticsMetricPersistenceAdapter(AdminAnalyticsDatabaseClient(analyticsClient))
         val day = LocalDate.parse("2026-06-25")
 
         adapter.upsertDailyMetrics(listOf(AdminDailyMetricPoint(day, "daily_active_users", null, 3.0, sampleCount = 3)))
