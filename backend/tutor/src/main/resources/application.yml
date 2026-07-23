@@ -111,6 +111,10 @@ buddystudy:
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
     scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent}
+    runtime-metrics:
+      enabled: ${RUNTIME_METRICS_ENABLED:true}
+      interval-ms: ${RUNTIME_METRICS_INTERVAL_MS:30000}
+      initial-delay-ms: ${RUNTIME_METRICS_INITIAL_DELAY_MS:30000}
   analytics:
     enabled: ${ADMIN_ANALYTICS_ENABLED:true}
     recent-days: ${ADMIN_ANALYTICS_RECENT_DAYS:2}

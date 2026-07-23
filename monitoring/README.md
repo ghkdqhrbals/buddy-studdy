@@ -28,6 +28,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Custom API log dashboard served by `monitoring/api-dashboard`.
   - API rows expand inline to show request, response, optional stack trace, and related logs.
   - `/performance.html` shows p50, p90, p95, and p99 latency grouped by API endpoint.
+  - `/system.html` shows Loki-backed RPS, error rate, host/JVM memory, CPU, threads, GC, and R2DBC pool time series.
   - Timestamps are rendered in KST with millisecond precision.
 - Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
   - See `docs/observability/slack-codex-log-search.md`.
