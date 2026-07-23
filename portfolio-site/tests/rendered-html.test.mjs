@@ -48,7 +48,10 @@ test("server-renders the BuddyStudy engineering document", async () => {
   assert.match(html, /WARP/);
   assert.match(html, /Native Image/);
   assert.match(html, /load-test-dashboard\.png/);
-  assert.match(html, /study\.png/);
+  assert.match(html, /home-current\.png/);
+  assert.match(html, /settings-current\.png/);
+  assert.match(html, /StudyMateiOS/);
+  assert.match(html, /직접 실행해 캡처/);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 

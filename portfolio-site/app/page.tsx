@@ -48,10 +48,16 @@ const productFlow = [
 ];
 
 const screenshots = [
-  { src: "/media/study.png", alt: "BuddyStudy 질문과 답변 화면", label: "질문과 답변" },
-  { src: "/media/records.png", alt: "BuddyStudy 학습 기록 화면", label: "학습 기록" },
-  { src: "/media/stats.png", alt: "BuddyStudy 주제별 통계 화면", label: "주제별 통계" },
-  { src: "/media/settings.png", alt: "BuddyStudy 설정 화면", label: "설정" },
+  {
+    src: "/media/home-current.png",
+    alt: "BuddyStudy 현재 홈 화면",
+    label: "홈 · 공개 질문과 내 학습을 한 화면에서 전환",
+  },
+  {
+    src: "/media/settings-current.png",
+    alt: "BuddyStudy 현재 설정 화면",
+    label: "설정 · 학습 주기, 언어, 알림과 개발자 옵션",
+  },
 ];
 
 const testMatrix = [
@@ -233,7 +239,11 @@ export default function Home() {
               ))}
             </ol>
 
-            <h3>iOS 화면</h3>
+            <h3>현재 iOS 화면</h3>
+            <p>
+              아래 이미지는 현재 <code>StudyMateiOS</code> 빌드를 iOS 26 시뮬레이터에서
+              직접 실행해 캡처했습니다.
+            </p>
             <div className="screenshot-grid">
               {screenshots.map((screen) => (
                 <figure key={screen.label}>
