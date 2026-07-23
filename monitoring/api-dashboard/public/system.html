@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BuddyStudy System Metrics</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072301" />
+    <title>BuddyStudy Server Dashboard</title>
+    <link rel="stylesheet" href="/styles.css?v=2026072302" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -16,19 +16,19 @@
         <nav>
           <a href="/">API Logs</a>
           <a href="/performance.html">API Performance</a>
-          <a href="/system.html" aria-current="page">System Metrics</a>
+          <a href="/system.html" aria-current="page">Server Dashboard</a>
         </nav>
       </aside>
 
       <div class="content-shell">
         <header class="topbar">
           <div>
-            <h1>System Metrics</h1>
-            <p>Server, JVM, database pool, and request throughput over time</p>
+            <h1>Server Dashboard</h1>
+            <p>Golden signals, WebFlux runtime pressure, JVM, database pool, and host resources</p>
           </div>
         </header>
 
-        <section class="filters system-filters" aria-label="System metric filters">
+        <section class="filters system-filters" aria-label="Server metric filters">
           <label>
             Time range
             <select id="rangeSelect">
@@ -42,50 +42,100 @@
           <span id="statusMessage" class="status-message" data-tone="loading">Loading...</span>
         </section>
 
-        <section class="summary-grid metrics-summary-grid" aria-label="Current system summary">
+        <section class="summary-grid metrics-summary-grid" aria-label="Current server summary">
+          <article>
+            <span>Traffic</span>
+            <strong id="rpsSummary">-</strong>
+            <small>requests per second</small>
+          </article>
+          <article>
+            <span>Latency p95</span>
+            <strong id="p95Summary">-</strong>
+            <small>tail response time</small>
+          </article>
+          <article>
+            <span>Latency p99</span>
+            <strong id="p99Summary">-</strong>
+            <small>worst one percent</small>
+          </article>
+          <article>
+            <span>Server Errors</span>
+            <strong id="errorSummary">-</strong>
+            <small>5xx request ratio</small>
+          </article>
           <article>
             <span>Process CPU</span>
             <strong id="processCpuSummary">-</strong>
+            <small>backend process</small>
           </article>
           <article>
-            <span>Heap Usage</span>
-            <strong id="heapSummary">-</strong>
-          </article>
-          <article>
-            <span>Process RSS</span>
-            <strong id="rssSummary">-</strong>
-          </article>
-          <article>
-            <span>Live Threads</span>
-            <strong id="threadsSummary">-</strong>
-          </article>
-          <article>
-            <span>Request Rate</span>
-            <strong id="rpsSummary">-</strong>
-          </article>
-          <article>
-            <span>DB Connections</span>
+            <span>DB Saturation</span>
             <strong id="dbSummary">-</strong>
+            <small id="dbSummaryDetail">connection pool</small>
           </article>
         </section>
 
+        <section class="diagnosis-panel" aria-labelledby="diagnosisTitle">
+          <div>
+            <span class="section-kicker">Current assessment</span>
+            <h2 id="diagnosisTitle">Diagnosis</h2>
+          </div>
+          <ul id="diagnosisList" class="diagnosis-list">
+            <li data-tone="neutral">Waiting for server samples.</li>
+          </ul>
+        </section>
+
         <main class="metrics-grid">
+          <header class="metrics-section-heading">
+            <span class="section-kicker">Golden signals</span>
+            <h2>Service Health</h2>
+            <p>Start with user-visible symptoms before inspecting server causes.</p>
+          </header>
+
           <section class="metric-chart-panel metric-chart-panel-primary">
             <div class="metric-chart-header">
               <div>
-                <h2>Requests Per Second</h2>
-                <p>RPS and 5xx responses per second over the selected time range</p>
+                <h2>Traffic</h2>
+                <p>Requests per second across all backend APIs</p>
               </div>
               <div id="throughputLegend" class="chart-legend"></div>
             </div>
             <canvas id="throughputChart" class="metric-chart metric-chart-primary" height="280"></canvas>
           </section>
 
+          <section class="metric-chart-panel metric-chart-panel-primary">
+            <div class="metric-chart-header">
+              <div>
+                <h2>Latency Percentiles</h2>
+                <p>p50 baseline and p95/p99 tail latency from API exchange duration</p>
+              </div>
+              <div id="latencyLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="latencyChart" class="metric-chart metric-chart-primary" height="280"></canvas>
+          </section>
+
+          <section class="metric-chart-panel metric-chart-panel-primary">
+            <div class="metric-chart-header">
+              <div>
+                <h2>Error Ratio</h2>
+                <p>Client and server errors divided by total request traffic</p>
+              </div>
+              <div id="errorLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="errorChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <header class="metrics-section-heading">
+            <span class="section-kicker">Saturation</span>
+            <h2>Capacity Pressure</h2>
+            <p>CPU, database connections, and Reactor Netty event-loop queues.</p>
+          </header>
+
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
                 <h2>CPU Utilization</h2>
-                <p>Backend process and host CPU</p>
+                <p>Backend process and host CPU pressure</p>
               </div>
               <div id="cpuLegend" class="chart-legend"></div>
             </div>
@@ -95,8 +145,47 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
+                <h2>R2DBC Pool Saturation</h2>
+                <p>Acquired connections as a percentage of the configured maximum</p>
+              </div>
+              <div id="dbSaturationLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="dbSaturationChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <section class="metric-chart-panel">
+            <div class="metric-chart-header">
+              <div>
+                <h2>R2DBC Connection Pool</h2>
+                <p>Allocated, acquired, idle, pending, and maximum connections</p>
+              </div>
+              <div id="dbLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="dbChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <section class="metric-chart-panel">
+            <div class="metric-chart-header">
+              <div>
+                <h2>Reactor Netty Event Loop</h2>
+                <p>Pending tasks per loop and active server connections</p>
+              </div>
+              <div id="nettyLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="nettyChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <header class="metrics-section-heading">
+            <span class="section-kicker">Cause analysis</span>
+            <h2>Runtime And Host</h2>
+            <p>Compare these charts on the same time range when latency or errors change.</p>
+          </header>
+
+          <section class="metric-chart-panel">
+            <div class="metric-chart-header">
+              <div>
                 <h2>JVM &amp; Process Memory</h2>
-                <p>Heap, non-heap, direct buffers, and resident memory</p>
+                <p>Heap, non-heap, Netty direct memory, and resident memory</p>
               </div>
               <div id="jvmMemoryLegend" class="chart-legend"></div>
             </div>
@@ -123,17 +212,6 @@
               <div id="threadsLegend" class="chart-legend"></div>
             </div>
             <canvas id="threadsChart" class="metric-chart" height="230"></canvas>
-          </section>
-
-          <section class="metric-chart-panel">
-            <div class="metric-chart-header">
-              <div>
-                <h2>R2DBC Connection Pool</h2>
-                <p>Allocated, acquired, idle, and pending connections</p>
-              </div>
-              <div id="dbLegend" class="chart-legend"></div>
-            </div>
-            <canvas id="dbChart" class="metric-chart" height="230"></canvas>
           </section>
 
           <section class="metric-chart-panel">
@@ -182,6 +260,6 @@
       </div>
     </div>
 
-    <script type="module" src="/system.js?v=2026072301"></script>
+    <script type="module" src="/system.js?v=2026072302"></script>
   </body>
 </html>

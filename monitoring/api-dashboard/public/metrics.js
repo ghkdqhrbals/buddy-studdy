@@ -85,6 +85,13 @@ export function formatRate(value) {
   return `${rate.toFixed(rate >= 10 ? 1 : 2)}/s`;
 }
 
+export function formatMilliseconds(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds)) return "-";
+  if (milliseconds >= 1000) return `${(milliseconds / 1000).toFixed(milliseconds >= 10_000 ? 1 : 2)} s`;
+  return `${milliseconds.toFixed(milliseconds >= 100 ? 0 : milliseconds >= 10 ? 1 : 2)} ms`;
+}
+
 export function formatDurationSeconds(value) {
   const total = Number(value);
   if (!Number.isFinite(total)) return "-";
@@ -113,5 +120,48 @@ export function buildRequestRateQuery(window) {
 }
 
 export function buildErrorRateQuery(window) {
-  return `sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " |= "\\\"status\\\":5")[${window}]))`;
+  return buildStatusClassRateQuery(500, 600, window);
+}
+
+export function buildClientErrorRateQuery(window) {
+  return buildStatusClassRateQuery(400, 500, window);
+}
+
+export function buildLatencyQuantileQuery(quantile, window) {
+  const value = Number(quantile);
+  if (!Number.isFinite(value) || value <= 0 || value >= 1) {
+    throw new Error("Latency quantile must be between 0 and 1");
+  }
+  return `max(quantile_over_time(${value}, {container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | unwrap durationMs [${window}]))`;
+}
+
+export function ratioPoints(numerator, denominator, multiplier = 100) {
+  if (!denominator.length) return [];
+  const valuesByTimestamp = new Map(numerator.map((point) => [point.ms, Number(point.value)]));
+  return denominator
+    .map((point) => {
+      const denominatorValue = Number(point.value);
+      if (!Number.isFinite(denominatorValue) || denominatorValue <= 0) return null;
+      const numeratorValue = valuesByTimestamp.get(point.ms) ?? 0;
+      return {
+        ms: point.ms,
+        value: (Math.max(0, numeratorValue) / denominatorValue) * multiplier,
+      };
+    })
+    .filter(Boolean);
+}
+
+export function percentagePoints(samples, numeratorField, denominatorField) {
+  return samples
+    .map((sample) => {
+      const numerator = Number(sample[numeratorField]);
+      const denominator = Number(sample[denominatorField]);
+      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+      return { ms: sample.ms, value: (numerator / denominator) * 100 };
+    })
+    .filter(Boolean);
+}
+
+function buildStatusClassRateQuery(minimum, maximumExclusive, window) {
+  return `sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= ${minimum} and status < ${maximumExclusive})[${window}]))`;
 }

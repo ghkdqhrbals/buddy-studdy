@@ -1,13 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildClientErrorRateQuery,
   buildErrorRateQuery,
+  buildLatencyQuantileQuery,
   buildRequestRateQuery,
   counterDeltaPoints,
   counterRatePoints,
   formatBytes,
+  formatMilliseconds,
   parseLokiMetricValues,
   parseRuntimeMetrics,
+  percentagePoints,
+  ratioPoints,
 } from "../public/metrics.js";
 
 test("parseRuntimeMetrics extracts the flat runtime payload", () => {
@@ -59,13 +64,51 @@ test("formatBytes uses binary units", () => {
   assert.equal(formatBytes(10 * 1024 * 1024), "10.0 MiB");
 });
 
-test("request and error rate queries aggregate in Loki", () => {
+test("formats latency without hiding sub-second detail", () => {
+  assert.equal(formatMilliseconds(4.38), "4.38 ms");
+  assert.equal(formatMilliseconds(125.4), "125 ms");
+  assert.equal(formatMilliseconds(2500), "2.50 s");
+});
+
+test("request, error, and latency queries aggregate in Loki", () => {
   assert.equal(
     buildRequestRateQuery("1m"),
     'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange ")[1m]))',
   );
   assert.equal(
     buildErrorRateQuery("1m"),
-    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " |= "\\"status\\":5")[1m]))',
+    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= 500 and status < 600)[1m]))',
+  );
+  assert.equal(
+    buildClientErrorRateQuery("1m"),
+    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= 400 and status < 500)[1m]))',
+  );
+  assert.equal(
+    buildLatencyQuantileQuery(0.95, "1m"),
+    'max(quantile_over_time(0.95, {container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | unwrap durationMs [1m]))',
+  );
+});
+
+test("ratioPoints aligns metric timestamps and treats missing errors as zero", () => {
+  assert.deepEqual(
+    ratioPoints(
+      [{ ms: 2, value: 1 }],
+      [{ ms: 1, value: 20 }, { ms: 2, value: 10 }],
+    ),
+    [{ ms: 1, value: 0 }, { ms: 2, value: 10 }],
+  );
+});
+
+test("percentagePoints calculates resource saturation", () => {
+  assert.deepEqual(
+    percentagePoints(
+      [
+        { ms: 1, dbPoolAcquired: 8, dbPoolMaxAllocated: 10 },
+        { ms: 2, dbPoolAcquired: 2, dbPoolMaxAllocated: 0 },
+      ],
+      "dbPoolAcquired",
+      "dbPoolMaxAllocated",
+    ),
+    [{ ms: 1, value: 80 }],
   );
 });

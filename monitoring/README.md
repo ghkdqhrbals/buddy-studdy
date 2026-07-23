@@ -28,7 +28,13 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Custom API log dashboard served by `monitoring/api-dashboard`.
   - API rows expand inline to show request, response, optional stack trace, and related logs.
   - `/performance.html` shows p50, p90, p95, and p99 latency grouped by API endpoint.
-  - `/system.html` shows Loki-backed RPS, error rate, host/JVM memory, CPU, threads, GC, and R2DBC pool time series.
+  - `/system.html` is the server dashboard organized around the four Golden Signals:
+    - Traffic: RPS time series.
+    - Latency: p50, p95, and p99 time series derived by Loki.
+    - Errors: 4xx and 5xx request ratios.
+    - Saturation: process/system CPU, host/JVM/direct memory, disk, network, JVM threads and GC, R2DBC pool usage and pending acquires, and Reactor Netty event-loop pending tasks and active connections.
+  - The server dashboard queries aggregated Loki metric series instead of downloading all API logs into the browser.
+  - Runtime metric snapshots are emitted every 30 seconds by the backend and retained according to Loki retention.
   - Timestamps are rendered in KST with millisecond precision.
 - Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
   - See `docs/observability/slack-codex-log-search.md`.

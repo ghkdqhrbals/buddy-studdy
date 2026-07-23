@@ -1,5 +1,7 @@
 import {
+  buildClientErrorRateQuery,
   buildErrorRateQuery,
+  buildLatencyQuantileQuery,
   buildRequestRateQuery,
   chooseMetricStepMs,
   counterDeltaPoints,
@@ -8,11 +10,14 @@ import {
   formatCount,
   formatDurationSeconds,
   formatLogqlDuration,
+  formatMilliseconds,
   formatPercent,
   formatRate,
   parseLokiMetricValues,
   parseRuntimeMetrics,
-} from "./metrics.js?v=2026072301";
+  percentagePoints,
+  ratioPoints,
+} from "./metrics.js?v=2026072302";
 
 const RUNTIME_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics "';
 const COLORS = {
@@ -23,25 +28,32 @@ const COLORS = {
   yellow: "#b77900",
   cyan: "#0891b2",
   gray: "#7b8798",
+  orange: "#d05b20",
 };
 
 const state = {
   range: null,
   snapshots: [],
   requestRate: [],
-  errorRate: [],
+  clientErrorRate: [],
+  serverErrorRate: [],
+  p50: [],
+  p95: [],
+  p99: [],
 };
 
 const els = {
   rangeSelect: document.querySelector("#rangeSelect"),
   refreshButton: document.querySelector("#refreshButton"),
   statusMessage: document.querySelector("#statusMessage"),
-  processCpuSummary: document.querySelector("#processCpuSummary"),
-  heapSummary: document.querySelector("#heapSummary"),
-  rssSummary: document.querySelector("#rssSummary"),
-  threadsSummary: document.querySelector("#threadsSummary"),
   rpsSummary: document.querySelector("#rpsSummary"),
+  p95Summary: document.querySelector("#p95Summary"),
+  p99Summary: document.querySelector("#p99Summary"),
+  errorSummary: document.querySelector("#errorSummary"),
+  processCpuSummary: document.querySelector("#processCpuSummary"),
   dbSummary: document.querySelector("#dbSummary"),
+  dbSummaryDetail: document.querySelector("#dbSummaryDetail"),
+  diagnosisList: document.querySelector("#diagnosisList"),
   snapshotTimestamp: document.querySelector("#snapshotTimestamp"),
   runtimeDetails: document.querySelector("#runtimeDetails"),
 };
@@ -55,7 +67,30 @@ const chartDefinitions = [
     fillPrimary: true,
     series: () => [
       { name: "Requests", color: COLORS.blue, points: state.requestRate },
-      { name: "5xx", color: COLORS.red, points: state.errorRate },
+      { name: "4xx", color: COLORS.yellow, points: state.clientErrorRate },
+      { name: "5xx", color: COLORS.red, points: state.serverErrorRate },
+    ],
+  },
+  {
+    canvas: document.querySelector("#latencyChart"),
+    legend: document.querySelector("#latencyLegend"),
+    unit: "milliseconds",
+    curve: true,
+    fillPrimary: true,
+    series: () => [
+      { name: "p50", color: COLORS.green, points: state.p50 },
+      { name: "p95", color: COLORS.blue, points: state.p95 },
+      { name: "p99", color: COLORS.red, points: state.p99 },
+    ],
+  },
+  {
+    canvas: document.querySelector("#errorChart"),
+    legend: document.querySelector("#errorLegend"),
+    unit: "percent",
+    curve: true,
+    series: () => [
+      { name: "4xx ratio", color: COLORS.yellow, points: clientErrorRatio() },
+      { name: "5xx ratio", color: COLORS.red, points: serverErrorRatio() },
     ],
   },
   {
@@ -69,13 +104,48 @@ const chartDefinitions = [
     ],
   },
   {
+    canvas: document.querySelector("#dbSaturationChart"),
+    legend: document.querySelector("#dbSaturationLegend"),
+    unit: "percent",
+    max: 100,
+    series: () => [
+      {
+        name: "Acquired / max",
+        color: COLORS.red,
+        points: percentagePoints(state.snapshots, "dbPoolAcquired", "dbPoolMaxAllocated"),
+      },
+    ],
+  },
+  {
+    canvas: document.querySelector("#dbChart"),
+    legend: document.querySelector("#dbLegend"),
+    unit: "count",
+    series: () => [
+      metricSeries("Max", "dbPoolMaxAllocated", COLORS.gray),
+      metricSeries("Allocated", "dbPoolAllocated", COLORS.blue),
+      metricSeries("Acquired", "dbPoolAcquired", COLORS.red),
+      metricSeries("Idle", "dbPoolIdle", COLORS.green),
+      metricSeries("Pending", "dbPoolPending", COLORS.yellow),
+    ],
+  },
+  {
+    canvas: document.querySelector("#nettyChart"),
+    legend: document.querySelector("#nettyLegend"),
+    unit: "count",
+    series: () => [
+      metricSeries("Pending total", "reactorNettyEventLoopPendingTasks", COLORS.red),
+      metricSeries("Max per loop", "reactorNettyEventLoopMaxPendingTasks", COLORS.yellow),
+      metricSeries("Active connections", "reactorNettyActiveConnections", COLORS.blue),
+    ],
+  },
+  {
     canvas: document.querySelector("#jvmMemoryChart"),
     legend: document.querySelector("#jvmMemoryLegend"),
     unit: "bytes",
     series: () => [
       metricSeries("Heap", "heapUsedBytes", COLORS.blue),
       metricSeries("Non-heap", "nonHeapUsedBytes", COLORS.purple),
-      metricSeries("Direct", "directBufferMemoryUsedBytes", COLORS.yellow),
+      metricSeries("Netty direct", "reactorNettyDirectMemoryBytes", COLORS.yellow),
       metricSeries("Process RSS", "processResidentMemoryBytes", COLORS.green),
     ],
   },
@@ -97,17 +167,6 @@ const chartDefinitions = [
       metricSeries("Runnable", "threadsRunnable", COLORS.green),
       metricSeries("Waiting", "threadsWaiting", COLORS.purple),
       metricSeries("Blocked", "threadsBlocked", COLORS.red),
-    ],
-  },
-  {
-    canvas: document.querySelector("#dbChart"),
-    legend: document.querySelector("#dbLegend"),
-    unit: "count",
-    series: () => [
-      metricSeries("Allocated", "dbPoolAllocated", COLORS.blue),
-      metricSeries("Acquired", "dbPoolAcquired", COLORS.red),
-      metricSeries("Idle", "dbPoolIdle", COLORS.green),
-      metricSeries("Pending", "dbPoolPending", COLORS.yellow),
     ],
   },
   {
@@ -176,34 +235,57 @@ async function lokiQueryRange(query, range, { limit = 5000, step = null, directi
 }
 
 async function loadMetrics() {
-  setStatus("Loading system metrics...", "loading");
-  const range = currentRange();
-  const stepMs = chooseMetricStepMs(range.endMs - range.startMs);
-  const step = formatLogqlDuration(stepMs);
-  const window = formatLogqlDuration(Math.max(30_000, stepMs));
+  setStatus("Loading server metrics...", "loading");
+  els.refreshButton.disabled = true;
+  try {
+    const range = currentRange();
+    const stepMs = chooseMetricStepMs(range.endMs - range.startMs);
+    const step = formatLogqlDuration(stepMs);
+    const window = formatLogqlDuration(Math.max(30_000, stepMs));
 
-  const [runtimeValues, requestValues, errorValues] = await Promise.all([
-    lokiQueryRange(RUNTIME_QUERY, range),
-    lokiQueryRange(buildRequestRateQuery(window), range, { limit: 1000, step }),
-    lokiQueryRange(buildErrorRateQuery(window), range, { limit: 1000, step }),
-  ]);
+    const [
+      runtimeValues,
+      requestValues,
+      clientErrorValues,
+      serverErrorValues,
+      p50Values,
+      p95Values,
+      p99Values,
+    ] = await Promise.all([
+      lokiQueryRange(RUNTIME_QUERY, range),
+      lokiQueryRange(buildRequestRateQuery(window), range, { limit: 1000, step }),
+      lokiQueryRange(buildClientErrorRateQuery(window), range, { limit: 1000, step }),
+      lokiQueryRange(buildErrorRateQuery(window), range, { limit: 1000, step }),
+      lokiQueryRange(buildLatencyQuantileQuery(0.5, window), range, { limit: 1000, step }),
+      lokiQueryRange(buildLatencyQuantileQuery(0.95, window), range, { limit: 1000, step }),
+      lokiQueryRange(buildLatencyQuantileQuery(0.99, window), range, { limit: 1000, step }),
+    ]);
 
-  state.range = range;
-  state.snapshots = runtimeValues
-    .map((value) => {
-      try {
-        return parseRuntimeMetrics(value);
-      } catch (error) {
-        console.warn("Failed to parse runtime_metrics", error, value);
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.ms - b.ms);
-  state.requestRate = parseLokiMetricValues(requestValues);
-  state.errorRate = parseLokiMetricValues(errorValues);
-  render();
-  setStatus(state.snapshots.length ? "Ready" : "Waiting for runtime samples", state.snapshots.length ? "ready" : "loading");
+    state.range = range;
+    state.snapshots = runtimeValues
+      .map((value) => {
+        try {
+          return parseRuntimeMetrics(value);
+        } catch (error) {
+          console.warn("Failed to parse runtime_metrics", error, value);
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ms - b.ms);
+    state.requestRate = parseLokiMetricValues(requestValues);
+    state.clientErrorRate = parseLokiMetricValues(clientErrorValues);
+    state.serverErrorRate = parseLokiMetricValues(serverErrorValues);
+    state.p50 = parseLokiMetricValues(p50Values);
+    state.p95 = parseLokiMetricValues(p95Values);
+    state.p99 = parseLokiMetricValues(p99Values);
+    render();
+
+    const hasData = state.snapshots.length || state.requestRate.length;
+    setStatus(hasData ? "Ready" : "Waiting for server samples", hasData ? "ready" : "loading");
+  } finally {
+    els.refreshButton.disabled = false;
+  }
 }
 
 function metricSeries(name, field, color) {
@@ -216,8 +298,17 @@ function metricSeries(name, field, color) {
   };
 }
 
+function clientErrorRatio() {
+  return ratioPoints(state.clientErrorRate, state.requestRate);
+}
+
+function serverErrorRatio() {
+  return ratioPoints(state.serverErrorRate, state.requestRate);
+}
+
 function render() {
   renderSummary();
+  renderDiagnosis();
   renderDetails();
   for (const definition of chartDefinitions) {
     const series = definition.series();
@@ -228,17 +319,90 @@ function render() {
 
 function renderSummary() {
   const latest = state.snapshots.at(-1);
-  const latestRps = state.requestRate.at(-1)?.value;
+  const latestDbSaturation = percentagePoints(
+    latest ? [latest] : [],
+    "dbPoolAcquired",
+    "dbPoolMaxAllocated",
+  ).at(-1)?.value;
+  const latestServerErrorRatio = serverErrorRatio().at(-1)?.value;
+
+  els.rpsSummary.textContent = formatRate(latestValue(state.requestRate));
+  els.p95Summary.textContent = formatMilliseconds(latestValue(state.p95));
+  els.p99Summary.textContent = formatMilliseconds(latestValue(state.p99));
+  els.errorSummary.textContent = formatPercent(latestServerErrorRatio);
   els.processCpuSummary.textContent = formatPercent(latest?.processCpuPercent);
-  els.heapSummary.textContent = latest
-    ? `${formatBytes(latest.heapUsedBytes)} / ${formatBytes(latest.heapMaxBytes)}`
-    : "-";
-  els.rssSummary.textContent = formatBytes(latest?.processResidentMemoryBytes);
-  els.threadsSummary.textContent = formatCount(latest?.threadsLive);
-  els.rpsSummary.textContent = formatRate(latestRps);
-  els.dbSummary.textContent = latest?.dbPoolAcquired == null
-    ? "-"
-    : `${formatCount(latest.dbPoolAcquired)} / ${formatCount(latest.dbPoolMaxAllocated)}`;
+  els.dbSummary.textContent = formatPercent(latestDbSaturation);
+  els.dbSummaryDetail.textContent = latest?.dbPoolAcquired == null
+    ? "connection pool unavailable"
+    : `${formatCount(latest.dbPoolAcquired)} / ${formatCount(latest.dbPoolMaxAllocated)} acquired, ${formatCount(latest.dbPoolPending)} pending`;
+}
+
+function renderDiagnosis() {
+  const latest = state.snapshots.at(-1);
+  const issues = [];
+  const p50 = latestValue(state.p50);
+  const p99 = latestValue(state.p99);
+  const clientErrors = latestValue(clientErrorRatio());
+  const serverErrors = latestValue(serverErrorRatio());
+  const dbSaturation = percentagePoints(
+    latest ? [latest] : [],
+    "dbPoolAcquired",
+    "dbPoolMaxAllocated",
+  ).at(-1)?.value;
+  const heapSaturation = latest
+    ? percentage(latest.heapUsedBytes, latest.heapMaxBytes)
+    : null;
+  const diskSaturation = latest
+    ? percentage(latest.rootDiskUsedBytes, latest.rootDiskTotalBytes)
+    : null;
+
+  if (serverErrors >= 1) {
+    issues.push(["critical", `5xx ratio is ${formatPercent(serverErrors)}. Inspect failed request traces first.`]);
+  } else if (serverErrors > 0) {
+    issues.push(["warning", `5xx responses are present at ${formatPercent(serverErrors)}.`]);
+  }
+  if (clientErrors >= 10) {
+    issues.push(["warning", `4xx ratio is ${formatPercent(clientErrors)}. Check authentication, validation, and client version patterns.`]);
+  }
+  if (Number.isFinite(p99) && Number.isFinite(p50) && p99 >= 100 && p99 >= p50 * 4) {
+    issues.push(["warning", `Tail latency is spread: p99 ${formatMilliseconds(p99)} versus p50 ${formatMilliseconds(p50)}.`]);
+  }
+  if (Number(latest?.processCpuPercent) >= 80) {
+    issues.push(["critical", `Process CPU is ${formatPercent(latest.processCpuPercent)} and may be constraining throughput.`]);
+  }
+  if (Number(dbSaturation) >= 80 || Number(latest?.dbPoolPending) > 0) {
+    issues.push(["critical", `R2DBC pool pressure is ${formatPercent(dbSaturation)} with ${formatCount(latest?.dbPoolPending)} pending acquisitions.`]);
+  }
+  if (Number(latest?.reactorNettyEventLoopMaxPendingTasks) > 0) {
+    issues.push(["warning", `Reactor Netty has ${formatCount(latest.reactorNettyEventLoopMaxPendingTasks)} pending tasks on the busiest event loop.`]);
+  }
+  if (Number(latest?.threadsBlocked) > 0) {
+    issues.push(["warning", `${formatCount(latest.threadsBlocked)} JVM threads are blocked.`]);
+  }
+  if (Number(heapSaturation) >= 85) {
+    issues.push(["warning", `Heap usage is ${formatPercent(heapSaturation)} of maximum. Compare the post-GC floor over time.`]);
+  }
+  if (Number(diskSaturation) >= 85) {
+    issues.push(["critical", `Root filesystem usage is ${formatPercent(diskSaturation)}.`]);
+  }
+
+  els.diagnosisList.innerHTML = "";
+  const visibleIssues = issues.slice(0, 5);
+  if (!visibleIssues.length) {
+    const hasData = latest || state.requestRate.length;
+    visibleIssues.push([
+      hasData ? "ready" : "neutral",
+      hasData
+        ? "No immediate error or saturation threshold is crossed. Compare trends before declaring the service healthy."
+        : "Waiting for server and request samples.",
+    ]);
+  }
+  for (const [tone, message] of visibleIssues) {
+    const item = document.createElement("li");
+    item.dataset.tone = tone;
+    item.textContent = message;
+    els.diagnosisList.append(item);
+  }
 }
 
 function renderDetails() {
@@ -253,15 +417,18 @@ function renderDetails() {
     ["JVM", `${latest.jvmName} ${latest.jvmVersion}`],
     ["Uptime", formatDurationSeconds(latest.processUptimeSeconds)],
     ["Processors", formatCount(latest.availableProcessors)],
-    ["1m load average", Number(latest.systemLoadAverage1m).toFixed(2)],
+    ["1m load average", finiteNumber(latest.systemLoadAverage1m, 2)],
     ["Host memory", `${formatBytes(latest.hostMemoryUsedBytes)} / ${formatBytes(latest.hostMemoryTotalBytes)}`],
     ["Root filesystem", `${formatBytes(latest.rootDiskUsedBytes)} / ${formatBytes(latest.rootDiskTotalBytes)}`],
     ["Open file descriptors", formatCount(latest.processOpenFileDescriptors)],
     ["Heap", `${formatBytes(latest.heapUsedBytes)} / ${formatBytes(latest.heapCommittedBytes)} committed / ${formatBytes(latest.heapMaxBytes)} max`],
     ["Non-heap", `${formatBytes(latest.nonHeapUsedBytes)} / ${formatBytes(latest.nonHeapCommittedBytes)} committed`],
-    ["Direct buffers", `${formatCount(latest.directBufferCount)} buffers, ${formatBytes(latest.directBufferMemoryUsedBytes)}`],
+    ["JVM direct buffers", `${formatCount(latest.directBufferCount)} buffers, ${formatBytes(latest.directBufferMemoryUsedBytes)}`],
+    ["Netty direct memory", formatBytes(latest.reactorNettyDirectMemoryBytes)],
     ["Threads", `${formatCount(latest.threadsLive)} live, ${formatCount(latest.threadsDaemon)} daemon, ${formatCount(latest.threadsPeak)} peak`],
     ["Thread states", `${formatCount(latest.threadsRunnable)} runnable, ${formatCount(latest.threadsWaiting)} waiting, ${formatCount(latest.threadsTimedWaiting)} timed, ${formatCount(latest.threadsBlocked)} blocked`],
+    ["Event loop", `${formatCount(latest.reactorNettyEventLoopPendingTasks)} pending total, ${formatCount(latest.reactorNettyEventLoopMaxPendingTasks)} max per loop`],
+    ["Active connections", formatCount(latest.reactorNettyActiveConnections)],
     ["GC total", `${formatCount(latest.gcCollectionsTotal)} collections, ${formatCount(latest.gcCollectionTimeMsTotal)} ms`],
     ["Classes", `${formatCount(latest.classesLoaded)} loaded, ${formatCount(latest.classesUnloadedTotal)} unloaded`],
     ["R2DBC pool", latest.dbPoolAllocated == null
@@ -385,14 +552,7 @@ function traceSeriesPath(context, coordinates, curved) {
       continue;
     }
     const midpointX = previous.x + (current.x - previous.x) / 2;
-    context.bezierCurveTo(
-      midpointX,
-      previous.y,
-      midpointX,
-      current.y,
-      current.x,
-      current.y,
-    );
+    context.bezierCurveTo(midpointX, previous.y, midpointX, current.y, current.x, current.y);
   }
 }
 
@@ -402,8 +562,24 @@ function formatAxisValue(value, unit) {
   if (unit === "bytesRate") return `${formatBytes(value)}/s`;
   if (unit === "percent") return formatPercent(value);
   if (unit === "rate") return formatRate(value);
-  if (unit === "milliseconds") return `${Math.round(value)} ms`;
+  if (unit === "milliseconds") return formatMilliseconds(value);
   return formatCount(value);
+}
+
+function latestValue(points) {
+  return points.at(-1)?.value;
+}
+
+function percentage(numerator, denominator) {
+  const first = Number(numerator);
+  const second = Number(denominator);
+  if (!Number.isFinite(first) || !Number.isFinite(second) || second <= 0) return null;
+  return (first / second) * 100;
+}
+
+function finiteNumber(value, digits) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) : "-";
 }
 
 function formatKst(ms) {

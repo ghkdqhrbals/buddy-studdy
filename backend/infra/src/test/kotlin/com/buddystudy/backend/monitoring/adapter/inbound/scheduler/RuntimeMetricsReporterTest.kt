@@ -1,6 +1,8 @@
 package com.buddystudy.backend.monitoring.adapter.inbound.scheduler
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.Gauge
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -89,6 +91,10 @@ class RuntimeMetricsReporterTest {
             dbPoolPending = 0,
             dbPoolMaxAllocated = 10,
             dbPoolMaxPending = 20,
+            reactorNettyEventLoopPendingTasks = 3.0,
+            reactorNettyEventLoopMaxPendingTasks = 2.0,
+            reactorNettyActiveConnections = 4.0,
+            reactorNettyDirectMemoryBytes = 1_024.0,
             jvmName = "GraalVM",
             jvmVersion = "25",
         )
@@ -101,6 +107,24 @@ class RuntimeMetricsReporterTest {
         assertThat(payload["dbPoolPending"].intValue()).isZero()
         assertThat(payload["rootDiskUsedBytes"].longValue()).isEqualTo(1_024)
         assertThat(payload["networkTransmitBytesTotal"].longValue()).isEqualTo(20_000)
+        assertThat(payload["reactorNettyEventLoopPendingTasks"].doubleValue()).isEqualTo(3.0)
+        assertThat(payload["reactorNettyActiveConnections"].doubleValue()).isEqualTo(4.0)
         assertThat(payload["jvmVersion"].textValue()).isEqualTo("25")
+    }
+
+    @Test
+    fun `aggregates gauges across reactor netty event loops`() {
+        val registry = SimpleMeterRegistry()
+        Gauge.builder("reactor.netty.eventloop.pending.tasks") { 2.0 }
+            .tag("name", "event-loop-1")
+            .register(registry)
+        Gauge.builder("reactor.netty.eventloop.pending.tasks") { 5.0 }
+            .tag("name", "event-loop-2")
+            .register(registry)
+
+        val aggregate = aggregateGauges(registry, "reactor.netty.eventloop.pending.tasks")
+
+        assertThat(aggregate.total).isEqualTo(7.0)
+        assertThat(aggregate.maximum).isEqualTo(5.0)
     }
 }

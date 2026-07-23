@@ -65,6 +65,9 @@ internal class RuntimeMetricsSampler(
         val rootDisk = readRootDisk()
         val network = readNetworkIo()
         val pool = connectionPoolMetrics()
+        val eventLoopPendingTasks = gaugeAggregate("reactor.netty.eventloop.pending.tasks")
+        val activeConnections = gaugeAggregate("reactor.netty.http.server.connections.active")
+        val nettyDirectMemory = gaugeAggregate("reactor.netty.bytebuf.allocator.active.direct.memory")
 
         return RuntimeMetricsSnapshot(
             capturedAtEpochMs = System.currentTimeMillis(),
@@ -110,6 +113,10 @@ internal class RuntimeMetricsSampler(
             dbPoolPending = pool?.pendingAcquireSize(),
             dbPoolMaxAllocated = pool?.maxAllocatedSize,
             dbPoolMaxPending = pool?.maxPendingAcquireSize,
+            reactorNettyEventLoopPendingTasks = eventLoopPendingTasks.total,
+            reactorNettyEventLoopMaxPendingTasks = eventLoopPendingTasks.maximum,
+            reactorNettyActiveConnections = activeConnections.total,
+            reactorNettyDirectMemoryBytes = nettyDirectMemory.total,
             jvmName = runtime.vmName,
             jvmVersion = runtime.vmVersion,
         )
@@ -119,6 +126,9 @@ internal class RuntimeMetricsSampler(
         meterRegistry.find(name).gauge()?.value()
             ?.takeIf(Double::isFinite)
             ?.times(100.0)
+
+    private fun gaugeAggregate(name: String): GaugeAggregate =
+        aggregateGauges(meterRegistry, name)
 
     private fun threadStateCounts(): Map<Thread.State, Int> =
         runCatching {
@@ -176,9 +186,32 @@ internal data class RuntimeMetricsSnapshot(
     val dbPoolPending: Int?,
     val dbPoolMaxAllocated: Int?,
     val dbPoolMaxPending: Int?,
+    val reactorNettyEventLoopPendingTasks: Double?,
+    val reactorNettyEventLoopMaxPendingTasks: Double?,
+    val reactorNettyActiveConnections: Double?,
+    val reactorNettyDirectMemoryBytes: Double?,
     val jvmName: String,
     val jvmVersion: String,
 )
+
+internal data class GaugeAggregate(
+    val total: Double?,
+    val maximum: Double?,
+)
+
+internal fun aggregateGauges(
+    meterRegistry: MeterRegistry,
+    name: String,
+): GaugeAggregate {
+    val values = meterRegistry.find(name)
+        .gauges()
+        .map { it.value() }
+        .filter(Double::isFinite)
+    return GaugeAggregate(
+        total = values.takeIf(List<Double>::isNotEmpty)?.sum(),
+        maximum = values.maxOrNull(),
+    )
+}
 
 internal data class HostMemorySnapshot(
     val totalBytes: Long,
