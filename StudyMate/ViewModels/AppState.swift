@@ -2732,6 +2732,8 @@ final class AppState: ObservableObject {
     private func resetCommunitySignInState() {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
         setCommunitySessionSignedIn(false)
+        isRequiredTermsGatePresented = false
+        pendingTermsRequirementRetry = nil
         var nextState = communityProfileState
         nextState.resetSignedOutProfile()
         communityProfileState = nextState
@@ -2999,7 +3001,17 @@ final class AppState: ObservableObject {
         var nextState = communityProfileState
         nextState.applyProfile(resolvedProfile)
         communityProfileState = nextState
-        isRequiredTermsGatePresented = resolvedProfile.status == "PENDING_TERMS"
+        if resolvedProfile.status == "PENDING_TERMS" {
+            isRequiredTermsGatePresented = true
+        } else if isRequiredTermsGatePresented {
+            logAuthTrace(
+                "required_terms_gate_preserved",
+                page: .profile,
+                reason: "active-profile-does-not-confirm-terms",
+                extra: ["profileId=\(resolvedProfile.id)", "status=\(resolvedProfile.status)"],
+                deduplicate: false
+            )
+        }
         applyProfilePageAccess(resolvedProfile)
         logAuthTrace(
             "community_profile_apply_end",

@@ -2011,6 +2011,35 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testActiveProfileRefreshDoesNotDismissTermsAgreementGateRaisedByAPIError() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        backend.createQuestionErrors = [
+            Self.backendError(
+                code: "TERMS_AGREEMENT_REQUIRED",
+                status: 403,
+                message: "Latest terms agreement is required."
+            )
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.signInToCommunity(idToken: "google-id-token")
+        await appState.generateQuestion(manual: true, studyCategoryID: "16")
+        XCTAssertTrue(appState.isRequiredTermsGatePresented)
+
+        await appState.loadCommunityProfile()
+
+        XCTAssertTrue(appState.isRequiredTermsGatePresented)
+        XCTAssertGreaterThanOrEqual(backend.fetchMyProfileCallCount, 1)
+    }
+
+    @MainActor
     func testManualQuestionSyncsSavedModelBeforeCreateQuestion() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
