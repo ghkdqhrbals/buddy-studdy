@@ -41,15 +41,23 @@ optimizations are not presented as completed capacity.
 
 ## Deployment
 
-The site is hosted with OpenAI Sites. `.openai/hosting.json` contains the opaque
-project ID used by the Sites deployment flow. A deployable version must be
-created from the exact Git commit pushed to the Sites source repository.
+- Public URL: https://buddystudy.lowfidev.cloud
+- Origin: `vinext start` on `127.0.0.1:3011`
+- Process supervisor: macOS `launchd`
+- Public routing: Routingflare named Cloudflare Tunnel
+- Sites fallback: https://buddystudy-portfolio.ghkdqhrbals.chatgpt.site
 
-Production hostname:
+Apply or repair the local production route with:
 
-```text
-https://buddystudy.lowfidev.cloud
+```sh
+./scripts/setup-routingflare.sh
 ```
 
-Access mode is public. The site has no database, authentication, forms, runtime
-secrets, or user-specific state.
+The script builds the application, installs the tracked launch agent, waits for
+the local production origin, registers the Routingflare route, restarts the
+tunnel, and points the public hostname at the configured named tunnel.
+
+This deployment intentionally depends on the Mac and its Routingflare tunnel
+remaining online. The Sites deployment remains available as an independent
+fallback URL. The site has no database, authentication, forms, runtime secrets,
+or user-specific state.
