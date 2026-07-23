@@ -201,8 +201,14 @@ class PostgresAdvisoryJobLockAdapter(
     override suspend fun release(jobName: String) {
         val connection = heldConnections.remove(jobName) ?: return
         try {
-            connection.createStatement("select pg_advisory_unlock(hashtext($1))")
-                .bind(0, jobName).execute().awaitSingle()
+            val result = connection.createStatement("select pg_advisory_unlock(hashtext($1)) as released")
+                .bind(0, jobName)
+                .execute()
+                .awaitSingle()
+            val released = result
+                .map { row, _ -> row.get("released", java.lang.Boolean::class.java)?.booleanValue() ?: false }
+                .awaitSingle()
+            check(released) { "PostgreSQL advisory lock was not held for job: $jobName" }
         } finally {
             connection.close().awaitFirstOrNull()
         }
