@@ -91,6 +91,16 @@ jobs:
             --secret-id "${POSTGRES_SECRET_ID}" \
             --query SecretString \
             --output text 2>/dev/null || true)"
+          APP_SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --region ap-northeast-2 \
+            --secret-id "${APP_SECRET_ID}" \
+            --query SecretString \
+            --output text)"
+          OPENAI_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY") or "")')"
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "Missing OPENAI_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+            exit 1
+          fi
 
           if [ -n "${POSTGRES_SECRET_JSON}" ]; then
             POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("dbname") or "buddystudy")')"
@@ -119,6 +129,7 @@ jobs:
           DATABASE_PASSWORD=${POSTGRES_PASSWORD}
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
+          OPENAI_API_KEY=${OPENAI_API_KEY}
           OPENAI_MODEL=gpt-5.4
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}

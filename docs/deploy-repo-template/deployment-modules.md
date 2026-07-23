@@ -33,6 +33,10 @@ one workflow run just because they share a host.
 ## Change Routing
 
 - Backend Kotlin/API/env changes: build backend image, then run backend deploy.
+- Backend runtime secrets are read by the backend deploy workflow from AWS
+  Secrets Manager. Required values such as `OPENAI_API_KEY` must be validated
+  before writing the container env file so an optional Spring config import
+  cannot silently start a partially configured backend.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs dashboard changes: run monitoring deploy.
