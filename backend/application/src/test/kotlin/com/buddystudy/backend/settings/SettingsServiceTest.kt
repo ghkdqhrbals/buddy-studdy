@@ -105,6 +105,33 @@ class SettingsServiceTest {
         assertThat(studies.rows.single().nextDueAt).isAfter(existingDueAt)
     }
 
+    @Test
+    fun `upsert schedule without a topic does not create a default study`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+
+        val response = service.upsertSchedule(
+            principal,
+            ScheduleCommand(topic = "", schedules = null),
+        )
+
+        assertThat(studies.rows).isEmpty()
+        assertThat(studies.saved).isEmpty()
+        assertThat(studies.findByUserIdAndTopicsCalls).isEqualTo(1)
+        assertThat(response.nextDueAt).isNull()
+    }
+
+    @Test
+    fun `upsert schedule preserves an explicitly requested SwiftUI study`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+
+        service.upsertSchedule(
+            principal,
+            ScheduleCommand(topic = "SwiftUI", schedules = null),
+        )
+
+        assertThat(studies.saved.map { it.topic }).containsExactly("SwiftUI")
+    }
+
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         val saved = mutableListOf<StudyEntity>()

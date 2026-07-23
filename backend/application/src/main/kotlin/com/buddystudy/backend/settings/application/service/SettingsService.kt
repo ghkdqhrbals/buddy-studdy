@@ -32,9 +32,11 @@ class SettingsService(
     override suspend fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
-        val items = command.schedules?.takeIf { it.isNotEmpty() } ?: listOf(
-            ScheduleItemCommand(command.topic.ifBlank { "SwiftUI" }, command.difficultyLevel, command.customPrompt, command.openaiModel)
-        )
+        val items = command.schedules
+            ?.takeIf { it.isNotEmpty() }
+            ?: command.topic.trim().takeIf { it.isNotEmpty() }?.let { topic ->
+                listOf(ScheduleItemCommand(topic, command.difficultyLevel, command.customPrompt, command.openaiModel))
+            }.orEmpty()
         users.findById(principal.userId)?.let { user ->
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
