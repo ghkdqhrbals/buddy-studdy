@@ -2,7 +2,6 @@ package com.buddystudy.backend.community.adapter.inbound.web
 
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
-import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.common.adapter.inbound.web.optionalPrincipal
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
@@ -34,7 +33,6 @@ import kotlin.math.min
 @Tag(name = "Public Questions", description = "Public completed-question browsing, reactions, comments, and report APIs.")
 class CommunityController(
     private val community: CommunityWebPort,
-    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "List public completed questions",
@@ -69,18 +67,14 @@ class CommunityController(
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    suspend fun likePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any {
-        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_LIKE)
-        return community.likePublicQuestion(id, authentication)
-    }
+    suspend fun likePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any =
+        community.likePublicQuestion(id, authentication)
 
     @Operation(summary = "Unlike a public question", description = "Removes the authenticated user's like. Like counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/like")
     @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
-    suspend fun unlikePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any {
-        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_LIKE)
-        return community.unlikePublicQuestion(id, authentication)
-    }
+    suspend fun unlikePublicQuestion(@Parameter(description = "Public question id.", example = "42") @PathVariable id: Long, authentication: Authentication): Any =
+        community.unlikePublicQuestion(id, authentication)
 
     @Operation(summary = "List public question comments", description = "Returns paginated comments for a public question.")
     @GetMapping("/public/questions/{id}/comments")
@@ -102,10 +96,7 @@ class CommunityController(
         @PathVariable id: Long,
         @RequestBody body: CommunityCommentRequest,
         authentication: Authentication,
-    ): Any {
-        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_COMMENT)
-        return community.createComment(id, body, authentication)
-    }
+    ): Any = community.createComment(id, body, authentication)
 
     @Operation(summary = "Delete a comment", description = "Soft-deletes the authenticated user's own comment on a public question. Comment counts may be aggregated asynchronously.")
     @DeleteMapping("/public/questions/{id}/comments/{commentId}")
@@ -116,10 +107,7 @@ class CommunityController(
         @Parameter(description = "Comment id.", example = "7")
         @PathVariable commentId: Long,
         authentication: Authentication,
-    ): Any {
-        permissionGuard.check(authentication, Permissions.COMMENT_DELETE)
-        return community.deleteComment(id, commentId, authentication)
-    }
+    ): Any = community.deleteComment(id, commentId, authentication)
 
     @Operation(summary = "Report a public question", description = "Submits a moderation report for a public question. The backend records the report for review.")
     @PostMapping("/public/questions/{id}/report")
@@ -129,10 +117,7 @@ class CommunityController(
         @PathVariable id: Long,
         @RequestBody body: ReportQuestionRequest,
         authentication: Authentication,
-    ): ReportQuestionResponse {
-        permissionGuard.check(authentication, Permissions.PUBLIC_QUESTION_REPORT)
-        return community.reportQuestion(id, body, authentication)
-    }
+    ): ReportQuestionResponse = community.reportQuestion(id, body, authentication)
 }
 
 @RestController

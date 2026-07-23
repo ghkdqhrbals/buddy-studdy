@@ -3,7 +3,6 @@ package com.buddystudy.backend.settings.adapter.inbound.web
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
-import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemCommand
@@ -27,7 +26,6 @@ import org.springframework.web.bind.annotation.RestController
 @Tag(name = "Settings", description = "Authenticated study settings and schedule configuration APIs.")
 class SettingsController(
     private val settings: SettingsWebPort,
-    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "Save study settings",
@@ -61,10 +59,7 @@ class SettingsController(
         @PathVariable studyId: Long,
         @Valid @RequestBody body: ScheduleRequest,
         authentication: Authentication,
-    ): Any {
-        permissionGuard.check(authentication, Permissions.STUDY_UPDATE)
-        return settings.studySettings(studyId, body, authentication)
-    }
+    ): Any = settings.studySettings(studyId, body, authentication)
 }
 
 interface SettingsWebPort {

@@ -3,7 +3,6 @@ package com.buddystudy.backend.study.adapter.inbound.web
 import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
-import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import com.buddystudy.backend.study.adapter.inbound.web.dto.PushTestRequest
 import com.buddystudy.backend.study.application.model.PushTestCommand
 import com.buddystudy.backend.study.application.model.PushTestResponse
@@ -25,7 +24,6 @@ import org.springframework.web.bind.annotation.RestController
 @RequirePermission(Permissions.TEST_PUSH_SEND)
 class PushTestController(
     private val pushTest: PushTestWebPort,
-    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(
         summary = "Send a test push notification",
@@ -40,10 +38,7 @@ class PushTestController(
     suspend fun send(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
-    ): PushTestResponse {
-        permissionGuard.check(authentication, Permissions.TEST_PUSH_SEND)
-        return pushTest.send(body ?: PushTestRequest(), authentication)
-    }
+    ): PushTestResponse = pushTest.send(body ?: PushTestRequest(), authentication)
 
     @Operation(
         summary = "Publish a test push event",
@@ -57,10 +52,7 @@ class PushTestController(
     suspend fun publishEvent(
         @RequestBody(required = false) body: PushTestRequest?,
         authentication: Authentication,
-    ): PushTestResponse {
-        permissionGuard.check(authentication, Permissions.TEST_PUSH_SEND)
-        return pushTest.publishEvent(body ?: PushTestRequest(), authentication)
-    }
+    ): PushTestResponse = pushTest.publishEvent(body ?: PushTestRequest(), authentication)
 }
 
 interface PushTestWebPort {

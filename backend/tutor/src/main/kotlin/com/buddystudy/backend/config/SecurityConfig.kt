@@ -1,11 +1,13 @@
 package com.buddystudy.backend.config
 
 import com.buddystudy.backend.auth.TokenProvider
+import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.adapter.inbound.web.ReactiveRequestDetails
+import com.buddystudy.backend.common.adapter.inbound.web.RequirePermissionAuthorizationManager
 import com.buddystudy.backend.common.adapter.inbound.web.RequestLoggingFilter
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -15,17 +17,24 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.slf4j.LoggerFactory
+import org.springframework.aop.Advisor
+import org.springframework.aop.support.ComposablePointcut
+import org.springframework.aop.support.annotation.AnnotationMatchingPointcut
+import org.springframework.beans.factory.config.BeanDefinition
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.annotation.Role
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
+import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder
 import org.springframework.security.config.web.server.ServerHttpSecurity
+import org.springframework.security.authorization.method.AuthorizationManagerBeforeReactiveMethodInterceptor
 import org.springframework.security.core.Authentication
 import org.springframework.security.core.context.ReactiveSecurityContextHolder
 import org.springframework.security.web.server.SecurityWebFilterChain
@@ -40,7 +49,21 @@ import java.util.UUID
 
 @Configuration
 @EnableWebFluxSecurity
+@EnableReactiveMethodSecurity
 class SecurityConfig {
+    @Bean
+    @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+    fun requirePermissionAdvisor(
+        authorizationManager: RequirePermissionAuthorizationManager,
+    ): Advisor {
+        val pointcut = ComposablePointcut(
+            AnnotationMatchingPointcut.forClassAnnotation(RequirePermission::class.java),
+        ).union(
+            AnnotationMatchingPointcut.forMethodAnnotation(RequirePermission::class.java),
+        )
+        return AuthorizationManagerBeforeReactiveMethodInterceptor(pointcut, authorizationManager)
+    }
+
     @Bean
     @ConditionalOnMissingBean(ObjectMapper::class)
     fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()

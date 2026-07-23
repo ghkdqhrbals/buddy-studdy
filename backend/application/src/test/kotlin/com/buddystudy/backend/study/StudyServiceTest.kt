@@ -4,12 +4,8 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.auth.application.permission.PermissionEvaluationResult
-import com.buddystudy.backend.auth.application.permission.PermissionEvaluator
-import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
-import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystudy.backend.community.application.port.outbound.SearchResult
 import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
@@ -60,7 +56,6 @@ class StudyServiceTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
-    private val permissionEvaluator = FakePermissionEvaluator()
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val service = StudyService(
@@ -83,7 +78,6 @@ class StudyServiceTest {
             notifications = FakeNotificationPublisher(),
         ),
         questionSearch = QuestionSearchSyncManager(BuddyStudyProperties(), questions, users, FakeQuestionSearchPort(), FakeQuestionSearchTranslator()),
-        permissionEvaluator = permissionEvaluator,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -151,32 +145,6 @@ class StudyServiceTest {
         service.delete(principal, id = 601)
 
         assertThat(questions.visibleRows.single { it.id == 601L }.deletedAt).isNotNull()
-    }
-
-    @Test
-    fun `create question stops before generation when permission evaluator denies`(): Unit = runBlocking {
-        permissionEvaluator.result = PermissionEvaluationResult.denied(
-            permissionCode = Permissions.STUDY_CREATE,
-            failureCode = ApiErrorCode.QUOTA_EXCEEDED,
-            reason = "Quota is exceeded.",
-        )
-        serviceStudies.rows += StudyEntity(
-            id = 90,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Kotlin",
-            difficultyLevel = 6,
-            intervalMinutes = 15,
-        )
-
-        org.assertj.core.api.Assertions.assertThatThrownBy {
-            runBlocking { service.createQuestion(principal, studyId = 90) }
-        }
-            .isInstanceOf(ApiRuntimeException::class.java)
-            .extracting("errorCode")
-            .isEqualTo(ApiErrorCode.QUOTA_EXCEEDED)
-
-        assertThat(openAI.generateCalls).isEqualTo(0)
     }
 
     @Test
@@ -752,16 +720,6 @@ class StudyServiceTest {
 
     private class FakeQuestionCreatedPublisher : QuestionCreatedPublishPort {
         override suspend fun publishQuestionCreated(questionId: Long, language: String, createdAt: Instant): Boolean = true
-    }
-
-    private class FakePermissionEvaluator : PermissionEvaluator {
-        var result = PermissionEvaluationResult.granted(Permissions.STUDY_CREATE)
-        val calls = mutableListOf<String>()
-
-        override suspend fun evaluate(principal: Principal, permissionCode: String): PermissionEvaluationResult {
-            calls += permissionCode
-            return result
-        }
     }
 
     private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {

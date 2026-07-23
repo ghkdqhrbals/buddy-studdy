@@ -4,7 +4,6 @@ import com.buddystudy.backend.auth.application.permission.Permissions
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.admin.application.port.inbound.AdminUseCase
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
-import com.buddystudy.backend.common.adapter.inbound.web.PermissionWebGuard
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
@@ -21,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController
 @Tag(name = "OpenAI", description = "OpenAI model options and authenticated API-key status APIs.")
 class AdminController(
     private val admin: AdminWebPort,
-    private val permissionGuard: PermissionWebGuard,
 ) {
     @Operation(summary = "List supported OpenAI models", description = "Returns the OpenAI model options that the app allows users to choose for each study room.")
     @GetMapping("/openai/models")
@@ -38,10 +36,8 @@ class AdminController(
     @Operation(summary = "Validate saved OpenAI API key", description = "Tests the authenticated user's saved OpenAI API key and returns the current validation result.")
     @PostMapping("/api/validate")
     @RequirePermission(Permissions.PROFILE_UPDATE)
-    suspend fun validateApi(authentication: Authentication): Any {
-        permissionGuard.check(authentication, Permissions.PROFILE_UPDATE)
-        return admin.validateApi(authentication)
-    }
+    suspend fun validateApi(authentication: Authentication): Any =
+        admin.validateApi(authentication)
 }
 
 interface AdminWebPort {
