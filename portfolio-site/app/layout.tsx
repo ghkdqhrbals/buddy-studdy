@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     template: "%s | BuddyStudy",
   },
   description:
-    "SwiftUI iOS, Kotlin WebFlux, R2DBC, Redis Streams, APNs, Cloudflare WARP와 실측 성능 분석으로 만든 AI 학습 시스템.",
+    "통계 최적화, 캐시 경계, Redis Streams 전달 보장, 조합형 아바타, 사설 인프라와 MVC/WebFlux 실측 차트로 설명하는 BuddyStudy 엔지니어링 포트폴리오.",
   icons: {
     icon: "/media/buddystudy-icon.png",
     shortcut: "/media/buddystudy-icon.png",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "BuddyStudy | AI 학습 시스템 포트폴리오",
     description:
-      "제품 설계부터 백엔드, 성능 실험, 보안, 관측 가능성, 배포까지 검증 가능한 근거로 정리했습니다.",
+      "실제 구현 근거와 k6·nGrinder 성능 데이터로 통계, 캐시, 메시징, 이미지와 인프라 설계를 설명합니다.",
     url: "https://buddystudy.lowfidev.cloud",
     siteName: "BuddyStudy",
     locale: "ko_KR",

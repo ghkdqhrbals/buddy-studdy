@@ -77,6 +77,38 @@ that one framework is universally faster.
 - Incremental PostgreSQL read model using dirty keys rather than rebuilding all
   history after every answer.
 
+The write transaction adds only the affected
+`(user_id, stat_date, topic_key, difficulty_level)` to
+`user_stats_dirty_keys`. Workers claim bounded batches with
+`FOR UPDATE SKIP LOCKED` and rebuild a bucket from the question source of truth.
+Deleting a dirty marker compares the observed `updated_at`, so a concurrent
+answer does not disappear behind an older refresh. Reprocessing is safe because
+the bucket is recomputed rather than incremented.
+
+### Cache Boundaries
+
+Cache only data that can be reconstructed:
+
+| Data | Location | Invalidation |
+| --- | --- | --- |
+| Active answer draft | `SettingsStore`, not a disposable cache | grading or explicit discard |
+| Record pages and view models | iOS memory | delete and successful synchronization |
+| Avatar catalog and profile config | iOS local cache | profile save, logout, catalog version |
+| Email verification code | Redis TTL | expiry or successful verification |
+
+The public-question response contains viewer-specific fields such as
+`likedByMe`. A shared response cache can leak one viewer's state into another,
+so the proposed seven-second list cache is not described as a deployed feature.
+
+### Avatar Image Cost
+
+The current default is a Reddit-style avatar builder, not a user-photo upload
+pipeline. PostgreSQL stores catalog item keys, categories, compatibility,
+z-index, unlocks, and a compact user config. The iOS app composes fixed slots
+from bundled assets and locally cached catalog data. This avoids per-user image
+blobs, CDN variants, and repeated profile-image downloads. Photo upload and
+64/256 on-the-fly resizing remain future design options, not current behavior.
+
 ### Identity, Terms, And Community
 
 - Device registration before an account is linked.
@@ -153,11 +185,33 @@ business write + outbox row (one PostgreSQL transaction)
 A crash can happen after Redis accepts an event and before PostgreSQL marks the
 row published. Consumers therefore deduplicate by `(event_type, event_id)`.
 
+### Why Redis Streams
+
+Redis already served short-lived authentication state and was already part of
+the operated infrastructure. The current workload needs append-only ordering,
+consumer groups, pending entries, acknowledgements, and replay. Redis Streams
+provides those properties without adding a Kafka cluster and its operational
+surface at the current traffic and team size.
+
+The current guarantee comes from:
+
+- one PostgreSQL transaction for the business row and outbox row;
+- a unique `(event_type, event_id)` producer key;
+- leased `SKIP LOCKED` claims and exponential retry;
+- event-id deduplication in consumers;
+- at-least-once delivery rather than a false exactly-once claim.
+
+Redis 8.6 introduced producer-side `XADD IDMP` and `IDMPAUTO`. Those options can
+reduce duplicate stream entries after a verified Redis and client upgrade, but
+they are a future defense. They are not the source of the current guarantee and
+must not be attributed to Redis 8.2.
+
 ## Performance Engineering
 
 ### Test Method
 
-- k6 constant-arrival-rate workload.
+- k6 constant-arrival-rate open-loop workload.
+- nGrinder 3.5.9-p1 closed-loop VUser workload and recovery automation.
 - 1,000, 1,500, 2,000, 2,500, and 3,000 requested RPS.
 - Three alternating-order rounds, median reported.
 - Same PostgreSQL fixture, Redis, 4 visible CPUs, 512 MiB heap, and 10 DB
@@ -167,6 +221,13 @@ row published. Consumers therefore deduplicate by `(event_type, event_id)`.
   and allocation telemetry.
 - JFR and a row-count control experiment for bottleneck localization.
 
+The reusable harness keeps scenario definitions, fixtures, credentials,
+normalization, and report metadata shared across both tools. The preserved
+nGrinder result is currently a one-VUser wiring smoke, so it validates
+controller/agent/script/result automation but is not used as a capacity result.
+Only repeated standard runs may support an MVC/WebFlux sustained-load
+conclusion.
+
 ### Defensible Results
 
 | Observation | Result |
@@ -174,6 +235,7 @@ row published. Consumers therefore deduplicate by `(event_type, event_id)`.
 | No-DB health endpoint | MVC and WebFlux both sustained about 3,000 RPS |
 | MVC authenticated studies | 2,478 successful RPS at a 2,500 RPS target |
 | Current WebFlux authenticated studies | Saturation started below 1,000 RPS in the initial sweep |
+| WebFlux studies at 1,000 target RPS | 328.0 successful RPS, p95 5,000.36 ms, 37.322% failure |
 | Reactive DB queue | About 2,992 pending acquisitions behind a 10-connection pool |
 | Overall median RSS | 903.0 MiB MVC, 937.2 MiB WebFlux |
 | Focused 400 RPS, 100 rows | WebFlux p95 780.94 ms, allocation 1,254.3 MiB/s |
@@ -300,6 +362,23 @@ dispatcher publishes it later. This prevents the business row from committing
 without a durable publication intent. Delivery is at-least-once, so consumers
 deduplicate.
 
+### “Why Redis Streams instead of Kafka?”
+
+Redis was already operated, and the required semantics were consumer groups,
+ACK, pending-entry recovery, and replay rather than long-term event retention
+or broad multi-team streaming. Transactional outbox solves the PostgreSQL/Redis
+dual-write boundary. The cost is at-least-once delivery and explicit consumer
+idempotency. Kafka becomes reasonable when retention, partition scale, replay
+volume, or organizational fan-out exceeds this simpler operating model.
+
+### “Does Redis XADD make publication idempotent?”
+
+The deployed design does not rely on it. Redis 8.6 added `XADD IDMP` and
+`IDMPAUTO`, but the current stack uses the outbox unique event key and consumer
+deduplication. After a verified 8.6 and client upgrade, producer-side
+idempotency can become an additional layer, not a replacement for transaction
+and consumer correctness.
+
 ### “How does `@Transactional` work with coroutines?”
 
 With R2DBC, Spring binds the transaction to Reactor context. It does not require
@@ -328,6 +407,10 @@ draft conflict UX and export for records and statistics.
 - WebFlux details: `docs/WEBFLUX_MIGRATION.md`
 - Performance report: `docs/performance/MVC_VS_WEBFLUX_R2DBC_2026-07-22.md`
 - Load harness: `backend/loadtest/README.md`
+- Dual-tool normalized smoke:
+  `backend/loadtest/results/verification-smoke-dual-v5/normalized-results.json`
+- Redis Stream idempotency:
+  `https://redis.io/docs/latest/develop/data-types/streams/idempotency/`
 - Runtime monitoring: `docs/observability/runtime-metrics.md`
 - Cloudflare private access: `deploy/cloudflared/README.md`
 - Deployment ownership: `docs/deploy-repo-template/deployment-modules.md`
