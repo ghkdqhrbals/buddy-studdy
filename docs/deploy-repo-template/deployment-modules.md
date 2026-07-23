@@ -37,6 +37,11 @@ one workflow run just because they share a host.
   Secrets Manager. Required values such as `OPENAI_API_KEY` must be validated
   before writing the container env file so an optional Spring config import
   cannot silently start a partially configured backend.
+- PostgreSQL credentials and connection URLs are owned by the
+  `buddystudy/prod/postgres` secret. It contains `dbname`, `username`,
+  `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC
+  and R2DBC settings from that secret. A legacy host password file is migrated
+  into the secret once and is not the continuing configuration source.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs dashboard changes: run monitoring deploy.

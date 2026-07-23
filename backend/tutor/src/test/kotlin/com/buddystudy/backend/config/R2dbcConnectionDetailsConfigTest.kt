@@ -42,4 +42,22 @@ class R2dbcConnectionDetailsConfigTest {
         assertThat(options.getValue(ConnectionFactoryOptions.USER)).isEqualTo("url-user")
         assertThat(options.getValue(ConnectionFactoryOptions.PASSWORD).toString()).isEqualTo("url-password")
     }
+
+    @Test
+    fun `falls back to JDBC deployment settings when R2DBC settings are absent`() {
+        val details =
+            EnvironmentR2dbcConnectionDetails(
+                MockEnvironment()
+                    .withProperty("DATABASE_URL", "jdbc:postgresql://buddystudy-db:5432/buddystudy")
+                    .withProperty("DATABASE_USERNAME", "deploy-user")
+                    .withProperty("DATABASE_PASSWORD", "deploy-password"),
+            )
+
+        val options = details.connectionFactoryOptions
+
+        assertThat(options.getValue(ConnectionFactoryOptions.HOST)).isEqualTo("buddystudy-db")
+        assertThat(options.getValue(ConnectionFactoryOptions.DATABASE)).isEqualTo("buddystudy")
+        assertThat(options.getValue(ConnectionFactoryOptions.USER)).isEqualTo("deploy-user")
+        assertThat(options.getValue(ConnectionFactoryOptions.PASSWORD).toString()).isEqualTo("deploy-password")
+    }
 }

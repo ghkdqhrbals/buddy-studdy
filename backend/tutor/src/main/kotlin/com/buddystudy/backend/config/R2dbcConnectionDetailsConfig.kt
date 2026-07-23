@@ -35,9 +35,22 @@ internal class EnvironmentR2dbcConnectionDetails(
     private val environment: Environment,
 ) : R2dbcConnectionDetails {
     override fun getConnectionFactoryOptions(): ConnectionFactoryOptions {
-        val url = environment.requiredNonBlank("spring.r2dbc.url", "R2DBC_DATABASE_URL")
-        val username = environment.firstNonBlank("spring.r2dbc.username", "DATABASE_USERNAME")
-        val password = environment.firstDefined("spring.r2dbc.password", "DATABASE_PASSWORD")
+        val url =
+            environment.firstNonBlank("R2DBC_DATABASE_URL")
+                ?: environment.firstNonBlank("DATABASE_URL")?.toR2dbcUrl()
+                ?: environment.requiredNonBlank("spring.r2dbc.url")
+        val username =
+            environment.firstNonBlank(
+                "R2DBC_DATABASE_USERNAME",
+                "DATABASE_USERNAME",
+                "spring.r2dbc.username",
+            )
+        val password =
+            environment.firstDefined(
+                "R2DBC_DATABASE_PASSWORD",
+                "DATABASE_PASSWORD",
+                "spring.r2dbc.password",
+            )
         val parsed = ConnectionFactoryOptions.parse(url)
         val builder = parsed.mutate()
 
@@ -59,4 +72,11 @@ internal class EnvironmentR2dbcConnectionDetails(
 
     private fun Environment.firstDefined(vararg names: String): String? =
         names.firstNotNullOfOrNull(::getProperty)
+
+    private fun String.toR2dbcUrl(): String =
+        when {
+            startsWith("jdbc:postgresql:") -> replaceFirst("jdbc:postgresql:", "r2dbc:postgresql:")
+            startsWith("jdbc:") -> removePrefix("jdbc:").let { "r2dbc:$it" }
+            else -> this
+        }
 }

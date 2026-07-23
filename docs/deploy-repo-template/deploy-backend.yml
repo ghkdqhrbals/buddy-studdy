@@ -91,6 +91,7 @@ jobs:
             --secret-id "${POSTGRES_SECRET_ID}" \
             --query SecretString \
             --output text 2>/dev/null || true)"
+          POSTGRES_SECRET_ORIGINAL_JSON="${POSTGRES_SECRET_JSON}"
           APP_SECRET_JSON="$(aws secretsmanager get-secret-value \
             --region ap-northeast-2 \
             --secret-id "${APP_SECRET_ID}" \
@@ -102,24 +103,42 @@ jobs:
             exit 1
           fi
 
-          if [ -n "${POSTGRES_SECRET_JSON}" ]; then
-            POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("dbname") or "buddystudy")')"
-            POSTGRES_USER="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("username") or "buddystudy")')"
-            POSTGRES_PASSWORD="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
-            printf '%s' "${POSTGRES_PASSWORD}" > .postgres_password
-            printf '%s' "${POSTGRES_SECRET_ID}" > .postgres_secret_name
-          elif [ ! -s .postgres_password ]; then
-            POSTGRES_DB=buddystudy
-            POSTGRES_USER=buddystudy
-            openssl rand -hex 32 > .postgres_password
-          else
-            POSTGRES_DB=buddystudy
-            POSTGRES_USER=buddystudy
+          if [ -z "${POSTGRES_SECRET_JSON}" ]; then
+            if [ ! -s .postgres_password ]; then
+              openssl rand -hex 32 > .postgres_password
+            fi
+            POSTGRES_PASSWORD="$(cat .postgres_password)"
+            POSTGRES_SECRET_JSON="$(
+              POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" python3 -c \
+                'import json, os; print(json.dumps({"dbname":"buddystudy","username":"buddystudy","password":os.environ["POSTGRES_PASSWORD"],"jdbcUrl":"jdbc:postgresql://buddystudy-db:5432/buddystudy","r2dbcUrl":"r2dbc:postgresql://buddystudy-db:5432/buddystudy"}))'
+            )"
+            aws secretsmanager create-secret \
+              --region ap-northeast-2 \
+              --name "${POSTGRES_SECRET_ID}" \
+              --secret-string "${POSTGRES_SECRET_JSON}" >/dev/null
+            POSTGRES_SECRET_ORIGINAL_JSON="${POSTGRES_SECRET_JSON}"
           fi
+
+          POSTGRES_SECRET_JSON="$(
+            SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c \
+              'import json, os; secret=json.loads(os.environ["SECRET_JSON"]); database=secret.get("dbname") or "buddystudy"; secret.update({"dbname":database,"username":secret.get("username") or "buddystudy","jdbcUrl":secret.get("jdbcUrl") or f"jdbc:postgresql://buddystudy-db:5432/{database}","r2dbcUrl":secret.get("r2dbcUrl") or f"r2dbc:postgresql://buddystudy-db:5432/{database}"}); secret.get("password") or (_ for _ in ()).throw(SystemExit("PostgreSQL password is missing from the AWS secret.")); print(json.dumps(secret))'
+          )"
+          if [ "${POSTGRES_SECRET_JSON}" != "${POSTGRES_SECRET_ORIGINAL_JSON}" ]; then
+            aws secretsmanager put-secret-value \
+              --region ap-northeast-2 \
+              --secret-id "${POSTGRES_SECRET_ID}" \
+              --secret-string "${POSTGRES_SECRET_JSON}" >/dev/null
+          fi
+
+          POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')"
+          POSTGRES_USER="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')"
+          POSTGRES_PASSWORD="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
+          DATABASE_URL="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["jdbcUrl"])')"
+          R2DBC_DATABASE_URL="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["r2dbcUrl"])')"
+          printf '%s' "${POSTGRES_PASSWORD}" > .postgres_password
+          printf '%s' "${POSTGRES_SECRET_ID}" > .postgres_secret_name
           chmod 600 .postgres_password
           chmod 600 .postgres_secret_name 2>/dev/null || true
-          POSTGRES_PASSWORD="$(cat .postgres_password)"
-          DATABASE_URL="jdbc:postgresql://buddystudy-db:5432/${POSTGRES_DB}"
 
           cat > .env <<ENV
           SPRING_PROFILES_ACTIVE=prod
@@ -127,6 +146,9 @@ jobs:
           DATABASE_URL=${DATABASE_URL}
           DATABASE_USERNAME=${POSTGRES_USER}
           DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+          R2DBC_DATABASE_URL=${R2DBC_DATABASE_URL}
+          R2DBC_DATABASE_USERNAME=${POSTGRES_USER}
+          R2DBC_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
           OPENAI_API_KEY=${OPENAI_API_KEY}
