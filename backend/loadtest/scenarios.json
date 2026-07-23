@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "scenarios": {
+    "health": {
+      "description": "HTTP runtime, routing, and JSON serialization without persistence.",
+      "requests": [
+        {
+          "name": "health",
+          "method": "GET",
+          "path": "/health",
+          "weight": 100,
+          "authenticated": false,
+          "expectedStatus": 200,
+          "requiredJsonPaths": [
+            "ok"
+          ]
+        }
+      ]
+    },
+    "public-questions": {
+      "description": "Public question database reads, mapping, and a 20-row response.",
+      "requests": [
+        {
+          "name": "public-questions",
+          "method": "GET",
+          "path": "/api/v1/public/questions?limit=20&offset=0&language=ko",
+          "weight": 100,
+          "authenticated": false,
+          "expectedStatus": 200,
+          "requiredJsonPaths": [
+            "questions",
+            "limit",
+            "offset"
+          ],
+          "nonEmptyJsonPaths": [
+            "questions"
+          ]
+        }
+      ]
+    },
+    "studies": {
+      "description": "JWT verification, DB-backed session validation, pagination, and 100 study rows.",
+      "requests": [
+        {
+          "name": "studies",
+          "method": "GET",
+          "path": "/api/v1/studies?limit=${STUDIES_LIMIT}&offset=0",
+          "weight": 100,
+          "authenticated": true,
+          "expectedStatus": 200,
+          "requiredJsonPaths": [
+            "studies",
+            "limit",
+            "offset"
+          ],
+          "nonEmptyJsonPaths": [
+            "studies"
+          ]
+        }
+      ]
+    },
+    "mobile-read-mix": {
+      "description": "Read-only mobile traffic mix without the synthetic health endpoint.",
+      "requests": [
+        {
+          "name": "public-questions",
+          "method": "GET",
+          "path": "/api/v1/public/questions?limit=20&offset=0&language=ko",
+          "weight": 70,
+          "authenticated": false,
+          "expectedStatus": 200,
+          "requiredJsonPaths": [
+            "questions",
+            "limit",
+            "offset"
+          ],
+          "nonEmptyJsonPaths": [
+            "questions"
+          ]
+        },
+        {
+          "name": "studies",
+          "method": "GET",
+          "path": "/api/v1/studies?limit=${STUDIES_LIMIT}&offset=0",
+          "weight": 30,
+          "authenticated": true,
+          "expectedStatus": 200,
+          "requiredJsonPaths": [
+            "studies",
+            "limit",
+            "offset"
+          ],
+          "nonEmptyJsonPaths": [
+            "studies"
+          ]
+        }
+      ]
+    }
+  }
+}

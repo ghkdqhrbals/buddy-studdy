@@ -1,0 +1,28 @@
+services:
+  controller:
+    image: "${NGRINDER_CONTROLLER_IMAGE:-ngrinder/controller:3.5.9-p1}"
+    ports:
+      - "${NGRINDER_BIND_ADDRESS:-127.0.0.1}:${NGRINDER_WEB_PORT:-18081}:80"
+    volumes:
+      - controller-data:/opt/ngrinder-controller
+    networks:
+      - load-generator
+
+  agent:
+    image: "${NGRINDER_AGENT_IMAGE:-ngrinder/agent:3.5.9-p1}"
+    command:
+      - "controller:80"
+    depends_on:
+      - controller
+    volumes:
+      - agent-data:/opt/ngrinder-agent
+    networks:
+      - load-generator
+
+networks:
+  load-generator:
+    internal: false
+
+volumes:
+  controller-data:
+  agent-data:

@@ -62,6 +62,7 @@ def main():
                 "elapsedSeconds": index,
                 "rps": requests.get("rate", 0.0),
                 "requests": requests.get("count", 0.0),
+                "meanMs": duration.get("avg", 0.0),
                 "p50Ms": duration.get("med", 0.0),
                 "p90Ms": duration.get("p(90)", 0.0),
                 "p95Ms": duration.get("p(95)", 0.0),

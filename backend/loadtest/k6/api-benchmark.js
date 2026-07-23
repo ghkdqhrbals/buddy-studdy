@@ -1,6 +1,8 @@
 import http from "k6/http";
 import { check } from "k6";
+import { Rate } from "k6/metrics";
 
+const manifest = JSON.parse(open("../scenarios.json"));
 const baseUrl = __ENV.BASE_URL || "http://127.0.0.1:18080";
 const scenario = __ENV.SCENARIO || "health";
 const vus = Number(__ENV.VUS || 50);
@@ -8,6 +10,8 @@ const targetRps = Number(__ENV.TARGET_RPS || 0);
 const duration = __ENV.DURATION || "30s";
 const requestTimeout = __ENV.REQUEST_TIMEOUT || "5s";
 const studiesLimit = Number(__ENV.STUDIES_LIMIT || 100);
+const validateBody = (__ENV.VALIDATE_BODY || "false") === "true";
+const strictValidation = (__ENV.STRICT_VALIDATION || "false") === "true";
 const preAllocatedVUs = Number(
   __ENV.PRE_ALLOCATED_VUS || Math.max(100, Math.ceil(targetRps * 0.25)),
 );
@@ -36,52 +40,93 @@ export const options = {
   scenarios: {
     api: execution,
   },
-  discardResponseBodies: true,
+  discardResponseBodies: !validateBody,
   summaryTrendStats: ["avg", "med", "p(90)", "p(95)", "p(99)", "max"],
+  thresholds: strictValidation
+    ? { response_validation_failed: ["rate==0"] }
+    : {},
 };
 
-function requestDefinition() {
-  const commonParams = {
-    timeout: requestTimeout,
-  };
-  switch (scenario) {
-    case "health":
-      return {
-        path: "/health",
-        params: { ...commonParams, tags: { endpoint: "health" } },
-      };
-    case "public-questions":
-      return {
-        path: "/api/v1/public/questions?limit=20&offset=0&language=ko",
-        params: {
-          ...commonParams,
-          tags: { endpoint: "public-questions" },
-        },
-      };
-    case "studies":
-      if (!__ENV.ACCESS_TOKEN) {
-        throw new Error("ACCESS_TOKEN is required for the studies scenario.");
-      }
-      return {
-        path: `/api/v1/studies?limit=${studiesLimit}&offset=0`,
-        params: {
-          ...commonParams,
-          headers: { Authorization: `Bearer ${__ENV.ACCESS_TOKEN}` },
-          tags: { endpoint: "studies" },
-        },
-      };
-    default:
-      throw new Error(`Unsupported SCENARIO: ${scenario}`);
-  }
+const responseValidationFailed = new Rate("response_validation_failed");
+
+const scenarioDefinition = manifest.scenarios[scenario];
+if (!scenarioDefinition) {
+  throw new Error(`Unsupported SCENARIO: ${scenario}`);
+}
+if (
+  scenarioDefinition.requests.some((request) => request.authenticated)
+  && !__ENV.ACCESS_TOKEN
+) {
+  throw new Error(`ACCESS_TOKEN is required for the ${scenario} scenario.`);
 }
 
-const request = requestDefinition();
+function expandPath(path) {
+  return path.replace("${STUDIES_LIMIT}", String(studiesLimit));
+}
+
+function chooseRequest() {
+  if (scenarioDefinition.requests.length === 1) {
+    return scenarioDefinition.requests[0];
+  }
+  const selected = Math.random() * 100;
+  let cumulative = 0;
+  for (const request of scenarioDefinition.requests) {
+    cumulative += request.weight;
+    if (selected < cumulative) {
+      return request;
+    }
+  }
+  return scenarioDefinition.requests[scenarioDefinition.requests.length - 1];
+}
+
+function readJsonPath(value, path) {
+  return path.split(".").reduce(
+    (current, key) => (current !== null && current !== undefined ? current[key] : undefined),
+    value,
+  );
+}
 
 export default function () {
-  const response = http.get(`${baseUrl}${request.path}`, request.params);
-  check(response, {
-    [`${scenario} status is 200`]: (result) => result.status === 200,
-  });
+  const request = chooseRequest();
+  const headers = request.authenticated
+    ? { Authorization: `Bearer ${__ENV.ACCESS_TOKEN}` }
+    : {};
+  const params = {
+    timeout: requestTimeout,
+    headers,
+    tags: { scenario, endpoint: request.name },
+    responseType: validateBody ? "text" : "none",
+  };
+  const response = http.request(
+    request.method,
+    `${baseUrl}${expandPath(request.path)}`,
+    null,
+    params,
+  );
+  const checks = {
+    [`${request.name} status is ${request.expectedStatus}`]:
+      (result) => result.status === request.expectedStatus,
+  };
+  if (validateBody) {
+    let body;
+    try {
+      body = response.json();
+    } catch (_error) {
+      body = null;
+    }
+    checks[`${request.name} response is JSON`] = () => body !== null;
+    for (const path of request.requiredJsonPaths || []) {
+      checks[`${request.name} contains ${path}`] = () => readJsonPath(body, path) !== undefined;
+    }
+    for (const path of request.nonEmptyJsonPaths || []) {
+      checks[`${request.name} ${path} is non-empty`] = () => {
+        const value = readJsonPath(body, path);
+        return Array.isArray(value) ? value.length > 0 : Boolean(value);
+      };
+    }
+  }
+  const valid = check(response, checks);
+  responseValidationFailed.add(!valid);
 }
 
 export function handleSummary(data) {
