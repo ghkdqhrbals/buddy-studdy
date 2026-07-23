@@ -49,6 +49,8 @@ one workflow run just because they share a host.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio hostname or Sites validation changes: run the portfolio domain
   workflow in the app repository. It changes DNS records only and must not
-  deploy the backend, monitoring stack, or admin frontend.
+  deploy the backend, monitoring stack, or admin frontend. The workflow uses
+  repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID`; the
+  token needs DNS edit access only for the configured zone.
 - Nginx public routing changes: update the owning module workflow template and
   state which module is responsible for reloading nginx.
