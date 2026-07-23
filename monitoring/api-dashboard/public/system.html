@@ -70,15 +70,15 @@
         </section>
 
         <main class="metrics-grid">
-          <section class="metric-chart-panel">
+          <section class="metric-chart-panel metric-chart-panel-primary">
             <div class="metric-chart-header">
               <div>
-                <h2>Request Throughput</h2>
-                <p>Requests and 5xx responses per second</p>
+                <h2>Requests Per Second</h2>
+                <p>RPS and 5xx responses per second over the selected time range</p>
               </div>
               <div id="throughputLegend" class="chart-legend"></div>
             </div>
-            <canvas id="throughputChart" class="metric-chart" height="230"></canvas>
+            <canvas id="throughputChart" class="metric-chart metric-chart-primary" height="280"></canvas>
           </section>
 
           <section class="metric-chart-panel">

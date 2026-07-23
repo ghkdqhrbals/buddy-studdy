@@ -51,6 +51,8 @@ const chartDefinitions = [
     canvas: document.querySelector("#throughputChart"),
     legend: document.querySelector("#throughputLegend"),
     unit: "rate",
+    curve: true,
+    fillPrimary: true,
     series: () => [
       { name: "Requests", color: COLORS.blue, points: state.requestRate },
       { name: "5xx", color: COLORS.red, points: state.errorRate },
@@ -309,6 +311,9 @@ function drawChart(canvas, series, range, options) {
     const y = padding.top + (height * index) / 4;
     context.moveTo(padding.left, y);
     context.lineTo(padding.left + width, y);
+    const x = padding.left + (width * index) / 4;
+    context.moveTo(x, padding.top);
+    context.lineTo(x, padding.top + height);
   }
   context.stroke();
 
@@ -323,23 +328,36 @@ function drawChart(canvas, series, range, options) {
   }
 
   let hasPoints = false;
-  for (const item of series) {
+  series.forEach((item, seriesIndex) => {
     const points = item.points.filter((point) => point.ms >= startMs && point.ms <= endMs && Number.isFinite(point.value));
-    if (!points.length) continue;
+    if (!points.length) return;
     hasPoints = true;
+    const coordinates = points.map((point) => ({
+      x: padding.left + ((point.ms - startMs) / Math.max(1, endMs - startMs)) * width,
+      y: padding.top + height - (point.value / maxValue) * height,
+    }));
+
+    if (options.fillPrimary && seriesIndex === 0 && coordinates.length > 1) {
+      const fill = context.createLinearGradient(0, padding.top, 0, padding.top + height);
+      fill.addColorStop(0, `${item.color}38`);
+      fill.addColorStop(1, `${item.color}05`);
+      context.beginPath();
+      traceSeriesPath(context, coordinates, options.curve);
+      context.lineTo(coordinates.at(-1).x, padding.top + height);
+      context.lineTo(coordinates[0].x, padding.top + height);
+      context.closePath();
+      context.fillStyle = fill;
+      context.fill();
+    }
+
     context.strokeStyle = item.color;
-    context.lineWidth = 2;
+    context.lineWidth = seriesIndex === 0 ? 2.5 : 2;
     context.lineJoin = "round";
     context.lineCap = "round";
     context.beginPath();
-    points.forEach((point, index) => {
-      const x = padding.left + ((point.ms - startMs) / Math.max(1, endMs - startMs)) * width;
-      const y = padding.top + height - (point.value / maxValue) * height;
-      if (index === 0) context.moveTo(x, y);
-      else context.lineTo(x, y);
-    });
+    traceSeriesPath(context, coordinates, options.curve);
     context.stroke();
-  }
+  });
 
   if (!hasPoints) {
     context.fillStyle = "#8b98aa";
@@ -349,10 +367,33 @@ function drawChart(canvas, series, range, options) {
 
   context.fillStyle = "#66758a";
   context.textBaseline = "top";
-  context.textAlign = "left";
-  context.fillText(formatKstAxis(startMs), padding.left, padding.top + height + 9);
-  context.textAlign = "right";
-  context.fillText(formatKstAxis(endMs), padding.left + width, padding.top + height + 9);
+  for (let index = 0; index <= 4; index += 1) {
+    const x = padding.left + (width * index) / 4;
+    const timestamp = startMs + ((endMs - startMs) * index) / 4;
+    context.textAlign = index === 0 ? "left" : index === 4 ? "right" : "center";
+    context.fillText(formatKstAxis(timestamp), x, padding.top + height + 9);
+  }
+}
+
+function traceSeriesPath(context, coordinates, curved) {
+  context.moveTo(coordinates[0].x, coordinates[0].y);
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const previous = coordinates[index - 1];
+    const current = coordinates[index];
+    if (!curved) {
+      context.lineTo(current.x, current.y);
+      continue;
+    }
+    const midpointX = previous.x + (current.x - previous.x) / 2;
+    context.bezierCurveTo(
+      midpointX,
+      previous.y,
+      midpointX,
+      current.y,
+      current.x,
+      current.y,
+    );
+  }
 }
 
 function formatAxisValue(value, unit) {
