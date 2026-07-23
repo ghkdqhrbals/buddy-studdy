@@ -7,6 +7,17 @@ plugins {
     jacoco
 }
 
+tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessAot>("processAot") {
+    args("--spring.profiles.active=aot")
+    systemProperties(
+        mapOf(
+            "spring.r2dbc.url" to "r2dbc:postgresql://localhost:5432/buddystudy",
+            "spring.r2dbc.username" to "buddystudy",
+            "spring.r2dbc.password" to "aot-build-only",
+        ),
+    )
+}
+
 tasks.register("patchNativeReachabilityMetadata") {
     val aotMetadata = layout.buildDirectory.file("resources/aot/META-INF/native-image/com.buddystudy/tutor/reachability-metadata.json")
     dependsOn("processAotResources")
