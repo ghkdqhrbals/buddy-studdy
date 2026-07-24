@@ -21,7 +21,7 @@ This keeps API/Grafana URLs simple while avoiding public DB/Redis exposure.
 - `api.lowfidev.cloud` -> `localhost:30080`
 - `coordinator.lowfidev.cloud` -> `localhost:8080`
 - `monitoring.lowfidev.cloud` -> `localhost:3000` (custom operational UI)
-- `grafana.lowfidev.cloud` -> `localhost:3001` (standalone Grafana)
+- `grafana.lowfidev.cloud` -> `localhost:3000` (nginx gateway proxies to Grafana)
 - `ssh.lowfidev.cloud` -> local SSH through Cloudflare Access
 
 The config also keeps compatibility TCP hostnames:
@@ -64,6 +64,11 @@ The production MacBook Air uses Routingflare for the two monitoring HTTP
 routes. Apply them with the dedicated
 `Deploy BuddyStudy Monitoring Routes on MacBook Air` workflow; do not attach
 route changes to backend or TestZone deployment jobs.
+
+The routing workflow restarts the Routingflare menu-bar app through macOS
+Launch Services before starting the named-tunnel connector. This keeps the
+app and its `cloudflared` child independent from the GitHub Actions runner, so
+the runner's orphan-process cleanup cannot take the public routes offline.
 
 ## Compatibility TCP Commands
 
