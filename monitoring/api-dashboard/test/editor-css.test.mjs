@@ -13,4 +13,7 @@ test("script editor hides native glyphs behind the syntax highlight layer", () =
   const highlightRule = css.match(/\.script-highlight \{(?<body>[^}]+)\}/)?.groups?.body ?? "";
   assert.match(highlightRule, /color:\s*#dce6f4;/);
   assert.match(highlightRule, /pointer-events:\s*none;/);
+  assert.match(highlightRule, /align-self:\s*stretch;/);
+  assert.match(highlightRule, /max-height:\s*none;/);
+  assert.doesNotMatch(highlightRule, /height:\s*100%;/);
 });
