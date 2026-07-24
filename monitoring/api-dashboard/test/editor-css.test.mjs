@@ -28,6 +28,15 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
   assert.match(html, /id="runDialog"/);
 });
 
+test("workspace exposes one new run action and keeps target URL in the run form", () => {
+  assert.equal((html.match(/id="overviewRunButton"/g) || []).length, 1);
+  assert.doesNotMatch(html, /id="headerRunButton"|>Run test</);
+  assert.doesNotMatch(html, /id="projectBaseUrl"|id="saveProjectButton"|id="newProjectBaseUrl"/);
+  assert.match(html, /<input[\s\S]+?id="runTargetUrl"[\s\S]+?required/);
+  assert.match(javascript, /targetUrl:\s*elements\.runTargetUrl\.value/);
+  assert.match(javascript, /run\.targetUrl\s*\|\|\s*"-"/);
+});
+
 test("run charts use vendored uPlot with unit-specific live series", () => {
   const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function applyProfile/)?.[0] ?? "";
   assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);

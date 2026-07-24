@@ -216,11 +216,6 @@ body {
   text-transform: uppercase;
 }
 
-.workspace-bar .workspace-target {
-  min-width: 320px;
-  flex: 1;
-}
-
 .workspace-bar input,
 .workspace-bar select,
 .testzone-dialog input,
@@ -1088,8 +1083,7 @@ body {
   }
 
   .workspace-bar label,
-  .workspace-project,
-  .workspace-bar .workspace-target {
+  .workspace-project {
     min-width: 0;
     width: 100%;
   }

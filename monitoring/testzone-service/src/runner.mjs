@@ -77,7 +77,7 @@ export class RunManager {
       maxVus: this.config.maxVus,
       maxDurationSeconds: this.config.maxDurationSeconds,
       duration: run.options.duration,
-      targetBaseUrl: project.baseUrl,
+      targetBaseUrl: run.targetUrl,
     });
 
     const runDirectory = this.store.runPath(run.id);
@@ -95,7 +95,7 @@ export class RunManager {
     const processEnvironment = {
       ...process.env,
       ...Object.fromEntries(Object.entries(environment).map(([key, value]) => [key, String(value)])),
-      BASE_URL: project.baseUrl,
+      BASE_URL: run.targetUrl,
       VUS: String(run.options.vus),
       MAX_VUS: String(run.options.maxVus),
       TARGET_RPS: String(run.options.targetRps),

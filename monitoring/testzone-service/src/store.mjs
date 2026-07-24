@@ -43,7 +43,6 @@ function defaultState() {
     projects: [{
       id: projectId,
       name: "BuddyStudy API",
-      baseUrl: "https://api.ghkdqhrbals.org",
       createdAt: now(),
       updatedAt: now(),
     }],
@@ -119,6 +118,13 @@ export class TestZoneStore {
       if (!run.name) {
         run.name = run.scriptName || `Test run ${run.id.slice(0, 8)}`;
         changed = true;
+      }
+      if (!run.targetUrl) {
+        const project = this.state.projects.find((entry) => entry.id === run.projectId);
+        if (project?.baseUrl) {
+          run.targetUrl = project.baseUrl;
+          changed = true;
+        }
       }
       if (!Object.hasOwn(run, "live")) {
         run.live = null;
@@ -213,7 +219,6 @@ export class TestZoneStore {
     const project = {
       id: crypto.randomUUID(),
       name: input.name,
-      baseUrl: input.baseUrl,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -226,7 +231,6 @@ export class TestZoneStore {
     const project = this.state.projects.find((entry) => entry.id === id);
     if (!project) return null;
     if (input.name) project.name = input.name;
-    if (input.baseUrl) project.baseUrl = input.baseUrl;
     project.updatedAt = now();
     await this.persist();
     return project;
@@ -262,6 +266,7 @@ export class TestZoneStore {
       projectId: input.projectId,
       scriptId: input.scriptId,
       scriptName: input.scriptName,
+      targetUrl: input.targetUrl,
       name: input.name,
       profile: input.profile,
       options: input.options,

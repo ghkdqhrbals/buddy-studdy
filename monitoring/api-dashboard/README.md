@@ -14,13 +14,14 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 ## TestZone Behavior
 
 TestZone is runtime-neutral. It does not know or display whether the target is
-MVC, WebFlux, Tomcat, or Netty. A project contains only a name, a target URL,
-scripts, and executions.
+MVC, WebFlux, Tomcat, or Netty. A project contains a name, scripts, and
+executions. Each execution captures its own target URL, so one project can test
+multiple deployments without rewriting project settings.
 
 The browser can:
 
 - create, edit, validate, and delete k6 JavaScript files
-- ask OpenAI to generate or revise the current script
+- choose a target URL for every execution
 - configure headers and environment values without embedding credentials in
   source files
 - start, cancel, and delete executions
@@ -28,7 +29,7 @@ The browser can:
   components
 - open an execution in Grafana using its `run_id`
 
-`Run test` calls the TestZone service and starts k6. It does not copy a shell
+`New run` calls the TestZone service and starts k6. It does not copy a shell
 command. Sensitive header and environment names are redacted from persisted
 metadata. The browser never receives the OpenAI API key or InfluxDB token.
 

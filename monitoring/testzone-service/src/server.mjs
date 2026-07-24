@@ -128,7 +128,6 @@ export async function createTestZoneServer(dependencies = {}) {
         const body = await readJson(request);
         const project = await store.createProject({
           name: requireText(body.name, "Project name"),
-          baseUrl: validateTargetHost(body.baseUrl, config.allowedTargetHosts),
         });
         return sendJson(response, 201, { project });
       }
@@ -137,7 +136,6 @@ export async function createTestZoneServer(dependencies = {}) {
         const body = await readJson(request);
         const project = await store.updateProject(match[0], {
           name: body.name ? requireText(body.name, "Project name") : undefined,
-          baseUrl: body.baseUrl ? validateTargetHost(body.baseUrl, config.allowedTargetHosts) : undefined,
         });
         return project ? sendJson(response, 200, { project }) : sendJson(response, 404, { error: "Project not found." });
       }
@@ -224,7 +222,7 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!project || !script || script.projectId !== project.id) {
           return sendJson(response, 404, { error: "Project or script not found." });
         }
-        project.baseUrl = validateTargetHost(project.baseUrl, config.allowedTargetHosts);
+        const targetUrl = validateTargetHost(body.targetUrl, config.allowedTargetHosts);
         const options = normalizeRunOptions(body.options || {}, config);
         const environment = safeEnvironment(body.environment || {});
         environment.HEADERS_JSON = JSON.stringify(body.headers || {});
@@ -232,6 +230,7 @@ export async function createTestZoneServer(dependencies = {}) {
           projectId: project.id,
           scriptId: script.id,
           scriptName: script.name,
+          targetUrl,
           name: requireText(body.name || script.name, "Test name", 120),
           profile: String(body.profile || "custom").slice(0, 40),
           options,

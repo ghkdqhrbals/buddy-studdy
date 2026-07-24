@@ -108,11 +108,11 @@ test("project APIs create and delete projects with their scripts, runs, and time
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: "Catalog API",
-      baseUrl: "https://catalog.example.test",
     }),
   });
   assert.equal(createdResponse.status, 201);
   const created = (await createdResponse.json()).project;
+  assert.equal("baseUrl" in created, false);
   const script = await app.store.createScript({
     projectId: created.id,
     name: "catalog.js",
@@ -181,6 +181,7 @@ test("run API starts a saved script instead of returning a copied command", asyn
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
+      targetUrl: "https://api.example.test",
       name: "Public API peak",
       profile: "custom",
       options: { duration: "30s", vus: 20, maxVus: 100, targetRps: 50 },
@@ -192,7 +193,28 @@ test("run API starts a saved script instead of returning a copied command", asyn
   assert.equal(body.run.status, "running");
   assert.equal(body.run.name, "Public API peak");
   assert.equal(body.run.scriptName, script.name);
+  assert.equal(body.run.targetUrl, "https://api.example.test");
   assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
+
+  const secondResponse = await fetch(`${app.baseUrl}/api/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId: project.id,
+      scriptId: script.id,
+      targetUrl: "https://staging.example.test/base/",
+      name: "Public API staging",
+      profile: "smoke",
+      options: { duration: "10s", vus: 1, maxVus: 1, targetRps: 1 },
+    }),
+  });
+  assert.equal(secondResponse.status, 202);
+  const second = await secondResponse.json();
+  assert.equal(second.run.targetUrl, "https://staging.example.test/base");
+  assert.deepEqual(
+    new Set(app.store.state.runs.map((run) => run.targetUrl)),
+    new Set(["https://api.example.test", "https://staging.example.test/base"]),
+  );
 });
 
 test("script workspace supports create, edit, and delete", async (context) => {
@@ -246,6 +268,7 @@ test("run history preserves the script name after the script is deleted", async 
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
+      targetUrl: "https://api.example.test",
       profile: "custom",
       options: { duration: "10s", vus: 1, maxVus: 1, targetRps: 1 },
     }),
@@ -422,6 +445,8 @@ test("store migration backfills names for legacy run metadata", async (context) 
   context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const initialStore = await new TestZoneStore(dataDir).init();
   const script = initialStore.state.scripts[0];
+  initialStore.state.projects[0].baseUrl = "https://legacy.example.test";
+  await initialStore.persist();
   const run = await initialStore.createRun({
     projectId: script.projectId,
     scriptId: script.id,
@@ -432,4 +457,5 @@ test("store migration backfills names for legacy run metadata", async (context) 
 
   const migratedStore = await new TestZoneStore(dataDir).init();
   assert.equal(migratedStore.state.runs[0].scriptName, script.name);
+  assert.equal(migratedStore.state.runs[0].targetUrl, "https://legacy.example.test");
 });

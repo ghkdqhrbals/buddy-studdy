@@ -47,10 +47,10 @@ const state = {
 };
 
 const elementIds = [
-  "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
+  "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
-  "newProjectName", "newProjectBaseUrl", "createProjectButton",
-  "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
+  "newProjectName", "createProjectButton",
+  "overviewRunButton", "quickScriptSelect", "profileShortcuts",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
@@ -171,35 +171,13 @@ function renderProjects() {
   }
   elements.projectSelect.replaceChildren(...options);
   const selected = project();
-  elements.projectBaseUrl.value = selected?.baseUrl || "";
   elements.projectSelect.disabled = !selected;
-  elements.projectBaseUrl.disabled = !selected;
-  elements.saveProjectButton.disabled = !selected;
   elements.deleteProjectButton.disabled = !selected;
-  elements.headerRunButton.disabled = !selected;
   elements.overviewRunButton.disabled = !selected;
-}
-
-async function saveProject() {
-  const selected = project();
-  if (!selected) return;
-  setButtonBusy(elements.saveProjectButton, true, "Saving");
-  try {
-    Object.assign(selected, (await api(`/projects/${selected.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ baseUrl: elements.projectBaseUrl.value }),
-    })).project);
-    setFeedback(elements.projectFeedback, "Saved", "success");
-  } catch (error) {
-    setFeedback(elements.projectFeedback, error.message, "error");
-  } finally {
-    setButtonBusy(elements.saveProjectButton, false);
-  }
 }
 
 function openNewProjectDialog() {
   elements.newProjectForm.reset();
-  elements.newProjectBaseUrl.value = project()?.baseUrl || "https://";
   elements.newProjectDialog.showModal();
   elements.newProjectName.focus();
 }
@@ -212,7 +190,6 @@ async function createProject(event) {
       method: "POST",
       body: JSON.stringify({
         name: elements.newProjectName.value,
-        baseUrl: elements.newProjectBaseUrl.value,
       }),
     })).project;
     state.projects.unshift(created);
@@ -388,7 +365,6 @@ async function validateCurrentScript(quiet = false) {
       method: "POST",
       body: JSON.stringify({
         code: elements.scriptEditor.value,
-        baseUrl: project()?.baseUrl,
         duration: elements.runDuration.value,
       }),
     })).validation;
@@ -619,7 +595,7 @@ function renderSelectedRun() {
     : "Preparing k6 metrics";
   elements.runDetailTitle.textContent = run.name || run.scriptName;
   elements.runDetailMeta.textContent = `${formatDate(run.startedAt || run.createdAt)} · ${run.id}`;
-  elements.runDetailTarget.textContent = project()?.baseUrl || "-";
+  elements.runDetailTarget.textContent = run.targetUrl || "-";
   elements.runDetailConfig.textContent = `${run.options?.duration || "-"} · ${run.options?.targetRps || 0} RPS · ${run.options?.maxVus || 0} max VUs`;
   elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
   elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
@@ -928,6 +904,18 @@ function applyProfile(name) {
   elements.runName.value = `${selectedScript?.name?.replace(/\.js$/, "") || "API test"} · ${profile.label}`;
 }
 
+function targetUrlStorageKey() {
+  return state.projectId ? `testzone.targetUrl.${state.projectId}` : "";
+}
+
+function suggestedTargetUrl() {
+  const storageKey = targetUrlStorageKey();
+  const remembered = storageKey ? localStorage.getItem(storageKey) : "";
+  if (remembered) return remembered;
+  const latestWithTarget = state.runs.find((run) => run.targetUrl);
+  return latestWithTarget?.targetUrl || project()?.baseUrl || "";
+}
+
 function openRunDialog(profileName = "standard", scriptId = null) {
   const selectedProject = project();
   if (!selectedProject || !state.scripts.length) {
@@ -935,7 +923,7 @@ function openRunDialog(profileName = "standard", scriptId = null) {
     return;
   }
   elements.runProjectName.textContent = selectedProject.name;
-  elements.runTargetUrl.textContent = selectedProject.baseUrl;
+  elements.runTargetUrl.value = suggestedTargetUrl();
   elements.runScriptSelect.value = scriptId || state.scriptId || state.scripts[0].id;
   applyProfile(profileName);
   elements.runFormError.textContent = "";
@@ -953,6 +941,7 @@ async function startRun(event) {
         name: elements.runName.value,
         projectId: state.projectId,
         scriptId: elements.runScriptSelect.value,
+        targetUrl: elements.runTargetUrl.value,
         profile: elements.runForm.dataset.profile || "custom",
         options: {
           duration: elements.runDuration.value,
@@ -964,6 +953,8 @@ async function startRun(event) {
         environment: parseObjectJson(elements.runEnvironment.value, "Environment"),
       }),
     });
+    const storageKey = targetUrlStorageKey();
+    if (storageKey) localStorage.setItem(storageKey, payload.run.targetUrl);
     state.selectedRunId = payload.run.id;
     elements.runDialog.close();
     switchTab("overview");
@@ -1239,8 +1230,6 @@ function bindEvents() {
   elements.newProjectButton.addEventListener("click", openNewProjectDialog);
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
-  elements.saveProjectButton.addEventListener("click", saveProject);
-  elements.headerRunButton.addEventListener("click", () => openRunDialog());
   elements.overviewRunButton.addEventListener("click", () => openRunDialog());
   elements.profileShortcuts.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");

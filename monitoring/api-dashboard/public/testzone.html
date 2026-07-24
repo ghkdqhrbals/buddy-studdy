@@ -33,7 +33,6 @@
           </div>
           <div class="header-actions">
             <span id="serviceStatus" class="service-status" data-state="loading">연결 확인 중</span>
-            <button id="headerRunButton" class="button button-primary" type="button">Run test</button>
           </div>
         </header>
 
@@ -48,12 +47,6 @@
               <button id="deleteProjectButton" class="button button-secondary danger-text" type="button">Delete</button>
             </div>
           </div>
-          <label class="workspace-target">
-            <span>Target URL</span>
-            <input id="projectBaseUrl" type="url" autocomplete="off" />
-          </label>
-          <button id="saveProjectButton" class="button button-secondary" type="button">Save target</button>
-          <span id="projectFeedback" class="inline-feedback" role="status"></span>
         </div>
 
         <nav class="testzone-tabs" aria-label="TestZone sections">
@@ -278,8 +271,16 @@
         <div class="dialog-body">
           <div class="run-context">
             <div><span>Project</span><strong id="runProjectName">-</strong></div>
-            <div><span>Target</span><strong id="runTargetUrl">-</strong></div>
           </div>
+          <label>Target URL
+            <input
+              id="runTargetUrl"
+              type="url"
+              autocomplete="url"
+              placeholder="https://api.example.com"
+              required
+            />
+          </label>
           <label>Test name<input id="runName" maxlength="120" placeholder="Public questions · standard" /></label>
           <label>Script<select id="runScriptSelect"></select></label>
           <fieldset>
@@ -337,7 +338,6 @@
         </header>
         <div class="dialog-body">
           <label>Project name<input id="newProjectName" maxlength="120" autocomplete="off" required /></label>
-          <label>Target URL<input id="newProjectBaseUrl" type="url" autocomplete="off" placeholder="https://api.example.com" required /></label>
         </div>
         <footer>
           <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
@@ -400,6 +400,6 @@
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
     <script src="/vendor/uplot/uPlot.iife.min.js?v=1.6.32"></script>
-    <script type="module" src="/testzone.js?v=2026072501"></script>
+    <script type="module" src="/testzone.js?v=2026072502"></script>
   </body>
 </html>
