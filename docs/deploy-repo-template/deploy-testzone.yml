@@ -61,9 +61,38 @@ jobs:
           TESTZONE_INFLUX_TOKEN="$(cat "${testzone_root}/.influx_token")"
           TESTZONE_COMPONENT_PASSWORD="$(cat "${testzone_root}/.component_password")"
 
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-          docker pull "${IMAGE_REF}"
-          docker pull influxdb:2.7-alpine
+          run_with_timeout() {
+            local seconds="$1"
+            shift
+            /usr/bin/perl -e 'alarm shift; exec @ARGV' "${seconds}" "$@"
+          }
+
+          docker_ready=false
+          if run_with_timeout 10 docker info >/dev/null 2>&1; then
+            docker_ready=true
+          else
+            open -ga Docker || true
+            for _ in $(seq 1 24); do
+              if run_with_timeout 10 docker info >/dev/null 2>&1; then
+                docker_ready=true
+                break
+              fi
+              sleep 5
+            done
+          fi
+          if [ "${docker_ready}" != true ]; then
+            echo "Docker Desktop did not become ready within the deployment window." >&2
+            exit 1
+          fi
+
+          export DOCKER_CONFIG
+          DOCKER_CONFIG="$(mktemp -d)"
+          trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
+
+          printf '%s' "${GHCR_TOKEN}" |
+            run_with_timeout 30 docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          run_with_timeout 300 docker pull "${IMAGE_REF}"
+          run_with_timeout 300 docker pull influxdb:2.7-alpine
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
           docker network create buddystudy-testzone >/dev/null 2>&1 || true
 
