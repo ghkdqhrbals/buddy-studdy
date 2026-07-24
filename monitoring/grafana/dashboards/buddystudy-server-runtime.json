@@ -65,7 +65,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container=~\".+\"} |= \"runtime_metrics \" [$__range]))",
+          "expr": "sum(count_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" [$__range]))",
           "legendFormat": "samples",
           "queryType": "instant",
           "refId": "A"
@@ -128,7 +128,7 @@
       },
       "targets": [
         {
-          "expr": "last_over_time({container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processCpuPercent | __error__=\"\" [$__range])",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processCpuPercent=\"processCpuPercent\" | unwrap processCpuPercent | __error__=\"\" [$__range])",
           "legendFormat": "process CPU",
           "queryType": "instant",
           "refId": "A"
@@ -185,12 +185,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processCpuPercent | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processCpuPercent=\"processCpuPercent\" | unwrap processCpuPercent | __error__=\"\" [1m])",
           "legendFormat": "process",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap systemCpuPercent | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json systemCpuPercent=\"systemCpuPercent\" | unwrap systemCpuPercent | __error__=\"\" [1m])",
           "legendFormat": "system",
           "refId": "B"
         }
@@ -244,22 +244,22 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processResidentMemoryBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processResidentMemoryBytes=\"processResidentMemoryBytes\" | unwrap processResidentMemoryBytes | __error__=\"\" [1m])",
           "legendFormat": "resident",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap heapUsedBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json heapUsedBytes=\"heapUsedBytes\" | unwrap heapUsedBytes | __error__=\"\" [1m])",
           "legendFormat": "heap",
           "refId": "B"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap nonHeapUsedBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json nonHeapUsedBytes=\"nonHeapUsedBytes\" | unwrap nonHeapUsedBytes | __error__=\"\" [1m])",
           "legendFormat": "non-heap",
           "refId": "C"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyDirectMemoryBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyDirectMemoryBytes=\"reactorNettyDirectMemoryBytes\" | unwrap reactorNettyDirectMemoryBytes | __error__=\"\" [1m])",
           "legendFormat": "direct",
           "refId": "D"
         }
@@ -313,22 +313,22 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolAllocated | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAllocated=\"dbPoolAllocated\" | unwrap dbPoolAllocated | __error__=\"\" [1m])",
           "legendFormat": "allocated",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolAcquired | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAcquired=\"dbPoolAcquired\" | unwrap dbPoolAcquired | __error__=\"\" [1m])",
           "legendFormat": "acquired",
           "refId": "B"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolIdle | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolIdle=\"dbPoolIdle\" | unwrap dbPoolIdle | __error__=\"\" [1m])",
           "legendFormat": "idle",
           "refId": "C"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolPending | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m])",
           "legendFormat": "pending",
           "refId": "D"
         }
@@ -382,12 +382,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap threadsLive | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsLive=\"threadsLive\" | unwrap threadsLive | __error__=\"\" [1m])",
           "legendFormat": "live",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap threadsBlocked | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsBlocked=\"threadsBlocked\" | unwrap threadsBlocked | __error__=\"\" [1m])",
           "legendFormat": "blocked",
           "refId": "B"
         }
@@ -441,12 +441,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap gcCollectionsTotal | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionsTotal=\"gcCollectionsTotal\" | unwrap gcCollectionsTotal | __error__=\"\" [1m])",
           "legendFormat": "collections",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap gcCollectionTimeMsTotal | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionTimeMsTotal=\"gcCollectionTimeMsTotal\" | unwrap gcCollectionTimeMsTotal | __error__=\"\" [1m])",
           "legendFormat": "time ms",
           "refId": "B"
         }
@@ -500,12 +500,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyActiveConnections | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyActiveConnections=\"reactorNettyActiveConnections\" | unwrap reactorNettyActiveConnections | __error__=\"\" [1m])",
           "legendFormat": "active connections",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyEventLoopPendingTasks | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyEventLoopPendingTasks=\"reactorNettyEventLoopPendingTasks\" | unwrap reactorNettyEventLoopPendingTasks | __error__=\"\" [1m])",
           "legendFormat": "pending tasks",
           "refId": "B"
         }
@@ -558,12 +558,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap rootDiskUsedBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskUsedBytes=\"rootDiskUsedBytes\" | unwrap rootDiskUsedBytes | __error__=\"\" [1m])",
           "legendFormat": "used",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap rootDiskTotalBytes | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskTotalBytes=\"rootDiskTotalBytes\" | unwrap rootDiskTotalBytes | __error__=\"\" [1m])",
           "legendFormat": "total",
           "refId": "B"
         }
@@ -616,12 +616,12 @@
       },
       "targets": [
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap networkReceiveBytesTotal | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkReceiveBytesTotal=\"networkReceiveBytesTotal\" | unwrap networkReceiveBytesTotal | __error__=\"\" [1m])",
           "legendFormat": "received",
           "refId": "A"
         },
         {
-          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap networkTransmitBytesTotal | __error__=\"\"",
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkTransmitBytesTotal=\"networkTransmitBytesTotal\" | unwrap networkTransmitBytesTotal | __error__=\"\" [1m])",
           "legendFormat": "transmitted",
           "refId": "B"
         }
