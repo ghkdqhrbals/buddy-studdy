@@ -5,6 +5,9 @@ const VU_OPTION_PATTERN = /\b(?:vus|preAllocatedVUs|maxVUs)\s*:\s*(\d+)/g;
 const DURATION_OPTION_PATTERN = /\b(?:duration|maxDuration)\s*:\s*["'](\d+(?:ms|s|m|h))["']/g;
 const RATE_OPTION_PATTERN = /\brate\s*:\s*(\d+)/g;
 const OPTIONS_EXPORT_PATTERN = /export\s+const\s+options\s*=/;
+const TEST_CONFIG_PATTERN = /export\s+const\s+testConfig\s*=\s*\{([\s\S]*?)\};/;
+const TARGET_URL_PATTERN = /\btargetUrl\s*:\s*["']([^"']+)["']/;
+const TEST_NAME_PATTERN = /\bname\s*:\s*["']([^"']+)["']/;
 
 export class ValidationError extends Error {
   constructor(message, details = []) {
@@ -66,7 +69,7 @@ export function validateScript(code, options = {}) {
   const add = (message, index = 0) => errors.push(diagnostic(source, message, index));
   const maxVus = Number(options.maxVus ?? 1000);
   const maxDurationSeconds = Number(options.maxDurationSeconds ?? 3600);
-  const targetBaseUrl = options.targetBaseUrl ? normalizeBaseUrl(options.targetBaseUrl) : null;
+  const allowedTargetHosts = options.allowedTargetHosts || [];
 
   if (!source.trim()) add("Script is empty.");
   if (source.length > 250_000) add("Script exceeds the 250 KB limit.");
@@ -75,6 +78,22 @@ export function validateScript(code, options = {}) {
   }
   if (!OPTIONS_EXPORT_PATTERN.test(source)) {
     add("Script must export k6 load settings with `export const options = ...`.");
+  }
+  const testConfigMatch = source.match(TEST_CONFIG_PATTERN);
+  if (!testConfigMatch) {
+    add("Script must export execution metadata with `export const testConfig = ...`.");
+  }
+  const targetUrlMatch = testConfigMatch?.[1].match(TARGET_URL_PATTERN);
+  if (testConfigMatch && !targetUrlMatch) {
+    add("Script testConfig must include an absolute targetUrl.", testConfigMatch.index);
+  }
+  let targetUrl = null;
+  if (targetUrlMatch) {
+    try {
+      targetUrl = validateTargetHost(targetUrlMatch[1], allowedTargetHosts);
+    } catch (error) {
+      add(error.message, testConfigMatch.index);
+    }
   }
 
   for (const match of source.matchAll(K6_IMPORT_PATTERN)) {
@@ -117,14 +136,12 @@ export function validateScript(code, options = {}) {
     }
   }
 
-  if (targetBaseUrl) {
-    const targetHost = new URL(targetBaseUrl).hostname;
-    for (const match of source.matchAll(new RegExp(URL_PATTERN.source, "g"))) {
-      const literal = match[0];
-      const hostname = new URL(literal).hostname;
-      if (hostname !== targetHost && !literal.includes("127.0.0.1") && !literal.includes("localhost")) {
-        add(`Script contains a URL outside the selected target: ${hostname}. Use __ENV.BASE_URL for requests.`, match.index);
-      }
+  for (const match of source.matchAll(new RegExp(URL_PATTERN.source, "g"))) {
+    const literal = match[0];
+    try {
+      validateTargetHost(literal, allowedTargetHosts);
+    } catch (error) {
+      add(error.message, match.index);
     }
   }
 
@@ -134,6 +151,7 @@ export function validateScript(code, options = {}) {
   const duration = durationMatches.length === 1
     ? durationMatches[0][1]
     : `${durationSeconds}s`;
+  const testName = testConfigMatch?.[1].match(TEST_NAME_PATTERN)?.[1]?.trim();
   return {
     valid: true,
     bytes: Buffer.byteLength(source),
@@ -145,6 +163,8 @@ export function validateScript(code, options = {}) {
       vus: requestedVus[0] || 1,
       maxVus: Math.max(...requestedVus, 1),
       targetRps: Math.max(...requestedRates, 0),
+      targetUrl,
+      name: testName || null,
     },
   };
 }

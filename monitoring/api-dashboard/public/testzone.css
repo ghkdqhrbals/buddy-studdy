@@ -67,7 +67,6 @@ body {
 
 .header-actions,
 .editor-actions,
-.run-context,
 .workspace-bar,
 .testzone-tabs,
 .editor-file {
@@ -925,68 +924,6 @@ body {
   font-weight: 700;
 }
 
-.run-context {
-  gap: 10px;
-  padding: 11px 12px;
-  border-radius: 5px;
-  background: var(--tz-surface-muted);
-}
-
-.run-context div {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 2px;
-}
-
-.run-context span {
-  color: var(--tz-muted);
-  font-size: 9px;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.run-context strong {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.testzone-dialog details {
-  padding: 10px 12px;
-  border: 1px solid var(--tz-border);
-  border-radius: 5px;
-}
-
-.testzone-dialog summary {
-  color: var(--tz-text);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.advanced-settings {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.advanced-settings textarea {
-  min-height: 100px;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-}
-
-.advanced-settings p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--tz-muted);
-  font-size: 10px;
-}
-
 .compact-dialog {
   width: min(460px, calc(100vw - 32px));
 }
@@ -1094,9 +1031,6 @@ body {
     min-width: 170px;
   }
 
-  .advanced-settings {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 /* TestZone execution workspace */

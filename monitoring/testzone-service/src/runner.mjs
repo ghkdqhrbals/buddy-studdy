@@ -5,30 +5,6 @@ import { summarizeK6 } from "./influx.mjs";
 import { K6LiveMetricsReader } from "./live-metrics.mjs";
 import { validateScript } from "./validation.mjs";
 
-const SECRET_NAME_PATTERN = /(token|secret|password|authorization|api[_-]?key)/i;
-
-function sanitizedEnvironment(values = {}) {
-  return Object.fromEntries(
-    Object.entries(values).map(([key, value]) => {
-      if (key === "HEADERS_JSON") {
-        try {
-          const headers = JSON.parse(String(value));
-          const masked = Object.fromEntries(
-            Object.entries(headers).map(([name, headerValue]) => [
-              name,
-              SECRET_NAME_PATTERN.test(name) ? "[REDACTED]" : headerValue,
-            ]),
-          );
-          return [key, JSON.stringify(masked)];
-        } catch {
-          return [key, "[REDACTED]"];
-        }
-      }
-      return [key, SECRET_NAME_PATTERN.test(key) ? "[REDACTED]" : String(value)];
-    }),
-  );
-}
-
 function tail(lines, maximum = 200) {
   return lines.slice(Math.max(0, lines.length - maximum));
 }
@@ -42,7 +18,7 @@ export class RunManager {
     this.active = new Map();
   }
 
-  async start(run, project, script, environment = {}) {
+  async start(run, script) {
     if (this.active.size >= this.config.maxConcurrentRuns) {
       throw new Error(`TestZone already has ${this.active.size} active run(s).`);
     }
@@ -50,7 +26,7 @@ export class RunManager {
       maxVus: this.config.maxVus,
       maxTargetRps: this.config.maxTargetRps,
       maxDurationSeconds: this.config.maxDurationSeconds,
-      targetBaseUrl: run.targetUrl,
+      allowedTargetHosts: this.config.allowedTargetHosts,
     });
 
     const runDirectory = this.store.runPath(run.id);
@@ -61,13 +37,7 @@ export class RunManager {
     await fs.mkdir(runDirectory, { recursive: true });
     await fs.writeFile(scriptPath, script.code, { mode: 0o600 });
     await fs.writeFile(this.store.runSeriesPath(run.id), "", { mode: 0o600 });
-    await fs.writeFile(path.join(runDirectory, "environment.json"), `${JSON.stringify(sanitizedEnvironment(environment), null, 2)}\n`, { mode: 0o600 });
 
-    const processEnvironment = {
-      ...process.env,
-      ...Object.fromEntries(Object.entries(environment).map(([key, value]) => [key, String(value)])),
-      BASE_URL: run.targetUrl,
-    };
     const args = [
       "run",
       "--quiet",
@@ -77,7 +47,7 @@ export class RunManager {
       `json=${metricsPath}`,
       scriptPath,
     ];
-    const child = this.spawn("k6", args, { env: processEnvironment, stdio: ["ignore", "pipe", "pipe"] });
+    const child = this.spawn("k6", args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     this.active.set(run.id, child);
     const logs = [];
     const append = async (chunk) => {

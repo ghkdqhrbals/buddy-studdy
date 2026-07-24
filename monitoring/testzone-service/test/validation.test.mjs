@@ -9,9 +9,13 @@ import {
 
 const VALID_SCRIPT = `
 import http from "k6/http";
+export const testConfig = {
+  name: "Studies API",
+  targetUrl: "https://api.ghkdqhrbals.org",
+};
 export const options = { vus: 10, duration: "30s" };
 export default function () {
-  http.get(\`\${__ENV.BASE_URL}/api/v1/studies\`);
+  http.get(\`\${testConfig.targetUrl}/api/v1/studies\`);
 }
 `;
 
@@ -23,7 +27,10 @@ test("durationToSeconds parses supported k6 durations", () => {
 });
 
 test("validateScript accepts a bounded k6 script", () => {
-  const validation = validateScript(VALID_SCRIPT, { maxVus: 1000 });
+  const validation = validateScript(VALID_SCRIPT, {
+    maxVus: 1000,
+    allowedTargetHosts: ["ghkdqhrbals.org"],
+  });
   assert.equal(validation.valid, true);
   assert.deepEqual(validation.execution, {
     duration: "30s",
@@ -31,6 +38,8 @@ test("validateScript accepts a bounded k6 script", () => {
     vus: 10,
     maxVus: 10,
     targetRps: 0,
+    targetUrl: "https://api.ghkdqhrbals.org",
+    name: "Studies API",
   });
 });
 
@@ -62,6 +71,25 @@ test("validateScript requires bounded script-owned options and enforces rate lim
     }),
     (error) => error instanceof ValidationError
       && error.details.some((detail) => detail.message.includes("greater than zero")),
+  );
+});
+
+test("validateScript requires a script-owned target URL", () => {
+  assert.throws(
+    () => validateScript(VALID_SCRIPT.replace(/export const testConfig[\s\S]+?};\n/, ""), {
+      maxVus: 1000,
+      allowedTargetHosts: ["ghkdqhrbals.org"],
+    }),
+    (error) => error instanceof ValidationError
+      && error.details.some((detail) => detail.message.includes("export const testConfig")),
+  );
+  assert.throws(
+    () => validateScript(VALID_SCRIPT.replace("api.ghkdqhrbals.org", "example.com"), {
+      maxVus: 1000,
+      allowedTargetHosts: ["ghkdqhrbals.org"],
+    }),
+    (error) => error instanceof ValidationError
+      && error.details.some((detail) => detail.message.includes("allowlist")),
   );
 });
 

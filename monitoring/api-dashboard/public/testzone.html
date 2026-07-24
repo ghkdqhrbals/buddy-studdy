@@ -6,7 +6,7 @@
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
     <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css?v=1.6.32" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072503" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072504" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -243,51 +243,6 @@
       </div>
     </div>
 
-    <dialog id="runDialog" class="testzone-dialog run-dialog">
-      <form id="runForm">
-        <header>
-          <div>
-            <span>Run configuration</span>
-            <h2>Start performance test</h2>
-          </div>
-          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
-        </header>
-        <div class="dialog-body">
-          <div class="run-context">
-            <div><span>Project</span><strong id="runProjectName">-</strong></div>
-          </div>
-          <label>Target URL
-            <input
-              id="runTargetUrl"
-              type="url"
-              autocomplete="url"
-              placeholder="https://api.example.com"
-              required
-            />
-          </label>
-          <label>Test name<input id="runName" maxlength="120" placeholder="Public questions" /></label>
-          <label>Script<select id="runScriptSelect"></select></label>
-          <details>
-            <summary>Headers and environment</summary>
-            <div class="advanced-settings">
-              <label>Headers JSON
-                <textarea id="runHeaders" spellcheck="false" placeholder='{"Authorization":"Bearer ...","Content-Type":"application/json"}'>{}</textarea>
-              </label>
-              <label>Environment JSON
-                <textarea id="runEnvironment" spellcheck="false" placeholder='{"STUDY_ID":"16"}'>{}</textarea>
-              </label>
-              <p>민감한 값은 실행 시에만 전달되며 결과와 로그에서는 마스킹됩니다.</p>
-            </div>
-          </details>
-          <div id="runFormError" class="form-error" role="alert"></div>
-        </div>
-        <footer>
-          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
-          <button id="startRunButton" class="button button-primary" type="submit">Run now</button>
-        </footer>
-      </form>
-    </dialog>
-
     <dialog id="scriptSnapshotDialog" class="testzone-dialog script-snapshot-dialog">
       <form>
         <header>
@@ -368,6 +323,6 @@
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
     <script src="/vendor/uplot/uPlot.iife.min.js?v=1.6.32"></script>
-    <script type="module" src="/testzone.js?v=2026072503"></script>
+    <script type="module" src="/testzone.js?v=2026072504"></script>
   </body>
 </html>

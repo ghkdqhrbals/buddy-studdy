@@ -6,6 +6,8 @@ import { DEFAULT_SCRIPT } from "../src/store.mjs";
 const runnerSource = await readFile(new URL("../src/runner.mjs", import.meta.url), "utf8");
 
 test("default user script owns its k6 execution options", () => {
+  assert.match(DEFAULT_SCRIPT, /export const testConfig/);
+  assert.match(DEFAULT_SCRIPT, /targetUrl: "https:\/\/api\.ghkdqhrbals\.org"/);
   assert.match(DEFAULT_SCRIPT, /export const options/);
   assert.match(DEFAULT_SCRIPT, /executor: "constant-arrival-rate"/);
   assert.match(DEFAULT_SCRIPT, /rate: 300/);
@@ -18,8 +20,7 @@ test("runner executes the saved script without injecting load options", () => {
   assert.match(runnerSource, /`json=\$\{metricsPath\}`,\s*scriptPath/);
 });
 
-test("runner uses the immutable run target instead of project configuration", () => {
-  assert.match(runnerSource, /targetBaseUrl:\s*run\.targetUrl/);
-  assert.match(runnerSource, /BASE_URL:\s*run\.targetUrl/);
-  assert.doesNotMatch(runnerSource, /BASE_URL:\s*project\.baseUrl/);
+test("runner leaves target URL and headers entirely to the saved script", () => {
+  assert.match(runnerSource, /allowedTargetHosts:\s*this\.config\.allowedTargetHosts/);
+  assert.doesNotMatch(runnerSource, /BASE_URL|HEADERS_JSON|environment\.json/);
 });

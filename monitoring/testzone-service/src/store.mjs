@@ -15,16 +15,24 @@ export const DEFAULT_EXECUTION_OPTIONS = `export const options = {
   },
 };`;
 
+export const DEFAULT_TEST_CONFIG = `export const testConfig = {
+  name: "Public questions",
+  targetUrl: "https://api.ghkdqhrbals.org",
+};`;
+
 export const DEFAULT_SCRIPT = `import http from "k6/http";
 import { check, sleep } from "k6";
 
+${DEFAULT_TEST_CONFIG}
+
 ${DEFAULT_EXECUTION_OPTIONS}
 
-const baseUrl = __ENV.BASE_URL;
-const headers = JSON.parse(__ENV.HEADERS_JSON || "{}");
+const headers = {
+  Accept: "application/json",
+};
 
 export default function () {
-  const response = http.get(\`\${baseUrl}/api/v1/public/questions?limit=20&offset=0\`, {
+  const response = http.get(\`\${testConfig.targetUrl}/api/v1/public/questions?limit=20&offset=0\`, {
     headers,
     tags: { api: "public-questions" },
     timeout: "5s",
@@ -49,6 +57,18 @@ export function stripManagedExecutionOptions(code) {
 export function ensureScriptExecutionOptions(code) {
   if (/export\s+const\s+options\s*=/.test(code)) return code;
   return `${DEFAULT_EXECUTION_OPTIONS}\n\n${code}`;
+}
+
+export function ensureScriptTestConfig(code) {
+  let migrated = code
+    .replace("const baseUrl = __ENV.BASE_URL;", "const baseUrl = testConfig.targetUrl;")
+    .replace(
+      'const headers = JSON.parse(__ENV.HEADERS_JSON || "{}");',
+      'const headers = { Accept: "application/json" };',
+    );
+  if (/export\s+const\s+testConfig\s*=/.test(migrated)) return migrated;
+  migrated = `${DEFAULT_TEST_CONFIG}\n\n${migrated}`;
+  return migrated;
 }
 
 function now() {
@@ -110,9 +130,11 @@ export class TestZoneStore {
     await Promise.all(this.state.scripts.map(async (script) => {
       const scriptPath = this.scriptPath(script.id);
       const code = await fs.readFile(scriptPath, "utf8");
-      const migrated = ensureScriptExecutionOptions(
-        stripManagedExecutionOptions(
-          code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+      const migrated = ensureScriptTestConfig(
+        ensureScriptExecutionOptions(
+          stripManagedExecutionOptions(
+            code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+          ),
         ),
       );
       if (migrated === code) return;

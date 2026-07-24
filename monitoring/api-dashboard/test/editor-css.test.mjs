@@ -25,22 +25,23 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
     assert.doesNotMatch(source, /assistant/i);
   }
   assert.match(html, /id="editorRunButton"/);
-  assert.match(html, /id="runDialog"/);
+  assert.doesNotMatch(html, /id="runDialog"/);
 });
 
-test("workspace exposes one new run action and keeps target URL in the run form", () => {
+test("workspace starts the selected script immediately without a run form", () => {
   assert.equal((html.match(/id="overviewRunButton"/g) || []).length, 1);
   assert.doesNotMatch(html, /id="headerRunButton"|>Run test</);
   assert.match(html, /id="overviewRunButton" class="run-launch-button"/);
   assert.match(html, /class="run-launch-icon" aria-hidden="true">\+<\/span>/);
   assert.match(css, /\.run-launch-button:focus-visible/);
   assert.doesNotMatch(html, /id="projectBaseUrl"|id="saveProjectButton"|id="newProjectBaseUrl"/);
-  assert.match(html, /<input[\s\S]+?id="runTargetUrl"[\s\S]+?required/);
-  assert.match(javascript, /targetUrl:\s*elements\.runTargetUrl\.value/);
+  assert.doesNotMatch(html, /runTargetUrl|runHeaders|runEnvironment|startRunButton/);
+  assert.match(javascript, /async function startRun\(scriptId = state\.scriptId/);
+  assert.match(javascript, /body:\s*JSON\.stringify\(\{\s*projectId:\s*state\.projectId,\s*scriptId:\s*selectedScript\.id,\s*\}\)/);
   assert.match(javascript, /run\.targetUrl\s*\|\|\s*"-"/);
   assert.doesNotMatch(html, /id="runDuration"|id="runVus"|id="runMaxVus"|id="runTargetRps"/);
   assert.doesNotMatch(html, /id="runProfileControl"|id="profileShortcuts"|id="quickScriptSelect"/);
-  assert.doesNotMatch(javascript, /profile:\s*elements|options:\s*\{\s*duration:/);
+  assert.doesNotMatch(javascript, /openRunDialog|runForm|runTargetUrl|runHeaders|runEnvironment/);
   assert.match(javascript, /formatRunLoadPlan\(run\.options\)/);
 });
 

@@ -7,7 +7,6 @@ import { RunManager } from "./runner.mjs";
 import { TestZoneStore } from "./store.mjs";
 import {
   validateScript,
-  validateTargetHost,
   ValidationError,
 } from "./validation.mjs";
 
@@ -59,22 +58,6 @@ function publicRun(run, config) {
   dashboard.searchParams.set("to", String(to));
   dashboard.searchParams.set("var-run_id", run.id);
   return { ...run, grafanaUrl: dashboard.toString() };
-}
-
-function safeEnvironment(values = {}) {
-  const entries = Object.entries(values);
-  if (entries.length > 30) throw new ValidationError("At most 30 environment variables are allowed.");
-  const result = {};
-  for (const [rawKey, rawValue] of entries) {
-    const key = String(rawKey).trim();
-    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key)) {
-      throw new ValidationError(`Invalid environment variable name: ${key}`);
-    }
-    const value = String(rawValue ?? "");
-    if (value.length > 8_000) throw new ValidationError(`${key} exceeds 8,000 characters.`);
-    result[key] = value;
-  }
-  return result;
 }
 
 export async function createTestZoneServer(dependencies = {}) {
@@ -163,7 +146,12 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!store.state.projects.some((entry) => entry.id === body.projectId)) {
           return sendJson(response, 404, { error: "Project not found." });
         }
-        validateScript(body.code || "", { maxVus: config.maxVus });
+        validateScript(body.code || "", {
+          maxVus: config.maxVus,
+          maxTargetRps: config.maxTargetRps,
+          maxDurationSeconds: config.maxDurationSeconds,
+          allowedTargetHosts: config.allowedTargetHosts,
+        });
         const script = await store.createScript({
           projectId: body.projectId,
           name: requireText(body.name, "Script name"),
@@ -179,7 +167,14 @@ export async function createTestZoneServer(dependencies = {}) {
       }
       if (match && request.method === "PATCH") {
         const body = await readJson(request);
-        if (typeof body.code === "string") validateScript(body.code, { maxVus: config.maxVus });
+        if (typeof body.code === "string") {
+          validateScript(body.code, {
+            maxVus: config.maxVus,
+            maxTargetRps: config.maxTargetRps,
+            maxDurationSeconds: config.maxDurationSeconds,
+            allowedTargetHosts: config.allowedTargetHosts,
+          });
+        }
         const script = await store.updateScript(match[0], {
           name: body.name ? requireText(body.name, "Script name") : undefined,
           description: body.description,
@@ -200,9 +195,9 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!code) return sendJson(response, 404, { error: "Script not found." });
         const validation = validateScript(code, {
           maxVus: config.maxVus,
+          maxTargetRps: config.maxTargetRps,
           maxDurationSeconds: config.maxDurationSeconds,
-          duration: body.duration,
-          targetBaseUrl: body.baseUrl,
+          allowedTargetHosts: config.allowedTargetHosts,
         });
         return sendJson(response, 200, { validation });
       }
@@ -216,33 +211,40 @@ export async function createTestZoneServer(dependencies = {}) {
       }
       if (request.method === "POST" && pathname === "/api/runs") {
         const body = await readJson(request);
+        const unexpectedFields = Object.keys(body).filter((key) => !["projectId", "scriptId"].includes(key));
+        if (unexpectedFields.length) {
+          throw new ValidationError(
+            `Run settings belong in the script. Remove: ${unexpectedFields.sort().join(", ")}.`,
+          );
+        }
         const project = store.state.projects.find((entry) => entry.id === body.projectId);
         const script = await store.getScript(body.scriptId);
         if (!project || !script || script.projectId !== project.id) {
           return sendJson(response, 404, { error: "Project or script not found." });
         }
-        const targetUrl = validateTargetHost(body.targetUrl, config.allowedTargetHosts);
         const validation = validateScript(script.code, {
           maxVus: config.maxVus,
           maxTargetRps: config.maxTargetRps,
           maxDurationSeconds: config.maxDurationSeconds,
-          targetBaseUrl: targetUrl,
+          allowedTargetHosts: config.allowedTargetHosts,
         });
-        const environment = safeEnvironment(body.environment || {});
-        environment.HEADERS_JSON = JSON.stringify(body.headers || {});
+        const {
+          targetUrl,
+          name,
+          ...executionOptions
+        } = validation.execution;
         const run = await store.createRun({
           projectId: project.id,
           scriptId: script.id,
           scriptName: script.name,
           targetUrl,
-          name: requireText(body.name || script.name, "Test name", 120),
+          name: name || script.name.replace(/\.js$/i, ""),
           profile: "script",
-          options: validation.execution,
+          options: executionOptions,
         });
-        await runs.start(run, project, script, environment);
+        await runs.start(run, script);
         return sendJson(response, 202, {
           run: publicRun({ ...run, status: "running" }, config),
-          environmentKeys: Object.keys(environment).sort(),
         });
       }
       match = routeMatch(pathname, /^\/api\/runs\/([^/]+)$/);

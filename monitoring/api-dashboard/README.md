@@ -29,10 +29,10 @@ The browser can:
   components
 - open an execution in Grafana using its `run_id`
 
-`New run` selects the target URL and saved script, then starts k6. Duration,
-VUs, arrival rate, and other load behavior are defined only in the script's
-`export const options`. Sensitive header and environment names are redacted
-from persisted metadata. The browser never receives the InfluxDB token.
+`New run` immediately starts the currently selected saved script. The target
+URL comes from `export const testConfig`; headers, request bodies, duration,
+VUs, arrival rate, and every other execution setting live in the JavaScript
+file. The browser never receives the InfluxDB token.
 
 Limits are enforced by the TestZone API:
 

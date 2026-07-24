@@ -181,17 +181,14 @@ test("run API starts a saved script instead of returning a copied command", asyn
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
-      targetUrl: "https://api.example.test",
-      name: "Public API peak",
-      headers: { Authorization: "Bearer test" },
     }),
   });
   assert.equal(response.status, 202);
   const body = await response.json();
   assert.equal(body.run.status, "running");
-  assert.equal(body.run.name, "Public API peak");
+  assert.equal(body.run.name, "Public questions");
   assert.equal(body.run.scriptName, script.name);
-  assert.equal(body.run.targetUrl, "https://api.example.test");
+  assert.equal(body.run.targetUrl, "https://api.ghkdqhrbals.org");
   assert.equal(body.run.profile, "script");
   assert.deepEqual(body.run.options, {
     duration: "30s",
@@ -200,25 +197,20 @@ test("run API starts a saved script instead of returning a copied command", asyn
     maxVus: 500,
     targetRps: 300,
   });
-  assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
+  assert.equal("environmentKeys" in body, false);
 
-  const secondResponse = await fetch(`${app.baseUrl}/api/runs`, {
+  const legacyResponse = await fetch(`${app.baseUrl}/api/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
-      targetUrl: "https://staging.example.test/base/",
-      name: "Public API staging",
+      targetUrl: "https://staging.example.test",
+      headers: { Authorization: "Bearer test" },
     }),
   });
-  assert.equal(secondResponse.status, 202);
-  const second = await secondResponse.json();
-  assert.equal(second.run.targetUrl, "https://staging.example.test/base");
-  assert.deepEqual(
-    new Set(app.store.state.runs.map((run) => run.targetUrl)),
-    new Set(["https://api.example.test", "https://staging.example.test/base"]),
-  );
+  assert.equal(legacyResponse.status, 422);
+  assert.match((await legacyResponse.json()).error, /Run settings belong in the script/);
 });
 
 test("script workspace supports create, edit, and delete", async (context) => {
@@ -272,9 +264,6 @@ test("run history preserves the script name after the script is deleted", async 
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
-      targetUrl: "https://api.example.test",
-      profile: "custom",
-      options: { duration: "10s", vus: 1, maxVus: 1, targetRps: 1 },
     }),
   });
   assert.equal(createResponse.status, 202);
@@ -406,7 +395,7 @@ test("script validation rejects unsafe requests with actionable details", async 
   assert.ok(body.details.every((entry) => Number.isInteger(entry.line)));
 });
 
-test("store migration removes execution settings from legacy user scripts", async (context) => {
+test("store migration moves all legacy execution settings into the script", async (context) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-migration-"));
   context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const initialStore = await new TestZoneStore(dataDir).init();
@@ -441,6 +430,9 @@ export const options = targetRps > 0
   const migratedScript = (await migratedStore.listScripts())[0];
 
   assert.doesNotMatch(migratedScript.code, /TARGET_RPS|MAX_VUS/);
+  assert.doesNotMatch(migratedScript.code, /__ENV\.BASE_URL|HEADERS_JSON/);
+  assert.match(migratedScript.code, /export const testConfig/);
+  assert.match(migratedScript.code, /targetUrl: "https:\/\/api\.ghkdqhrbals\.org"/);
   assert.match(migratedScript.code, /export const options/);
   assert.match(migratedScript.code, /export default function/);
 });

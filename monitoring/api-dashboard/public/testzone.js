@@ -7,7 +7,6 @@ import {
   formatRate,
   highlightJavaScript,
   lineNumbersFor,
-  parseObjectJson,
   runScriptName,
   selectLatestRun,
 } from "./testzone-model.js?v=2026072406";
@@ -63,8 +62,6 @@ const elementIds = [
   "toggleFilesButton", "focusEditorButton", "validateScriptButton",
   "saveScriptButton", "editorRunButton", "deleteScriptButton",
   "componentGrid", "refreshComponentsButton",
-  "runDialog", "runForm", "runProjectName", "runTargetUrl", "runName", "runScriptSelect",
-  "runHeaders", "runEnvironment", "runFormError", "startRunButton",
   "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
   "scriptSnapshotDialog", "scriptSnapshotTitle", "scriptSnapshotCode",
   "componentConfigDialog", "componentConfigForm", "componentConfigTitle", "componentConfigFields",
@@ -260,16 +257,6 @@ function renderScripts() {
     button.append(name, detail);
     return button;
   }));
-  const options = state.scripts.map((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.id;
-    option.textContent = entry.name;
-    return option;
-  });
-  elements.runScriptSelect.replaceChildren(...options);
-  if (state.scriptId) {
-    elements.runScriptSelect.value = state.scriptId;
-  }
   loadScriptIntoEditor();
 }
 
@@ -333,7 +320,7 @@ function renderDiagnostics(diagnostics = []) {
 
 async function saveScript() {
   const selected = script();
-  if (!selected) return;
+  if (!selected) return false;
   setButtonBusy(elements.saveScriptButton, true, "Saving");
   try {
     Object.assign(selected, (await api(`/scripts/${selected.id}`, {
@@ -344,9 +331,11 @@ async function saveScript() {
     renderDirtyState();
     renderScripts();
     setFeedback(elements.editorFeedback, "Saved", "success");
+    return true;
   } catch (error) {
     renderDiagnostics(error.details);
     setFeedback(elements.editorFeedback, diagnosticMessage(error.details?.[0]) || error.message, "error");
+    return false;
   } finally {
     setButtonBusy(elements.saveScriptButton, false);
   }
@@ -894,60 +883,36 @@ function formatRunLoadPlan(options = {}) {
     : `${duration} · ${maxVus.toLocaleString()} VUs`;
 }
 
-function targetUrlStorageKey() {
-  return state.projectId ? `testzone.targetUrl.${state.projectId}` : "";
-}
-
-function suggestedTargetUrl() {
-  const storageKey = targetUrlStorageKey();
-  const remembered = storageKey ? localStorage.getItem(storageKey) : "";
-  if (remembered) return remembered;
-  const latestWithTarget = state.runs.find((run) => run.targetUrl);
-  return latestWithTarget?.targetUrl || project()?.baseUrl || "";
-}
-
-function openRunDialog(scriptId = null) {
+async function startRun(scriptId = state.scriptId, button = elements.overviewRunButton) {
   const selectedProject = project();
-  if (!selectedProject || !state.scripts.length) {
-    toast("Create a project script before starting a run.", "error");
+  const selectedScript = state.scripts.find((entry) => entry.id === scriptId);
+  if (!selectedProject || !selectedScript) {
+    toast("Select a project script before starting a run.", "error");
     return;
   }
-  elements.runProjectName.textContent = selectedProject.name;
-  elements.runTargetUrl.value = suggestedTargetUrl();
-  elements.runScriptSelect.value = scriptId || state.scriptId || state.scripts[0].id;
-  const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
-  elements.runName.value = selectedScript?.name?.replace(/\.js$/, "") || "API test";
-  elements.runFormError.textContent = "";
-  elements.runDialog.showModal();
-}
-
-async function startRun(event) {
-  event.preventDefault();
-  setButtonBusy(elements.startRunButton, true, "Starting");
-  elements.runFormError.textContent = "";
+  if (state.dirty && selectedScript.id === state.scriptId) {
+    const saved = await saveScript();
+    if (!saved) return;
+  }
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
   try {
     const payload = await api("/runs", {
       method: "POST",
       body: JSON.stringify({
-        name: elements.runName.value,
         projectId: state.projectId,
-        scriptId: elements.runScriptSelect.value,
-        targetUrl: elements.runTargetUrl.value,
-        headers: parseObjectJson(elements.runHeaders.value, "Headers"),
-        environment: parseObjectJson(elements.runEnvironment.value, "Environment"),
+        scriptId: selectedScript.id,
       }),
     });
-    const storageKey = targetUrlStorageKey();
-    if (storageKey) localStorage.setItem(storageKey, payload.run.targetUrl);
     state.selectedRunId = payload.run.id;
-    elements.runDialog.close();
     switchTab("overview");
     toast("Performance test started.");
     await loadRuns();
   } catch (error) {
-    elements.runFormError.textContent = [error.message, ...error.details.map(diagnosticMessage)].join(" ");
+    toast([error.message, ...error.details.map(diagnosticMessage)].join(" "), "error");
   } finally {
-    setButtonBusy(elements.startRunButton, false);
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
   }
 }
 
@@ -1214,7 +1179,7 @@ function bindEvents() {
   elements.newProjectButton.addEventListener("click", openNewProjectDialog);
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
-  elements.overviewRunButton.addEventListener("click", () => openRunDialog());
+  elements.overviewRunButton.addEventListener("click", () => void startRun());
   elements.refreshRunsButton.addEventListener("click", loadRuns);
   elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
   elements.cancelSelectedRunButton.addEventListener("click", () => {
@@ -1249,7 +1214,7 @@ function bindEvents() {
   elements.scriptNameInput.addEventListener("input", markDirty);
   elements.saveScriptButton.addEventListener("click", saveScript);
   elements.validateScriptButton.addEventListener("click", () => void validateCurrentScript(false));
-  elements.editorRunButton.addEventListener("click", () => openRunDialog(state.scriptId));
+  elements.editorRunButton.addEventListener("click", () => void startRun(state.scriptId, elements.editorRunButton));
   elements.deleteScriptButton.addEventListener("click", deleteCurrentScript);
   elements.toggleFilesButton.addEventListener("click", () =>
     togglePane(document.querySelector(".file-pane"), elements.toggleFilesButton, "files-hidden"));
@@ -1260,11 +1225,6 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
-  elements.runScriptSelect.addEventListener("change", () => {
-    const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
-    elements.runName.value = selectedScript?.name?.replace(/\.js$/, "") || "API test";
-  });
-  elements.runForm.addEventListener("submit", startRun);
   elements.refreshComponentsButton.addEventListener("click", loadComponents);
   elements.componentConfigForm.addEventListener("submit", saveComponentConfig);
   elements.confirmForm.addEventListener("submit", (event) => {
