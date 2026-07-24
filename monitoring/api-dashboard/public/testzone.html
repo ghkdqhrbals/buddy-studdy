@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072407" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072408" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -198,7 +198,6 @@
                   <div class="editor-actions">
                     <span id="editorFeedback" class="inline-feedback" role="status"></span>
                     <button id="toggleFilesButton" class="button button-secondary" type="button">Files</button>
-                    <button id="toggleAssistantButton" class="button button-secondary" type="button">Assistant</button>
                     <button id="focusEditorButton" class="button button-secondary" type="button">Focus</button>
                     <button id="validateScriptButton" class="button button-secondary" type="button">Validate</button>
                     <button id="saveScriptButton" class="button button-secondary" type="button">Save</button>
@@ -218,32 +217,6 @@
                   <span>⌘S 저장 · Tab 들여쓰기</span>
                 </footer>
               </section>
-
-              <aside class="assistant-pane">
-                <header>
-                  <div>
-                    <span>OpenAI</span>
-                    <strong>Script assistant</strong>
-                  </div>
-                  <span id="assistantAvailability" class="assistant-dot" title="OpenAI status"></span>
-                </header>
-                <div id="assistantMessages" class="assistant-messages">
-                  <div class="assistant-message assistant-system">
-                    <strong>어떤 API를 테스트할지 알려주세요.</strong>
-                    <p>헤더, 요청 본문, 기대 상태와 JSON 검증 조건까지 포함해 실행 가능한 k6 코드를 작성합니다.</p>
-                  </div>
-                </div>
-                <div id="assistantDraft" class="assistant-draft" hidden>
-                  <span>Generated draft</span>
-                  <p id="assistantDraftMessage"></p>
-                  <ul id="assistantDraftDiagnostics"></ul>
-                  <button id="applyAssistantDraftButton" class="button button-secondary" type="button">Apply to editor</button>
-                </div>
-                <form id="assistantForm" class="assistant-compose">
-                  <textarea id="assistantPrompt" aria-label="Ask OpenAI to edit the k6 script" placeholder="예: POST /api/v1/studies 요청을 200 RPS로 테스트하고 응답의 id를 검증해줘"></textarea>
-                  <button id="assistantSendButton" class="button button-primary" type="submit">Generate</button>
-                </form>
-              </aside>
             </div>
           </section>
 
@@ -381,6 +354,6 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script type="module" src="/testzone.js?v=2026072407"></script>
+    <script type="module" src="/testzone.js?v=2026072408"></script>
   </body>
 </html>

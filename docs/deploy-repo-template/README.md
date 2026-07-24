@@ -54,7 +54,6 @@ MacBook Air TestZone deploy:
 
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
-- `OPENAI_API_KEY`
 
 InfluxDB and component credentials are generated once on the MacBook Air with
 mode `0600`, under
@@ -155,8 +154,7 @@ The MacBook Air workflow creates or replaces:
 
 The separate TestZone workflow creates or replaces:
 
-- `buddystudy-testzone-service`: bounded k6 runner, JavaScript workspace API,
-  and OpenAI script assistant.
+- `buddystudy-testzone-service`: bounded k6 runner and JavaScript workspace API.
 - `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
 - approved disposable PostgreSQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.

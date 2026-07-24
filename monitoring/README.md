@@ -75,9 +75,9 @@ TestZone consists of two independently deployed modules:
    dashboard, and InfluxDB datasource definition.
 2. The TestZone workflow deploys the k6 execution service and InfluxDB.
 
-The OpenAI assistant calls the Responses API from the TestZone service. Set
-`OPENAI_API_KEY` only in the deployment secret. It is never written into the
-static dashboard.
+Run duration, VUs, maximum VUs, and target RPS are configured in Run Plan.
+The service injects those values into an internal execution wrapper, while
+saved scripts and run history contain only user-authored API test logic.
 
 See [TestZone Operations](../docs/performance/TESTZONE_OPERATIONS.md).
 

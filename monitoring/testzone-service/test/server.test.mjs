@@ -10,7 +10,6 @@ async function fixture() {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-"));
   const store = await new TestZoneStore(dataDir).init();
   const calls = {
-    assistant: [],
     components: [],
     influxDeletes: [],
   };
@@ -23,7 +22,6 @@ async function fixture() {
     maxConcurrentRuns: 1,
     allowedTargetHosts: [],
     grafanaBaseUrl: "https://grafana.example.test/grafana",
-    openAI: { apiKey: "", model: "gpt-5" },
     influx: { url: "", token: "", org: "", bucket: "" },
     componentPassword: "test",
   };
@@ -34,16 +32,6 @@ async function fixture() {
     },
     async cancel() {
       return true;
-    },
-  };
-  const assistant = {
-    enabled: true,
-    async generate(input) {
-      calls.assistant.push(input);
-      return {
-        message: "Generated.",
-        code: "import http from \"k6/http\"; export default function () { http.get(`${__ENV.BASE_URL}/health`); }",
-      };
     },
   };
   const influx = {
@@ -82,7 +70,7 @@ async function fixture() {
       return { id, status: "not-deployed" };
     },
   };
-  const created = await createTestZoneServer({ config, store, runs, assistant, influx, components });
+  const created = await createTestZoneServer({ config, store, runs, influx, components });
   await new Promise((resolve) => created.server.listen(0, "127.0.0.1", resolve));
   const address = created.server.address();
   return {
@@ -103,7 +91,8 @@ test("status and project APIs expose runtime-neutral TestZone state", async (con
   const status = await fetch(`${app.baseUrl}/api/status`).then((response) => response.json());
   assert.equal(status.maxVus, 1000);
   assert.equal(status.maxTargetRps, 3000);
-  assert.equal(status.integrations.openAI, true);
+  assert.equal(status.integrations.influxDB, true);
+  assert.equal("openAI" in status.integrations, false);
 
   const projects = await fetch(`${app.baseUrl}/api/projects`).then((response) => response.json());
   assert.equal(projects.projects.length, 1);
@@ -136,7 +125,7 @@ test("run API starts a saved script instead of returning a copied command", asyn
   assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
 });
 
-test("script workspace supports create, edit, AI draft, and delete", async (context) => {
+test("script workspace supports create, edit, and delete", async (context) => {
   const app = await fixture();
   context.after(() => app.close());
   const project = app.store.state.projects[0];
@@ -167,20 +156,6 @@ test("script workspace supports create, edit, AI draft, and delete", async (cont
   const updated = await updateResponse.json();
   assert.equal(updated.script.name, "studies-read.js");
   assert.ok(updated.script.code.endsWith("\n\n"));
-
-  const assistantResponse = await fetch(`${app.baseUrl}/api/scripts/${created.script.id}/ai`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt: "Add an authenticated studies request.",
-      currentCode: updated.script.code,
-    }),
-  });
-  assert.equal(assistantResponse.status, 200);
-  const draft = await assistantResponse.json();
-  assert.equal(draft.result.message, "Generated.");
-  assert.equal(app.calls.assistant[0].projectName, project.name);
-  assert.equal(app.calls.assistant[0].baseUrl, project.baseUrl);
 
   const deleteResponse = await fetch(`${app.baseUrl}/api/scripts/${created.script.id}`, {
     method: "DELETE",
@@ -334,21 +309,42 @@ test("script validation rejects unsafe requests with actionable details", async 
   assert.ok(body.details.every((entry) => Number.isInteger(entry.line)));
 });
 
-test("store migration repairs the legacy maxVUs template typo", async (context) => {
+test("store migration removes execution settings from legacy user scripts", async (context) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-migration-"));
   context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
   const initialStore = await new TestZoneStore(dataDir).init();
   const script = (await initialStore.listScripts())[0];
+  const legacyOptions = `const targetRps = Number(__ENV.TARGET_RPS || 0);
+const vus = Number(__ENV.VUS || 10);
+const maxVus = Number(__ENV.MAX_VUS || Math.max(vus, 100));
+const duration = __ENV.DURATION || "30s";
+
+export const options = targetRps > 0
+  ? {
+      scenarios: {
+        api: {
+          executor: "constant-arrival-rate",
+          rate: targetRps,
+          timeUnit: "1s",
+          duration,
+          preAllocatedVUs: Math.min(vus, maxVus),
+          maxVUs,
+        },
+      },
+    }
+  : { vus, duration };
+
+`;
   await fs.writeFile(
     initialStore.scriptPath(script.id),
-    script.code.replace("          maxVUs: maxVus,\n", "          maxVUs,\n"),
+    script.code.replace('const baseUrl = __ENV.BASE_URL;\n', `${legacyOptions}const baseUrl = __ENV.BASE_URL;\n`),
   );
 
   const migratedStore = await new TestZoneStore(dataDir).init();
   const migratedScript = (await migratedStore.listScripts())[0];
 
-  assert.match(migratedScript.code, /maxVUs: maxVus/);
-  assert.doesNotMatch(migratedScript.code, /^\s+maxVUs,$/m);
+  assert.doesNotMatch(migratedScript.code, /TARGET_RPS|MAX_VUS|export const options/);
+  assert.match(migratedScript.code, /export default function/);
 });
 
 test("store migration backfills names for legacy run metadata", async (context) => {

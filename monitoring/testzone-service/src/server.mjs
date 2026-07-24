@@ -3,13 +3,11 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { ComponentManager } from "./components.mjs";
 import { InfluxWriter } from "./influx.mjs";
-import { K6Assistant } from "./openai.mjs";
 import { RunManager } from "./runner.mjs";
 import { TestZoneStore } from "./store.mjs";
 import {
   normalizeRunOptions,
   validateScript,
-  validateScriptReport,
   validateTargetHost,
   ValidationError,
 } from "./validation.mjs";
@@ -84,7 +82,6 @@ export async function createTestZoneServer(dependencies = {}) {
   const config = dependencies.config || loadConfig();
   const store = dependencies.store || await new TestZoneStore(config.dataDir).init();
   const influx = dependencies.influx || new InfluxWriter(config.influx);
-  const assistant = dependencies.assistant || new K6Assistant(config.openAI);
   const components = dependencies.components || await new ComponentManager({
     password: config.componentPassword,
     dataDir: config.dataDir,
@@ -117,7 +114,6 @@ export async function createTestZoneServer(dependencies = {}) {
           maxDurationSeconds: config.maxDurationSeconds,
           maxConcurrentRuns: config.maxConcurrentRuns,
           integrations: {
-            openAI: assistant.enabled,
             influxDB: influx.enabled,
             components: true,
           },
@@ -197,25 +193,6 @@ export async function createTestZoneServer(dependencies = {}) {
           targetBaseUrl: body.baseUrl,
         });
         return sendJson(response, 200, { validation });
-      }
-
-      match = routeMatch(pathname, /^\/api\/scripts\/([^/]+)\/ai$/);
-      if (match && request.method === "POST") {
-        const body = await readJson(request);
-        const script = await store.getScript(match[0]);
-        if (!script) return sendJson(response, 404, { error: "Script not found." });
-        const project = store.state.projects.find((entry) => entry.id === script.projectId);
-        const result = await assistant.generate({
-          prompt: requireText(body.prompt, "AI request", 4_000),
-          currentCode: typeof body.currentCode === "string" ? body.currentCode : script.code,
-          projectName: project.name,
-          baseUrl: project.baseUrl,
-        });
-        const validation = validateScriptReport(result.code, {
-          maxVus: config.maxVus,
-          targetBaseUrl: project.baseUrl,
-        });
-        return sendJson(response, 200, { result, validation });
       }
 
       if (request.method === "GET" && pathname === "/api/runs") {
@@ -360,7 +337,7 @@ export async function createTestZoneServer(dependencies = {}) {
     if (componentSampleTimer) clearInterval(componentSampleTimer);
   });
 
-  return { server, config, store, influx, assistant, components, runs };
+  return { server, config, store, influx, components, runs };
 }
 
 const executedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

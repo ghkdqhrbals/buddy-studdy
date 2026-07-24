@@ -2,28 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const DEFAULT_SCRIPT = `import http from "k6/http";
+export const DEFAULT_SCRIPT = `import http from "k6/http";
 import { check, sleep } from "k6";
-
-const targetRps = Number(__ENV.TARGET_RPS || 0);
-const vus = Number(__ENV.VUS || 10);
-const maxVus = Number(__ENV.MAX_VUS || Math.max(vus, 100));
-const duration = __ENV.DURATION || "30s";
-
-export const options = targetRps > 0
-  ? {
-      scenarios: {
-        api: {
-          executor: "constant-arrival-rate",
-          rate: targetRps,
-          timeUnit: "1s",
-          duration,
-          preAllocatedVUs: Math.min(vus, maxVus),
-          maxVUs: maxVus,
-        },
-      },
-    }
-  : { vus, duration };
 
 const baseUrl = __ENV.BASE_URL;
 const headers = JSON.parse(__ENV.HEADERS_JSON || "{}");
@@ -45,6 +25,11 @@ export default function () {
 
 const LEGACY_MAX_VUS_OPTION = "          maxVUs,\n";
 const FIXED_MAX_VUS_OPTION = "          maxVUs: maxVus,\n";
+const MANAGED_EXECUTION_OPTIONS = /const targetRps = Number\(__ENV\.TARGET_RPS \|\| 0\);[\s\S]*?export const options = targetRps > 0[\s\S]*?: \{ vus, duration \};\s*/;
+
+export function stripManagedExecutionOptions(code) {
+  return code.replace(MANAGED_EXECUTION_OPTIONS, "").replace(/^\s*\n/, "");
+}
 
 function now() {
   return new Date().toISOString();
@@ -106,10 +91,13 @@ export class TestZoneStore {
     await Promise.all(this.state.scripts.map(async (script) => {
       const scriptPath = this.scriptPath(script.id);
       const code = await fs.readFile(scriptPath, "utf8");
-      if (!code.includes(LEGACY_MAX_VUS_OPTION)) return;
+      const migrated = stripManagedExecutionOptions(
+        code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+      );
+      if (migrated === code) return;
       await fs.writeFile(
         scriptPath,
-        code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+        migrated,
         { mode: 0o600 },
       );
       script.updatedAt = now();
@@ -311,5 +299,3 @@ export class TestZoneStore {
     return run;
   }
 }
-
-export { DEFAULT_SCRIPT };

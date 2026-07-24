@@ -33,6 +33,33 @@ function tail(lines, maximum = 200) {
   return lines.slice(Math.max(0, lines.length - maximum));
 }
 
+export function buildExecutionScript() {
+  return `import userScenario from "./script.js";
+
+const targetRps = Number(__ENV.TARGET_RPS || 0);
+const vus = Number(__ENV.VUS || 10);
+const maxVus = Number(__ENV.MAX_VUS || Math.max(vus, 100));
+const duration = __ENV.DURATION || "30s";
+
+export const options = targetRps > 0
+  ? {
+      scenarios: {
+        api: {
+          executor: "constant-arrival-rate",
+          rate: targetRps,
+          timeUnit: "1s",
+          duration,
+          preAllocatedVUs: Math.min(vus, maxVus),
+          maxVUs: maxVus,
+        },
+      },
+    }
+  : { vus, duration };
+
+export default userScenario;
+`;
+}
+
 export class RunManager {
   constructor({ store, influx, config, spawnImpl = spawn }) {
     this.store = store;
@@ -55,11 +82,13 @@ export class RunManager {
 
     const runDirectory = this.store.runPath(run.id);
     const scriptPath = path.join(runDirectory, "script.js");
+    const executionPath = path.join(runDirectory, "execution.js");
     const summaryPath = path.join(runDirectory, "summary.json");
     const metricsPath = path.join(runDirectory, "metrics.jsonl");
     const logPath = path.join(runDirectory, "run.log");
     await fs.mkdir(runDirectory, { recursive: true });
     await fs.writeFile(scriptPath, script.code, { mode: 0o600 });
+    await fs.writeFile(executionPath, buildExecutionScript(), { mode: 0o600 });
     await fs.writeFile(this.store.runSeriesPath(run.id), "", { mode: 0o600 });
     await fs.writeFile(path.join(runDirectory, "environment.json"), `${JSON.stringify(sanitizedEnvironment(environment), null, 2)}\n`, { mode: 0o600 });
 
@@ -79,7 +108,7 @@ export class RunManager {
       summaryPath,
       "--out",
       `json=${metricsPath}`,
-      scriptPath,
+      executionPath,
     ];
     const child = this.spawn("k6", args, { env: processEnvironment, stdio: ["ignore", "pipe", "pipe"] });
     this.active.set(run.id, child);

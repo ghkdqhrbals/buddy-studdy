@@ -37,11 +37,10 @@ jobs:
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
 
-          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN OPENAI_API_KEY; do
+          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN; do
             if [ -z "${!required:-}" ]; then
               echo "Missing TestZone deployment value: ${required}" >&2
               exit 1
@@ -129,8 +128,6 @@ jobs:
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
             -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
-            -e TESTZONE_OPENAI_MODEL=gpt-5 \
-            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
             -e TESTZONE_COMPONENT_PASSWORD="${TESTZONE_COMPONENT_PASSWORD}" \
             -v "${testzone_root}/data:/data" \
             -v /var/run/docker.sock:/var/run/docker.sock \

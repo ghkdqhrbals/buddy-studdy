@@ -165,6 +165,7 @@ jobs:
             -e GF_AUTH_ANONYMOUS_ENABLED=false \
             -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/ \
             -e GF_SERVER_SERVE_FROM_SUB_PATH=false \
+            -e GF_LIVE_ALLOWED_ORIGINS=https://grafana.lowfidev.cloud \
             -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \

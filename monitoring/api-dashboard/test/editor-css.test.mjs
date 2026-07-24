@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const css = await readFile(new URL("../public/testzone.css", import.meta.url), "utf8");
+const html = await readFile(new URL("../public/testzone.html", import.meta.url), "utf8");
+const javascript = await readFile(new URL("../public/testzone.js", import.meta.url), "utf8");
 
 test("script editor hides native glyphs behind the syntax highlight layer", () => {
   const editorRule = css.match(/\.code-editor #scriptEditor \{(?<body>[^}]+)\}/)?.groups?.body ?? "";
@@ -16,4 +18,12 @@ test("script editor hides native glyphs behind the syntax highlight layer", () =
   assert.match(highlightRule, /align-self:\s*stretch;/);
   assert.match(highlightRule, /max-height:\s*none;/);
   assert.doesNotMatch(highlightRule, /height:\s*100%;/);
+});
+
+test("script workspace contains only files, editor, and Run Plan controls", () => {
+  for (const source of [html, css, javascript]) {
+    assert.doesNotMatch(source, /assistant/i);
+  }
+  assert.match(html, /id="editorRunButton"/);
+  assert.match(html, /id="runDialog"/);
 });

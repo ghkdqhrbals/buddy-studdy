@@ -12,10 +12,13 @@ It deliberately does not infer or display the target's server framework.
 ## Runtime Flow
 
 1. The operator selects a project and target URL.
-2. The operator writes a k6 script or asks the OpenAI assistant for a draft.
+2. The operator writes and saves the API request and response checks as a k6
+   JavaScript file.
 3. The TestZone API validates imports, literal URLs, duration, VUs, target RPS,
    and target-host allowlist.
-4. `Run now` starts the bundled k6 binary with the selected script.
+4. `Run now` creates an internal execution wrapper from Run Plan settings and
+   starts the bundled k6 binary. The saved script remains free of VU, RPS, and
+   duration boilerplate.
 5. k6 writes a summary, JSONL metric stream, and bounded log tail.
 6. The service stores run metadata locally and imports one-second metric
    aggregates into InfluxDB.

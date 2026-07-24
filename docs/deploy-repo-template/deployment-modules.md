@@ -60,12 +60,13 @@ one workflow run just because they share a host.
   disabled, and the deployment does not force a protected file dashboard as
   the anonymous home page. Unauthenticated visits therefore reach Grafana's
   login screen instead of rendering a dashboard shell that fails with
-  `Unauthorized`.
+  `Unauthorized`. Grafana Live accepts WebSocket connections only from
+  `https://grafana.lowfidev.cloud`, matching the public gateway origin.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
-  The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns
-  persistent local InfluxDB/component credentials under
-  `MACBOOKAIR_TESTZONE_ROOT`.
+  The deploy owns persistent local InfluxDB/component credentials under
+  `MACBOOKAIR_TESTZONE_ROOT`. Run Plan values are injected by the runner and
+  are not stored in user-authored JavaScript.
 - Monitoring hostname or port changes: run the monitoring routing workflow
   after the monitoring deploy. Routingflare maps
   `monitoring.lowfidev.cloud` to the monitoring nginx gateway and

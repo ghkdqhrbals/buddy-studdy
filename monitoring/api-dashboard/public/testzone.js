@@ -26,7 +26,6 @@ const state = {
   selectedRunId: null,
   runSeries: [],
   dirty: false,
-  assistantDraft: null,
   confirmAction: null,
   pollTimer: null,
   componentPollTimer: null,
@@ -47,11 +46,9 @@ const elementIds = [
   "runDetailScriptButton", "runDetailStatus", "runLogTail", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
   "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback", "lintPanel",
-  "toggleFilesButton", "toggleAssistantButton", "focusEditorButton", "validateScriptButton",
+  "toggleFilesButton", "focusEditorButton", "validateScriptButton",
   "saveScriptButton", "editorRunButton", "deleteScriptButton",
-  "assistantAvailability", "assistantMessages", "assistantDraft", "assistantDraftMessage",
-  "assistantDraftDiagnostics", "applyAssistantDraftButton", "assistantForm", "assistantPrompt",
-  "assistantSendButton", "componentGrid", "refreshComponentsButton",
+  "componentGrid", "refreshComponentsButton",
   "runDialog", "runForm", "runProjectName", "runTargetUrl", "runName", "runScriptSelect",
   "runProfileControl", "runDuration", "runVus", "runMaxVus", "runTargetRps",
   "runHeaders", "runEnvironment", "runFormError", "startRunButton",
@@ -130,12 +127,6 @@ async function loadStatus() {
   state.status = await api("/status");
   elements.serviceStatus.textContent = "Ready";
   elements.serviceStatus.dataset.state = "ready";
-  elements.assistantAvailability.dataset.enabled = String(state.status.integrations.openAI);
-  elements.assistantAvailability.title = state.status.integrations.openAI
-    ? "OpenAI is ready"
-    : "OpenAI key is not configured";
-  elements.assistantPrompt.disabled = !state.status.integrations.openAI;
-  elements.assistantSendButton.disabled = !state.status.integrations.openAI;
 }
 
 async function loadProjects() {
@@ -361,60 +352,6 @@ async function deleteCurrentScript() {
   } catch (error) {
     toast(error.message, "error");
   }
-}
-
-async function askAssistant(event) {
-  event.preventDefault();
-  const selected = script();
-  const prompt = elements.assistantPrompt.value.trim();
-  if (!selected || !prompt) return;
-  appendAssistantMessage(prompt, "user");
-  elements.assistantPrompt.value = "";
-  setButtonBusy(elements.assistantSendButton, true, "Generating");
-  try {
-    const payload = await api(`/scripts/${selected.id}/ai`, {
-      method: "POST",
-      body: JSON.stringify({ prompt, currentCode: elements.scriptEditor.value }),
-    });
-    state.assistantDraft = payload.result.code;
-    elements.assistantDraftMessage.textContent = payload.result.message;
-    elements.assistantDraftDiagnostics.replaceChildren(...(payload.validation?.diagnostics || []).map((entry) => {
-      const item = document.createElement("li");
-      item.textContent = diagnosticMessage(entry);
-      return item;
-    }));
-    elements.assistantDraft.hidden = false;
-    appendAssistantMessage(
-      payload.validation?.valid
-        ? payload.result.message
-        : `${payload.result.message} 생성된 초안에 수정할 진단이 있습니다.`,
-      "assistant",
-    );
-  } catch (error) {
-    appendAssistantMessage(error.message, "error");
-  } finally {
-    setButtonBusy(elements.assistantSendButton, false);
-  }
-}
-
-function appendAssistantMessage(message, role) {
-  const item = document.createElement("div");
-  item.className = `assistant-message assistant-${role}`;
-  const paragraph = document.createElement("p");
-  paragraph.textContent = message;
-  item.append(paragraph);
-  elements.assistantMessages.append(item);
-  elements.assistantMessages.scrollTop = elements.assistantMessages.scrollHeight;
-}
-
-function applyAssistantDraft() {
-  if (!state.assistantDraft) return;
-  elements.scriptEditor.value = state.assistantDraft;
-  state.assistantDraft = null;
-  elements.assistantDraft.hidden = true;
-  markDirty();
-  syncEditorMetrics();
-  elements.scriptEditor.focus();
 }
 
 async function loadRuns() {
@@ -1050,8 +987,6 @@ function bindEvents() {
   elements.deleteScriptButton.addEventListener("click", deleteCurrentScript);
   elements.toggleFilesButton.addEventListener("click", () =>
     togglePane(document.querySelector(".file-pane"), elements.toggleFilesButton, "files-hidden"));
-  elements.toggleAssistantButton.addEventListener("click", () =>
-    togglePane(document.querySelector(".assistant-pane"), elements.toggleAssistantButton, "assistant-hidden"));
   elements.focusEditorButton.addEventListener("click", () => {
     document.querySelector(".ide-shell").classList.toggle("focus-mode");
     elements.focusEditorButton.setAttribute(
@@ -1059,8 +994,6 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
-  elements.assistantForm.addEventListener("submit", askAssistant);
-  elements.applyAssistantDraftButton.addEventListener("click", applyAssistantDraft);
   elements.runProfileControl.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");
     if (button) applyProfile(button.dataset.profile);

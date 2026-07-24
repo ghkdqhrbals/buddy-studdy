@@ -23,10 +23,6 @@ export function loadConfig(env = process.env) {
     maxConcurrentRuns: integer(env.TESTZONE_MAX_CONCURRENT_RUNS, 1),
     allowedTargetHosts: csv(env.TESTZONE_ALLOWED_TARGET_HOSTS),
     grafanaBaseUrl: env.TESTZONE_GRAFANA_URL || "https://grafana.lowfidev.cloud",
-    openAI: {
-      apiKey: env.OPENAI_API_KEY || "",
-      model: env.TESTZONE_OPENAI_MODEL || "gpt-5",
-    },
     influx: {
       url: env.TESTZONE_INFLUX_URL || "http://buddystudy-testzone-influxdb:8086",
       org: env.TESTZONE_INFLUX_ORG || "buddystudy",
