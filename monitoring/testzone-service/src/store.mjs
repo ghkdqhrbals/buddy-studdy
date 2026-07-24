@@ -121,11 +121,21 @@ export class TestZoneStore {
   async migrateRunMetadata() {
     let changed = false;
     for (const run of this.state.runs) {
-      if (run.scriptName) continue;
-      const script = this.state.scripts.find((entry) => entry.id === run.scriptId);
-      if (!script) continue;
-      run.scriptName = script.name;
-      changed = true;
+      if (!run.scriptName) {
+        const script = this.state.scripts.find((entry) => entry.id === run.scriptId);
+        if (script) {
+          run.scriptName = script.name;
+          changed = true;
+        }
+      }
+      if (!run.name) {
+        run.name = run.scriptName || `Test run ${run.id.slice(0, 8)}`;
+        changed = true;
+      }
+      if (!Object.hasOwn(run, "live")) {
+        run.live = null;
+        changed = true;
+      }
     }
     if (changed) await this.persist();
   }
@@ -136,6 +146,10 @@ export class TestZoneStore {
 
   runPath(id) {
     return path.join(this.runDir, id);
+  }
+
+  runSeriesPath(id) {
+    return path.join(this.runPath(id), "run-series.jsonl");
   }
 
   snapshot() {
@@ -237,6 +251,7 @@ export class TestZoneStore {
       projectId: input.projectId,
       scriptId: input.scriptId,
       scriptName: input.scriptName,
+      name: input.name,
       profile: input.profile,
       options: input.options,
       status: "queued",
@@ -246,6 +261,7 @@ export class TestZoneStore {
       summary: null,
       error: null,
       logTail: [],
+      live: null,
     };
     this.state.runs.unshift(run);
     await this.persist();
@@ -258,6 +274,32 @@ export class TestZoneStore {
     Object.assign(run, patch);
     await this.persist();
     return structuredClone(run);
+  }
+
+  async appendRunSeries(id, point) {
+    await fs.appendFile(this.runSeriesPath(id), `${JSON.stringify(point)}\n`, { mode: 0o600 });
+  }
+
+  async readRunSeries(id) {
+    try {
+      const content = await fs.readFile(this.runSeriesPath(id), "utf8");
+      return content
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  async readRunScript(id) {
+    try {
+      return await fs.readFile(path.join(this.runPath(id), "script.js"), "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
   }
 
   async deleteRun(id) {

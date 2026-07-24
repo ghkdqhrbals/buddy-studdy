@@ -15,7 +15,7 @@
       "targetBlank": false,
       "title": "Back to TestZone",
       "type": "link",
-      "url": "/testzone.html"
+      "url": "https://monitoring.lowfidev.cloud/testzone.html"
     }
   ],
   "panels": [
@@ -67,6 +67,10 @@
         {
           "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_reqs\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 1s, fn: sum, createEmpty: true)\n  |> fill(value: 0.0)\n  |> set(key: \"_field\", value: \"request_rate\")",
           "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"requestRate\" and r.run_id == \"${run_id}\")",
+          "refId": "B"
         }
       ],
       "title": "Request rate",
@@ -120,6 +124,10 @@
         {
           "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_req_duration\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 10s, fn: (column, tables=<-) => tables |> quantile(q: 0.95, column: column, method: \"estimate_tdigest\"), createEmpty: false)\n  |> set(key: \"_field\", value: \"p95_latency\")",
           "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"p95Ms\" and r.run_id == \"${run_id}\")",
+          "refId": "B"
         }
       ],
       "title": "p95 latency",
@@ -186,6 +194,10 @@
         {
           "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_req_failed\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 10s, fn: mean, createEmpty: false)\n  |> set(key: \"_field\", value: \"error_rate\")",
           "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"errorRate\" and r.run_id == \"${run_id}\")",
+          "refId": "B"
         }
       ],
       "title": "Error rate",
@@ -237,9 +249,119 @@
         {
           "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"vus\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 5s, fn: max, createEmpty: false)\n  |> set(key: \"_field\", value: \"vus\")",
           "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"vus\" and r.run_id == \"${run_id}\")",
+          "refId": "B"
         }
       ],
       "title": "Virtual users",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "axisLabel": "CPU"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component =~ /^${component:regex}$/)\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Test component CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "axisLabel": "memory"
+          },
+          "unit": "decmbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component =~ /^${component:regex}$/)\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Test component memory",
       "type": "timeseries"
     }
   ],
@@ -262,18 +384,46 @@
           "type": "influxdb",
           "uid": "buddystudy-testzone-influx"
         },
-        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"run_id\", predicate: (r) => r._measurement == \"testzone_k6_metric\", start: -30d)",
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"run_id\", predicate: (r) => r._measurement == \"testzone_k6_metric\" or r._measurement == \"testzone_run_live\", start: -30d)",
         "hide": 0,
         "includeAll": false,
         "label": "Run",
         "multi": false,
         "name": "run_id",
         "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"run_id\", predicate: (r) => r._measurement == \"testzone_k6_metric\", start: -30d)",
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"run_id\", predicate: (r) => r._measurement == \"testzone_k6_metric\" or r._measurement == \"testzone_run_live\", start: -30d)",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
         "sort": 3,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "influxdb",
+          "uid": "buddystudy-testzone-influx"
+        },
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"component\", predicate: (r) => r._measurement == \"testzone_component_runtime\", start: -30d)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Component",
+        "multi": true,
+        "name": "component",
+        "options": [],
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"component\", predicate: (r) => r._measurement == \"testzone_component_runtime\", start: -30d)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
         "type": "query"
       },
       {
@@ -299,5 +449,5 @@
   "timezone": "browser",
   "title": "BuddyStudy TestZone Runs",
   "uid": "testzone-runs",
-  "version": 1
+  "version": 2
 }

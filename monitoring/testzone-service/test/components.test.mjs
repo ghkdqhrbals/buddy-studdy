@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { ComponentManager } from "../src/components.mjs";
 
 test("ComponentManager deploys, restarts, and removes an approved isolated component", async () => {
@@ -51,4 +54,44 @@ test("ComponentManager rejects components outside the fixed catalog", async () =
   await assert.rejects(manager.deploy("arbitrary-image"), /Unknown TestZone component/);
   await assert.rejects(manager.restart("arbitrary-image"), /Unknown TestZone component/);
   await assert.rejects(manager.delete("arbitrary-image"), /Unknown TestZone component/);
+});
+
+test("ComponentManager persists private credentials and configurable resource limits", async (context) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-components-"));
+  context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const exec = async (_command, args) => {
+    if (args[0] === "inspect") throw new Error("container missing");
+    return { stdout: "" };
+  };
+  const first = await new ComponentManager({
+    dataDir,
+    exec,
+    password: "postgres-password",
+  }).init();
+
+  await first.updateConfig("postgres", {
+    imageTag: "17-alpine",
+    database: "load_zone",
+    username: "load_user",
+    hostPort: 45432,
+    cpus: 2,
+    memoryMb: 1024,
+  });
+  const postgres = await first.credentials("postgres");
+  const redis = await first.credentials("redis");
+  const second = await new ComponentManager({
+    dataDir,
+    exec,
+    password: "ignored-after-initialization",
+  }).init();
+
+  assert.equal(postgres.password, "postgres-password");
+  assert.equal(postgres.internalUrl, "postgresql://load_user:postgres-password@buddystudy-testzone-postgres:5432/load_zone");
+  assert.match(redis.internalUrl, /^redis:\/\/:[^@]+@buddystudy-testzone-redis:6379\/0$/);
+  assert.deepEqual(await second.credentials("postgres"), postgres);
+  const listed = await second.list();
+  assert.equal(listed.find((entry) => entry.id === "postgres").config.memoryMb, 1024);
+  assert.equal(listed.some((entry) => entry.id === "kafka"), false);
+  const mode = (await fs.stat(path.join(dataDir, "components.json"))).mode & 0o777;
+  assert.equal(mode, 0o600);
 });

@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import {
   RUN_PROFILES,
   buildChartPoints,
+  diagnosticMessage,
   editorPosition,
   formatChartLabel,
   formatMilliseconds,
   formatPercent,
   formatRate,
+  highlightJavaScript,
   lineNumbersFor,
   parseObjectJson,
   runScriptName,
@@ -83,4 +85,10 @@ test("formatters preserve missing values and display operational units", () => {
 test("editor helpers keep line numbering and caret position stable", () => {
   assert.equal(lineNumbersFor("one\ntwo\nthree"), "1\n2\n3");
   assert.deepEqual(editorPosition("one\ntwo", 6), { line: 2, column: 3 });
+  assert.match(highlightJavaScript("const value = http.get(\"/api\");"), /syntax-keyword/);
+  assert.match(highlightJavaScript("const value = http.get(\"/api\");"), /syntax-builtin/);
+  assert.equal(
+    diagnosticMessage({ line: 4, column: 12, message: "Use __ENV.BASE_URL." }),
+    "Ln 4:12 Use __ENV.BASE_URL.",
+  );
 });

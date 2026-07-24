@@ -1,0 +1,652 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Custom monitoring",
+      "type": "link",
+      "url": "https://monitoring.lowfidev.cloud/system.html"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=~\".+\"} |= \"runtime_metrics \" [$__range]))",
+          "legendFormat": "samples",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Runtime samples",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processCpuPercent | __error__=\"\" [$__range])",
+          "legendFormat": "process CPU",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Process CPU",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "CPU",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processCpuPercent | __error__=\"\"",
+          "legendFormat": "process",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap systemCpuPercent | __error__=\"\"",
+          "legendFormat": "system",
+          "refId": "B"
+        }
+      ],
+      "title": "CPU utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "bytes",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap processResidentMemoryBytes | __error__=\"\"",
+          "legendFormat": "resident",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap heapUsedBytes | __error__=\"\"",
+          "legendFormat": "heap",
+          "refId": "B"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap nonHeapUsedBytes | __error__=\"\"",
+          "legendFormat": "non-heap",
+          "refId": "C"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyDirectMemoryBytes | __error__=\"\"",
+          "legendFormat": "direct",
+          "refId": "D"
+        }
+      ],
+      "title": "Application memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "connections",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolAllocated | __error__=\"\"",
+          "legendFormat": "allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolAcquired | __error__=\"\"",
+          "legendFormat": "acquired",
+          "refId": "B"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolIdle | __error__=\"\"",
+          "legendFormat": "idle",
+          "refId": "C"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap dbPoolPending | __error__=\"\"",
+          "legendFormat": "pending",
+          "refId": "D"
+        }
+      ],
+      "title": "Database connection pool",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "threads",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap threadsLive | __error__=\"\"",
+          "legendFormat": "live",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap threadsBlocked | __error__=\"\"",
+          "legendFormat": "blocked",
+          "refId": "B"
+        }
+      ],
+      "title": "Runtime threads",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "events",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap gcCollectionsTotal | __error__=\"\"",
+          "legendFormat": "collections",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap gcCollectionTimeMsTotal | __error__=\"\"",
+          "legendFormat": "time ms",
+          "refId": "B"
+        }
+      ],
+      "title": "Garbage collection",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "count",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyActiveConnections | __error__=\"\"",
+          "legendFormat": "active connections",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap reactorNettyEventLoopPendingTasks | __error__=\"\"",
+          "legendFormat": "pending tasks",
+          "refId": "B"
+        }
+      ],
+      "title": "Server event loop",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "bytes",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap rootDiskUsedBytes | __error__=\"\"",
+          "legendFormat": "used",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap rootDiskTotalBytes | __error__=\"\"",
+          "legendFormat": "total",
+          "refId": "B"
+        }
+      ],
+      "title": "Root disk",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "bytes total",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap networkReceiveBytesTotal | __error__=\"\"",
+          "legendFormat": "received",
+          "refId": "A"
+        },
+        {
+          "expr": "{container=~\".+\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | json | unwrap networkTransmitBytesTotal | __error__=\"\"",
+          "legendFormat": "transmitted",
+          "refId": "B"
+        }
+      ],
+      "title": "Network counters",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": [
+    "BuddyStudy",
+    "Runtime",
+    "Loki"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BuddyStudy Server Runtime",
+  "uid": "buddystudy-server-runtime",
+  "version": 1
+}

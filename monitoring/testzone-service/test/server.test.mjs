@@ -65,6 +65,18 @@ async function fixture() {
       calls.components.push(["restart", id]);
       return { id, status: "running" };
     },
+    async reset(id) {
+      calls.components.push(["reset", id]);
+      return { id, status: "running" };
+    },
+    async credentials(id) {
+      calls.components.push(["credentials", id]);
+      return { password: "secret", internalUrl: `redis://:${id}@redis:6379/0` };
+    },
+    async updateConfig(id, input) {
+      calls.components.push(["config", id, input]);
+      return { id, status: "not-deployed", config: input };
+    },
     async delete(id) {
       calls.components.push(["delete", id]);
       return { id, status: "not-deployed" };
@@ -102,7 +114,7 @@ test("run API starts a saved script instead of returning a copied command", asyn
   const app = await fixture();
   context.after(() => app.close());
   const project = app.store.state.projects[0];
-  const script = app.store.state.scripts[0];
+  const script = await app.store.getScript(app.store.state.scripts[0].id);
 
   const response = await fetch(`${app.baseUrl}/api/runs`, {
     method: "POST",
@@ -110,6 +122,7 @@ test("run API starts a saved script instead of returning a copied command", asyn
     body: JSON.stringify({
       projectId: project.id,
       scriptId: script.id,
+      name: "Public API peak",
       profile: "custom",
       options: { duration: "30s", vus: 20, maxVus: 100, targetRps: 50 },
       headers: { Authorization: "Bearer test" },
@@ -118,6 +131,7 @@ test("run API starts a saved script instead of returning a copied command", asyn
   assert.equal(response.status, 202);
   const body = await response.json();
   assert.equal(body.run.status, "running");
+  assert.equal(body.run.name, "Public API peak");
   assert.equal(body.run.scriptName, script.name);
   assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
 });
@@ -179,7 +193,7 @@ test("run history preserves the script name after the script is deleted", async 
   const app = await fixture();
   context.after(() => app.close());
   const project = app.store.state.projects[0];
-  const script = app.store.state.scripts[0];
+  const script = await app.store.getScript(app.store.state.scripts[0].id);
 
   const createResponse = await fetch(`${app.baseUrl}/api/runs`, {
     method: "POST",
@@ -203,6 +217,40 @@ test("run history preserves the script name after the script is deleted", async 
   const history = await fetch(`${app.baseUrl}/api/runs?projectId=${project.id}`)
     .then((response) => response.json());
   assert.equal(history.runs[0].scriptName, script.name);
+});
+
+test("run detail exposes live series and its immutable script snapshot", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+  const script = await app.store.getScript(app.store.state.scripts[0].id);
+  const run = await app.store.createRun({
+    projectId: project.id,
+    scriptId: script.id,
+    scriptName: script.name,
+    name: "Live request profile",
+    profile: "standard",
+    options: {},
+  });
+  await fs.mkdir(app.store.runPath(run.id), { recursive: true });
+  await fs.writeFile(path.join(app.store.runPath(run.id), "script.js"), script.code);
+  await app.store.appendRunSeries(run.id, {
+    timestamp: "2026-07-24T03:00:00.000Z",
+    requestRate: 319,
+    p95Ms: 4180,
+    errorRate: 0.8026,
+    vus: 1000,
+  });
+
+  const series = await fetch(`${app.baseUrl}/api/runs/${run.id}/series`)
+    .then((response) => response.json());
+  const snapshot = await fetch(`${app.baseUrl}/api/runs/${run.id}/script`)
+    .then((response) => response.json());
+
+  assert.equal(series.series[0].requestRate, 319);
+  assert.equal(snapshot.script.name, script.name);
+  assert.equal(snapshot.script.code, script.code);
+  assert.equal(snapshot.script.readonly, true);
 });
 
 test("run deletion removes metadata, artifacts, and matching InfluxDB series", async (context) => {
@@ -231,7 +279,7 @@ test("run deletion removes metadata, artifacts, and matching InfluxDB series", a
   await assert.rejects(fs.stat(app.store.runPath(run.id)), { code: "ENOENT" });
 });
 
-test("component APIs expose deploy, restart, and delete lifecycle actions", async (context) => {
+test("component APIs expose configuration, credentials, reset, and lifecycle actions", async (context) => {
   const app = await fixture();
   context.after(() => app.close());
 
@@ -241,16 +289,32 @@ test("component APIs expose deploy, restart, and delete lifecycle actions", asyn
   const restart = await fetch(`${app.baseUrl}/api/components/redis/restart`, {
     method: "POST",
   }).then((response) => response.json());
+  const reset = await fetch(`${app.baseUrl}/api/components/redis/reset`, {
+    method: "POST",
+  }).then((response) => response.json());
+  const credentials = await fetch(`${app.baseUrl}/api/components/redis/credentials`)
+    .then((response) => response.json());
+  const configured = await fetch(`${app.baseUrl}/api/components/redis/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ memoryMb: 512 }),
+  }).then((response) => response.json());
   const deleted = await fetch(`${app.baseUrl}/api/components/redis`, {
     method: "DELETE",
   }).then((response) => response.json());
 
   assert.equal(deploy.component.status, "running");
   assert.equal(restart.component.status, "running");
+  assert.equal(reset.component.status, "running");
+  assert.equal(credentials.credentials.password, "secret");
+  assert.equal(configured.component.config.memoryMb, 512);
   assert.equal(deleted.component.status, "not-deployed");
   assert.deepEqual(app.calls.components, [
     ["deploy", "redis"],
     ["restart", "redis"],
+    ["reset", "redis"],
+    ["credentials", "redis"],
+    ["config", "redis", { memoryMb: 512 }],
     ["delete", "redis"],
   ]);
 });
@@ -266,7 +330,8 @@ test("script validation rejects unsafe requests with actionable details", async 
   });
   assert.equal(response.status, 422);
   const body = await response.json();
-  assert.ok(body.details.some((entry) => entry.includes("Remote JavaScript imports")));
+  assert.ok(body.details.some((entry) => entry.message.includes("Remote JavaScript imports")));
+  assert.ok(body.details.every((entry) => Number.isInteger(entry.line)));
 });
 
 test("store migration repairs the legacy maxVUs template typo", async (context) => {

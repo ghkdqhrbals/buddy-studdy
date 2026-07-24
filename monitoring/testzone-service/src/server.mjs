@@ -9,6 +9,7 @@ import { TestZoneStore } from "./store.mjs";
 import {
   normalizeRunOptions,
   validateScript,
+  validateScriptReport,
   validateTargetHost,
   ValidationError,
 } from "./validation.mjs";
@@ -56,7 +57,7 @@ function routeMatch(pathname, pattern) {
 function publicRun(run, config) {
   const from = run.startedAt ? Date.parse(run.startedAt) : Date.now() - 3_600_000;
   const to = run.finishedAt ? Date.parse(run.finishedAt) : Date.now();
-  const dashboard = new URL("/grafana/d/testzone-runs/testzone-runs", config.grafanaBaseUrl);
+  const dashboard = new URL("/d/testzone-runs/testzone-runs", config.grafanaBaseUrl);
   dashboard.searchParams.set("from", String(from));
   dashboard.searchParams.set("to", String(to));
   dashboard.searchParams.set("var-run_id", run.id);
@@ -84,8 +85,12 @@ export async function createTestZoneServer(dependencies = {}) {
   const store = dependencies.store || await new TestZoneStore(config.dataDir).init();
   const influx = dependencies.influx || new InfluxWriter(config.influx);
   const assistant = dependencies.assistant || new K6Assistant(config.openAI);
-  const components = dependencies.components || new ComponentManager({ password: config.componentPassword });
+  const components = dependencies.components || await new ComponentManager({
+    password: config.componentPassword,
+    dataDir: config.dataDir,
+  }).init();
   const runs = dependencies.runs || new RunManager({ store, influx, config });
+  const componentSampleIntervalMs = Number(dependencies.componentSampleIntervalMs ?? 5_000);
 
   for (const run of store.state.runs) {
     if (["queued", "running", "cancelling"].includes(run.status)) {
@@ -206,11 +211,11 @@ export async function createTestZoneServer(dependencies = {}) {
           projectName: project.name,
           baseUrl: project.baseUrl,
         });
-        validateScript(result.code, {
+        const validation = validateScriptReport(result.code, {
           maxVus: config.maxVus,
           targetBaseUrl: project.baseUrl,
         });
-        return sendJson(response, 200, { result });
+        return sendJson(response, 200, { result, validation });
       }
 
       if (request.method === "GET" && pathname === "/api/runs") {
@@ -235,6 +240,7 @@ export async function createTestZoneServer(dependencies = {}) {
           projectId: project.id,
           scriptId: script.id,
           scriptName: script.name,
+          name: requireText(body.name || script.name, "Test name", 120),
           profile: String(body.profile || "custom").slice(0, 40),
           options,
         });
@@ -264,16 +270,49 @@ export async function createTestZoneServer(dependencies = {}) {
         const cancelled = await runs.cancel(match[0]);
         return cancelled ? sendJson(response, 202, { cancelling: true }) : sendJson(response, 409, { error: "Run is not active." });
       }
+      match = routeMatch(pathname, /^\/api\/runs\/([^/]+)\/series$/);
+      if (match && request.method === "GET") {
+        const run = store.state.runs.find((entry) => entry.id === match[0]);
+        if (!run) return sendJson(response, 404, { error: "Run not found." });
+        return sendJson(response, 200, { series: await store.readRunSeries(run.id) });
+      }
+      match = routeMatch(pathname, /^\/api\/runs\/([^/]+)\/script$/);
+      if (match && request.method === "GET") {
+        const run = store.state.runs.find((entry) => entry.id === match[0]);
+        if (!run) return sendJson(response, 404, { error: "Run not found." });
+        const code = await store.readRunScript(run.id);
+        return code === null
+          ? sendJson(response, 404, { error: "Run script snapshot not found." })
+          : sendJson(response, 200, {
+            script: {
+              id: run.scriptId,
+              name: run.scriptName,
+              code,
+              readonly: true,
+            },
+          });
+      }
 
       if (request.method === "GET" && pathname === "/api/components") {
         return sendJson(response, 200, { components: await components.list() });
       }
-      match = routeMatch(pathname, /^\/api\/components\/([^/]+)\/(deploy|restart)$/);
+      match = routeMatch(pathname, /^\/api\/components\/([^/]+)\/(deploy|restart|reset)$/);
       if (match && request.method === "POST") {
-        const component = match[1] === "deploy"
-          ? await components.deploy(match[0])
-          : await components.restart(match[0]);
-        return sendJson(response, 200, { component });
+        const operation = {
+          deploy: () => components.deploy(match[0]),
+          restart: () => components.restart(match[0]),
+          reset: () => components.reset(match[0]),
+        }[match[1]];
+        return sendJson(response, 200, { component: await operation() });
+      }
+      match = routeMatch(pathname, /^\/api\/components\/([^/]+)\/credentials$/);
+      if (match && request.method === "GET") {
+        return sendJson(response, 200, { credentials: await components.credentials(match[0]) });
+      }
+      match = routeMatch(pathname, /^\/api\/components\/([^/]+)\/config$/);
+      if (match && request.method === "PUT") {
+        const body = await readJson(request);
+        return sendJson(response, 200, { component: await components.updateConfig(match[0], body) });
       }
       match = routeMatch(pathname, /^\/api\/components\/([^/]+)$/);
       if (match && request.method === "DELETE") {
@@ -295,6 +334,30 @@ export async function createTestZoneServer(dependencies = {}) {
         details: error.details || [],
       });
     }
+  });
+
+  let componentSampleInProgress = false;
+  const sampleComponents = async () => {
+    if (!influx.enabled || componentSampleInProgress || typeof influx.writeComponentSnapshots !== "function") return;
+    componentSampleInProgress = true;
+    try {
+      await influx.writeComponentSnapshots(await components.list());
+    } catch (error) {
+      console.error(JSON.stringify({
+        level: "warn",
+        event: "testzone_component_metrics_failed",
+        message: error.message,
+      }));
+    } finally {
+      componentSampleInProgress = false;
+    }
+  };
+  const componentSampleTimer = componentSampleIntervalMs > 0
+    ? setInterval(() => void sampleComponents(), componentSampleIntervalMs)
+    : null;
+  componentSampleTimer?.unref();
+  server.on("close", () => {
+    if (componentSampleTimer) clearInterval(componentSampleTimer);
   });
 
   return { server, config, store, influx, assistant, components, runs };

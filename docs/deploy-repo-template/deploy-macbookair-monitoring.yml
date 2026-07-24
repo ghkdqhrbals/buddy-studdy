@@ -70,6 +70,12 @@ jobs:
             "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-logs.json" \
             -o "${monitoring_root}/grafana/dashboards/buddystudy-logs.json"
           curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-api-performance.json" \
+            -o "${monitoring_root}/grafana/dashboards/buddystudy-api-performance.json"
+          curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-server-runtime.json" \
+            -o "${monitoring_root}/grafana/dashboards/buddystudy-server-runtime.json"
+          curl -fsSL \
             "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-testzone.json" \
             -o "${monitoring_root}/grafana/dashboards/buddystudy-testzone.json"
           curl -fsSL \
@@ -131,8 +137,8 @@ jobs:
             -e GF_SECURITY_ADMIN_USER=admin \
             -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
             -e GF_USERS_ALLOW_SIGN_UP=false \
-            -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/grafana/ \
-            -e GF_SERVER_SERVE_FROM_SUB_PATH=true \
+            -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/ \
+            -e GF_SERVER_SERVE_FROM_SUB_PATH=false \
             -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
@@ -156,5 +162,5 @@ jobs:
           echo "MacBook Air monitoring module is running."
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
           echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
-          echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/grafana/"
+          echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/"
           echo "Loki push: http://127.0.0.1:${LOKI_PORT}/loki/api/v1/push"

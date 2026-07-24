@@ -27,8 +27,8 @@ assume that any JVM-oriented metric can be unavailable.
 
 The collector follows these rules:
 
-1. Host `/proc` counters, R2DBC pool metrics, Micrometer gauges, and each MXBean
-   family are collected independently.
+1. Host `/proc` counters, standard Micrometer binders, direct R2DBC pool
+   metrics, and each MXBean family are collected independently.
 2. One unsupported MXBean cannot discard an otherwise valid host or pool
    sample.
 3. Partial samples set `runtimeMetricsDegraded=true`.
@@ -49,9 +49,15 @@ The collector follows these rules:
 | Disk | Java `FileStore` | Root filesystem capacity |
 | Network | `/proc/net/dev` | Loopback is excluded |
 | Open files | `/proc/self/fd` | Linux process descriptor count |
-| Database pressure | R2DBC `PoolMetrics` | Acquired, allocated, idle, pending, configured limits |
+| Database pressure | Spring Boot `r2dbc.pool.*` Micrometer gauges | Acquired, allocated, idle, pending, configured limits |
 | Event loop | Reactor Netty Micrometer gauges | Pending tasks, active connections, direct memory |
-| Heap, threads, GC, classes | `ManagementFactory` | Best effort because Native Image support varies |
+| Heap, threads, GC, classes | Micrometer JVM binders | Standard source across JVM and Native Image when available |
+| Binder fallback | R2DBC `PoolMetrics` and `ManagementFactory` | Used per metric when the standard binder is absent |
+
+The collector does not create a WebFlux-specific or hand-maintained metrics
+model. It consumes the same Micrometer names published by Spring Boot,
+Reactor Netty, the JVM binder, and the R2DBC pool. Direct pool/MXBean reads are
+fallbacks so Native Image limitations do not erase the full sample.
 
 ## Failure Diagnosis
 
@@ -90,5 +96,6 @@ npm test
 
 For production verification, deploy the backend and monitoring modules
 separately, wait for at least two 30-second samples, and inspect
-`/system.html`. Runtime availability is a monitoring concern and must not be a
+`https://monitoring.lowfidev.cloud/system.html` or the Server Runtime Grafana
+dashboard. Runtime availability is a monitoring concern and must not be a
 GitHub Actions runtime health gate.

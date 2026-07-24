@@ -115,14 +115,41 @@ The monitoring site has four stable destinations in a left navigation:
 TestZone provides:
 
 - runtime-neutral target projects
-- JavaScript/k6 file creation, editing, validation, and deletion
-- server-side OpenAI script generation with an editable draft
+- a code-focused JavaScript editor with syntax highlighting, line/column
+  diagnostics, file management, and focused editing mode
+- server-side OpenAI script generation with an editable draft; unsafe output
+  stays visible with actionable diagnostics instead of being discarded
 - direct execution, cancellation, and run deletion
+- user-defined test names and immutable script snapshots attached to history
+- live one-second RPS, p95, error, VU, and dropped-iteration samples while k6
+  is running
+- a selectable per-run time-series detail view, with the same run linked into
+  Grafana before and after completion
 - a hard 1,000-VUser and 3,000-RPS ceiling
 - request headers and environment injection without source-code secrets
-- allowlisted PostgreSQL, Redis, and Kafka test-component lifecycle controls
+- allowlisted PostgreSQL and Redis component configuration, deploy, restart,
+  destructive reset, credential retrieval, and return/delete controls
 - local run metadata and raw artifact retention
-- InfluxDB time-series ingestion and per-run Grafana analysis
+- InfluxDB live/final time-series ingestion and per-run Grafana analysis
+
+Component credentials are generated once, stored in a mode-`0600` file under
+`MACBOOKAIR_TESTZONE_ROOT`, and returned only through the authenticated
+TestZone API. PostgreSQL/Redis ports bind to `127.0.0.1`; tests running in
+TestZone use the private `buddystudy-testzone` network. Database identity,
+password, or persistent settings are applied on a destructive reset because
+container environment variables cannot mutate an already initialized volume.
+Kafka is intentionally excluded until a concrete test requires it.
+
+Live metrics are read from k6's append-only JSON output once per second. A
+completed second is normalized into `requestRate`, `p95Ms`, `errorRate`,
+`vus`, and `droppedIterations`, then written to both the run artifact and
+InfluxDB. This adds observability without changing the load script or waiting
+for k6's final summary.
+
+While TestZone is running, the component manager samples Docker CPU, memory,
+process, network-I/O, and block-I/O values every five seconds and writes
+`testzone_component_runtime` points to InfluxDB. The Components tab refreshes
+the same current values every three seconds while visible.
 
 The UI does not compare MVC and WebFlux. Those names may be represented as
 separate target projects only when an operator intentionally creates them.
@@ -137,6 +164,15 @@ The execution boundary remains private:
 - the browser cannot provide Docker images, container commands, OpenAI keys,
   or InfluxDB credentials.
 - disposable component actions map to a fixed server-side catalog.
+
+## Monitoring Destinations
+
+- `https://monitoring.lowfidev.cloud` serves the focused operational UI:
+  logs, API performance, server runtime, and TestZone.
+- `https://grafana.lowfidev.cloud` serves Grafana from its root path and owns
+  exploratory Loki/InfluxDB dashboards.
+- Routingflare owns both host routes on the MacBook Air. Monitoring,
+  TestZone, and routing are deployed as separate modules.
 
 The Docker socket is mounted only into the private TestZone service because it
 owns the allowlisted component lifecycle. This is a privileged boundary and

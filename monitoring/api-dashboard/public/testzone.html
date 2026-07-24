@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072403" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072405" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -19,6 +19,7 @@
           <a href="/performance.html">API Performance</a>
           <a href="/system.html">Server Dashboard</a>
           <a href="/testzone.html" aria-current="page">TestZone</a>
+          <a href="https://grafana.lowfidev.cloud/" target="_blank" rel="noreferrer">Grafana</a>
         </nav>
       </aside>
 
@@ -75,15 +76,35 @@
               <article class="workspace-section chart-section">
                 <header>
                   <div>
-                    <h3>Recent test results</h3>
-                    <p>최근 실행의 처리량과 p95를 함께 비교합니다.</p>
+                    <h3 id="timelineTitle">Run time-series</h3>
+                    <p id="timelineDescription">실행 중 RPS, p95, 오류율과 VUser를 초 단위로 확인합니다.</p>
                   </div>
-                  <div class="chart-key">
-                    <span><i class="key-rps"></i>RPS</span>
-                    <span><i class="key-p95"></i>p95</span>
+                  <div class="timeline-controls">
+                    <select id="recentRunSelect" aria-label="Select test run"></select>
+                    <a id="timelineGrafanaLink" class="row-action" href="https://grafana.lowfidev.cloud/" target="_blank" rel="noreferrer">Grafana</a>
                   </div>
                 </header>
-                <canvas id="runHistoryChart" height="260" aria-label="Recent run result chart"></canvas>
+                <div class="chart-key">
+                  <span><i class="key-rps"></i>RPS</span>
+                  <span><i class="key-p95"></i>p95</span>
+                  <span><i class="key-error"></i>Error</span>
+                  <span><i class="key-vus"></i>VUs</span>
+                </div>
+                <div id="liveRunStrip" class="live-run-strip" hidden>
+                  <span class="live-indicator">Live</span>
+                  <strong id="liveRps">-</strong>
+                  <span id="liveProgress">Preparing run</span>
+                  <button id="cancelSelectedRunButton" class="row-action danger" type="button">Cancel</button>
+                </div>
+                <canvas id="runHistoryChart" height="260" aria-label="Selected run time-series chart"></canvas>
+                <div id="timelineEmptyState" class="chart-empty" hidden>
+                  <strong>No time-series data yet</strong>
+                  <span>실행이 시작되면 초 단위 지표가 여기에 표시됩니다.</span>
+                </div>
+                <footer class="timeline-footer">
+                  <span id="timelineRunMeta">Select a run from history.</span>
+                  <button id="viewRunScriptButton" class="row-action" type="button">View script</button>
+                </footer>
               </article>
 
               <article class="workspace-section quick-start">
@@ -119,6 +140,7 @@
                   <thead>
                     <tr>
                       <th>Started</th>
+                      <th>Test name</th>
                       <th>Script</th>
                       <th>Profile</th>
                       <th>Status</th>
@@ -135,6 +157,22 @@
                   <span>스크립트를 선택하고 첫 성능 테스트를 실행하세요.</span>
                 </div>
               </div>
+            </section>
+            <section id="runDetail" class="workspace-section run-detail" hidden>
+              <header>
+                <div>
+                  <h3 id="runDetailTitle">Run details</h3>
+                  <p id="runDetailMeta"></p>
+                </div>
+                <button id="closeRunDetailButton" class="icon-button" type="button" aria-label="Close run details">×</button>
+              </header>
+              <div class="run-detail-grid">
+                <div><span>Target</span><strong id="runDetailTarget">-</strong></div>
+                <div><span>Configuration</span><strong id="runDetailConfig">-</strong></div>
+                <div><span>Script</span><button id="runDetailScriptButton" class="text-link" type="button">-</button></div>
+                <div><span>Status</span><strong id="runDetailStatus">-</strong></div>
+              </div>
+              <pre id="runLogTail" class="run-log-tail" aria-label="Run log output"></pre>
             </section>
           </section>
 
@@ -159,6 +197,9 @@
                   </div>
                   <div class="editor-actions">
                     <span id="editorFeedback" class="inline-feedback" role="status"></span>
+                    <button id="toggleFilesButton" class="button button-secondary" type="button">Files</button>
+                    <button id="toggleAssistantButton" class="button button-secondary" type="button">Assistant</button>
+                    <button id="focusEditorButton" class="button button-secondary" type="button">Focus</button>
                     <button id="validateScriptButton" class="button button-secondary" type="button">Validate</button>
                     <button id="saveScriptButton" class="button button-secondary" type="button">Save</button>
                     <button id="editorRunButton" class="button button-primary" type="button">Run</button>
@@ -167,8 +208,10 @@
                 </header>
                 <div class="code-editor">
                   <div id="editorLineNumbers" class="line-numbers" aria-hidden="true"></div>
+                  <pre id="scriptHighlight" class="script-highlight" aria-hidden="true"></pre>
                   <textarea id="scriptEditor" aria-label="k6 JavaScript editor" spellcheck="false" wrap="off"></textarea>
                 </div>
+                <div id="lintPanel" class="lint-panel" hidden></div>
                 <footer class="editor-statusbar">
                   <span>JavaScript · k6</span>
                   <span id="editorPosition">Ln 1, Col 1</span>
@@ -193,6 +236,7 @@
                 <div id="assistantDraft" class="assistant-draft" hidden>
                   <span>Generated draft</span>
                   <p id="assistantDraftMessage"></p>
+                  <ul id="assistantDraftDiagnostics"></ul>
                   <button id="applyAssistantDraftButton" class="button button-secondary" type="button">Apply to editor</button>
                 </div>
                 <form id="assistantForm" class="assistant-compose">
@@ -213,7 +257,7 @@
             </div>
             <section class="component-notice">
               <strong>테스트 데이터는 운영과 분리됩니다.</strong>
-              <span>컴포넌트 삭제 시 컨테이너가 즉시 제거되며 운영 서버에는 영향을 주지 않습니다.</span>
+              <span>Reset과 Return은 테스트 볼륨의 데이터를 삭제합니다. 운영 서버와 운영 데이터에는 접근하지 않습니다.</span>
             </section>
             <div id="componentGrid" class="component-grid"></div>
           </section>
@@ -235,6 +279,7 @@
             <div><span>Project</span><strong id="runProjectName">-</strong></div>
             <div><span>Target</span><strong id="runTargetUrl">-</strong></div>
           </div>
+          <label>Test name<input id="runName" maxlength="120" placeholder="Public questions · standard" /></label>
           <label>Script<select id="runScriptSelect"></select></label>
           <fieldset>
             <legend>Profile</legend>
@@ -273,6 +318,40 @@
       </form>
     </dialog>
 
+    <dialog id="scriptSnapshotDialog" class="testzone-dialog script-snapshot-dialog">
+      <form>
+        <header>
+          <div><span>Run artifact</span><h2 id="scriptSnapshotTitle">Script snapshot</h2></div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </header>
+        <pre id="scriptSnapshotCode" class="snapshot-code"></pre>
+      </form>
+    </dialog>
+
+    <dialog id="componentConfigDialog" class="testzone-dialog compact-dialog">
+      <form id="componentConfigForm">
+        <header>
+          <div><span>Runtime parameters</span><h2 id="componentConfigTitle">Configure component</h2></div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </header>
+        <div id="componentConfigFields" class="dialog-body"></div>
+        <footer>
+          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
+          <button class="button button-primary" type="submit">Save parameters</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="componentCredentialsDialog" class="testzone-dialog compact-dialog">
+      <form>
+        <header>
+          <div><span>Private connection values</span><h2 id="componentCredentialsTitle">Credentials</h2></div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </header>
+        <div id="componentCredentialsBody" class="dialog-body credential-list"></div>
+      </form>
+    </dialog>
+
     <dialog id="newScriptDialog" class="testzone-dialog compact-dialog">
       <form id="newScriptForm">
         <header>
@@ -302,6 +381,6 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script type="module" src="/testzone.js?v=2026072404"></script>
+    <script type="module" src="/testzone.js?v=2026072405"></script>
   </body>
 </html>

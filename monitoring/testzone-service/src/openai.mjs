@@ -3,6 +3,7 @@ Write secure, deterministic k6 JavaScript for API performance tests.
 The script must:
 - import only k6 built-in modules
 - use __ENV.BASE_URL, __ENV.HEADERS_JSON, __ENV.VUS, __ENV.MAX_VUS, __ENV.TARGET_RPS, and __ENV.DURATION
+- build every request URL from __ENV.BASE_URL; never write an absolute HTTP URL literal
 - support constant-arrival-rate when TARGET_RPS is greater than zero and VU mode otherwise
 - tag every request with a stable api tag
 - validate status and required response fields with check()

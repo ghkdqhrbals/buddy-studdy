@@ -1,18 +1,20 @@
 import {
   RUN_PROFILES,
-  buildChartPoints,
+  diagnosticMessage,
   editorPosition,
   formatDate,
   formatMilliseconds,
   formatPercent,
   formatRate,
+  highlightJavaScript,
   lineNumbersFor,
   parseObjectJson,
   runScriptName,
   selectLatestRun,
-} from "./testzone-model.js?v=2026072403";
+} from "./testzone-model.js?v=2026072405";
 
 const API_BASE = "/testzone/api";
+const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
 const state = {
   status: null,
   projects: [],
@@ -21,32 +23,46 @@ const state = {
   components: [],
   projectId: null,
   scriptId: null,
+  selectedRunId: null,
+  runSeries: [],
   dirty: false,
   assistantDraft: null,
   confirmAction: null,
   pollTimer: null,
+  componentPollTimer: null,
+  activeTab: "overview",
+  lintTimer: null,
+  componentId: null,
 };
 
-const elements = Object.fromEntries(
-  [
-    "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
-    "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
-    "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
-    "runRows", "runEmptyState", "runCount", "refreshRunsButton",
-    "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "editorLineNumbers",
-    "editorPosition", "editorDirtyMark", "editorFeedback", "validateScriptButton",
-    "saveScriptButton", "editorRunButton", "deleteScriptButton",
-    "assistantAvailability", "assistantMessages", "assistantDraft", "assistantDraftMessage",
-    "applyAssistantDraftButton", "assistantForm", "assistantPrompt", "assistantSendButton",
-    "componentGrid", "refreshComponentsButton",
-    "runDialog", "runForm", "runProjectName", "runTargetUrl", "runScriptSelect",
-    "runProfileControl", "runDuration", "runVus", "runMaxVus", "runTargetRps",
-    "runHeaders", "runEnvironment", "runFormError", "startRunButton",
-    "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
-    "confirmDialog", "confirmForm", "confirmTitle", "confirmMessage", "confirmActionButton",
-    "toastRegion",
-  ].map((id) => [id, document.getElementById(id)]),
-);
+const elementIds = [
+  "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
+  "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
+  "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
+  "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
+  "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
+  "cancelSelectedRunButton", "viewRunScriptButton",
+  "runRows", "runEmptyState", "runCount", "refreshRunsButton",
+  "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
+  "runDetailScriptButton", "runDetailStatus", "runLogTail", "closeRunDetailButton",
+  "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
+  "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback", "lintPanel",
+  "toggleFilesButton", "toggleAssistantButton", "focusEditorButton", "validateScriptButton",
+  "saveScriptButton", "editorRunButton", "deleteScriptButton",
+  "assistantAvailability", "assistantMessages", "assistantDraft", "assistantDraftMessage",
+  "assistantDraftDiagnostics", "applyAssistantDraftButton", "assistantForm", "assistantPrompt",
+  "assistantSendButton", "componentGrid", "refreshComponentsButton",
+  "runDialog", "runForm", "runProjectName", "runTargetUrl", "runName", "runScriptSelect",
+  "runProfileControl", "runDuration", "runVus", "runMaxVus", "runTargetRps",
+  "runHeaders", "runEnvironment", "runFormError", "startRunButton",
+  "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
+  "scriptSnapshotDialog", "scriptSnapshotTitle", "scriptSnapshotCode",
+  "componentConfigDialog", "componentConfigForm", "componentConfigTitle", "componentConfigFields",
+  "componentCredentialsDialog", "componentCredentialsTitle", "componentCredentialsBody",
+  "confirmDialog", "confirmForm", "confirmTitle", "confirmMessage", "confirmActionButton",
+  "toastRegion",
+];
+const elements = Object.fromEntries(elementIds.map((id) => [id, document.getElementById(id)]));
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -73,6 +89,10 @@ function script() {
   return state.scripts.find((entry) => entry.id === state.scriptId) || null;
 }
 
+function selectedRun() {
+  return state.runs.find((entry) => entry.id === state.selectedRunId) || null;
+}
+
 function setFeedback(element, message, status = "") {
   element.textContent = message;
   element.dataset.state = status;
@@ -94,47 +114,38 @@ function setButtonBusy(button, busy, label) {
 }
 
 function switchTab(name) {
+  state.activeTab = name;
+  window.clearTimeout(state.componentPollTimer);
   document.querySelectorAll(".testzone-tabs button").forEach((button) => {
     button.setAttribute("aria-selected", String(button.dataset.tab === name));
   });
   document.querySelectorAll("[data-panel]").forEach((panel) => {
     panel.hidden = panel.dataset.panel !== name;
   });
-  if (name === "components") loadComponents();
+  if (name === "components") void loadComponents();
   if (name === "scripts") window.setTimeout(syncEditorMetrics, 0);
 }
 
 async function loadStatus() {
-  try {
-    state.status = await api("/status");
-    elements.serviceStatus.textContent = "Ready";
-    elements.serviceStatus.dataset.state = "ready";
-    elements.assistantAvailability.dataset.enabled = String(state.status.integrations.openAI);
-    elements.assistantAvailability.title = state.status.integrations.openAI
-      ? "OpenAI is ready"
-      : "OpenAI key is not configured";
-    elements.assistantPrompt.disabled = !state.status.integrations.openAI;
-    elements.assistantSendButton.disabled = !state.status.integrations.openAI;
-    elements.assistantPrompt.placeholder = state.status.integrations.openAI
-      ? "예: POST /api/v1/studies 요청을 200 RPS로 테스트하고 응답의 id를 검증해줘"
-      : "OpenAI key is not configured on the TestZone server.";
-  } catch (error) {
-    elements.serviceStatus.textContent = "Service unavailable";
-    elements.serviceStatus.dataset.state = "error";
-    throw error;
-  }
+  state.status = await api("/status");
+  elements.serviceStatus.textContent = "Ready";
+  elements.serviceStatus.dataset.state = "ready";
+  elements.assistantAvailability.dataset.enabled = String(state.status.integrations.openAI);
+  elements.assistantAvailability.title = state.status.integrations.openAI
+    ? "OpenAI is ready"
+    : "OpenAI key is not configured";
+  elements.assistantPrompt.disabled = !state.status.integrations.openAI;
+  elements.assistantSendButton.disabled = !state.status.integrations.openAI;
 }
 
 async function loadProjects() {
-  const payload = await api("/projects");
-  state.projects = payload.projects;
+  state.projects = (await api("/projects")).projects;
   const remembered = localStorage.getItem("testzone.projectId");
   state.projectId = state.projects.some((entry) => entry.id === remembered)
     ? remembered
     : state.projects[0]?.id ?? null;
   renderProjects();
   await Promise.all([loadScripts(), loadRuns()]);
-  renderRuns();
 }
 
 function renderProjects() {
@@ -145,8 +156,7 @@ function renderProjects() {
     option.selected = entry.id === state.projectId;
     return option;
   }));
-  const selected = project();
-  elements.projectBaseUrl.value = selected?.baseUrl || "";
+  elements.projectBaseUrl.value = project()?.baseUrl || "";
 }
 
 async function saveProject() {
@@ -154,11 +164,10 @@ async function saveProject() {
   if (!selected) return;
   setButtonBusy(elements.saveProjectButton, true, "Saving");
   try {
-    const payload = await api(`/projects/${selected.id}`, {
+    Object.assign(selected, (await api(`/projects/${selected.id}`, {
       method: "PATCH",
       body: JSON.stringify({ baseUrl: elements.projectBaseUrl.value }),
-    });
-    Object.assign(selected, payload.project);
+    })).project);
     setFeedback(elements.projectFeedback, "Saved", "success");
   } catch (error) {
     setFeedback(elements.projectFeedback, error.message, "error");
@@ -169,8 +178,7 @@ async function saveProject() {
 
 async function loadScripts() {
   if (!state.projectId) return;
-  const payload = await api(`/scripts?projectId=${encodeURIComponent(state.projectId)}`);
-  state.scripts = payload.scripts;
+  state.scripts = (await api(`/scripts?projectId=${encodeURIComponent(state.projectId)}`)).scripts;
   if (!state.scripts.some((entry) => entry.id === state.scriptId)) {
     state.scriptId = state.scripts[0]?.id ?? null;
   }
@@ -212,10 +220,13 @@ function loadScriptIntoEditor() {
   state.dirty = false;
   renderDirtyState();
   syncEditorMetrics();
-  elements.saveScriptButton.disabled = !selected;
-  elements.validateScriptButton.disabled = !selected;
-  elements.editorRunButton.disabled = !selected;
-  elements.deleteScriptButton.disabled = !selected;
+  renderDiagnostics([]);
+  for (const button of [
+    elements.saveScriptButton,
+    elements.validateScriptButton,
+    elements.editorRunButton,
+    elements.deleteScriptButton,
+  ]) button.disabled = !selected;
 }
 
 function renderDirtyState() {
@@ -226,14 +237,38 @@ function markDirty() {
   state.dirty = true;
   renderDirtyState();
   setFeedback(elements.editorFeedback, "Unsaved");
+  window.clearTimeout(state.lintTimer);
+  state.lintTimer = window.setTimeout(() => void validateCurrentScript(true), 700);
 }
 
 function syncEditorMetrics() {
   const code = elements.scriptEditor.value;
   elements.editorLineNumbers.textContent = lineNumbersFor(code);
+  elements.scriptHighlight.innerHTML = highlightJavaScript(code);
   elements.editorLineNumbers.scrollTop = elements.scriptEditor.scrollTop;
+  elements.scriptHighlight.scrollTop = elements.scriptEditor.scrollTop;
+  elements.scriptHighlight.scrollLeft = elements.scriptEditor.scrollLeft;
   const position = editorPosition(code, elements.scriptEditor.selectionStart);
   elements.editorPosition.textContent = `Ln ${position.line}, Col ${position.column}`;
+}
+
+function renderDiagnostics(diagnostics = []) {
+  elements.lintPanel.hidden = diagnostics.length === 0;
+  elements.lintPanel.replaceChildren(...diagnostics.map((diagnostic) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = diagnosticMessage(diagnostic);
+    button.addEventListener("click", () => {
+      const lines = elements.scriptEditor.value.split("\n");
+      const line = Math.max(1, Number(diagnostic.line || 1));
+      const column = Math.max(1, Number(diagnostic.column || 1));
+      const offset = lines.slice(0, line - 1).reduce((sum, value) => sum + value.length + 1, 0) + column - 1;
+      elements.scriptEditor.focus();
+      elements.scriptEditor.setSelectionRange(offset, offset);
+      syncEditorMetrics();
+    });
+    return button;
+  }));
 }
 
 async function saveScript() {
@@ -241,45 +276,46 @@ async function saveScript() {
   if (!selected) return;
   setButtonBusy(elements.saveScriptButton, true, "Saving");
   try {
-    const payload = await api(`/scripts/${selected.id}`, {
+    Object.assign(selected, (await api(`/scripts/${selected.id}`, {
       method: "PATCH",
-      body: JSON.stringify({
-        name: elements.scriptNameInput.value,
-        code: elements.scriptEditor.value,
-      }),
-    });
-    Object.assign(selected, payload.script);
+      body: JSON.stringify({ name: elements.scriptNameInput.value, code: elements.scriptEditor.value }),
+    })).script);
     state.dirty = false;
     renderDirtyState();
     renderScripts();
     setFeedback(elements.editorFeedback, "Saved", "success");
   } catch (error) {
-    setFeedback(elements.editorFeedback, error.details?.[0] || error.message, "error");
+    renderDiagnostics(error.details);
+    setFeedback(elements.editorFeedback, diagnosticMessage(error.details?.[0]) || error.message, "error");
   } finally {
     setButtonBusy(elements.saveScriptButton, false);
   }
 }
 
-async function validateCurrentScript() {
+async function validateCurrentScript(quiet = false) {
   const selected = script();
-  if (!selected) return;
-  setButtonBusy(elements.validateScriptButton, true, "Checking");
+  if (!selected) return false;
+  if (!quiet) setButtonBusy(elements.validateScriptButton, true, "Checking");
   try {
-    const payload = await api(`/scripts/${selected.id}/validate`, {
+    const validation = (await api(`/scripts/${selected.id}/validate`, {
       method: "POST",
       body: JSON.stringify({
         code: elements.scriptEditor.value,
         baseUrl: project()?.baseUrl,
+        duration: elements.runDuration.value,
       }),
-    });
-    setFeedback(elements.editorFeedback, `Valid · ${payload.validation.bytes.toLocaleString()} bytes`, "success");
-    toast("Script validation passed.");
+    })).validation;
+    renderDiagnostics([]);
+    setFeedback(elements.editorFeedback, `Valid · ${validation.bytes.toLocaleString()} bytes`, "success");
+    if (!quiet) toast("Script validation passed.");
+    return true;
   } catch (error) {
-    const message = [error.message, ...(error.details || [])].join(" ");
-    setFeedback(elements.editorFeedback, error.details?.[0] || error.message, "error");
-    toast(message, "error");
+    renderDiagnostics(error.details);
+    setFeedback(elements.editorFeedback, diagnosticMessage(error.details?.[0]) || error.message, "error");
+    if (!quiet) toast(error.details.map(diagnosticMessage).join(" ") || error.message, "error");
+    return false;
   } finally {
-    setButtonBusy(elements.validateScriptButton, false);
+    if (!quiet) setButtonBusy(elements.validateScriptButton, false);
   }
 }
 
@@ -292,7 +328,6 @@ function openNewScriptDialog() {
 
 async function createScript(event) {
   event.preventDefault();
-  const code = script()?.code || elements.scriptEditor.value;
   try {
     const payload = await api("/scripts", {
       method: "POST",
@@ -300,7 +335,7 @@ async function createScript(event) {
         projectId: state.projectId,
         name: elements.newScriptName.value,
         description: elements.newScriptDescription.value,
-        code,
+        code: script()?.code || elements.scriptEditor.value,
       }),
     });
     state.scripts.unshift(payload.script);
@@ -309,19 +344,14 @@ async function createScript(event) {
     renderScripts();
     toast("New script created.");
   } catch (error) {
-    toast(error.details?.[0] || error.message, "error");
+    toast(error.details.map(diagnosticMessage).join(" ") || error.message, "error");
   }
 }
 
 async function deleteCurrentScript() {
   const selected = script();
   if (!selected) return;
-  const accepted = await confirmAction(
-    "Delete script?",
-    `${selected.name} 파일을 삭제합니다. 완료된 실행 결과는 유지됩니다.`,
-    "Delete script",
-  );
-  if (!accepted) return;
+  if (!await confirmAction("Delete script?", `${selected.name} 파일을 삭제합니다. 실행 스냅샷은 유지됩니다.`, "Delete script")) return;
   try {
     await api(`/scripts/${selected.id}`, { method: "DELETE" });
     state.scripts = state.scripts.filter((entry) => entry.id !== selected.id);
@@ -348,8 +378,18 @@ async function askAssistant(event) {
     });
     state.assistantDraft = payload.result.code;
     elements.assistantDraftMessage.textContent = payload.result.message;
+    elements.assistantDraftDiagnostics.replaceChildren(...(payload.validation?.diagnostics || []).map((entry) => {
+      const item = document.createElement("li");
+      item.textContent = diagnosticMessage(entry);
+      return item;
+    }));
     elements.assistantDraft.hidden = false;
-    appendAssistantMessage(payload.result.message, "assistant");
+    appendAssistantMessage(
+      payload.validation?.valid
+        ? payload.result.message
+        : `${payload.result.message} 생성된 초안에 수정할 진단이 있습니다.`,
+      "assistant",
+    );
   } catch (error) {
     appendAssistantMessage(error.message, "error");
   } finally {
@@ -379,31 +419,67 @@ function applyAssistantDraft() {
 
 async function loadRuns() {
   if (!state.projectId) return;
-  const payload = await api(`/runs?projectId=${encodeURIComponent(state.projectId)}`);
-  state.runs = payload.runs;
+  state.runs = (await api(`/runs?projectId=${encodeURIComponent(state.projectId)}`)).runs;
+  if (!state.runs.some((run) => run.id === state.selectedRunId)) {
+    state.selectedRunId = selectLatestRun(state.runs)?.id || null;
+  }
   renderRuns();
+  await loadSelectedRunSeries();
   scheduleRunPolling();
+}
+
+function runMetric(run, key) {
+  if (run.summary?.[key] !== null && run.summary?.[key] !== undefined) return run.summary[key];
+  const map = { requestRate: "requestRate", p95Ms: "p95Ms", errorRate: "errorRate" };
+  return run.live?.[map[key]];
 }
 
 function renderRuns() {
   const latest = selectLatestRun(state.runs);
   elements.summaryStatus.textContent = latest?.status || "No runs";
-  elements.summaryRps.textContent = formatRate(latest?.summary?.requestRate);
-  elements.summaryP95.textContent = formatMilliseconds(latest?.summary?.p95Ms);
-  elements.summaryError.textContent = formatPercent(latest?.summary?.errorRate);
+  elements.summaryRps.textContent = formatRate(latest ? runMetric(latest, "requestRate") : null);
+  elements.summaryP95.textContent = formatMilliseconds(latest ? runMetric(latest, "p95Ms") : null);
+  elements.summaryError.textContent = formatPercent(latest ? runMetric(latest, "errorRate") : null);
   elements.runCount.textContent = `${state.runs.length.toLocaleString()} runs`;
   elements.runEmptyState.hidden = state.runs.length > 0;
+
+  elements.recentRunSelect.replaceChildren(...state.runs.map((run) => {
+    const option = document.createElement("option");
+    option.value = run.id;
+    option.textContent = `${run.name || run.scriptName} · ${formatDate(run.startedAt || run.createdAt)}`;
+    option.selected = run.id === state.selectedRunId;
+    return option;
+  }));
+
   elements.runRows.replaceChildren(...state.runs.map((run) => {
     const row = document.createElement("tr");
-    const cells = [
-      formatDate(run.startedAt || run.createdAt),
-      runScriptName(run, state.scripts),
-      run.profile,
-    ].map((value) => {
-      const cell = document.createElement("td");
-      cell.textContent = value;
-      return cell;
+    row.dataset.runId = run.id;
+    row.classList.toggle("is-selected", run.id === state.selectedRunId);
+    row.addEventListener("click", () => void selectRun(run.id));
+    const started = document.createElement("td");
+    started.textContent = formatDate(run.startedAt || run.createdAt);
+    const name = document.createElement("td");
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "table-link";
+    nameButton.textContent = run.name || run.scriptName || "Untitled test";
+    nameButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void selectRun(run.id);
     });
+    name.append(nameButton);
+    const scriptCell = document.createElement("td");
+    const scriptButton = document.createElement("button");
+    scriptButton.type = "button";
+    scriptButton.className = "table-link";
+    scriptButton.textContent = runScriptName(run, state.scripts);
+    scriptButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void openRunScript(run);
+    });
+    scriptCell.append(scriptButton);
+    const profile = document.createElement("td");
+    profile.textContent = run.profile;
     const statusCell = document.createElement("td");
     const status = document.createElement("span");
     status.className = "status-pill";
@@ -411,9 +487,9 @@ function renderRuns() {
     status.textContent = run.status;
     statusCell.append(status);
     const metrics = [
-      formatRate(run.summary?.requestRate),
-      formatMilliseconds(run.summary?.p95Ms),
-      formatPercent(run.summary?.errorRate),
+      formatRate(runMetric(run, "requestRate")),
+      formatMilliseconds(runMetric(run, "p95Ms")),
+      formatPercent(runMetric(run, "errorRate")),
     ].map((value) => {
       const cell = document.createElement("td");
       cell.textContent = value;
@@ -421,21 +497,23 @@ function renderRuns() {
     });
     const actions = document.createElement("td");
     actions.className = "row-actions";
-    if (["queued", "running", "cancelling"].includes(run.status)) {
-      actions.append(actionButton("Cancel", () => cancelRun(run.id)));
+    const grafana = document.createElement("a");
+    grafana.className = "row-action";
+    grafana.href = run.grafanaUrl;
+    grafana.target = "_blank";
+    grafana.rel = "noreferrer";
+    grafana.textContent = "Grafana";
+    grafana.addEventListener("click", (event) => event.stopPropagation());
+    actions.append(grafana);
+    if (ACTIVE_STATUSES.has(run.status)) {
+      actions.append(actionButton("Cancel", () => cancelRun(run.id), true));
     } else {
-      const grafana = document.createElement("a");
-      grafana.className = "row-action";
-      grafana.href = run.grafanaUrl;
-      grafana.target = "_blank";
-      grafana.rel = "noreferrer";
-      grafana.textContent = "Grafana";
-      actions.append(grafana, actionButton("Delete", () => deleteRun(run), true));
+      actions.append(actionButton("Delete", () => deleteRun(run), true));
     }
-    row.append(...cells, statusCell, ...metrics, actions);
+    row.append(started, name, scriptCell, profile, statusCell, ...metrics, actions);
     return row;
   }));
-  drawRunChart();
+  renderSelectedRun();
 }
 
 function actionButton(label, handler, danger = false) {
@@ -443,14 +521,68 @@ function actionButton(label, handler, danger = false) {
   button.type = "button";
   button.className = `row-action${danger ? " danger" : ""}`;
   button.textContent = label;
-  button.addEventListener("click", handler);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void handler();
+  });
   return button;
+}
+
+async function selectRun(id) {
+  state.selectedRunId = id;
+  renderRuns();
+  await loadSelectedRunSeries();
+}
+
+async function loadSelectedRunSeries() {
+  const run = selectedRun();
+  if (!run) {
+    state.runSeries = [];
+    renderSelectedRun();
+    return;
+  }
+  try {
+    state.runSeries = (await api(`/runs/${run.id}/series`)).series;
+  } catch {
+    state.runSeries = [];
+  }
+  renderSelectedRun();
+}
+
+function renderSelectedRun() {
+  const run = selectedRun();
+  elements.runDetail.hidden = !run;
+  elements.liveRunStrip.hidden = !run || !ACTIVE_STATUSES.has(run.status);
+  elements.cancelSelectedRunButton.disabled = !run || !ACTIVE_STATUSES.has(run.status);
+  elements.viewRunScriptButton.disabled = !run;
+  if (!run) {
+    elements.timelineTitle.textContent = "Run time-series";
+    elements.timelineRunMeta.textContent = "Select a run from history.";
+    elements.timelineGrafanaLink.href = "https://grafana.lowfidev.cloud/";
+    drawRunChart();
+    return;
+  }
+  elements.timelineTitle.textContent = run.name || run.scriptName;
+  elements.timelineGrafanaLink.href = run.grafanaUrl;
+  elements.timelineRunMeta.textContent = `${run.profile} · ${formatDate(run.startedAt || run.createdAt)} · ${run.status}`;
+  elements.liveRps.textContent = formatRate(run.live?.requestRate);
+  elements.liveProgress.textContent = run.live
+    ? `${Math.round((run.live.progress || 0) * 100)}% · ${run.live.vus || 0} VUs · p95 ${formatMilliseconds(run.live.p95Ms)}`
+    : "Preparing k6 metrics";
+  elements.runDetailTitle.textContent = run.name || run.scriptName;
+  elements.runDetailMeta.textContent = `${formatDate(run.startedAt || run.createdAt)} · ${run.id}`;
+  elements.runDetailTarget.textContent = project()?.baseUrl || "-";
+  elements.runDetailConfig.textContent = `${run.options?.duration || "-"} · ${run.options?.targetRps || 0} RPS · ${run.options?.maxVus || 0} max VUs`;
+  elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
+  elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
+  elements.runLogTail.textContent = (run.logTail || []).join("\n") || "No k6 log output.";
+  drawRunChart();
 }
 
 function scheduleRunPolling() {
   window.clearTimeout(state.pollTimer);
-  if (state.runs.some((run) => ["queued", "running", "cancelling"].includes(run.status))) {
-    state.pollTimer = window.setTimeout(loadRuns, 2000);
+  if (state.runs.some((run) => ACTIVE_STATUSES.has(run.status))) {
+    state.pollTimer = window.setTimeout(() => void loadRuns(), 1500);
   }
 }
 
@@ -465,17 +597,25 @@ async function cancelRun(id) {
 }
 
 async function deleteRun(run) {
-  const accepted = await confirmAction(
-    "Delete run?",
-    `${formatDate(run.startedAt || run.createdAt)} 실행과 InfluxDB 시계열을 함께 삭제합니다.`,
-    "Delete run",
-  );
-  if (!accepted) return;
+  if (!await confirmAction("Delete run?", `${run.name || run.scriptName} 실행과 InfluxDB 시계열을 삭제합니다.`, "Delete run")) return;
   try {
     await api(`/runs/${run.id}`, { method: "DELETE" });
     state.runs = state.runs.filter((entry) => entry.id !== run.id);
+    state.selectedRunId = selectLatestRun(state.runs)?.id || null;
     renderRuns();
+    await loadSelectedRunSeries();
     toast("Run and time-series data deleted.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function openRunScript(run) {
+  try {
+    const payload = await api(`/runs/${run.id}/script`);
+    elements.scriptSnapshotTitle.textContent = `${run.name || run.scriptName} · ${payload.script.name || "Script snapshot"}`;
+    elements.scriptSnapshotCode.innerHTML = highlightJavaScript(payload.script.code);
+    elements.scriptSnapshotDialog.showModal();
   } catch (error) {
     toast(error.message, "error");
   }
@@ -483,6 +623,10 @@ async function deleteRun(run) {
 
 function drawRunChart() {
   const canvas = elements.runHistoryChart;
+  const points = state.runSeries;
+  elements.timelineEmptyState.hidden = points.length > 0;
+  canvas.hidden = points.length === 0;
+  if (!points.length) return;
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(320, Math.round(rect.width));
   const height = 260;
@@ -492,19 +636,12 @@ function drawRunChart() {
   const context = canvas.getContext("2d");
   context.scale(ratio, ratio);
   context.clearRect(0, 0, width, height);
-  const points = buildChartPoints(state.runs);
-  if (!points.length) {
-    context.fillStyle = "#7b8a9e";
-    context.font = "12px system-ui";
-    context.textAlign = "center";
-    context.fillText("Completed runs will appear here.", width / 2, height / 2);
-    return;
-  }
-  const padding = { top: 22, right: 44, bottom: 34, left: 44 };
+  const padding = { top: 18, right: 44, bottom: 30, left: 48 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const maxRps = Math.max(...points.map((point) => point.rps), 1) * 1.15;
-  const maxP95 = Math.max(...points.map((point) => point.p95), 1) * 1.15;
+  const maxRps = Math.max(...points.map((point) => Number(point.requestRate) || 0), 1) * 1.12;
+  const maxP95 = Math.max(...points.map((point) => Number(point.p95Ms) || 0), 1) * 1.12;
+  const maxVus = Math.max(...points.map((point) => Number(point.vus) || 0), 1) * 1.12;
   context.strokeStyle = "#e4e9ef";
   context.lineWidth = 1;
   for (let index = 0; index <= 4; index += 1) {
@@ -514,34 +651,35 @@ function drawRunChart() {
     context.lineTo(width - padding.right, y);
     context.stroke();
   }
-  const step = chartWidth / points.length;
-  const barWidth = Math.min(26, step * 0.5);
-  points.forEach((point, index) => {
-    const x = padding.left + step * index + step / 2;
-    const barHeight = (point.rps / maxRps) * chartHeight;
-    context.fillStyle = "#2166d1";
-    context.fillRect(x - barWidth / 2, padding.top + chartHeight - barHeight, barWidth, barHeight);
-    context.fillStyle = "#64748b";
-    context.font = "9px system-ui";
-    context.textAlign = "center";
-    context.fillText(point.label, x, height - 12);
-  });
-  context.beginPath();
-  points.forEach((point, index) => {
-    const x = padding.left + step * index + step / 2;
-    const y = padding.top + chartHeight - (point.p95 / maxP95) * chartHeight;
-    if (index === 0) context.moveTo(x, y);
-    else context.lineTo(x, y);
-  });
-  context.strokeStyle = "#e4982b";
-  context.lineWidth = 2;
-  context.stroke();
+  const xAt = (index) => padding.left + (chartWidth * index) / Math.max(1, points.length - 1);
+  const drawLine = (selector, maximum, color, widthValue = 2) => {
+    context.beginPath();
+    points.forEach((point, index) => {
+      const x = xAt(index);
+      const y = padding.top + chartHeight - ((Number(selector(point)) || 0) / maximum) * chartHeight;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.strokeStyle = color;
+    context.lineWidth = widthValue;
+    context.stroke();
+  };
+  drawLine((point) => point.requestRate, maxRps, "#2166d1", 2.5);
+  drawLine((point) => point.p95Ms, maxP95, "#e4982b");
+  drawLine((point) => point.errorRate, 1, "#c63a3a");
+  drawLine((point) => point.vus, maxVus, "#16825d", 1.5);
   context.fillStyle = "#64748b";
-  context.font = "9px system-ui";
+  context.font = "10px system-ui";
   context.textAlign = "left";
   context.fillText(`${Math.round(maxRps)} RPS`, 2, padding.top + 4);
   context.textAlign = "right";
   context.fillText(formatMilliseconds(maxP95), width - 2, padding.top + 4);
+  const first = new Date(points[0].timestamp);
+  const last = new Date(points.at(-1).timestamp);
+  context.textAlign = "left";
+  context.fillText(first.toLocaleTimeString("ko-KR"), padding.left, height - 8);
+  context.textAlign = "right";
+  context.fillText(last.toLocaleTimeString("ko-KR"), width - padding.right, height - 8);
 }
 
 function applyProfile(name) {
@@ -554,6 +692,8 @@ function applyProfile(name) {
   elements.runMaxVus.value = profile.maxVus;
   elements.runTargetRps.value = profile.targetRps;
   elements.runForm.dataset.profile = name;
+  const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
+  elements.runName.value = `${selectedScript?.name?.replace(/\.js$/, "") || "API test"} · ${profile.label}`;
 }
 
 function openRunDialog(profileName = "standard", scriptId = null) {
@@ -575,11 +715,10 @@ async function startRun(event) {
   setButtonBusy(elements.startRunButton, true, "Starting");
   elements.runFormError.textContent = "";
   try {
-    const headers = parseObjectJson(elements.runHeaders.value, "Headers");
-    const environment = parseObjectJson(elements.runEnvironment.value, "Environment");
-    await api("/runs", {
+    const payload = await api("/runs", {
       method: "POST",
       body: JSON.stringify({
+        name: elements.runName.value,
         projectId: state.projectId,
         scriptId: elements.runScriptSelect.value,
         profile: elements.runForm.dataset.profile || "custom",
@@ -589,16 +728,17 @@ async function startRun(event) {
           maxVus: Number(elements.runMaxVus.value),
           targetRps: Number(elements.runTargetRps.value),
         },
-        headers,
-        environment,
+        headers: parseObjectJson(elements.runHeaders.value, "Headers"),
+        environment: parseObjectJson(elements.runEnvironment.value, "Environment"),
       }),
     });
+    state.selectedRunId = payload.run.id;
     elements.runDialog.close();
     switchTab("overview");
     toast("Performance test started.");
     await loadRuns();
   } catch (error) {
-    elements.runFormError.textContent = [error.message, ...(error.details || [])].join(" ");
+    elements.runFormError.textContent = [error.message, ...error.details.map(diagnosticMessage)].join(" ");
   } finally {
     setButtonBusy(elements.startRunButton, false);
   }
@@ -607,13 +747,20 @@ async function startRun(event) {
 async function loadComponents() {
   elements.componentGrid.setAttribute("aria-busy", "true");
   try {
-    const payload = await api("/components");
-    state.components = payload.components;
+    state.components = (await api("/components")).components;
     renderComponents();
   } catch (error) {
     toast(error.message, "error");
   } finally {
     elements.componentGrid.removeAttribute("aria-busy");
+    scheduleComponentPolling();
+  }
+}
+
+function scheduleComponentPolling() {
+  window.clearTimeout(state.componentPollTimer);
+  if (state.activeTab === "components") {
+    state.componentPollTimer = window.setTimeout(() => void loadComponents(), 3_000);
   }
 }
 
@@ -622,8 +769,12 @@ function renderComponents() {
     const card = document.createElement("article");
     card.className = "component-card";
     const header = document.createElement("header");
-    const heading = document.createElement("h3");
-    heading.textContent = component.name;
+    const heading = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = component.name;
+    const image = document.createElement("span");
+    image.textContent = component.image;
+    heading.append(title, image);
     const status = document.createElement("span");
     status.className = "status-pill";
     status.dataset.status = component.status;
@@ -631,17 +782,38 @@ function renderComponents() {
     header.append(heading, status);
     const endpoint = document.createElement("code");
     endpoint.textContent = component.endpoint;
+    const metrics = document.createElement("dl");
+    metrics.className = "component-metrics";
+    const values = [
+      ["CPU", component.metrics ? `${component.metrics.cpuPercent.toFixed(1)}%` : "-"],
+      ["Memory", component.metrics ? `${component.metrics.memoryUsedMb.toFixed(0)} / ${component.metrics.memoryLimitMb.toFixed(0)} MB` : "-"],
+      ["Host port", String(component.config.hostPort)],
+      ["Resources", `${component.config.cpus} CPU · ${component.config.memoryMb} MB`],
+    ];
+    for (const [label, value] of values) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = value;
+      metrics.append(term, detail);
+    }
     const actions = document.createElement("div");
     actions.className = "component-actions";
+    actions.append(
+      componentAction("Configure", component.id, "config"),
+      componentAction("Credentials", component.id, "credentials"),
+    );
     if (component.status === "not-deployed" || component.status === "exited") {
       actions.append(componentAction("Deploy", component.id, "deploy", true));
     } else {
       actions.append(
+        componentAction("Apply", component.id, "deploy", true),
         componentAction("Restart", component.id, "restart"),
-        componentAction("Delete", component.id, "delete", false, true),
+        componentAction("Reset", component.id, "reset", false, true),
+        componentAction("Return", component.id, "delete", false, true),
       );
     }
-    card.append(header, endpoint, actions);
+    card.append(header, endpoint, metrics, actions);
     return card;
   }));
 }
@@ -652,15 +824,15 @@ function componentAction(label, id, action, primary = false, danger = false) {
   button.className = `button ${primary ? "button-primary" : danger ? "button-danger" : "button-secondary"}`;
   button.textContent = label;
   button.addEventListener("click", async () => {
-    if (action === "delete") {
-      const accepted = await confirmAction(
-        `Delete ${id}?`,
-        "테스트 컴포넌트 컨테이너를 즉시 제거합니다.",
-        "Delete component",
-      );
-      if (!accepted) return;
+    if (action === "config") return openComponentConfig(id);
+    if (action === "credentials") return openComponentCredentials(id);
+    if (["delete", "reset"].includes(action)) {
+      const message = action === "reset"
+        ? "저장된 테스트 데이터를 삭제하고 새 인스턴스로 다시 배포합니다."
+        : "컨테이너와 테스트 데이터 볼륨을 반납합니다.";
+      if (!await confirmAction(`${label} ${id}?`, message, label)) return;
     }
-    setButtonBusy(button, true, action === "delete" ? "Deleting" : action === "restart" ? "Restarting" : "Deploying");
+    setButtonBusy(button, true, `${label}…`);
     try {
       await api(`/components/${id}${action === "delete" ? "" : `/${action}`}`, {
         method: action === "delete" ? "DELETE" : "POST",
@@ -674,6 +846,105 @@ function componentAction(label, id, action, primary = false, danger = false) {
     }
   });
   return button;
+}
+
+function configField(name, label, value, options = null) {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = label;
+  let control;
+  if (options) {
+    control = document.createElement("select");
+    for (const optionValue of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionValue;
+      option.selected = optionValue === value;
+      control.append(option);
+    }
+  } else {
+    control = document.createElement("input");
+    control.value = value;
+    control.type = typeof value === "number" ? "number" : "text";
+    if (name === "cpus") control.step = "0.1";
+  }
+  control.name = name;
+  wrapper.append(control);
+  return wrapper;
+}
+
+function openComponentConfig(id) {
+  const component = state.components.find((entry) => entry.id === id);
+  if (!component) return;
+  state.componentId = id;
+  elements.componentConfigTitle.textContent = `Configure ${component.name}`;
+  const config = component.config;
+  const fields = [
+    configField("imageTag", "Image version", config.imageTag, id === "postgres" ? ["16-alpine", "17-alpine"] : ["7.4-alpine", "8-alpine"]),
+    configField("hostPort", "Host port", config.hostPort),
+    configField("cpus", "CPU limit", config.cpus),
+    configField("memoryMb", "Memory limit (MB)", config.memoryMb),
+  ];
+  if (id === "postgres") {
+    fields.push(
+      configField("database", "Database", config.database),
+      configField("username", "Username", config.username),
+    );
+  } else {
+    fields.push(
+      configField("maxMemoryMb", "Redis max memory (MB)", config.maxMemoryMb),
+      configField("evictionPolicy", "Eviction policy", config.evictionPolicy, ["allkeys-lru", "allkeys-lfu", "volatile-lru", "noeviction"]),
+    );
+  }
+  elements.componentConfigFields.replaceChildren(...fields);
+  elements.componentConfigDialog.showModal();
+}
+
+async function saveComponentConfig(event) {
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(elements.componentConfigForm));
+  for (const key of ["hostPort", "cpus", "memoryMb", "maxMemoryMb"]) {
+    if (values[key] !== undefined) values[key] = Number(values[key]);
+  }
+  try {
+    await api(`/components/${state.componentId}/config`, {
+      method: "PUT",
+      body: JSON.stringify(values),
+    });
+    elements.componentConfigDialog.close();
+    toast("Parameters saved. Use Apply to recreate the container. Reset is required for PostgreSQL database or username changes.");
+    await loadComponents();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function openComponentCredentials(id) {
+  try {
+    const credentials = (await api(`/components/${id}/credentials`)).credentials;
+    state.componentId = id;
+    elements.componentCredentialsTitle.textContent = `${id} credentials`;
+    elements.componentCredentialsBody.replaceChildren(...Object.entries(credentials).map(([key, value]) => {
+      const row = document.createElement("div");
+      row.className = "credential-row";
+      const label = document.createElement("span");
+      label.textContent = key;
+      const code = document.createElement("code");
+      code.textContent = value;
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "row-action";
+      copy.textContent = "Copy";
+      copy.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(String(value));
+        toast(`${key} copied.`);
+      });
+      row.append(label, code, copy);
+      return row;
+    }));
+    elements.componentCredentialsDialog.showModal();
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 function confirmAction(title, message, actionLabel) {
@@ -698,16 +969,25 @@ function closeDialog(button) {
 function handleEditorKeydown(event) {
   if (event.key === "Tab") {
     event.preventDefault();
-    const start = elements.scriptEditor.selectionStart;
-    const end = elements.scriptEditor.selectionEnd;
-    elements.scriptEditor.setRangeText("  ", start, end, "end");
+    elements.scriptEditor.setRangeText(
+      "  ",
+      elements.scriptEditor.selectionStart,
+      elements.scriptEditor.selectionEnd,
+      "end",
+    );
     markDirty();
     syncEditorMetrics();
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    saveScript();
+    void saveScript();
   }
+}
+
+function togglePane(pane, button, className) {
+  pane.classList.toggle("is-hidden");
+  button.setAttribute("aria-pressed", String(!pane.classList.contains("is-hidden")));
+  document.querySelector(".ide-shell").classList.toggle(className, pane.classList.contains("is-hidden"));
 }
 
 function bindEvents() {
@@ -720,10 +1000,10 @@ function bindEvents() {
   elements.projectSelect.addEventListener("change", async () => {
     state.projectId = elements.projectSelect.value;
     state.scriptId = null;
+    state.selectedRunId = null;
     localStorage.setItem("testzone.projectId", state.projectId);
     renderProjects();
     await Promise.all([loadScripts(), loadRuns()]);
-    renderRuns();
   });
   elements.saveProjectButton.addEventListener("click", saveProject);
   elements.headerRunButton.addEventListener("click", () => openRunDialog());
@@ -733,6 +1013,19 @@ function bindEvents() {
     if (button) openRunDialog(button.dataset.profile, elements.quickScriptSelect.value);
   });
   elements.refreshRunsButton.addEventListener("click", loadRuns);
+  elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
+  elements.cancelSelectedRunButton.addEventListener("click", () => {
+    if (state.selectedRunId) void cancelRun(state.selectedRunId);
+  });
+  elements.viewRunScriptButton.addEventListener("click", () => {
+    if (selectedRun()) void openRunScript(selectedRun());
+  });
+  elements.runDetailScriptButton.addEventListener("click", () => {
+    if (selectedRun()) void openRunScript(selectedRun());
+  });
+  elements.closeRunDetailButton.addEventListener("click", () => {
+    elements.runDetail.hidden = true;
+  });
   elements.scriptList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-script-id]");
     if (!button) return;
@@ -746,23 +1039,36 @@ function bindEvents() {
     markDirty();
     syncEditorMetrics();
   });
-  elements.scriptEditor.addEventListener("scroll", syncEditorMetrics);
-  elements.scriptEditor.addEventListener("click", syncEditorMetrics);
-  elements.scriptEditor.addEventListener("keyup", syncEditorMetrics);
+  for (const eventName of ["scroll", "click", "keyup"]) {
+    elements.scriptEditor.addEventListener(eventName, syncEditorMetrics);
+  }
   elements.scriptEditor.addEventListener("keydown", handleEditorKeydown);
   elements.scriptNameInput.addEventListener("input", markDirty);
   elements.saveScriptButton.addEventListener("click", saveScript);
-  elements.validateScriptButton.addEventListener("click", validateCurrentScript);
+  elements.validateScriptButton.addEventListener("click", () => void validateCurrentScript(false));
   elements.editorRunButton.addEventListener("click", () => openRunDialog("standard", state.scriptId));
   elements.deleteScriptButton.addEventListener("click", deleteCurrentScript);
+  elements.toggleFilesButton.addEventListener("click", () =>
+    togglePane(document.querySelector(".file-pane"), elements.toggleFilesButton, "files-hidden"));
+  elements.toggleAssistantButton.addEventListener("click", () =>
+    togglePane(document.querySelector(".assistant-pane"), elements.toggleAssistantButton, "assistant-hidden"));
+  elements.focusEditorButton.addEventListener("click", () => {
+    document.querySelector(".ide-shell").classList.toggle("focus-mode");
+    elements.focusEditorButton.setAttribute(
+      "aria-pressed",
+      String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
+    );
+  });
   elements.assistantForm.addEventListener("submit", askAssistant);
   elements.applyAssistantDraftButton.addEventListener("click", applyAssistantDraft);
   elements.runProfileControl.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");
     if (button) applyProfile(button.dataset.profile);
   });
+  elements.runScriptSelect.addEventListener("change", () => applyProfile(elements.runForm.dataset.profile || "custom"));
   elements.runForm.addEventListener("submit", startRun);
   elements.refreshComponentsButton.addEventListener("click", loadComponents);
+  elements.componentConfigForm.addEventListener("submit", saveComponentConfig);
   elements.confirmForm.addEventListener("submit", (event) => {
     event.preventDefault();
     elements.confirmDialog.close();
@@ -778,11 +1084,10 @@ async function initialize() {
     await loadStatus();
     await loadProjects();
   } catch (error) {
+    elements.serviceStatus.textContent = "Service unavailable";
+    elements.serviceStatus.dataset.state = "error";
     toast(error.message, "error");
-    document.querySelectorAll("button, input, select, textarea").forEach((control) => {
-      if (!control.closest(".side-nav")) control.disabled = true;
-    });
   }
 }
 
-initialize();
+void initialize();

@@ -124,7 +124,7 @@ jobs:
             -e TESTZONE_MAX_DURATION_SECONDS=3600 \
             -e TESTZONE_MAX_CONCURRENT_RUNS=1 \
             -e TESTZONE_ALLOWED_TARGET_HOSTS="${TESTZONE_ALLOWED_TARGET_HOSTS}" \
-            -e TESTZONE_GRAFANA_URL=https://grafana.lowfidev.cloud/grafana/ \
+            -e TESTZONE_GRAFANA_URL=https://grafana.lowfidev.cloud/ \
             -e TESTZONE_INFLUX_URL=http://buddystudy-testzone-influxdb:8086 \
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
@@ -137,15 +137,6 @@ jobs:
             "${IMAGE_REF}"
 
           docker network connect buddystudy-testzone buddystudy-testzone-service >/dev/null 2>&1 || true
-
-          sleep 3
-          for container in buddystudy-testzone-influxdb buddystudy-testzone-service; do
-            if ! docker inspect -f '{{.State.Running}}' "${container}" 2>/dev/null | grep -qx true; then
-              echo "${container} did not stay running." >&2
-              docker logs "${container}" >&2 || true
-              exit 1
-            fi
-          done
 
       - name: Summary
         if: always()

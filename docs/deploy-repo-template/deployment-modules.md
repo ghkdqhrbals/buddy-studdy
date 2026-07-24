@@ -10,6 +10,7 @@ one workflow run just because they share a host.
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth |
+| Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
 
@@ -53,6 +54,10 @@ one workflow run just because they share a host.
   The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns
   persistent local InfluxDB/component credentials under
   `MACBOOKAIR_TESTZONE_ROOT`.
+- Monitoring hostname or port changes: run the monitoring routing workflow
+  after the monitoring deploy. Routingflare maps
+  `monitoring.lowfidev.cloud` to the dashboard and
+  `grafana.lowfidev.cloud` to the standalone Grafana origin.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The

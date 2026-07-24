@@ -2,6 +2,7 @@ package com.buddystudy.backend.monitoring.adapter.inbound.scheduler
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Tag
 import io.r2dbc.pool.ConnectionPool
 import io.r2dbc.pool.PoolMetrics
 import io.r2dbc.spi.ConnectionFactory
@@ -83,7 +84,7 @@ internal class RuntimeMetricsSampler(
         val openFileDescriptors = collect("openFileDescriptors", unavailable) {
             countOpenFileDescriptors()
         }
-        val pool = collect("r2dbcPool", unavailable) { connectionPoolMetrics() }
+        val pool = collect("databasePool", unavailable) { databasePoolMetrics() }
         val processCpu = collect("processCpu", unavailable) { percentageGauge("process.cpu.usage") }
         val systemCpu = collect("systemCpu", unavailable) { percentageGauge("system.cpu.usage") }
         val eventLoopPendingTasks = collect("nettyEventLoopPendingTasks", unavailable) {
@@ -109,7 +110,7 @@ internal class RuntimeMetricsSampler(
         if (residentMemory == null) unavailable += "processResidentMemory"
         if (rootDisk == null) unavailable += "rootDisk"
         if (network == null) unavailable += "networkIo"
-        if (pool == null) unavailable += "r2dbcPool"
+        if (pool == null) unavailable += "databasePool"
         if (eventLoopPendingTasks.total == null) unavailable += "nettyEventLoopPendingTasks"
         if (activeConnections.total == null) unavailable += "nettyActiveConnections"
 
@@ -137,11 +138,11 @@ internal class RuntimeMetricsSampler(
             rootDiskUsedBytes = rootDisk?.usedBytes,
             networkReceiveBytesTotal = network?.receiveBytes,
             networkTransmitBytesTotal = network?.transmitBytes,
-            heapUsedBytes = heap?.used?.nonNegativeOrNull(),
-            heapCommittedBytes = heap?.committed?.nonNegativeOrNull(),
-            heapMaxBytes = heap?.max?.nonNegativeOrNull(),
-            nonHeapUsedBytes = nonHeap?.used?.nonNegativeOrNull(),
-            nonHeapCommittedBytes = nonHeap?.committed?.nonNegativeOrNull(),
+            heapUsedBytes = memoryGauge("jvm.memory.used", "heap") ?: heap?.used?.nonNegativeOrNull(),
+            heapCommittedBytes = memoryGauge("jvm.memory.committed", "heap") ?: heap?.committed?.nonNegativeOrNull(),
+            heapMaxBytes = memoryGauge("jvm.memory.max", "heap") ?: heap?.max?.nonNegativeOrNull(),
+            nonHeapUsedBytes = memoryGauge("jvm.memory.used", "nonheap") ?: nonHeap?.used?.nonNegativeOrNull(),
+            nonHeapCommittedBytes = memoryGauge("jvm.memory.committed", "nonheap") ?: nonHeap?.committed?.nonNegativeOrNull(),
             directBufferCount = collect("directBufferCount", unavailable) {
                 directBuffer?.count?.nonNegativeOrNull()
             },
@@ -151,27 +152,27 @@ internal class RuntimeMetricsSampler(
             directBufferCapacityBytes = collect("directBufferCapacity", unavailable) {
                 directBuffer?.totalCapacity?.nonNegativeOrNull()
             },
-            threadsLive = collect("threadsLive", unavailable) { threads?.threadCount },
-            threadsDaemon = collect("threadsDaemon", unavailable) { threads?.daemonThreadCount },
-            threadsPeak = collect("threadsPeak", unavailable) { threads?.peakThreadCount },
+            threadsLive = countGauge("jvm.threads.live") ?: collect("threadsLive", unavailable) { threads?.threadCount },
+            threadsDaemon = countGauge("jvm.threads.daemon") ?: collect("threadsDaemon", unavailable) { threads?.daemonThreadCount },
+            threadsPeak = countGauge("jvm.threads.peak") ?: collect("threadsPeak", unavailable) { threads?.peakThreadCount },
             threadsStartedTotal = collect("threadsStarted", unavailable) { threads?.totalStartedThreadCount },
-            threadsRunnable = threadStates[Thread.State.RUNNABLE],
-            threadsBlocked = threadStates[Thread.State.BLOCKED],
-            threadsWaiting = threadStates[Thread.State.WAITING],
-            threadsTimedWaiting = threadStates[Thread.State.TIMED_WAITING],
-            gcCollectionsTotal = collect("gcCollections", unavailable) {
+            threadsRunnable = threadStateGauge("runnable") ?: threadStates[Thread.State.RUNNABLE],
+            threadsBlocked = threadStateGauge("blocked") ?: threadStates[Thread.State.BLOCKED],
+            threadsWaiting = threadStateGauge("waiting") ?: threadStates[Thread.State.WAITING],
+            threadsTimedWaiting = threadStateGauge("timed-waiting") ?: threadStates[Thread.State.TIMED_WAITING],
+            gcCollectionsTotal = gcPauseCount() ?: collect("gcCollections", unavailable) {
                 garbageCollectors?.sumOf { it.collectionCount.coerceAtLeast(0) }
             },
-            gcCollectionTimeMsTotal = collect("gcCollectionTime", unavailable) {
+            gcCollectionTimeMsTotal = gcPauseTimeMs() ?: collect("gcCollectionTime", unavailable) {
                 garbageCollectors?.sumOf { it.collectionTime.coerceAtLeast(0) }
             },
-            classesLoaded = collect("classesLoaded", unavailable) { classes?.loadedClassCount },
-            classesLoadedTotal = collect("classesLoadedTotal", unavailable) { classes?.totalLoadedClassCount },
-            classesUnloadedTotal = collect("classesUnloadedTotal", unavailable) { classes?.unloadedClassCount },
-            dbPoolAcquired = pool?.acquiredSize(),
-            dbPoolAllocated = pool?.allocatedSize(),
-            dbPoolIdle = pool?.idleSize(),
-            dbPoolPending = pool?.pendingAcquireSize(),
+            classesLoaded = countGauge("jvm.classes.loaded") ?: collect("classesLoaded", unavailable) { classes?.loadedClassCount },
+            classesLoadedTotal = counterValue("jvm.classes.loaded.count") ?: collect("classesLoadedTotal", unavailable) { classes?.totalLoadedClassCount },
+            classesUnloadedTotal = counterValue("jvm.classes.unloaded") ?: collect("classesUnloadedTotal", unavailable) { classes?.unloadedClassCount },
+            dbPoolAcquired = pool?.acquired,
+            dbPoolAllocated = pool?.allocated,
+            dbPoolIdle = pool?.idle,
+            dbPoolPending = pool?.pending,
             dbPoolMaxAllocated = pool?.maxAllocatedSize,
             dbPoolMaxPending = pool?.maxPendingAcquireSize,
             reactorNettyEventLoopPendingTasks = eventLoopPendingTasks.total,
@@ -191,14 +192,78 @@ internal class RuntimeMetricsSampler(
     private fun gaugeAggregate(name: String): GaugeAggregate =
         aggregateGauges(meterRegistry, name)
 
+    private fun memoryGauge(name: String, area: String): Long? =
+        meterRegistry.find(name)
+            .tags(listOf(Tag.of("area", area)))
+            .gauges()
+            .map { it.value() }
+            .filter(Double::isFinite)
+            .takeIf(List<Double>::isNotEmpty)
+            ?.sum()
+            ?.toLong()
+
+    private fun countGauge(name: String): Int? =
+        meterRegistry.find(name)
+            .gauges()
+            .map { it.value() }
+            .filter(Double::isFinite)
+            .takeIf(List<Double>::isNotEmpty)
+            ?.sum()
+            ?.toInt()
+
+    private fun threadStateGauge(state: String): Int? =
+        meterRegistry.find("jvm.threads.states")
+            .tag("state", state)
+            .gauges()
+            .map { it.value() }
+            .filter(Double::isFinite)
+            .takeIf(List<Double>::isNotEmpty)
+            ?.sum()
+            ?.toInt()
+
+    private fun counterValue(name: String): Long? =
+        meterRegistry.find(name)
+            .counters()
+            .map { it.count() }
+            .filter(Double::isFinite)
+            .takeIf(List<Double>::isNotEmpty)
+            ?.sum()
+            ?.toLong()
+
+    private fun gcPauseCount(): Long? =
+        meterRegistry.find("jvm.gc.pause")
+            .timers()
+            .takeIf { it.isNotEmpty() }
+            ?.sumOf { it.count() }
+
+    private fun gcPauseTimeMs(): Long? =
+        meterRegistry.find("jvm.gc.pause")
+            .timers()
+            .takeIf { it.isNotEmpty() }
+            ?.sumOf { it.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS).toLong() }
+
     private fun threadStateCounts(threads: java.lang.management.ThreadMXBean): Map<Thread.State, Int> =
         threads.getThreadInfo(threads.allThreadIds)
             .filterNotNull()
             .groupingBy { it.threadState }
             .eachCount()
 
-    private fun connectionPoolMetrics(): PoolMetrics? =
-        (connectionFactoryProvider.ifAvailable as? ConnectionPool)?.metrics?.orElse(null)
+    private fun databasePoolMetrics(): DatabasePoolSnapshot? {
+        val registrySnapshot = DatabasePoolSnapshot(
+            acquired = countGauge("r2dbc.pool.acquired"),
+            allocated = countGauge("r2dbc.pool.allocated"),
+            idle = countGauge("r2dbc.pool.idle"),
+            pending = countGauge("r2dbc.pool.pending"),
+            maxAllocatedSize = countGauge("r2dbc.pool.max.allocated"),
+            maxPendingAcquireSize = countGauge("r2dbc.pool.max.pending"),
+        )
+        if (registrySnapshot.hasValues()) return registrySnapshot
+        val direct = (connectionFactoryProvider.ifAvailable as? ConnectionPool)
+            ?.metrics
+            ?.orElse(null)
+            ?: return null
+        return direct.toSnapshot()
+    }
 
     private fun runtimeKind(): String =
         if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) {
@@ -219,6 +284,29 @@ internal class RuntimeMetricsSampler(
             null
         }
 }
+
+internal data class DatabasePoolSnapshot(
+    val acquired: Int?,
+    val allocated: Int?,
+    val idle: Int?,
+    val pending: Int?,
+    val maxAllocatedSize: Int?,
+    val maxPendingAcquireSize: Int?,
+) {
+    fun hasValues(): Boolean =
+        listOf(acquired, allocated, idle, pending, maxAllocatedSize, maxPendingAcquireSize)
+            .any { it != null }
+}
+
+private fun PoolMetrics.toSnapshot(): DatabasePoolSnapshot =
+    DatabasePoolSnapshot(
+        acquired = acquiredSize(),
+        allocated = allocatedSize(),
+        idle = idleSize(),
+        pending = pendingAcquireSize(),
+        maxAllocatedSize = maxAllocatedSize,
+        maxPendingAcquireSize = maxPendingAcquireSize,
+    )
 
 internal data class RuntimeMetricsSnapshot(
     val capturedAtEpochMs: Long,

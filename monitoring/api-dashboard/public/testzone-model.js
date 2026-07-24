@@ -100,3 +100,58 @@ export function editorPosition(code, selectionStart) {
   const lines = before.split("\n");
   return { line: lines.length, column: lines.at(-1).length + 1 };
 }
+
+const JAVASCRIPT_KEYWORDS = new Set([
+  "as", "async", "await", "break", "case", "catch", "const", "continue", "default",
+  "else", "export", "false", "finally", "for", "from", "function", "if", "import",
+  "in", "let", "new", "null", "of", "return", "switch", "throw", "true", "try",
+  "typeof", "undefined", "var", "while",
+]);
+const K6_BUILTINS = new Set(["check", "fail", "group", "http", "sleep", "__ENV"]);
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+export function highlightJavaScript(code) {
+  const source = String(code ?? "");
+  let index = 0;
+  let output = "";
+  while (index < source.length) {
+    const rest = source.slice(index);
+    const lineComment = rest.match(/^\/\/[^\n]*/);
+    const blockComment = rest.match(/^\/\*[\s\S]*?\*\//);
+    const string = rest.match(/^(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)/);
+    const number = rest.match(/^(?:\d+(?:\.\d+)?)/);
+    const identifier = rest.match(/^[A-Za-z_$][\w$]*/);
+    const match = lineComment || blockComment || string || number || identifier;
+    if (!match) {
+      output += escapeHtml(source[index]);
+      index += 1;
+      continue;
+    }
+    const token = match[0];
+    let className = "";
+    if (lineComment || blockComment) className = "syntax-comment";
+    else if (string) className = "syntax-string";
+    else if (number) className = "syntax-number";
+    else if (JAVASCRIPT_KEYWORDS.has(token)) className = "syntax-keyword";
+    else if (K6_BUILTINS.has(token)) className = "syntax-builtin";
+    output += className
+      ? `<span class="${className}">${escapeHtml(token)}</span>`
+      : escapeHtml(token);
+    index += token.length;
+  }
+  return `${output}\n`;
+}
+
+export function diagnosticMessage(diagnostic) {
+  if (typeof diagnostic === "string") return diagnostic;
+  const location = diagnostic?.line
+    ? `Ln ${diagnostic.line}${diagnostic.column ? `:${diagnostic.column}` : ""} `
+    : "";
+  return `${location}${diagnostic?.message || "Unknown script error"}`;
+}

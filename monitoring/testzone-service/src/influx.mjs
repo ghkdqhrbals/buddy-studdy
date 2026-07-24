@@ -132,6 +132,47 @@ export class InfluxWriter {
     ]);
   }
 
+  async writeLiveSnapshot(run, project, script, snapshot) {
+    return this.write([
+      lineProtocol("testzone_run_live", {
+        run_id: run.id,
+        project_id: project.id,
+        project: project.name,
+        script_id: script.id,
+        script: script.name,
+        profile: run.profile,
+      }, {
+        requestRate: snapshot.requestRate,
+        p95Ms: snapshot.p95Ms,
+        errorRate: snapshot.errorRate,
+        vus: snapshot.vus,
+        droppedIterations: snapshot.droppedIterations,
+        progress: snapshot.progress,
+      }, Date.parse(snapshot.timestamp)),
+    ]);
+  }
+
+  async writeComponentSnapshots(components, timestampMs = Date.now()) {
+    return this.write(components.map((component) => lineProtocol(
+      "testzone_component_runtime",
+      {
+        component: component.id,
+        image: component.image,
+        status: component.status,
+      },
+      {
+        cpuPercent: component.metrics?.cpuPercent,
+        memoryUsedMb: component.metrics?.memoryUsedMb,
+        memoryLimitMb: component.metrics?.memoryLimitMb,
+        memoryPercent: component.metrics?.memoryPercent,
+        processes: component.metrics?.processes,
+        networkIO: component.metrics?.networkIO,
+        blockIO: component.metrics?.blockIO,
+      },
+      timestampMs,
+    )));
+  }
+
   async importK6Json(filePath, context) {
     if (!this.enabled || !fs.existsSync(filePath)) return { written: 0, skipped: !this.enabled };
     const input = fs.createReadStream(filePath);

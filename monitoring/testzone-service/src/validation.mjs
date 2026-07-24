@@ -11,6 +11,17 @@ export class ValidationError extends Error {
   }
 }
 
+function diagnostic(source, message, index = 0) {
+  const before = source.slice(0, Math.max(0, index));
+  const lines = before.split("\n");
+  return {
+    severity: "error",
+    message,
+    line: lines.length,
+    column: (lines.at(-1)?.length || 0) + 1,
+  };
+}
+
 export function durationToSeconds(value) {
   const match = String(value ?? "").trim().match(DURATION_PATTERN);
   if (!match) return null;
@@ -49,50 +60,66 @@ export function validateTargetHost(baseUrl, allowedHosts = []) {
 export function validateScript(code, options = {}) {
   const source = String(code ?? "");
   const errors = [];
+  const add = (message, index = 0) => errors.push(diagnostic(source, message, index));
   const maxVus = Number(options.maxVus ?? 1000);
   const maxDurationSeconds = Number(options.maxDurationSeconds ?? 3600);
   const targetBaseUrl = options.targetBaseUrl ? normalizeBaseUrl(options.targetBaseUrl) : null;
 
-  if (!source.trim()) errors.push("Script is empty.");
-  if (source.length > 250_000) errors.push("Script exceeds the 250 KB limit.");
+  if (!source.trim()) add("Script is empty.");
+  if (source.length > 250_000) add("Script exceeds the 250 KB limit.");
   if (!/export\s+default\s+function/.test(source)) {
-    errors.push("Script must export a default k6 function.");
+    add("Script must export a default k6 function.");
   }
 
   for (const match of source.matchAll(K6_IMPORT_PATTERN)) {
     const specifier = match[1];
     if (!specifier.startsWith("k6") && !specifier.startsWith("./")) {
-      errors.push(`Import ${specifier} is not allowed. Use k6 modules or project-local files.`);
+      add(`Import ${specifier} is not allowed. Use k6 modules or project-local files.`, match.index);
     }
     if (/^https?:/i.test(specifier)) {
-      errors.push("Remote JavaScript imports are not allowed.");
+      add("Remote JavaScript imports are not allowed.", match.index);
     }
   }
 
   for (const match of source.matchAll(VU_OPTION_PATTERN)) {
     if (Number(match[1]) > maxVus) {
-      errors.push(`Script requests ${match[1]} VUs; the TestZone maximum is ${maxVus}.`);
+      add(`Script requests ${match[1]} VUs; the TestZone maximum is ${maxVus}.`, match.index);
     }
   }
 
   const duration = durationToSeconds(options.duration);
-  if (options.duration && duration === null) errors.push("Duration must look like 30s, 5m, or 1h.");
+  if (options.duration && duration === null) add("Duration must look like 30s, 5m, or 1h.");
   if (duration !== null && duration > maxDurationSeconds) {
-    errors.push(`Duration exceeds the ${maxDurationSeconds} second limit.`);
+    add(`Duration exceeds the ${maxDurationSeconds} second limit.`);
   }
 
   if (targetBaseUrl) {
     const targetHost = new URL(targetBaseUrl).hostname;
-    for (const literal of source.match(URL_PATTERN) ?? []) {
+    for (const match of source.matchAll(new RegExp(URL_PATTERN.source, "g"))) {
+      const literal = match[0];
       const hostname = new URL(literal).hostname;
       if (hostname !== targetHost && !literal.includes("127.0.0.1") && !literal.includes("localhost")) {
-        errors.push(`Script contains a URL outside the selected target: ${hostname}.`);
+        add(`Script contains a URL outside the selected target: ${hostname}. Use __ENV.BASE_URL for requests.`, match.index);
       }
     }
   }
 
-  if (errors.length) throw new ValidationError("The k6 script is not safe to run.", errors);
-  return { valid: true, bytes: Buffer.byteLength(source), maxVus };
+  if (errors.length) throw new ValidationError("Fix the script diagnostics before running the test.", errors);
+  return { valid: true, bytes: Buffer.byteLength(source), maxVus, diagnostics: [] };
+}
+
+export function validateScriptReport(code, options = {}) {
+  try {
+    return validateScript(code, options);
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    return {
+      valid: false,
+      bytes: Buffer.byteLength(String(code ?? "")),
+      maxVus: Number(options.maxVus ?? 1000),
+      diagnostics: error.details,
+    };
+  }
 }
 
 export function normalizeRunOptions(input, config) {

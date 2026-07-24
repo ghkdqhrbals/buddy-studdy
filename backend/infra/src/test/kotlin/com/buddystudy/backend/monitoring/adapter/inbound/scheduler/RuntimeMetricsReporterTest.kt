@@ -1,10 +1,13 @@
 package com.buddystudy.backend.monitoring.adapter.inbound.scheduler
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.r2dbc.spi.ConnectionFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.support.StaticListableBeanFactory
 
 class RuntimeMetricsReporterTest {
     @Test
@@ -132,5 +135,40 @@ class RuntimeMetricsReporterTest {
 
         assertThat(aggregate.total).isEqualTo(7.0)
         assertThat(aggregate.maximum).isEqualTo(5.0)
+    }
+
+    @Test
+    fun `prefers standard Micrometer JVM Netty and R2DBC pool gauges`() {
+        val registry = SimpleMeterRegistry()
+        Gauge.builder("jvm.memory.used") { 4_096.0 }
+            .tags("area", "heap", "id", "test")
+            .register(registry)
+        Gauge.builder("jvm.threads.live") { 27.0 }.register(registry)
+        Gauge.builder("jvm.classes.loaded") { 1_200.0 }.register(registry)
+        Counter.builder("jvm.classes.loaded.count").register(registry).increment(1_500.0)
+        Counter.builder("jvm.classes.unloaded").register(registry).increment(300.0)
+        Gauge.builder("r2dbc.pool.acquired") { 3.0 }.tag("name", "connectionFactory").register(registry)
+        Gauge.builder("r2dbc.pool.allocated") { 10.0 }.tag("name", "connectionFactory").register(registry)
+        Gauge.builder("r2dbc.pool.idle") { 7.0 }.tag("name", "connectionFactory").register(registry)
+        Gauge.builder("r2dbc.pool.pending") { 2.0 }.tag("name", "connectionFactory").register(registry)
+        Gauge.builder("r2dbc.pool.max.allocated") { 20.0 }.tag("name", "connectionFactory").register(registry)
+        Gauge.builder("reactor.netty.eventloop.pending.tasks") { 5.0 }
+            .tag("name", "reactor-http-nio-1")
+            .register(registry)
+        val provider = StaticListableBeanFactory().getBeanProvider(ConnectionFactory::class.java)
+
+        val snapshot = RuntimeMetricsSampler(registry, provider).snapshot()
+
+        assertThat(snapshot.heapUsedBytes).isEqualTo(4_096)
+        assertThat(snapshot.threadsLive).isEqualTo(27)
+        assertThat(snapshot.classesLoaded).isEqualTo(1_200)
+        assertThat(snapshot.classesLoadedTotal).isEqualTo(1_500)
+        assertThat(snapshot.classesUnloadedTotal).isEqualTo(300)
+        assertThat(snapshot.dbPoolAcquired).isEqualTo(3)
+        assertThat(snapshot.dbPoolAllocated).isEqualTo(10)
+        assertThat(snapshot.dbPoolIdle).isEqualTo(7)
+        assertThat(snapshot.dbPoolPending).isEqualTo(2)
+        assertThat(snapshot.dbPoolMaxAllocated).isEqualTo(20)
+        assertThat(snapshot.reactorNettyEventLoopPendingTasks).isEqualTo(5.0)
     }
 }

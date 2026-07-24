@@ -20,7 +20,8 @@ This keeps API/Grafana URLs simple while avoiding public DB/Redis exposure.
 
 - `api.lowfidev.cloud` -> `localhost:30080`
 - `coordinator.lowfidev.cloud` -> `localhost:8080`
-- `grafana.lowfidev.cloud` -> `localhost:3000`
+- `monitoring.lowfidev.cloud` -> `localhost:3000` (custom operational UI)
+- `grafana.lowfidev.cloud` -> `localhost:3001` (standalone Grafana)
 - `ssh.lowfidev.cloud` -> local SSH through Cloudflare Access
 
 The config also keeps compatibility TCP hostnames:
@@ -58,6 +59,11 @@ Redis port: 30379
 
 This is the closest equivalent to the old EC2 public-IP workflow without
 opening DB/Redis to the public Internet.
+
+The production MacBook Air uses Routingflare for the two monitoring HTTP
+routes. Apply them with the dedicated
+`Deploy BuddyStudy Monitoring Routes on MacBook Air` workflow; do not attach
+route changes to backend or TestZone deployment jobs.
 
 ## Compatibility TCP Commands
 

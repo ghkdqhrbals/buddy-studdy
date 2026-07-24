@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { summarizeK6 } from "./influx.mjs";
+import { K6LiveMetricsReader } from "./live-metrics.mjs";
 import { validateScript } from "./validation.mjs";
 
 const SECRET_NAME_PATTERN = /(token|secret|password|authorization|api[_-]?key)/i;
@@ -59,6 +60,7 @@ export class RunManager {
     const logPath = path.join(runDirectory, "run.log");
     await fs.mkdir(runDirectory, { recursive: true });
     await fs.writeFile(scriptPath, script.code, { mode: 0o600 });
+    await fs.writeFile(this.store.runSeriesPath(run.id), "", { mode: 0o600 });
     await fs.writeFile(path.join(runDirectory, "environment.json"), `${JSON.stringify(sanitizedEnvironment(environment), null, 2)}\n`, { mode: 0o600 });
 
     const processEnvironment = {
@@ -90,12 +92,44 @@ export class RunManager {
     };
     child.stdout.on("data", append);
     child.stderr.on("data", append);
-    await this.store.patchRun(run.id, { status: "running", startedAt: new Date().toISOString() });
+    const startedAt = new Date().toISOString();
+    await this.store.patchRun(run.id, { status: "running", startedAt });
+
+    const liveReader = new K6LiveMetricsReader(metricsPath);
+    let liveReadPending = false;
+    const collectLive = async (final = false) => {
+      if (liveReadPending) return;
+      liveReadPending = true;
+      try {
+        const points = await liveReader.read(final);
+        for (const point of points) {
+          const elapsedSeconds = Math.max(0, (Date.parse(point.timestamp) - Date.parse(startedAt)) / 1_000);
+          const snapshot = {
+            ...point,
+            elapsedSeconds,
+            progress: Math.min(1, elapsedSeconds / run.options.durationSeconds),
+            updatedAt: new Date().toISOString(),
+          };
+          await this.store.appendRunSeries(run.id, snapshot);
+          await this.store.patchRun(run.id, { live: snapshot });
+          await this.influx.writeLiveSnapshot(run, project, script, snapshot);
+        }
+      } catch (error) {
+        logs.push(`Live metrics warning: ${error.message}`);
+        await this.store.patchRun(run.id, { logTail: tail(logs) });
+      } finally {
+        liveReadPending = false;
+      }
+    };
+    const liveInterval = setInterval(() => void collectLive(false), 1_000);
 
     const timeoutMs = (run.options.durationSeconds + 90) * 1000;
     const timeoutId = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
     child.once("close", async (exitCode, signal) => {
       clearTimeout(timeoutId);
+      clearInterval(liveInterval);
+      while (liveReadPending) await new Promise((resolve) => setTimeout(resolve, 20));
+      await collectLive(true);
       this.active.delete(run.id);
       const finishedAt = new Date().toISOString();
       try {
@@ -116,6 +150,11 @@ export class RunManager {
           summary,
           error: status === "completed" ? null : failureReason,
           logTail: tail(logs),
+          live: {
+            ...(this.store.state.runs.find((entry) => entry.id === run.id)?.live || {}),
+            progress: 1,
+            updatedAt: finishedAt,
+          },
         });
         if (summary) {
           await this.influx.importK6Json(metricsPath, {

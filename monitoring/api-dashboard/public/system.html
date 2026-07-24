@@ -18,6 +18,7 @@
           <a href="/performance.html">API Performance</a>
           <a href="/system.html" aria-current="page">Server Dashboard</a>
           <a href="/testzone.html">TestZone</a>
+          <a href="https://grafana.lowfidev.cloud/" target="_blank" rel="noreferrer">Grafana</a>
         </nav>
       </aside>
 
@@ -25,7 +26,7 @@
         <header class="topbar">
           <div>
             <h1>Server Dashboard</h1>
-            <p>Golden signals, WebFlux runtime pressure, Native Image, database pool, and host resources</p>
+            <p>Golden signals, application runtime pressure, database pool, and host resources</p>
           </div>
         </header>
 
@@ -129,7 +130,7 @@
           <header class="metrics-section-heading">
             <span class="section-kicker">Saturation</span>
             <h2>Capacity Pressure</h2>
-            <p>CPU, database connections, and Reactor Netty event-loop queues.</p>
+            <p>CPU, database connections, and server event-loop queues.</p>
           </header>
 
           <section class="metric-chart-panel">
@@ -146,7 +147,7 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
-                <h2>R2DBC Pool Saturation</h2>
+                <h2>Database Pool Saturation</h2>
                 <p>Acquired connections as a percentage of the configured maximum</p>
               </div>
               <div id="dbSaturationLegend" class="chart-legend"></div>
@@ -157,7 +158,7 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
-                <h2>R2DBC Connection Pool</h2>
+                <h2>Database Connection Pool</h2>
                 <p>Allocated, acquired, idle, pending, and maximum connections</p>
               </div>
               <div id="dbLegend" class="chart-legend"></div>

@@ -388,7 +388,7 @@ function renderDiagnosis() {
     issues.push(["critical", `Process CPU is ${formatPercent(latest.processCpuPercent)} and may be constraining throughput.`]);
   }
   if (Number(dbSaturation) >= 80 || Number(latest?.dbPoolPending) > 0) {
-    issues.push(["critical", `R2DBC pool pressure is ${formatPercent(dbSaturation)} with ${formatCount(latest?.dbPoolPending)} pending acquisitions.`]);
+    issues.push(["critical", `Database pool pressure is ${formatPercent(dbSaturation)} with ${formatCount(latest?.dbPoolPending)} pending acquisitions.`]);
   }
   if (Number(latest?.reactorNettyEventLoopMaxPendingTasks) > 0) {
     issues.push(["warning", `Reactor Netty has ${formatCount(latest.reactorNettyEventLoopMaxPendingTasks)} pending tasks on the busiest event loop.`]);
@@ -465,7 +465,7 @@ function renderDetails() {
     ["Active connections", formatCount(latest.reactorNettyActiveConnections)],
     ["GC total", `${formatCount(latest.gcCollectionsTotal)} collections, ${formatCount(latest.gcCollectionTimeMsTotal)} ms`],
     ["Classes", `${formatCount(latest.classesLoaded)} loaded, ${formatCount(latest.classesUnloadedTotal)} unloaded`],
-    ["R2DBC pool", latest.dbPoolAllocated == null
+    ["Database pool", latest.dbPoolAllocated == null
       ? "Not available"
       : `${formatCount(latest.dbPoolAllocated)} allocated, ${formatCount(latest.dbPoolAcquired)} acquired, ${formatCount(latest.dbPoolIdle)} idle, ${formatCount(latest.dbPoolPending)} pending`],
   ];

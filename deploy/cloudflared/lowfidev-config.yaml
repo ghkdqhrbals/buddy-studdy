@@ -13,8 +13,10 @@ ingress:
     service: tcp://localhost:30379
   - hostname: coordinator.lowfidev.cloud
     service: http://localhost:8080
-  - hostname: grafana.lowfidev.cloud
+  - hostname: monitoring.lowfidev.cloud
     service: http://localhost:3000
+  - hostname: grafana.lowfidev.cloud
+    service: http://localhost:3001
   - hostname: ssh.lowfidev.cloud
     service: ssh://localhost:22
   - service: http_status:404

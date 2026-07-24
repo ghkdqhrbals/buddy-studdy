@@ -151,3 +151,34 @@ test("InfluxWriter deletes every series belonging to one run id", async () => {
   assert.equal(body.predicate, "run_id=\"run-with-quotes\"");
   assert.ok(Date.parse(body.stop) > Date.now());
 });
+
+test("InfluxWriter stores disposable component resource samples", async () => {
+  const writes = [];
+  const writer = new InfluxWriter(
+    { url: "http://influx.test", token: "token", org: "org", bucket: "bucket" },
+    async (_url, request) => {
+      writes.push(request.body);
+      return { ok: true };
+    },
+  );
+
+  await writer.writeComponentSnapshots([{
+    id: "postgres",
+    image: "postgres:17-alpine",
+    status: "running",
+    metrics: {
+      cpuPercent: 13.5,
+      memoryUsedMb: 128,
+      memoryLimitMb: 512,
+      memoryPercent: 25,
+      processes: 9,
+      networkIO: "4MB / 2MB",
+      blockIO: "1MB / 3MB",
+    },
+  }], 1_000);
+
+  assert.match(writes[0], /^testzone_component_runtime,component=postgres/);
+  assert.match(writes[0], /cpuPercent=13.5/);
+  assert.match(writes[0], /memoryUsedMb=128/);
+  assert.match(writes[0], /processes=9/);
+});
