@@ -114,6 +114,8 @@ jobs:
           docker ps \
             --filter name=buddystudy-api-dashboard \
             --format 'name={{.Names}} status={{.Status}} ports={{.Ports}}' || true
+          echo "Monitoring gateway recent log:"
+          docker logs --tail 80 buddystudy-api-dashboard || true
           echo "Routingflare ingress:"
           /usr/bin/find "${HOME}/Library/Application Support/TunnelBar" \
             -maxdepth 1 -type f -name 'cloudflared-*.yml' -print0 2>/dev/null \
