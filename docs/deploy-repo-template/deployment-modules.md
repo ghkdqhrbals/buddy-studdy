@@ -77,9 +77,9 @@ deployment.
   login screen instead of rendering a dashboard shell that fails with
   `Unauthorized`. Grafana Live accepts WebSocket connections only from
   `https://grafana.lowfidev.cloud`, matching the public gateway origin. The
-  Grafana and monitoring gateways preserve Cloudflare's incoming
-  `X-Forwarded-Proto` value instead of replacing it with the local HTTP hop;
-  this keeps Grafana's origin checks aligned with its public HTTPS `root_url`.
+  The dedicated Grafana gateway restores `grafana.lowfidev.cloud`, HTTPS, and
+  port 443 after Routingflare consumes the original host header. This keeps
+  Grafana Live origin checks aligned with its public HTTPS `root_url`.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard.

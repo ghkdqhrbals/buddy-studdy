@@ -30,13 +30,15 @@ test("Grafana Live accepts only the public Grafana origin", async () => {
   }
 });
 
-test("Grafana gateway preserves the public HTTPS scheme from Cloudflare", async () => {
+test("Grafana gateway restores the public origin consumed by Routingflare", async () => {
   const gateway = await fs.readFile(gatewayPath, "utf8");
 
-  assert.match(gateway, /map \$http_x_forwarded_proto \$public_forwarded_proto/);
-  assert.match(gateway, /default \$http_x_forwarded_proto;/);
-  assert.match(gateway, /"" https;/);
-  assert.match(gateway, /proxy_set_header X-Forwarded-Proto \$public_forwarded_proto;/);
+  assert.match(gateway, /proxy_set_header Host grafana\.lowfidev\.cloud;/);
+  assert.match(gateway, /proxy_set_header X-Forwarded-Host grafana\.lowfidev\.cloud;/);
+  assert.match(gateway, /proxy_set_header X-Forwarded-Proto https;/);
+  assert.match(gateway, /proxy_set_header X-Forwarded-Port 443;/);
+  assert.doesNotMatch(gateway, /proxy_set_header Host \$host;/);
+  assert.doesNotMatch(gateway, /proxy_set_header X-Forwarded-Host \$host;/);
   assert.doesNotMatch(gateway, /proxy_set_header X-Forwarded-Proto \$scheme;/);
 });
 

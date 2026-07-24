@@ -104,7 +104,9 @@ jobs:
 
           grep -q 'X-Forwarded-Proto \$public_forwarded_proto' \
             "${monitoring_root}/api-dashboard/nginx.conf"
-          grep -q 'X-Forwarded-Proto \$public_forwarded_proto' \
+          grep -q 'proxy_set_header Host grafana.lowfidev.cloud;' \
+            "${monitoring_root}/gateway/grafana-nginx.conf"
+          grep -q 'proxy_set_header X-Forwarded-Proto https;' \
             "${monitoring_root}/gateway/grafana-nginx.conf"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
