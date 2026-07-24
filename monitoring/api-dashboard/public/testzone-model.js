@@ -18,21 +18,6 @@ export function formatDate(value) {
   }).format(new Date(value));
 }
 
-export function formatChartLabel(value) {
-  if (!value) return "-";
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Seoul",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(value)).map((part) => [part.type, part.value]),
-  );
-  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
-}
-
 export function formatRate(value) {
   if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
@@ -75,26 +60,6 @@ export function runScriptName(run, scripts = []) {
   return run.scriptName
     || scripts.find((entry) => entry.id === run.scriptId)?.name
     || "Deleted script";
-}
-
-export function buildChartPoints(runs = []) {
-  return [...runs]
-    .filter((run) => run.status === "completed" && run.summary)
-    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
-    .slice(-12)
-    .map((run) => ({
-      id: run.id,
-      label: formatChartLabel(run.startedAt || run.createdAt),
-      rps: Number(run.summary.requestRate) || 0,
-      p95: Number(run.summary.p95Ms) || 0,
-    }));
-}
-
-export function chartSampleIndex(pointerX, sampleCount, plotStart, plotEnd) {
-  if (sampleCount <= 0) return -1;
-  if (sampleCount === 1 || plotEnd <= plotStart) return 0;
-  const normalized = Math.min(1, Math.max(0, (pointerX - plotStart) / (plotEnd - plotStart)));
-  return Math.round(normalized * (sampleCount - 1));
 }
 
 export function lineNumbersFor(code) {

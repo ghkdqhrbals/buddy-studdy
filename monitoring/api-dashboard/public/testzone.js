@@ -1,6 +1,5 @@
 import {
   RUN_PROFILES,
-  chartSampleIndex,
   diagnosticMessage,
   editorPosition,
   formatDate,
@@ -33,8 +32,11 @@ const state = {
   activeTab: "overview",
   lintTimer: null,
   componentId: null,
-  runChartHoverIndex: null,
-  runDetailChartHoverIndex: null,
+  runCharts: {
+    overview: null,
+    detail: null,
+  },
+  chartResizeTimer: null,
 };
 
 const elementIds = [
@@ -43,13 +45,12 @@ const elementIds = [
   "newProjectName", "newProjectBaseUrl", "createProjectButton",
   "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
-  "runChartTooltip",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
   "cancelSelectedRunButton", "viewRunScriptButton",
   "runRows", "runEmptyState", "runCount", "refreshRunsButton",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
-  "runDetailScriptButton", "runDetailStatus", "runDetailChart", "runDetailChartTooltip",
+  "runDetailScriptButton", "runDetailStatus", "runDetailChart",
   "runDetailChartEmpty", "runLogTail", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
   "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback", "lintPanel",
@@ -568,10 +569,6 @@ async function selectRun(id) {
 
 async function loadSelectedRunSeries() {
   const run = selectedRun();
-  state.runChartHoverIndex = null;
-  state.runDetailChartHoverIndex = null;
-  elements.runChartTooltip.hidden = true;
-  elements.runDetailChartTooltip.hidden = true;
   if (!run) {
     state.runSeries = [];
     renderSelectedRun();
@@ -657,184 +654,161 @@ async function openRunScript(run) {
   }
 }
 
-function drawRunChartCanvas(canvas, tooltip, emptyState, hoverIndex) {
-  const points = state.runSeries;
-  emptyState.hidden = points.length > 0;
-  canvas.hidden = points.length === 0;
-  if (!points.length) {
-    tooltip.hidden = true;
-    return;
-  }
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(320, Math.round(rect.width));
-  const height = 260;
-  const ratio = window.devicePixelRatio || 1;
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  const context = canvas.getContext("2d");
-  context.scale(ratio, ratio);
-  context.clearRect(0, 0, width, height);
-  const padding = { top: 18, right: 44, bottom: 30, left: 48 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const maxRps = Math.max(...points.map((point) => Number(point.requestRate) || 0), 1) * 1.12;
-  const maxP95 = Math.max(...points.map((point) => Number(point.p95Ms) || 0), 1) * 1.12;
-  const maxVus = Math.max(...points.map((point) => Number(point.vus) || 0), 1) * 1.12;
-  context.strokeStyle = "#e4e9ef";
-  context.lineWidth = 1;
-  for (let index = 0; index <= 4; index += 1) {
-    const y = padding.top + (chartHeight * index) / 4;
-    context.beginPath();
-    context.moveTo(padding.left, y);
-    context.lineTo(width - padding.right, y);
-    context.stroke();
-  }
-  const xAt = (index) => padding.left + (chartWidth * index) / Math.max(1, points.length - 1);
-  const drawLine = (selector, maximum, color, widthValue = 2) => {
-    context.beginPath();
-    points.forEach((point, index) => {
-      const x = xAt(index);
-      const y = padding.top + chartHeight - ((Number(selector(point)) || 0) / maximum) * chartHeight;
-      if (index === 0) context.moveTo(x, y);
-      else context.lineTo(x, y);
-    });
-    context.strokeStyle = color;
-    context.lineWidth = widthValue;
-    context.stroke();
-  };
-  drawLine((point) => point.requestRate, maxRps, "#2166d1", 2.5);
-  drawLine((point) => point.p95Ms, maxP95, "#e4982b");
-  drawLine((point) => point.errorRate, 1, "#c63a3a");
-  drawLine((point) => point.vus, maxVus, "#16825d", 1.5);
-  context.fillStyle = "#64748b";
-  context.font = "10px system-ui";
-  context.textAlign = "left";
-  context.fillText(`${Math.round(maxRps)} RPS`, 2, padding.top + 4);
-  context.textAlign = "right";
-  context.fillText(formatMilliseconds(maxP95), width - 2, padding.top + 4);
-  const first = new Date(points[0].timestamp);
-  const last = new Date(points.at(-1).timestamp);
-  context.textAlign = "left";
-  context.fillText(first.toLocaleTimeString("ko-KR"), padding.left, height - 8);
-  context.textAlign = "right";
-  context.fillText(last.toLocaleTimeString("ko-KR"), width - padding.right, height - 8);
+function positiveScaleRange(_plot, minimum, maximum) {
+  const upper = Math.max(Number(maximum) || 0, 1);
+  return [Math.min(0, Number(minimum) || 0), upper * 1.08];
+}
 
-  if (hoverIndex === null || hoverIndex >= points.length) {
-    tooltip.hidden = true;
+function errorScaleRange(_plot, _minimum, maximum) {
+  return [0, Math.max(1, (Number(maximum) || 0) * 1.08)];
+}
+
+function chartTime(timestampSeconds) {
+  if (timestampSeconds === null || timestampSeconds === undefined) return "-";
+  return new Date(timestampSeconds * 1000).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function runChartData() {
+  const points = [...state.runSeries].sort(
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+  );
+  return [
+    points.map((point) => new Date(point.timestamp).getTime() / 1000),
+    points.map((point) => Number(point.requestRate) || 0),
+    points.map((point) => Number(point.p95Ms) || 0),
+    points.map((point) => (Number(point.errorRate) || 0) * 100),
+  ];
+}
+
+function runChartOptions(width) {
+  return {
+    width,
+    height: 270,
+    padding: [12, 10, 0, 0],
+    cursor: {
+      show: true,
+      drag: { x: false, y: false },
+      points: { size: 7, width: 2 },
+    },
+    legend: {
+      show: true,
+      live: true,
+    },
+    scales: {
+      x: { time: true },
+      rps: { auto: true, range: positiveScaleRange },
+      latency: { auto: true, range: positiveScaleRange },
+      error: { auto: true, range: errorScaleRange },
+    },
+    series: [
+      {
+        label: "Time",
+        value: (_plot, value) => chartTime(value),
+      },
+      {
+        label: "RPS",
+        scale: "rps",
+        stroke: "#2166d1",
+        width: 2.5,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatRate(value),
+      },
+      {
+        label: "p95",
+        scale: "latency",
+        stroke: "#e4982b",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      },
+      {
+        label: "Error",
+        scale: "error",
+        stroke: "#c63a3a",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : `${Number(value).toFixed(2)}%`,
+      },
+    ],
+    axes: [
+      {
+        scale: "x",
+        stroke: "#64748b",
+        grid: { stroke: "#e4e9ef", width: 1 },
+        ticks: { stroke: "#cbd5e1", width: 1 },
+        values: (_plot, values) => values.map(chartTime),
+      },
+      {
+        scale: "rps",
+        side: 3,
+        label: "RPS",
+        stroke: "#2166d1",
+        grid: { stroke: "#e4e9ef", width: 1 },
+      },
+      {
+        scale: "latency",
+        side: 1,
+        label: "p95 (ms)",
+        stroke: "#b56c06",
+        grid: { show: false },
+      },
+      {
+        scale: "error",
+        side: 1,
+        label: "Error (%)",
+        stroke: "#c63a3a",
+        grid: { show: false },
+      },
+    ],
+  };
+}
+
+function disposeRunChart(key) {
+  state.runCharts[key]?.destroy();
+  state.runCharts[key] = null;
+}
+
+function renderRunChart(host, emptyState, key) {
+  disposeRunChart(key);
+  const hasPoints = state.runSeries.length > 0;
+  emptyState.hidden = hasPoints;
+  host.hidden = !hasPoints;
+  host.replaceChildren();
+  if (!hasPoints) return;
+  if (!window.uPlot) {
+    host.hidden = false;
+    host.textContent = "Chart library unavailable.";
     return;
   }
-  const hoverPoint = points[hoverIndex];
-  const hoverX = xAt(hoverIndex);
-  context.save();
-  context.strokeStyle = "#64748b";
-  context.lineWidth = 1;
-  context.setLineDash([3, 3]);
-  context.beginPath();
-  context.moveTo(hoverX, padding.top);
-  context.lineTo(hoverX, padding.top + chartHeight);
-  context.stroke();
-  context.setLineDash([]);
-  for (const series of [
-    { value: hoverPoint.requestRate, maximum: maxRps, color: "#2166d1" },
-    { value: hoverPoint.p95Ms, maximum: maxP95, color: "#e4982b" },
-    { value: hoverPoint.errorRate, maximum: 1, color: "#c63a3a" },
-    { value: hoverPoint.vus, maximum: maxVus, color: "#16825d" },
-  ]) {
-    const y = padding.top + chartHeight - ((Number(series.value) || 0) / series.maximum) * chartHeight;
-    context.fillStyle = "#fff";
-    context.strokeStyle = series.color;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.arc(hoverX, y, 4, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-  }
-  context.restore();
-  renderRunChartTooltip(tooltip, hoverPoint, hoverX, width);
+  const width = Math.max(320, Math.floor(host.getBoundingClientRect().width || host.parentElement?.clientWidth || 0));
+  state.runCharts[key] = new window.uPlot(runChartOptions(width), runChartData(), host);
 }
 
 function drawRunChart() {
-  drawRunChartCanvas(
-    elements.runHistoryChart,
-    elements.runChartTooltip,
-    elements.timelineEmptyState,
-    state.runChartHoverIndex,
-  );
-  drawRunChartCanvas(
-    elements.runDetailChart,
-    elements.runDetailChartTooltip,
-    elements.runDetailChartEmpty,
-    state.runDetailChartHoverIndex,
-  );
+  renderRunChart(elements.runHistoryChart, elements.timelineEmptyState, "overview");
+  renderRunChart(elements.runDetailChart, elements.runDetailChartEmpty, "detail");
 }
 
-function renderRunChartTooltip(tooltip, point, x, chartWidth) {
-  const title = document.createElement("strong");
-  title.textContent = formatDate(point.timestamp);
-  const metrics = document.createElement("dl");
-  for (const [label, value] of [
-    ["RPS", formatRate(point.requestRate)],
-    ["p95", formatMilliseconds(point.p95Ms)],
-    ["Error", formatPercent(point.errorRate)],
-    ["VUs", String(Number(point.vus) || 0)],
+function resizeRunCharts() {
+  for (const [key, host] of [
+    ["overview", elements.runHistoryChart],
+    ["detail", elements.runDetailChart],
   ]) {
-    const term = document.createElement("dt");
-    term.textContent = label;
-    const description = document.createElement("dd");
-    description.textContent = value;
-    metrics.append(term, description);
+    const chart = state.runCharts[key];
+    if (!chart || host.hidden) continue;
+    const width = Math.max(320, Math.floor(host.getBoundingClientRect().width || host.parentElement?.clientWidth || 0));
+    chart.setSize({ width, height: 270 });
   }
-  tooltip.replaceChildren(title, metrics);
-  tooltip.hidden = false;
-  const halfWidth = tooltip.offsetWidth / 2;
-  const safeX = Math.min(Math.max(x, halfWidth + 8), chartWidth - halfWidth - 8);
-  tooltip.style.left = `${safeX}px`;
 }
 
-function setRunChartHoverFromClientX(canvas, stateKey, clientX) {
-  const rect = canvas.getBoundingClientRect();
-  const index = chartSampleIndex(clientX - rect.left, state.runSeries.length, 48, rect.width - 44);
-  if (index === state[stateKey]) return;
-  state[stateKey] = index;
-  drawRunChart();
-}
-
-function clearRunChartHover(stateKey, tooltip) {
-  if (state[stateKey] === null) return;
-  state[stateKey] = null;
-  tooltip.hidden = true;
-  drawRunChart();
-}
-
-function handleRunChartKeydown(event, stateKey, tooltip) {
-  if (!state.runSeries.length) return;
-  const current = state[stateKey] ?? state.runSeries.length - 1;
-  let next = current;
-  if (event.key === "ArrowLeft") next = Math.max(0, current - 1);
-  else if (event.key === "ArrowRight") next = Math.min(state.runSeries.length - 1, current + 1);
-  else if (event.key === "Home") next = 0;
-  else if (event.key === "End") next = state.runSeries.length - 1;
-  else if (event.key === "Escape") {
-    clearRunChartHover(stateKey, tooltip);
-    return;
-  } else return;
-  event.preventDefault();
-  state[stateKey] = next;
-  drawRunChart();
-}
-
-function bindRunChartInteractions(canvas, tooltip, stateKey) {
-  canvas.addEventListener("pointermove", (event) => setRunChartHoverFromClientX(canvas, stateKey, event.clientX));
-  canvas.addEventListener("pointerdown", (event) => setRunChartHoverFromClientX(canvas, stateKey, event.clientX));
-  canvas.addEventListener("pointerleave", () => clearRunChartHover(stateKey, tooltip));
-  canvas.addEventListener("focus", () => {
-    if (state[stateKey] === null && state.runSeries.length) {
-      state[stateKey] = state.runSeries.length - 1;
-      drawRunChart();
-    }
-  });
-  canvas.addEventListener("blur", () => clearRunChartHover(stateKey, tooltip));
-  canvas.addEventListener("keydown", (event) => handleRunChartKeydown(event, stateKey, tooltip));
+function scheduleRunChartResize() {
+  window.clearTimeout(state.chartResizeTimer);
+  state.chartResizeTimer = window.setTimeout(resizeRunCharts, 100);
 }
 
 function applyProfile(name) {
@@ -1214,8 +1188,6 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
-  bindRunChartInteractions(elements.runHistoryChart, elements.runChartTooltip, "runChartHoverIndex");
-  bindRunChartInteractions(elements.runDetailChart, elements.runDetailChartTooltip, "runDetailChartHoverIndex");
   elements.runProfileControl.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");
     if (button) applyProfile(button.dataset.profile);
@@ -1230,7 +1202,7 @@ function bindEvents() {
     state.confirmAction?.(true);
     state.confirmAction = null;
   });
-  window.addEventListener("resize", drawRunChart);
+  window.addEventListener("resize", scheduleRunChartResize);
 }
 
 async function initialize() {

@@ -28,25 +28,29 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
   assert.match(html, /id="runDialog"/);
 });
 
-test("run chart exposes hover details and keyboard navigation", () => {
-  assert.match(html, /id="runChartTooltip"/);
-  assert.match(html, /tabindex="0"/);
-  assert.match(css, /\.run-chart-tooltip/);
-  assert.match(javascript, /pointermove/);
-  assert.match(javascript, /handleRunChartKeydown/);
+test("run charts use vendored uPlot with unit-specific live series", () => {
+  const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function applyProfile/)?.[0] ?? "";
+  assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);
+  assert.match(html, /vendor\/uplot\/uPlot\.min\.css\?v=1\.6\.32/);
+  assert.match(css, /\.run-history-chart \.u-legend/);
+  assert.match(chartCode, /new window\.uPlot/);
+  assert.match(chartCode, /label:\s*"RPS"/);
+  assert.match(chartCode, /label:\s*"p95"/);
+  assert.match(chartCode, /label:\s*"Error"/);
+  assert.doesNotMatch(chartCode, /VUs|point\.vus/);
+  assert.doesNotMatch(html, /runChartTooltip/);
 });
 
 test("selected history run renders its time-series inside the detail panel", () => {
   const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
   assert.match(detail, /id="runDetailChart"/);
-  assert.match(detail, /id="runDetailChartTooltip"/);
   assert.match(detail, /id="runDetailChartEmpty"/);
   assert.match(css, /\.run-detail-timeline/);
-  assert.match(javascript, /runDetailChartHoverIndex/);
   assert.match(
     javascript,
-    /drawRunChartCanvas\(\s*elements\.runDetailChart,\s*elements\.runDetailChartTooltip,\s*elements\.runDetailChartEmpty/,
+    /renderRunChart\(elements\.runDetailChart,\s*elements\.runDetailChartEmpty,\s*"detail"\)/,
   );
+  assert.doesNotMatch(detail, /runDetailChartTooltip/);
 });
 
 test("workspace manages projects and components expose restart without apply", () => {

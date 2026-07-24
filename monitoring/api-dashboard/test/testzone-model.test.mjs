@@ -2,11 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   RUN_PROFILES,
-  buildChartPoints,
-  chartSampleIndex,
   diagnosticMessage,
   editorPosition,
-  formatChartLabel,
   formatMilliseconds,
   formatPercent,
   formatRate,
@@ -53,13 +50,8 @@ test("JSON fields accept objects and reject invalid or array values", () => {
   assert.throws(() => parseObjectJson("{", "Headers"), /valid JSON/);
 });
 
-test("latest run and chart points use execution timestamps without runtime labels", () => {
+test("latest run uses execution timestamps", () => {
   assert.equal(selectLatestRun(runs).id, "running");
-  assert.deepEqual(buildChartPoints(runs).map(({ id, rps, p95 }) => ({ id, rps, p95 })), [
-    { id: "older", rps: 800.2, p95: 41.5 },
-    { id: "newer", rps: 995.4, p95: 57.1 },
-  ]);
-  assert.match(buildChartPoints(runs)[0].label, /^\d{2}\/\d{2} \d{2}:\d{2}$/);
 });
 
 test("run history keeps the execution-time script name and supports legacy runs", () => {
@@ -69,19 +61,6 @@ test("run history keeps the execution-time script name and supports legacy runs"
     "legacy-name.js",
   );
   assert.equal(runScriptName({ scriptId: "missing" }, []), "Deleted script");
-});
-
-test("chart labels remain compact and unambiguous", () => {
-  assert.equal(formatChartLabel("2026-07-24T01:58:00Z"), "07/24 10:58");
-});
-
-test("chart hover selects the nearest sample and clamps to the plot", () => {
-  assert.equal(chartSampleIndex(50, 5, 50, 450), 0);
-  assert.equal(chartSampleIndex(250, 5, 50, 450), 2);
-  assert.equal(chartSampleIndex(450, 5, 50, 450), 4);
-  assert.equal(chartSampleIndex(-100, 5, 50, 450), 0);
-  assert.equal(chartSampleIndex(900, 5, 50, 450), 4);
-  assert.equal(chartSampleIndex(250, 0, 50, 450), -1);
 });
 
 test("formatters preserve missing values and display operational units", () => {
