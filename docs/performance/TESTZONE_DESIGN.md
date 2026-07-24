@@ -103,7 +103,7 @@ no dropped/rejected request. A regression is reported for at least 5% lower
 successful RPS or at least 10% higher p95 when all three standard rounds agree.
 k6 and nGrinder disagreement is reported as inconclusive, not averaged away.
 
-## Site Information Architecture
+## Product Architecture
 
 The monitoring site has four stable destinations in a left navigation:
 
@@ -114,18 +114,34 @@ The monitoring site has four stable destinations in a left navigation:
 
 TestZone provides:
 
-- project and execution selection
-- selected-run verdict and evidence-backed findings
-- requested versus successful throughput
-- all-request p95 with the timeout boundary
-- successful-only p95 and timeout rate when collected
-- CPU and RSS comparison
-- immutable execution history
-- stage-level evidence table
-- a reviewed command generator with a hard 1,000-VUser limit
+- runtime-neutral target projects
+- JavaScript/k6 file creation, editing, validation, and deletion
+- server-side OpenAI script generation with an editable draft
+- direct execution, cancellation, and run deletion
+- a hard 1,000-VUser and 3,000-RPS ceiling
+- request headers and environment injection without source-code secrets
+- allowlisted PostgreSQL, Redis, and Kafka test-component lifecycle controls
+- local run metadata and raw artifact retention
+- InfluxDB time-series ingestion and per-run Grafana analysis
 
-The site is a read-only result catalog. Actual execution remains in the
-versioned load-test harness so browser compromise cannot start load.
+The UI does not compare MVC and WebFlux. Those names may be represented as
+separate target projects only when an operator intentionally creates them.
+Normal use starts from an already-running server and tests its public API
+contract.
+
+The execution boundary remains private:
+
+- Nginx Basic Auth protects UI and API.
+- k6 targets must match a deployment allowlist.
+- JavaScript may import k6 or project-local modules only.
+- the browser cannot provide Docker images, container commands, OpenAI keys,
+  or InfluxDB credentials.
+- disposable component actions map to a fixed server-side catalog.
+
+The Docker socket is mounted only into the private TestZone service because it
+owns the allowlisted component lifecycle. This is a privileged boundary and
+must remain on the MacBook Air's private monitoring host, not a public
+multi-tenant runner.
 
 ## Current Studies Finding
 

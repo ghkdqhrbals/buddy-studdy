@@ -9,6 +9,8 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 - Grafana data: `~/buddystudy/monitoring/grafana/data` -> `/var/lib/grafana`
 - Grafana provisioning: `monitoring/grafana/provisioning` -> `/etc/grafana/provisioning`
 - Grafana dashboards: `monitoring/grafana/dashboards` -> `/var/lib/grafana/dashboards`
+- TestZone state/scripts/runs: `~/buddystudy/monitoring/testzone/data` -> `/data`
+- TestZone InfluxDB: `~/buddystudy/monitoring/testzone/influxdb` -> `/var/lib/influxdb2`
 
 ## Access Control
 
@@ -21,6 +23,11 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
 ```
 
 - Loki and Grafana container ports are bound to `127.0.0.1` only. External access should go through the API dashboard reverse proxy.
+- TestZone has no public container port. Its API is reachable only through the
+  authenticated dashboard Nginx route.
+- k6 can target only hosts in `TESTZONE_ALLOWED_TARGET_HOSTS`.
+- Disposable components are selected from a fixed server-side catalog. The
+  browser cannot submit Docker images or commands.
 
 ## Dashboards
 
@@ -43,8 +50,27 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Timeline graph uses the selected Grafana time range and `$__interval`.
   - Drag on the timeline to zoom into a time range.
   - Logs panel uses Grafana Logs infinite scrolling with newest logs first.
+- `monitoring/grafana/dashboards/buddystudy-testzone.json`
+  - Reads k6 request rate, p95 latency, error rate, and VUs from InfluxDB.
+  - Filters every panel by TestZone `run_id`.
+  - TestZone run deletion also deletes the matching InfluxDB series.
+
+## TestZone
+
+TestZone consists of two independently deployed modules:
+
+1. The monitoring workflow deploys the browser UI, Nginx proxy, Grafana
+   dashboard, and InfluxDB datasource definition.
+2. The TestZone workflow deploys the k6 execution service and InfluxDB.
+
+The OpenAI assistant calls the Responses API from the TestZone service. Set
+`OPENAI_API_KEY` only in the deployment secret. It is never written into the
+static dashboard.
+
+See [TestZone Operations](../docs/performance/TESTZONE_OPERATIONS.md).
 
 ## External URLs
 
 - API Logs: `https://grafana.lowfidev.cloud`
 - Grafana: `https://grafana.lowfidev.cloud/grafana/`
+- TestZone: `https://grafana.lowfidev.cloud/testzone.html`

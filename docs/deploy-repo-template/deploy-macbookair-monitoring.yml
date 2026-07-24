@@ -24,6 +24,9 @@ jobs:
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
           API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
+          TESTZONE_INFLUX_TOKEN: ${{ secrets.TESTZONE_INFLUX_TOKEN }}
+          TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
+          TESTZONE_INFLUX_BUCKET: ${{ vars.TESTZONE_INFLUX_BUCKET || 'testzone' }}
         run: |
           set -euo pipefail
 
@@ -33,6 +36,10 @@ jobs:
           fi
           if [ -z "${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" ]; then
             echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
+            exit 1
+          fi
+          if [ -z "${TESTZONE_INFLUX_TOKEN}" ]; then
+            echo "Missing GitHub Actions secret: TESTZONE_INFLUX_TOKEN" >&2
             exit 1
           fi
 
@@ -52,11 +59,17 @@ jobs:
             "${MONITORING_SOURCE_BASE}/grafana/provisioning/datasources/loki.yml" \
             -o "${monitoring_root}/grafana/provisioning/datasources/loki.yml"
           curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/grafana/provisioning/datasources/testzone-influx.yml" \
+            -o "${monitoring_root}/grafana/provisioning/datasources/testzone-influx.yml"
+          curl -fsSL \
             "${MONITORING_SOURCE_BASE}/grafana/provisioning/dashboards/dashboards.yml" \
             -o "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
           curl -fsSL \
             "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-logs.json" \
             -o "${monitoring_root}/grafana/dashboards/buddystudy-logs.json"
+          curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-testzone.json" \
+            -o "${monitoring_root}/grafana/dashboards/buddystudy-testzone.json"
           curl -fsSL \
             "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
             -o "${monitoring_root}/loki/config/loki.yml"
@@ -118,6 +131,9 @@ jobs:
             -e GF_USERS_ALLOW_SIGN_UP=false \
             -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/grafana/ \
             -e GF_SERVER_SERVE_FROM_SUB_PATH=true \
+            -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
+            -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
+            -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
             -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/buddystudy-logs.json \
             -v "${monitoring_root}/grafana/data:/var/lib/grafana" \
             -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \

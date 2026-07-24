@@ -19,6 +19,8 @@ Current workflow templates:
 - `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
 - `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
   MacBook Air.
+- `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
+  Air.
 - `deploy-monitoring.yml`: legacy EC2-local monitoring fallback only.
 
 ## Required Secrets
@@ -47,6 +49,16 @@ MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
 - `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
+- `TESTZONE_INFLUX_TOKEN`
+
+MacBook Air TestZone deploy:
+
+- `GHCR_USERNAME`
+- `GHCR_TOKEN`
+- `TESTZONE_INFLUX_PASSWORD`
+- `TESTZONE_INFLUX_TOKEN`
+- `TESTZONE_COMPONENT_PASSWORD`
+- `OPENAI_API_KEY`
 
 Repository variables:
 
@@ -54,6 +66,10 @@ Repository variables:
 - `MACBOOKAIR_MONITORING_ROOT`: persistent host path for MacBook Air PLG data, defaults to `$HOME/data/buddystudy/monitoring`.
 - `GRAFANA_PORT`: MacBook Air Grafana host port, defaults to `3000`.
 - `LOKI_PORT`: MacBook Air Loki host port, defaults to `3100`.
+- `MACBOOKAIR_TESTZONE_ROOT`: persistent TestZone and InfluxDB path.
+- `TESTZONE_ALLOWED_TARGET_HOSTS`: comma-separated host allowlist for k6.
+- `TESTZONE_INFLUX_ORG` and `TESTZONE_INFLUX_BUCKET`: Grafana and runner
+  storage coordinates.
 
 ## Runtime Layout
 
@@ -135,6 +151,14 @@ The MacBook Air workflow creates or replaces:
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under
   `$HOME/data/buddystudy/monitoring/grafana/data` by default.
+
+The separate TestZone workflow creates or replaces:
+
+- `buddystudy-testzone-service`: bounded k6 runner, JavaScript workspace API,
+  and OpenAI script assistant.
+- `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
+- approved disposable PostgreSQL, Redis, or Kafka containers only when a user
+  deploys them from TestZone.
 
 EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
 `REMOTE_LOKI_PUSH_URL` is configured.

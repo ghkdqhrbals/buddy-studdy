@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: TestZone InfluxDB
+    uid: buddystudy-testzone-influx
+    type: influxdb
+    access: proxy
+    url: http://buddystudy-testzone-influxdb:8086
+    editable: false
+    jsonData:
+      version: Flux
+      organization: ${TESTZONE_INFLUX_ORG}
+      defaultBucket: ${TESTZONE_INFLUX_BUCKET}
+      tlsSkipVerify: true
+    secureJsonData:
+      token: ${TESTZONE_INFLUX_TOKEN}

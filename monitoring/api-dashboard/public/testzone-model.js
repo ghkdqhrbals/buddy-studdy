@@ -1,77 +1,96 @@
-export function resultsFor(execution, { scenario = "", tool = "" } = {}) {
-  return (execution?.results ?? []).filter(
-    (result) =>
-      (!scenario || result.scenario === scenario) &&
-      (!tool || result.tool === tool),
+export const RUN_PROFILES = Object.freeze({
+  smoke: { label: "Smoke", duration: "10s", vus: 1, maxVus: 10, targetRps: 5 },
+  standard: { label: "Standard", duration: "60s", vus: 100, maxVus: 1000, targetRps: 1000 },
+  diagnostic: { label: "Diagnostic", duration: "120s", vus: 500, maxVus: 1000, targetRps: 2000 },
+  soak: { label: "Soak", duration: "15m", vus: 300, maxVus: 1000, targetRps: 0 },
+  custom: { label: "Custom", duration: "60s", vus: 100, maxVus: 1000, targetRps: 0 },
+});
+
+export function formatDate(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+export function formatChartLabel(value) {
+  if (!value) return "-";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Seoul",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(value)).map((part) => [part.type, part.value]),
   );
+  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-export function unique(values) {
-  return [...new Set(values)].sort((left, right) =>
-    String(left).localeCompare(String(right), undefined, { numeric: true }),
-  );
+export function formatRate(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(number >= 100 ? 0 : 1)} RPS` : "-";
 }
 
-export function sustainableCapacity(results, runtime) {
-  const stages = results
-    .filter(
-      (result) =>
-        result.runtime === runtime &&
-        result.load?.type === "rps" &&
-        result.validity?.valid !== false,
-    )
-    .filter((result) => {
-      const summary = result.summary ?? {};
-      const target = Number(result.load.value);
-      return (
-        Number(summary.successRps ?? 0) >= target * 0.95 &&
-        Number(summary.failureRate ?? 0) < 0.001 &&
-        Number(summary.dropped ?? 0) === 0
-      );
-    })
-    .map((result) => Number(result.load.value));
-  return stages.length ? Math.max(...stages) : null;
+export function formatMilliseconds(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return number >= 1000 ? `${(number / 1000).toFixed(2)} s` : `${number.toFixed(number >= 100 ? 0 : 1)} ms`;
 }
 
-export function maximumMetric(results, section, key) {
-  const values = results
-    .map((result) => result?.[section]?.[key])
-    .filter((value) => typeof value === "number" && Number.isFinite(value));
-  return values.length ? Math.max(...values) : null;
+export function formatPercent(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  return Number.isFinite(number) ? `${(number * 100).toFixed(2)}%` : "-";
 }
 
-export function runtimeSeries(results, metric, { section = "summary" } = {}) {
-  const loads = unique(
-    results
-      .filter((result) => result.load?.type === "rps")
-      .map((result) => Number(result.load.value)),
-  );
-  const runtimes = unique(results.map((result) => result.runtime));
-  return {
-    loads,
-    series: runtimes.map((runtime) => ({
-      runtime,
-      values: loads.map((load) => {
-        const result = results.find(
-          (candidate) =>
-            candidate.runtime === runtime &&
-            candidate.load?.type === "rps" &&
-            Number(candidate.load.value) === load,
-        );
-        const value = result?.[section]?.[metric];
-        return typeof value === "number" ? value : null;
-      }),
-    })),
-  };
+export function parseObjectJson(value, label) {
+  const text = String(value || "").trim();
+  if (!text) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${label} must be valid JSON.`);
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  return parsed;
 }
 
-export function p95CollectionStatus(results) {
-  const measured = results.filter(
-    (result) => typeof result.summary?.successfulRequestP95Ms === "number",
-  ).length;
-  return {
-    measured,
-    total: results.length,
-    complete: measured > 0 && measured === results.length,
-  };
+export function selectLatestRun(runs = []) {
+  return [...runs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0] || null;
+}
+
+export function buildChartPoints(runs = []) {
+  return [...runs]
+    .filter((run) => run.status === "completed" && run.summary)
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+    .slice(-12)
+    .map((run) => ({
+      id: run.id,
+      label: formatChartLabel(run.startedAt || run.createdAt),
+      rps: Number(run.summary.requestRate) || 0,
+      p95: Number(run.summary.p95Ms) || 0,
+    }));
+}
+
+export function lineNumbersFor(code) {
+  const count = Math.max(1, String(code ?? "").split("\n").length);
+  return Array.from({ length: count }, (_, index) => index + 1).join("\n");
+}
+
+export function editorPosition(code, selectionStart) {
+  const before = String(code ?? "").slice(0, selectionStart);
+  const lines = before.split("\n");
+  return { line: lines.length, column: lines.at(-1).length + 1 };
 }

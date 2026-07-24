@@ -1,434 +1,786 @@
 import {
-  maximumMetric,
-  p95CollectionStatus,
-  resultsFor,
-  runtimeSeries,
-  sustainableCapacity,
-  unique,
-} from "./testzone-model.js?v=2026072401";
+  RUN_PROFILES,
+  buildChartPoints,
+  editorPosition,
+  formatDate,
+  formatMilliseconds,
+  formatPercent,
+  formatRate,
+  lineNumbersFor,
+  parseObjectJson,
+  selectLatestRun,
+} from "./testzone-model.js?v=2026072402";
 
-const COLORS = {
-  mvc: "#c7354a",
-  webflux: "#2563eb",
-  target: "#8b98aa",
-  timeout: "#9a6400",
+const API_BASE = "/testzone/api";
+const state = {
+  status: null,
+  projects: [],
+  scripts: [],
+  runs: [],
+  components: [],
+  projectId: null,
+  scriptId: null,
+  dirty: false,
+  assistantDraft: null,
+  confirmAction: null,
+  pollTimer: null,
 };
 
-const state = { payload: null, project: null, execution: null };
-const ids = [
-  "projectSelect", "executionSelect", "scenarioSelect", "toolSelect",
-  "resetFiltersButton", "generatedAt", "verdictBand", "verdictTitle",
-  "verdictDetail", "testzoneSummary", "throughputLegend", "latencyLegend",
-  "successLatencyLegend", "resourceLegend", "latencyDescription", "findingList", "historyRows",
-  "measurementRows", "newRunButton", "newRunDialog", "runProfile",
-  "runTool", "mvcRefInput", "webfluxRefInput", "runScenarios",
-  "runCommand", "copyRunCommandButton",
-];
-const els = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+const elements = Object.fromEntries(
+  [
+    "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
+    "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
+    "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
+    "runRows", "runEmptyState", "runCount", "refreshRunsButton",
+    "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "editorLineNumbers",
+    "editorPosition", "editorDirtyMark", "editorFeedback", "validateScriptButton",
+    "saveScriptButton", "editorRunButton", "deleteScriptButton",
+    "assistantAvailability", "assistantMessages", "assistantDraft", "assistantDraftMessage",
+    "applyAssistantDraftButton", "assistantForm", "assistantPrompt", "assistantSendButton",
+    "componentGrid", "refreshComponentsButton",
+    "runDialog", "runForm", "runProjectName", "runTargetUrl", "runScriptSelect",
+    "runProfileControl", "runDuration", "runVus", "runMaxVus", "runTargetRps",
+    "runHeaders", "runEnvironment", "runFormError", "startRunButton",
+    "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
+    "confirmDialog", "confirmForm", "confirmTitle", "confirmMessage", "confirmActionButton",
+    "toastRegion",
+  ].map((id) => [id, document.getElementById(id)]),
+);
 
-function formatNumber(value, digits = 1) {
-  return typeof value === "number"
-    ? value.toLocaleString("en-US", { maximumFractionDigits: digits })
-    : "-";
-}
-
-function formatPercent(value, digits = 1) {
-  return typeof value === "number" ? `${(value * 100).toFixed(digits)}%` : "-";
-}
-
-function formatBytes(value) {
-  return typeof value === "number" ? `${(value / 1048576).toFixed(1)} MiB` : "-";
-}
-
-function formatDate(value) {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function fillSelect(element, values, label = (value) => value) {
-  element.innerHTML = values
-    .map((value) => `<option value="${value}">${label(value)}</option>`)
-    .join("");
-}
-
-function currentResults() {
-  return resultsFor(state.execution, {
-    scenario: els.scenarioSelect.value,
-    tool: els.toolSelect.value,
-  });
-}
-
-function refreshProject() {
-  state.project = state.payload.projects.find(
-    (project) => project.id === els.projectSelect.value,
-  );
-  const executions = state.payload.executions.filter(
-    (execution) => execution.projectId === state.project.id,
-  );
-  fillSelect(
-    els.executionSelect,
-    executions.map((execution) => execution.id),
-    (id) => {
-      const execution = executions.find((item) => item.id === id);
-      return `${formatDate(execution.startedAt)} · ${execution.profile}`;
+async function api(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
     },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `TestZone request failed (${response.status}).`);
+    error.details = payload.details || [];
+    throw error;
+  }
+  return payload;
+}
+
+function project() {
+  return state.projects.find((entry) => entry.id === state.projectId) || null;
+}
+
+function script() {
+  return state.scripts.find((entry) => entry.id === state.scriptId) || null;
+}
+
+function setFeedback(element, message, status = "") {
+  element.textContent = message;
+  element.dataset.state = status;
+}
+
+function toast(message, status = "success") {
+  const item = document.createElement("div");
+  item.className = "toast";
+  item.dataset.state = status;
+  item.textContent = message;
+  elements.toastRegion.append(item);
+  window.setTimeout(() => item.remove(), 3600);
+}
+
+function setButtonBusy(button, busy, label) {
+  if (!button.dataset.label) button.dataset.label = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? label : button.dataset.label;
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".testzone-tabs button").forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.tab === name));
+  });
+  document.querySelectorAll("[data-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== name;
+  });
+  if (name === "components") loadComponents();
+  if (name === "scripts") window.setTimeout(syncEditorMetrics, 0);
+}
+
+async function loadStatus() {
+  try {
+    state.status = await api("/status");
+    elements.serviceStatus.textContent = "Ready";
+    elements.serviceStatus.dataset.state = "ready";
+    elements.assistantAvailability.dataset.enabled = String(state.status.integrations.openAI);
+    elements.assistantAvailability.title = state.status.integrations.openAI
+      ? "OpenAI is ready"
+      : "OpenAI key is not configured";
+    elements.assistantPrompt.disabled = !state.status.integrations.openAI;
+    elements.assistantSendButton.disabled = !state.status.integrations.openAI;
+    elements.assistantPrompt.placeholder = state.status.integrations.openAI
+      ? "예: POST /api/v1/studies 요청을 200 RPS로 테스트하고 응답의 id를 검증해줘"
+      : "OpenAI key is not configured on the TestZone server.";
+  } catch (error) {
+    elements.serviceStatus.textContent = "Service unavailable";
+    elements.serviceStatus.dataset.state = "error";
+    throw error;
+  }
+}
+
+async function loadProjects() {
+  const payload = await api("/projects");
+  state.projects = payload.projects;
+  const remembered = localStorage.getItem("testzone.projectId");
+  state.projectId = state.projects.some((entry) => entry.id === remembered)
+    ? remembered
+    : state.projects[0]?.id ?? null;
+  renderProjects();
+  await Promise.all([loadScripts(), loadRuns()]);
+}
+
+function renderProjects() {
+  elements.projectSelect.replaceChildren(...state.projects.map((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.name;
+    option.selected = entry.id === state.projectId;
+    return option;
+  }));
+  const selected = project();
+  elements.projectBaseUrl.value = selected?.baseUrl || "";
+}
+
+async function saveProject() {
+  const selected = project();
+  if (!selected) return;
+  setButtonBusy(elements.saveProjectButton, true, "Saving");
+  try {
+    const payload = await api(`/projects/${selected.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ baseUrl: elements.projectBaseUrl.value }),
+    });
+    Object.assign(selected, payload.project);
+    setFeedback(elements.projectFeedback, "Saved", "success");
+  } catch (error) {
+    setFeedback(elements.projectFeedback, error.message, "error");
+  } finally {
+    setButtonBusy(elements.saveProjectButton, false);
+  }
+}
+
+async function loadScripts() {
+  if (!state.projectId) return;
+  const payload = await api(`/scripts?projectId=${encodeURIComponent(state.projectId)}`);
+  state.scripts = payload.scripts;
+  if (!state.scripts.some((entry) => entry.id === state.scriptId)) {
+    state.scriptId = state.scripts[0]?.id ?? null;
+  }
+  renderScripts();
+}
+
+function renderScripts() {
+  elements.scriptList.replaceChildren(...state.scripts.map((entry) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.scriptId = entry.id;
+    button.setAttribute("aria-current", String(entry.id === state.scriptId));
+    const name = document.createElement("strong");
+    name.textContent = entry.name;
+    const detail = document.createElement("span");
+    detail.textContent = formatDate(entry.updatedAt);
+    button.append(name, detail);
+    return button;
+  }));
+  const options = state.scripts.map((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.name;
+    return option;
+  });
+  elements.quickScriptSelect.replaceChildren(...options.map((entry) => entry.cloneNode(true)));
+  elements.runScriptSelect.replaceChildren(...options);
+  if (state.scriptId) {
+    elements.quickScriptSelect.value = state.scriptId;
+    elements.runScriptSelect.value = state.scriptId;
+  }
+  loadScriptIntoEditor();
+}
+
+function loadScriptIntoEditor() {
+  const selected = script();
+  elements.scriptNameInput.value = selected?.name || "";
+  elements.scriptEditor.value = selected?.code || "";
+  state.dirty = false;
+  renderDirtyState();
+  syncEditorMetrics();
+  elements.saveScriptButton.disabled = !selected;
+  elements.validateScriptButton.disabled = !selected;
+  elements.editorRunButton.disabled = !selected;
+  elements.deleteScriptButton.disabled = !selected;
+}
+
+function renderDirtyState() {
+  elements.editorDirtyMark.dataset.dirty = String(state.dirty);
+}
+
+function markDirty() {
+  state.dirty = true;
+  renderDirtyState();
+  setFeedback(elements.editorFeedback, "Unsaved");
+}
+
+function syncEditorMetrics() {
+  const code = elements.scriptEditor.value;
+  elements.editorLineNumbers.textContent = lineNumbersFor(code);
+  elements.editorLineNumbers.scrollTop = elements.scriptEditor.scrollTop;
+  const position = editorPosition(code, elements.scriptEditor.selectionStart);
+  elements.editorPosition.textContent = `Ln ${position.line}, Col ${position.column}`;
+}
+
+async function saveScript() {
+  const selected = script();
+  if (!selected) return;
+  setButtonBusy(elements.saveScriptButton, true, "Saving");
+  try {
+    const payload = await api(`/scripts/${selected.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: elements.scriptNameInput.value,
+        code: elements.scriptEditor.value,
+      }),
+    });
+    Object.assign(selected, payload.script);
+    state.dirty = false;
+    renderDirtyState();
+    renderScripts();
+    setFeedback(elements.editorFeedback, "Saved", "success");
+  } catch (error) {
+    setFeedback(elements.editorFeedback, error.details?.[0] || error.message, "error");
+  } finally {
+    setButtonBusy(elements.saveScriptButton, false);
+  }
+}
+
+async function validateCurrentScript() {
+  const selected = script();
+  if (!selected) return;
+  setButtonBusy(elements.validateScriptButton, true, "Checking");
+  try {
+    const payload = await api(`/scripts/${selected.id}/validate`, {
+      method: "POST",
+      body: JSON.stringify({
+        code: elements.scriptEditor.value,
+        baseUrl: project()?.baseUrl,
+      }),
+    });
+    setFeedback(elements.editorFeedback, `Valid · ${payload.validation.bytes.toLocaleString()} bytes`, "success");
+    toast("Script validation passed.");
+  } catch (error) {
+    const message = [error.message, ...(error.details || [])].join(" ");
+    setFeedback(elements.editorFeedback, error.details?.[0] || error.message, "error");
+    toast(message, "error");
+  } finally {
+    setButtonBusy(elements.validateScriptButton, false);
+  }
+}
+
+function openNewScriptDialog() {
+  elements.newScriptName.value = "api-test.js";
+  elements.newScriptDescription.value = "";
+  elements.newScriptDialog.showModal();
+  elements.newScriptName.select();
+}
+
+async function createScript(event) {
+  event.preventDefault();
+  const code = script()?.code || elements.scriptEditor.value;
+  try {
+    const payload = await api("/scripts", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: state.projectId,
+        name: elements.newScriptName.value,
+        description: elements.newScriptDescription.value,
+        code,
+      }),
+    });
+    state.scripts.unshift(payload.script);
+    state.scriptId = payload.script.id;
+    elements.newScriptDialog.close();
+    renderScripts();
+    toast("New script created.");
+  } catch (error) {
+    toast(error.details?.[0] || error.message, "error");
+  }
+}
+
+async function deleteCurrentScript() {
+  const selected = script();
+  if (!selected) return;
+  const accepted = await confirmAction(
+    "Delete script?",
+    `${selected.name} 파일을 삭제합니다. 완료된 실행 결과는 유지됩니다.`,
+    "Delete script",
   );
-  els.executionSelect.value = state.project.latestExecutionId ?? executions[0]?.id ?? "";
-  refreshExecution();
+  if (!accepted) return;
+  try {
+    await api(`/scripts/${selected.id}`, { method: "DELETE" });
+    state.scripts = state.scripts.filter((entry) => entry.id !== selected.id);
+    state.scriptId = state.scripts[0]?.id ?? null;
+    renderScripts();
+    toast("Script deleted.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
-function refreshExecution() {
-  state.execution = state.payload.executions.find(
-    (execution) => execution.id === els.executionSelect.value,
+async function askAssistant(event) {
+  event.preventDefault();
+  const selected = script();
+  const prompt = elements.assistantPrompt.value.trim();
+  if (!selected || !prompt) return;
+  appendAssistantMessage(prompt, "user");
+  elements.assistantPrompt.value = "";
+  setButtonBusy(elements.assistantSendButton, true, "Generating");
+  try {
+    const payload = await api(`/scripts/${selected.id}/ai`, {
+      method: "POST",
+      body: JSON.stringify({ prompt, currentCode: elements.scriptEditor.value }),
+    });
+    state.assistantDraft = payload.result.code;
+    elements.assistantDraftMessage.textContent = payload.result.message;
+    elements.assistantDraft.hidden = false;
+    appendAssistantMessage(payload.result.message, "assistant");
+  } catch (error) {
+    appendAssistantMessage(error.message, "error");
+  } finally {
+    setButtonBusy(elements.assistantSendButton, false);
+  }
+}
+
+function appendAssistantMessage(message, role) {
+  const item = document.createElement("div");
+  item.className = `assistant-message assistant-${role}`;
+  const paragraph = document.createElement("p");
+  paragraph.textContent = message;
+  item.append(paragraph);
+  elements.assistantMessages.append(item);
+  elements.assistantMessages.scrollTop = elements.assistantMessages.scrollHeight;
+}
+
+function applyAssistantDraft() {
+  if (!state.assistantDraft) return;
+  elements.scriptEditor.value = state.assistantDraft;
+  state.assistantDraft = null;
+  elements.assistantDraft.hidden = true;
+  markDirty();
+  syncEditorMetrics();
+  elements.scriptEditor.focus();
+}
+
+async function loadRuns() {
+  if (!state.projectId) return;
+  const payload = await api(`/runs?projectId=${encodeURIComponent(state.projectId)}`);
+  state.runs = payload.runs;
+  renderRuns();
+  scheduleRunPolling();
+}
+
+function renderRuns() {
+  const latest = selectLatestRun(state.runs);
+  elements.summaryStatus.textContent = latest?.status || "No runs";
+  elements.summaryRps.textContent = formatRate(latest?.summary?.requestRate);
+  elements.summaryP95.textContent = formatMilliseconds(latest?.summary?.p95Ms);
+  elements.summaryError.textContent = formatPercent(latest?.summary?.errorRate);
+  elements.runCount.textContent = `${state.runs.length.toLocaleString()} runs`;
+  elements.runEmptyState.hidden = state.runs.length > 0;
+  elements.runRows.replaceChildren(...state.runs.map((run) => {
+    const row = document.createElement("tr");
+    const selectedScript = state.scripts.find((entry) => entry.id === run.scriptId);
+    const cells = [
+      formatDate(run.startedAt || run.createdAt),
+      selectedScript?.name || "Deleted script",
+      run.profile,
+    ].map((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      return cell;
+    });
+    const statusCell = document.createElement("td");
+    const status = document.createElement("span");
+    status.className = "status-pill";
+    status.dataset.status = run.status;
+    status.textContent = run.status;
+    statusCell.append(status);
+    const metrics = [
+      formatRate(run.summary?.requestRate),
+      formatMilliseconds(run.summary?.p95Ms),
+      formatPercent(run.summary?.errorRate),
+    ].map((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      return cell;
+    });
+    const actions = document.createElement("td");
+    actions.className = "row-actions";
+    if (["queued", "running", "cancelling"].includes(run.status)) {
+      actions.append(actionButton("Cancel", () => cancelRun(run.id)));
+    } else {
+      const grafana = document.createElement("a");
+      grafana.className = "row-action";
+      grafana.href = run.grafanaUrl;
+      grafana.target = "_blank";
+      grafana.rel = "noreferrer";
+      grafana.textContent = "Grafana";
+      actions.append(grafana, actionButton("Delete", () => deleteRun(run), true));
+    }
+    row.append(...cells, statusCell, ...metrics, actions);
+    return row;
+  }));
+  drawRunChart();
+}
+
+function actionButton(label, handler, danger = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `row-action${danger ? " danger" : ""}`;
+  button.textContent = label;
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function scheduleRunPolling() {
+  window.clearTimeout(state.pollTimer);
+  if (state.runs.some((run) => ["queued", "running", "cancelling"].includes(run.status))) {
+    state.pollTimer = window.setTimeout(loadRuns, 2000);
+  }
+}
+
+async function cancelRun(id) {
+  try {
+    await api(`/runs/${id}/cancel`, { method: "POST" });
+    toast("Run cancellation requested.");
+    await loadRuns();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function deleteRun(run) {
+  const accepted = await confirmAction(
+    "Delete run?",
+    `${formatDate(run.startedAt || run.createdAt)} 실행과 InfluxDB 시계열을 함께 삭제합니다.`,
+    "Delete run",
   );
-  const scenarios = unique((state.execution?.results ?? []).map((result) => result.scenario));
-  const tools = unique((state.execution?.results ?? []).map((result) => result.tool));
-  const previousScenario = els.scenarioSelect.value;
-  const previousTool = els.toolSelect.value;
-  fillSelect(els.scenarioSelect, scenarios);
-  fillSelect(els.toolSelect, tools);
-  if (scenarios.includes(previousScenario)) els.scenarioSelect.value = previousScenario;
-  if (tools.includes(previousTool)) els.toolSelect.value = previousTool;
-  render();
+  if (!accepted) return;
+  try {
+    await api(`/runs/${run.id}`, { method: "DELETE" });
+    state.runs = state.runs.filter((entry) => entry.id !== run.id);
+    renderRuns();
+    toast("Run and time-series data deleted.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
-function renderVerdict(results) {
-  const { execution } = state;
-  const timeoutCount = results.filter(
-    (result) => result.classification?.timeoutBoundaryReached,
-  ).length;
-  els.verdictBand.dataset.tone = execution.status;
-  els.verdictTitle.textContent =
-    execution.status === "passed"
-      ? "Capacity checks passed"
-      : execution.status === "invalid"
-        ? "Run excluded from conclusions"
-        : "Capacity target missed";
-  els.verdictDetail.textContent = timeoutCount
-    ? `${els.scenarioSelect.value} has ${timeoutCount} runtime/load stages whose all-request p95 reached the 5-second client timeout.`
-    : `${els.scenarioSelect.value} contains ${results.length} measured runtime/load stages.`;
-}
-
-function renderSummary(results) {
-  const mvcCapacity = sustainableCapacity(results, "mvc");
-  const webfluxCapacity = sustainableCapacity(results, "webflux");
-  const maxSuccess = maximumMetric(results, "summary", "successRps");
-  const maxP95 = maximumMetric(results, "summary", "allRequestP95Ms");
-  const maxFailure = maximumMetric(results, "summary", "failureRate");
-  const maxCpu = maximumMetric(results, "resources", "appCpuP95");
-  const items = [
-    ["MVC sustainable", mvcCapacity == null ? "< first stage" : `${formatNumber(mvcCapacity, 0)} RPS`, "95% target, <0.1% error"],
-    ["WebFlux sustainable", webfluxCapacity == null ? "< first stage" : `${formatNumber(webfluxCapacity, 0)} RPS`, "95% target, <0.1% error"],
-    ["Peak success", `${formatNumber(maxSuccess)} RPS`, "highest valid stage"],
-    ["Worst all p95", maxP95 == null ? "-" : `${formatNumber(maxP95)} ms`, "includes timeouts"],
-    ["Peak error", formatPercent(maxFailure), "started requests"],
-    ["Peak app CPU", maxCpu == null ? "-" : `${formatNumber(maxCpu)}%`, "100% equals one core"],
-  ];
-  els.testzoneSummary.innerHTML = items
-    .map(
-      ([label, value, detail]) =>
-        `<article><span>${label}</span><strong>${value}</strong><small>${detail}</small></article>`,
-    )
-    .join("");
-}
-
-function chartLegend(element, entries) {
-  element.innerHTML = entries
-    .map((entry) => `<span><i style="background:${entry.color}"></i>${entry.label}</span>`)
-    .join("");
-}
-
-function drawLineChart(canvas, {
-  labels,
-  series,
-  formatter = (value) => formatNumber(value),
-  log = false,
-  floor = 0,
-}) {
-  const box = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, box.width * dpr);
-  canvas.height = Math.max(1, box.height * dpr);
+function drawRunChart() {
+  const canvas = elements.runHistoryChart;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(320, Math.round(rect.width));
+  const height = 260;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
   const context = canvas.getContext("2d");
-  context.scale(dpr, dpr);
-  const width = box.width;
-  const height = box.height;
-  const padding = { left: 58, right: 20, top: 18, bottom: 38 };
-  const values = series
-    .flatMap((item) => item.values)
-    .filter((value) => typeof value === "number" && value >= 0);
+  context.scale(ratio, ratio);
   context.clearRect(0, 0, width, height);
-  if (!labels.length || !values.length) {
-    context.fillStyle = "#66758a";
+  const points = buildChartPoints(state.runs);
+  if (!points.length) {
+    context.fillStyle = "#7b8a9e";
+    context.font = "12px system-ui";
     context.textAlign = "center";
-    context.fillText("No measured values", width / 2, height / 2);
+    context.fillText("Completed runs will appear here.", width / 2, height / 2);
     return;
   }
-  const transformed = (value) => (log ? Math.log10(Math.max(1, value)) : value);
-  const maxValue = Math.max(...values);
-  const max = transformed(maxValue * 1.08 || 1);
-  const min = transformed(log ? 1 : floor);
-  const x = (index) =>
-    padding.left +
-    (labels.length === 1
-      ? (width - padding.left - padding.right) / 2
-      : (index * (width - padding.left - padding.right)) / (labels.length - 1));
-  const y = (value) =>
-    padding.top +
-    ((max - transformed(value)) * (height - padding.top - padding.bottom)) /
-      Math.max(0.0001, max - min);
-
-  context.font = "11px Inter, sans-serif";
-  context.strokeStyle = "#e8edf4";
-  context.fillStyle = "#66758a";
-  context.textAlign = "right";
+  const padding = { top: 22, right: 44, bottom: 34, left: 44 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maxRps = Math.max(...points.map((point) => point.rps), 1) * 1.15;
+  const maxP95 = Math.max(...points.map((point) => point.p95), 1) * 1.15;
+  context.strokeStyle = "#e4e9ef";
+  context.lineWidth = 1;
   for (let index = 0; index <= 4; index += 1) {
-    const transformedValue = min + ((max - min) * index) / 4;
-    const value = log ? 10 ** transformedValue : transformedValue;
-    const yy = y(value);
+    const y = padding.top + (chartHeight * index) / 4;
     context.beginPath();
-    context.moveTo(padding.left, yy);
-    context.lineTo(width - padding.right, yy);
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
     context.stroke();
-    context.fillText(formatter(value), padding.left - 8, yy + 4);
   }
-  context.textAlign = "center";
-  labels.forEach((label, index) => {
-    context.fillText(formatNumber(label, 0), x(index), height - 12);
+  const step = chartWidth / points.length;
+  const barWidth = Math.min(26, step * 0.5);
+  points.forEach((point, index) => {
+    const x = padding.left + step * index + step / 2;
+    const barHeight = (point.rps / maxRps) * chartHeight;
+    context.fillStyle = "#2166d1";
+    context.fillRect(x - barWidth / 2, padding.top + chartHeight - barHeight, barWidth, barHeight);
+    context.fillStyle = "#64748b";
+    context.font = "9px system-ui";
+    context.textAlign = "center";
+    context.fillText(point.label, x, height - 12);
   });
-  series.forEach((item) => {
-    context.strokeStyle = item.color;
-    context.fillStyle = item.color;
-    context.lineWidth = item.width ?? 2;
-    context.setLineDash(item.dashed ? [6, 5] : []);
-    context.beginPath();
-    let started = false;
-    item.values.forEach((value, index) => {
-      if (typeof value !== "number") {
-        started = false;
-        return;
-      }
-      if (!started) {
-        context.moveTo(x(index), y(value));
-        started = true;
-      } else {
-        context.lineTo(x(index), y(value));
-      }
-    });
-    context.stroke();
-    context.setLineDash([]);
-    item.values.forEach((value, index) => {
-      if (typeof value !== "number") return;
-      context.beginPath();
-      context.arc(x(index), y(value), 3.5, 0, Math.PI * 2);
-      context.fill();
-    });
+  context.beginPath();
+  points.forEach((point, index) => {
+    const x = padding.left + step * index + step / 2;
+    const y = padding.top + chartHeight - (point.p95 / maxP95) * chartHeight;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
   });
+  context.strokeStyle = "#e4982b";
+  context.lineWidth = 2;
+  context.stroke();
+  context.fillStyle = "#64748b";
+  context.font = "9px system-ui";
+  context.textAlign = "left";
+  context.fillText(`${Math.round(maxRps)} RPS`, 2, padding.top + 4);
+  context.textAlign = "right";
+  context.fillText(formatMilliseconds(maxP95), width - 2, padding.top + 4);
 }
 
-function chartSeries(results, metric, section = "summary") {
-  const data = runtimeSeries(results, metric, { section });
-  return {
-    labels: data.loads,
-    series: data.series.map((item) => ({
-      label: item.runtime === "mvc" ? "MVC / JDBC" : "WebFlux / R2DBC",
-      color: COLORS[item.runtime] ?? COLORS.target,
-      values: item.values,
-    })),
-  };
+function applyProfile(name) {
+  const profile = RUN_PROFILES[name] || RUN_PROFILES.custom;
+  elements.runProfileControl.querySelectorAll("button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.profile === name));
+  });
+  elements.runDuration.value = profile.duration;
+  elements.runVus.value = profile.vus;
+  elements.runMaxVus.value = profile.maxVus;
+  elements.runTargetRps.value = profile.targetRps;
+  elements.runForm.dataset.profile = name;
 }
 
-function renderCharts(results) {
-  const throughput = chartSeries(results, "successRps");
-  const target = {
-    label: "Target",
-    color: COLORS.target,
-    dashed: true,
-    values: throughput.labels,
-  };
-  drawLineChart(document.getElementById("throughputChart"), {
-    labels: throughput.labels,
-    series: [target, ...throughput.series],
-  });
-  chartLegend(els.throughputLegend, [target, ...throughput.series]);
+function openRunDialog(profileName = "standard", scriptId = null) {
+  const selectedProject = project();
+  if (!selectedProject || !state.scripts.length) {
+    toast("Create a project script before starting a run.", "error");
+    return;
+  }
+  elements.runProjectName.textContent = selectedProject.name;
+  elements.runTargetUrl.textContent = selectedProject.baseUrl;
+  elements.runScriptSelect.value = scriptId || state.scriptId || state.scripts[0].id;
+  applyProfile(profileName);
+  elements.runFormError.textContent = "";
+  elements.runDialog.showModal();
+}
 
-  const latency = chartSeries(results, "allRequestP95Ms");
-  const timeout = {
-    label: "5s timeout",
-    color: COLORS.timeout,
-    dashed: true,
-    values: latency.labels.map(() => 5000),
-  };
-  drawLineChart(document.getElementById("latencyChart"), {
-    labels: latency.labels,
-    series: [...latency.series, timeout],
-    formatter: (value) =>
-      value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${formatNumber(value, 0)}ms`,
-    log: true,
-  });
-  chartLegend(els.latencyLegend, [...latency.series, timeout]);
+async function startRun(event) {
+  event.preventDefault();
+  setButtonBusy(elements.startRunButton, true, "Starting");
+  elements.runFormError.textContent = "";
+  try {
+    const headers = parseObjectJson(elements.runHeaders.value, "Headers");
+    const environment = parseObjectJson(elements.runEnvironment.value, "Environment");
+    await api("/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: state.projectId,
+        scriptId: elements.runScriptSelect.value,
+        profile: elements.runForm.dataset.profile || "custom",
+        options: {
+          duration: elements.runDuration.value,
+          vus: Number(elements.runVus.value),
+          maxVus: Number(elements.runMaxVus.value),
+          targetRps: Number(elements.runTargetRps.value),
+        },
+        headers,
+        environment,
+      }),
+    });
+    elements.runDialog.close();
+    switchTab("overview");
+    toast("Performance test started.");
+    await loadRuns();
+  } catch (error) {
+    elements.runFormError.textContent = [error.message, ...(error.details || [])].join(" ");
+  } finally {
+    setButtonBusy(elements.startRunButton, false);
+  }
+}
 
-  const successfulLatency = chartSeries(results, "successfulRequestP95Ms");
-  drawLineChart(document.getElementById("successLatencyChart"), {
-    labels: successfulLatency.labels,
-    series: successfulLatency.series,
-    formatter: (value) =>
-      value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${formatNumber(value, 0)}ms`,
-    log: true,
-  });
-  chartLegend(els.successLatencyLegend, successfulLatency.series);
-  const successP95 = p95CollectionStatus(results);
-  els.latencyDescription.textContent = successP95.measured
-    ? `Successful-only p95 is available for ${successP95.measured}/${successP95.total} stages; all-request p95 remains the timeout-inclusive view.`
-    : "This historical execution collected only timeout-inclusive p95. Successful-only p95 is intentionally shown as unavailable.";
+async function loadComponents() {
+  elements.componentGrid.setAttribute("aria-busy", "true");
+  try {
+    const payload = await api("/components");
+    state.components = payload.components;
+    renderComponents();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    elements.componentGrid.removeAttribute("aria-busy");
+  }
+}
 
-  const cpu = chartSeries(results, "appCpuP95", "resources");
-  drawLineChart(document.getElementById("cpuChart"), {
-    labels: cpu.labels,
-    series: cpu.series,
-    formatter: (value) => `${formatNumber(value, 0)}%`,
-  });
-  const memory = chartSeries(results, "appRssPeakBytes", "resources");
-  const memorySeries = memory.series.map((item) => ({
-    ...item,
-    values: item.values.map((value) =>
-      typeof value === "number" ? value / 1048576 : null,
-    ),
+function renderComponents() {
+  elements.componentGrid.replaceChildren(...state.components.map((component) => {
+    const card = document.createElement("article");
+    card.className = "component-card";
+    const header = document.createElement("header");
+    const heading = document.createElement("h3");
+    heading.textContent = component.name;
+    const status = document.createElement("span");
+    status.className = "status-pill";
+    status.dataset.status = component.status;
+    status.textContent = component.status;
+    header.append(heading, status);
+    const endpoint = document.createElement("code");
+    endpoint.textContent = component.endpoint;
+    const actions = document.createElement("div");
+    actions.className = "component-actions";
+    if (component.status === "not-deployed" || component.status === "exited") {
+      actions.append(componentAction("Deploy", component.id, "deploy", true));
+    } else {
+      actions.append(
+        componentAction("Restart", component.id, "restart"),
+        componentAction("Delete", component.id, "delete", false, true),
+      );
+    }
+    card.append(header, endpoint, actions);
+    return card;
   }));
-  drawLineChart(document.getElementById("memoryChart"), {
-    labels: memory.labels,
-    series: memorySeries,
-    formatter: (value) => `${formatNumber(value, 0)} MiB`,
+}
+
+function componentAction(label, id, action, primary = false, danger = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `button ${primary ? "button-primary" : danger ? "button-danger" : "button-secondary"}`;
+  button.textContent = label;
+  button.addEventListener("click", async () => {
+    if (action === "delete") {
+      const accepted = await confirmAction(
+        `Delete ${id}?`,
+        "테스트 컴포넌트 컨테이너를 즉시 제거합니다.",
+        "Delete component",
+      );
+      if (!accepted) return;
+    }
+    setButtonBusy(button, true, action === "delete" ? "Deleting" : action === "restart" ? "Restarting" : "Deploying");
+    try {
+      await api(`/components/${id}${action === "delete" ? "" : `/${action}`}`, {
+        method: action === "delete" ? "DELETE" : "POST",
+      });
+      toast(`${id} ${action} completed.`);
+      await loadComponents();
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      setButtonBusy(button, false);
+    }
   });
-  chartLegend(els.resourceLegend, cpu.series);
+  return button;
 }
 
-function renderFindings() {
-  els.findingList.innerHTML = (state.execution.findings ?? [])
-    .map(
-      (finding) =>
-        `<li><span class="finding-severity" data-tone="${finding.severity}">${finding.severity}</span>` +
-        `<div class="finding-copy"><strong>${finding.title}</strong><span>${finding.detail}</span></div></li>`,
-    )
-    .join("");
-}
-
-function renderHistory() {
-  const executions = state.payload.executions.filter(
-    (execution) => execution.projectId === state.project.id,
-  );
-  els.historyRows.innerHTML = executions
-    .map((execution) => {
-      const scenarios = unique(execution.results.map((result) => result.scenario));
-      const commit = execution.refs?.webflux ?? execution.refs?.mvc ?? "-";
-      return `<tr data-execution-id="${execution.id}" aria-current="${execution.id === state.execution.id}">` +
-        `<td>${formatDate(execution.startedAt)}</td><td>${execution.profile}</td>` +
-        `<td><span class="status" data-tone="${execution.status}">${execution.status}</span></td>` +
-        `<td><code>${commit.slice(0, 8)}</code></td><td>${execution.results.length}</td>` +
-        `<td>${scenarios.join(", ")}</td></tr>`;
-    })
-    .join("");
-  els.historyRows.querySelectorAll("tr").forEach((row) => {
-    row.addEventListener("click", () => {
-      els.executionSelect.value = row.dataset.executionId;
-      refreshExecution();
-    });
+function confirmAction(title, message, actionLabel) {
+  elements.confirmTitle.textContent = title;
+  elements.confirmMessage.textContent = message;
+  elements.confirmActionButton.textContent = actionLabel;
+  elements.confirmDialog.showModal();
+  return new Promise((resolve) => {
+    state.confirmAction = resolve;
   });
 }
 
-function renderMeasurements(results) {
-  els.measurementRows.innerHTML = results
-    .slice()
-    .sort((left, right) =>
-      left.runtime.localeCompare(right.runtime) ||
-      Number(left.load.value) - Number(right.load.value),
-    )
-    .map((result) => {
-      const summary = result.summary ?? {};
-      const target = result.load?.type === "rps" ? Number(result.load.value) : null;
-      const met = target ? Number(summary.successRps ?? 0) / target : null;
-      const timeout = typeof summary.timeoutRate === "number"
-        ? formatPercent(summary.timeoutRate)
-        : result.classification?.timeoutBoundaryReached ? "p95 = timeout" : "not collected";
-      const saturated = result.classification?.saturated;
-      return `<tr><td class="${result.runtime}">${result.runtime.toUpperCase()}</td>` +
-        `<td>${formatNumber(result.load.value, 0)} ${result.load.type}</td>` +
-        `<td>${formatNumber(summary.successRps)}</td>` +
-        `<td class="${met != null && met >= 0.95 ? "metric-good" : "metric-bad"}">${formatPercent(met)}</td>` +
-        `<td>${typeof summary.allRequestP95Ms === "number" ? `${formatNumber(summary.allRequestP95Ms)} ms` : "-"}</td>` +
-        `<td>${typeof summary.successfulRequestP95Ms === "number" ? `${formatNumber(summary.successfulRequestP95Ms)} ms` : "not collected"}</td>` +
-        `<td class="${result.classification?.timeoutBoundaryReached ? "metric-bad" : ""}">${timeout}</td>` +
-        `<td>${formatPercent(summary.failureRate, 2)}</td><td>${formatNumber(summary.dropped, 0)}</td>` +
-        `<td>${typeof result.resources?.appCpuP95 === "number" ? `${formatNumber(result.resources.appCpuP95)}%` : "-"}</td>` +
-        `<td>${formatBytes(result.resources?.appRssPeakBytes)}</td>` +
-        `<td class="${saturated ? "metric-bad" : "metric-good"}">${saturated ? "saturated" : "sustainable"}</td></tr>`;
-    })
-    .join("");
+function closeDialog(button) {
+  const dialog = button.closest("dialog");
+  if (dialog === elements.confirmDialog && state.confirmAction) {
+    state.confirmAction(false);
+    state.confirmAction = null;
+  }
+  dialog.close();
 }
 
-function render() {
-  const results = currentResults();
-  renderVerdict(results);
-  renderSummary(results);
-  renderCharts(results);
-  renderFindings();
-  renderHistory();
-  renderMeasurements(results);
+function handleEditorKeydown(event) {
+  if (event.key === "Tab") {
+    event.preventDefault();
+    const start = elements.scriptEditor.selectionStart;
+    const end = elements.scriptEditor.selectionEnd;
+    elements.scriptEditor.setRangeText("  ", start, end, "end");
+    markDirty();
+    syncEditorMetrics();
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    saveScript();
+  }
 }
 
-function updateRunCommand() {
-  els.runCommand.textContent = [
-    `TOOL=${els.runTool.value}`,
-    `PROFILE=${els.runProfile.value}`,
-    `MVC_REF=${els.mvcRefInput.value.trim() || "eca7e320"}`,
-    `WEBFLUX_REF=${els.webfluxRefInput.value.trim() || "HEAD"}`,
-    `SCENARIOS=${els.runScenarios.value.trim()}`,
-    "MAX_CONCURRENT_USERS=1000",
-    "./backend/loadtest/run-comparison.sh",
-  ].join(" \\\n  ");
+function bindEvents() {
+  document.querySelectorAll(".testzone-tabs button").forEach((button) => {
+    button.addEventListener("click", () => switchTab(button.dataset.tab));
+  });
+  document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+    button.addEventListener("click", () => closeDialog(button));
+  });
+  elements.projectSelect.addEventListener("change", async () => {
+    state.projectId = elements.projectSelect.value;
+    state.scriptId = null;
+    localStorage.setItem("testzone.projectId", state.projectId);
+    renderProjects();
+    await Promise.all([loadScripts(), loadRuns()]);
+  });
+  elements.saveProjectButton.addEventListener("click", saveProject);
+  elements.headerRunButton.addEventListener("click", () => openRunDialog());
+  elements.overviewRunButton.addEventListener("click", () => openRunDialog());
+  elements.profileShortcuts.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-profile]");
+    if (button) openRunDialog(button.dataset.profile, elements.quickScriptSelect.value);
+  });
+  elements.refreshRunsButton.addEventListener("click", loadRuns);
+  elements.scriptList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-script-id]");
+    if (!button) return;
+    if (state.dirty && !window.confirm("Discard unsaved editor changes?")) return;
+    state.scriptId = button.dataset.scriptId;
+    renderScripts();
+  });
+  elements.newScriptButton.addEventListener("click", openNewScriptDialog);
+  elements.newScriptForm.addEventListener("submit", createScript);
+  elements.scriptEditor.addEventListener("input", () => {
+    markDirty();
+    syncEditorMetrics();
+  });
+  elements.scriptEditor.addEventListener("scroll", syncEditorMetrics);
+  elements.scriptEditor.addEventListener("click", syncEditorMetrics);
+  elements.scriptEditor.addEventListener("keyup", syncEditorMetrics);
+  elements.scriptEditor.addEventListener("keydown", handleEditorKeydown);
+  elements.scriptNameInput.addEventListener("input", markDirty);
+  elements.saveScriptButton.addEventListener("click", saveScript);
+  elements.validateScriptButton.addEventListener("click", validateCurrentScript);
+  elements.editorRunButton.addEventListener("click", () => openRunDialog("standard", state.scriptId));
+  elements.deleteScriptButton.addEventListener("click", deleteCurrentScript);
+  elements.assistantForm.addEventListener("submit", askAssistant);
+  elements.applyAssistantDraftButton.addEventListener("click", applyAssistantDraft);
+  elements.runProfileControl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-profile]");
+    if (button) applyProfile(button.dataset.profile);
+  });
+  elements.runForm.addEventListener("submit", startRun);
+  elements.refreshComponentsButton.addEventListener("click", loadComponents);
+  elements.confirmForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    elements.confirmDialog.close();
+    state.confirmAction?.(true);
+    state.confirmAction = null;
+  });
+  window.addEventListener("resize", drawRunChart);
 }
 
 async function initialize() {
-  const response = await fetch("/testzone-data.json?v=2026072401");
-  if (!response.ok) throw new Error(`TestZone data request failed: ${response.status}`);
-  state.payload = await response.json();
-  fillSelect(
-    els.projectSelect,
-    state.payload.projects.map((project) => project.id),
-    (id) => state.payload.projects.find((project) => project.id === id).name,
-  );
-  els.generatedAt.textContent = `Catalog generated ${formatDate(state.payload.generatedAt)}`;
-  refreshProject();
+  bindEvents();
+  try {
+    await loadStatus();
+    await loadProjects();
+  } catch (error) {
+    toast(error.message, "error");
+    document.querySelectorAll("button, input, select, textarea").forEach((control) => {
+      if (!control.closest(".side-nav")) control.disabled = true;
+    });
+  }
 }
 
-els.projectSelect.addEventListener("change", refreshProject);
-els.executionSelect.addEventListener("change", refreshExecution);
-els.scenarioSelect.addEventListener("change", render);
-els.toolSelect.addEventListener("change", render);
-els.resetFiltersButton.addEventListener("click", refreshExecution);
-els.newRunButton.addEventListener("click", () => {
-  updateRunCommand();
-  els.newRunDialog.showModal();
-});
-[els.runProfile, els.runTool, els.mvcRefInput, els.webfluxRefInput, els.runScenarios]
-  .forEach((element) => element.addEventListener("input", updateRunCommand));
-els.copyRunCommandButton.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(els.runCommand.textContent);
-  els.copyRunCommandButton.textContent = "Copied";
-  window.setTimeout(() => {
-    els.copyRunCommandButton.textContent = "Copy run command";
-  }, 1200);
-});
-window.addEventListener("resize", () => {
-  if (state.execution) renderCharts(currentResults());
-});
-
-initialize().catch((error) => {
-  console.error(error);
-  els.verdictTitle.textContent = "TestZone data unavailable";
-  els.verdictDetail.textContent = error.message;
-  els.verdictBand.dataset.tone = "failed";
-});
+initialize();

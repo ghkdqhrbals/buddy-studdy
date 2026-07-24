@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072401" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072403" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell testzone-shell">
       <aside class="side-nav" aria-label="Monitoring navigation">
         <div class="side-nav-brand">
           <span>BuddyStudy</span>
@@ -22,190 +22,286 @@
         </nav>
       </aside>
 
-      <div class="content-shell">
-        <header class="topbar testzone-topbar">
+      <div class="content-shell testzone-content">
+        <header class="testzone-header">
           <div>
+            <span class="testzone-eyebrow">Performance workspace</span>
             <h1>TestZone</h1>
-            <p>Reusable performance runs, runtime comparisons, and regression evidence</p>
+            <p>스크립트 작성부터 실행, 결과 분석까지 한 곳에서 관리합니다.</p>
           </div>
-          <button id="newRunButton" class="primary-action" type="button">New run plan</button>
+          <div class="header-actions">
+            <span id="serviceStatus" class="service-status" data-state="loading">연결 확인 중</span>
+            <button id="headerRunButton" class="button button-primary" type="button">Run test</button>
+          </div>
         </header>
 
-        <section class="testzone-filter-bar" aria-label="TestZone filters">
-          <label>Project<select id="projectSelect"></select></label>
-          <label>Execution<select id="executionSelect"></select></label>
-          <label>API scenario<select id="scenarioSelect"></select></label>
-          <label>Tool<select id="toolSelect"></select></label>
-          <button id="resetFiltersButton" type="button">Reset</button>
-          <span id="generatedAt" class="testzone-generated"></span>
-        </section>
+        <div class="workspace-bar">
+          <label>
+            <span>Project</span>
+            <select id="projectSelect" aria-label="Project"></select>
+          </label>
+          <label class="workspace-target">
+            <span>Target URL</span>
+            <input id="projectBaseUrl" type="url" autocomplete="off" />
+          </label>
+          <button id="saveProjectButton" class="button button-secondary" type="button">Save target</button>
+          <span id="projectFeedback" class="inline-feedback" role="status"></span>
+        </div>
 
-        <section id="verdictBand" class="verdict-band" aria-live="polite">
-          <div>
-            <span class="section-kicker">Selected execution</span>
-            <h2 id="verdictTitle">Loading TestZone data</h2>
-          </div>
-          <p id="verdictDetail"></p>
-        </section>
+        <nav class="testzone-tabs" aria-label="TestZone sections">
+          <button type="button" data-tab="overview" aria-selected="true">Overview</button>
+          <button type="button" data-tab="scripts" aria-selected="false">Scripts</button>
+          <button type="button" data-tab="components" aria-selected="false">Components</button>
+        </nav>
 
-        <section id="testzoneSummary" class="testzone-summary" aria-label="Selected result summary"></section>
-
-        <main class="testzone-main">
-          <section class="testzone-section testzone-section-wide">
-            <header class="testzone-section-heading">
+        <main class="testzone-workspace">
+          <section id="overviewPanel" class="tab-panel" data-panel="overview">
+            <div class="overview-heading">
               <div>
-                <span class="section-kicker">Capacity</span>
-                <h2>Successful throughput</h2>
-                <p>Completed and validated responses compared with requested arrival rate.</p>
+                <h2>Execution overview</h2>
+                <p>서버 구현 방식이 아니라 선택한 API와 부하 조건을 기준으로 결과를 봅니다.</p>
               </div>
-              <div id="throughputLegend" class="chart-legend"></div>
-            </header>
-            <canvas id="throughputChart" class="testzone-chart" height="290"></canvas>
-          </section>
+              <button id="overviewRunButton" class="button button-primary" type="button">New run</button>
+            </div>
 
-          <section class="testzone-section testzone-section-wide">
-            <header class="testzone-section-heading">
-              <div>
-                <span class="section-kicker">Latency</span>
-                <h2>All requests versus successful responses</h2>
-                <p id="latencyDescription">The two percentile populations are never mixed.</p>
-              </div>
-            </header>
-            <div class="latency-charts">
-              <div class="metric-chart-panel">
+            <section id="runSummary" class="run-summary" aria-label="Latest run summary">
+              <article><span>Status</span><strong id="summaryStatus">No runs</strong></article>
+              <article><span>Request rate</span><strong id="summaryRps">-</strong></article>
+              <article><span>p95 latency</span><strong id="summaryP95">-</strong></article>
+              <article><span>Error rate</span><strong id="summaryError">-</strong></article>
+            </section>
+
+            <section class="overview-grid">
+              <article class="workspace-section chart-section">
                 <header>
                   <div>
-                    <h3>All-request p95</h3>
-                    <p>Failures and client timeouts included</p>
+                    <h3>Recent test results</h3>
+                    <p>최근 실행의 처리량과 p95를 함께 비교합니다.</p>
                   </div>
-                  <div id="latencyLegend" class="chart-legend"></div>
+                  <div class="chart-key">
+                    <span><i class="key-rps"></i>RPS</span>
+                    <span><i class="key-p95"></i>p95</span>
+                  </div>
                 </header>
-                <canvas id="latencyChart" class="testzone-chart" height="260"></canvas>
-              </div>
-              <div class="metric-chart-panel">
+                <canvas id="runHistoryChart" height="260" aria-label="Recent run result chart"></canvas>
+              </article>
+
+              <article class="workspace-section quick-start">
                 <header>
                   <div>
-                    <h3>Successful-only p95</h3>
-                    <p>Only responses that passed status and JSON validation</p>
+                    <h3>Quick start</h3>
+                    <p>저장된 스크립트로 바로 실행합니다.</p>
                   </div>
-                  <div id="successLatencyLegend" class="chart-legend"></div>
                 </header>
-                <canvas id="successLatencyChart" class="testzone-chart" height="260"></canvas>
+                <label>
+                  Script
+                  <select id="quickScriptSelect"></select>
+                </label>
+                <div class="profile-shortcuts" id="profileShortcuts">
+                  <button type="button" data-profile="smoke">Smoke<span>10s · 1 VU</span></button>
+                  <button type="button" data-profile="standard">Standard<span>60s · 100 VU</span></button>
+                  <button type="button" data-profile="diagnostic">Diagnostic<span>120s · 500 VU</span></button>
+                  <button type="button" data-profile="soak">Soak<span>15m · 300 VU</span></button>
+                </div>
+              </article>
+            </section>
+
+            <section class="workspace-section runs-section">
+              <header>
+                <div>
+                  <h3>Run history</h3>
+                  <p id="runCount">0 runs</p>
+                </div>
+                <button id="refreshRunsButton" class="icon-button" type="button" title="Refresh runs" aria-label="Refresh runs">↻</button>
+              </header>
+              <div class="table-wrap">
+                <table class="testzone-table">
+                  <thead>
+                    <tr>
+                      <th>Started</th>
+                      <th>Script</th>
+                      <th>Profile</th>
+                      <th>Status</th>
+                      <th>RPS</th>
+                      <th>p95</th>
+                      <th>Error</th>
+                      <th class="actions-column">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="runRows"></tbody>
+                </table>
+                <div id="runEmptyState" class="empty-state" hidden>
+                  <strong>아직 실행 기록이 없습니다.</strong>
+                  <span>스크립트를 선택하고 첫 성능 테스트를 실행하세요.</span>
+                </div>
               </div>
+            </section>
+          </section>
+
+          <section id="scriptsPanel" class="tab-panel" data-panel="scripts" hidden>
+            <div class="ide-shell">
+              <aside class="file-pane">
+                <header>
+                  <div>
+                    <span>Project files</span>
+                    <strong>k6 scripts</strong>
+                  </div>
+                  <button id="newScriptButton" class="icon-button" type="button" title="New script" aria-label="New script">+</button>
+                </header>
+                <div id="scriptList" class="script-list"></div>
+              </aside>
+
+              <section class="editor-pane">
+                <header class="editor-toolbar">
+                  <div class="editor-file">
+                    <span id="editorDirtyMark" aria-hidden="true"></span>
+                    <input id="scriptNameInput" aria-label="Script file name" />
+                  </div>
+                  <div class="editor-actions">
+                    <span id="editorFeedback" class="inline-feedback" role="status"></span>
+                    <button id="validateScriptButton" class="button button-secondary" type="button">Validate</button>
+                    <button id="saveScriptButton" class="button button-secondary" type="button">Save</button>
+                    <button id="editorRunButton" class="button button-primary" type="button">Run</button>
+                    <button id="deleteScriptButton" class="icon-button danger" type="button" title="Delete script" aria-label="Delete script">×</button>
+                  </div>
+                </header>
+                <div class="code-editor">
+                  <div id="editorLineNumbers" class="line-numbers" aria-hidden="true"></div>
+                  <textarea id="scriptEditor" aria-label="k6 JavaScript editor" spellcheck="false" wrap="off"></textarea>
+                </div>
+                <footer class="editor-statusbar">
+                  <span>JavaScript · k6</span>
+                  <span id="editorPosition">Ln 1, Col 1</span>
+                  <span>⌘S 저장 · Tab 들여쓰기</span>
+                </footer>
+              </section>
+
+              <aside class="assistant-pane">
+                <header>
+                  <div>
+                    <span>OpenAI</span>
+                    <strong>Script assistant</strong>
+                  </div>
+                  <span id="assistantAvailability" class="assistant-dot" title="OpenAI status"></span>
+                </header>
+                <div id="assistantMessages" class="assistant-messages">
+                  <div class="assistant-message assistant-system">
+                    <strong>어떤 API를 테스트할지 알려주세요.</strong>
+                    <p>헤더, 요청 본문, 기대 상태와 JSON 검증 조건까지 포함해 실행 가능한 k6 코드를 작성합니다.</p>
+                  </div>
+                </div>
+                <div id="assistantDraft" class="assistant-draft" hidden>
+                  <span>Generated draft</span>
+                  <p id="assistantDraftMessage"></p>
+                  <button id="applyAssistantDraftButton" class="button button-secondary" type="button">Apply to editor</button>
+                </div>
+                <form id="assistantForm" class="assistant-compose">
+                  <textarea id="assistantPrompt" aria-label="Ask OpenAI to edit the k6 script" placeholder="예: POST /api/v1/studies 요청을 200 RPS로 테스트하고 응답의 id를 검증해줘"></textarea>
+                  <button id="assistantSendButton" class="button button-primary" type="submit">Generate</button>
+                </form>
+              </aside>
             </div>
           </section>
 
-          <section class="testzone-section">
-            <header class="testzone-section-heading">
+          <section id="componentsPanel" class="tab-panel" data-panel="components" hidden>
+            <div class="overview-heading">
               <div>
-                <span class="section-kicker">Resources</span>
-                <h2>Application CPU and memory</h2>
-                <p>CPU p95 and peak resident memory measured during each load stage.</p>
+                <h2>Test components</h2>
+                <p>승인된 테스트 전용 데이터 컴포넌트만 격리된 Docker 네트워크에 배포합니다.</p>
               </div>
-              <div id="resourceLegend" class="chart-legend"></div>
-            </header>
-            <div class="resource-charts">
-              <canvas id="cpuChart" class="testzone-chart testzone-chart-small" height="240"></canvas>
-              <canvas id="memoryChart" class="testzone-chart testzone-chart-small" height="240"></canvas>
+              <button id="refreshComponentsButton" class="button button-secondary" type="button">Refresh</button>
             </div>
-          </section>
-
-          <section class="testzone-section">
-            <header class="testzone-section-heading">
-              <div>
-                <span class="section-kicker">Analysis</span>
-                <h2>Findings</h2>
-                <p>Only claims supported by the selected run are shown.</p>
-              </div>
-            </header>
-            <ul id="findingList" class="testzone-findings"></ul>
-          </section>
-
-          <section class="testzone-section testzone-section-wide">
-            <header class="testzone-section-heading">
-              <div>
-                <span class="section-kicker">History</span>
-                <h2>Execution history</h2>
-                <p>Choose a row to load its measurements and evidence.</p>
-              </div>
-            </header>
-            <div class="table-wrap">
-              <table class="testzone-table">
-                <thead>
-                  <tr>
-                    <th>Started</th><th>Profile</th><th>Status</th><th>Commit</th>
-                    <th>Measurements</th><th>Scenarios</th>
-                  </tr>
-                </thead>
-                <tbody id="historyRows"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="testzone-section testzone-section-wide">
-            <header class="testzone-section-heading">
-              <div>
-                <span class="section-kicker">Evidence</span>
-                <h2>Measured API stages</h2>
-                <p>All-request p95 includes timeout samples. Successful-only p95 is shown only when collected.</p>
-              </div>
-            </header>
-            <div class="table-wrap testzone-measurement-wrap">
-              <table class="testzone-table">
-                <thead>
-                  <tr>
-                    <th>Runtime</th><th>Load</th><th>Success RPS</th><th>Target met</th>
-                    <th>All p95</th><th>Success p95</th><th>Timeout</th><th>Error</th>
-                    <th>Dropped</th><th>CPU p95</th><th>RSS peak</th><th>Verdict</th>
-                  </tr>
-                </thead>
-                <tbody id="measurementRows"></tbody>
-              </table>
-            </div>
+            <section class="component-notice">
+              <strong>테스트 데이터는 운영과 분리됩니다.</strong>
+              <span>컴포넌트 삭제 시 컨테이너가 즉시 제거되며 운영 서버에는 영향을 주지 않습니다.</span>
+            </section>
+            <div id="componentGrid" class="component-grid"></div>
           </section>
         </main>
       </div>
     </div>
 
-    <dialog id="newRunDialog" class="run-dialog">
-      <form method="dialog">
+    <dialog id="runDialog" class="testzone-dialog run-dialog">
+      <form id="runForm">
         <header>
           <div>
-            <span class="section-kicker">Reproducible execution</span>
-            <h2>New run plan</h2>
+            <span>Run configuration</span>
+            <h2>Start performance test</h2>
           </div>
-          <button value="cancel" aria-label="Close" type="submit">Close</button>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
         </header>
-        <div class="run-form-grid">
-          <label>Profile
-            <select id="runProfile">
-              <option value="smoke">Smoke</option>
-              <option value="standard" selected>Standard</option>
-              <option value="diagnostic">Diagnostic</option>
-              <option value="soak">Soak</option>
-            </select>
-          </label>
-          <label>Tool
-            <select id="runTool">
-              <option value="k6">k6</option>
-              <option value="ngrinder">nGrinder</option>
-              <option value="all" selected>Both</option>
-            </select>
-          </label>
-          <label>MVC reference<input id="mvcRefInput" value="eca7e320" /></label>
-          <label>WebFlux reference<input id="webfluxRefInput" value="HEAD" /></label>
-          <label class="run-form-wide">Scenarios
-            <input id="runScenarios" value="public-questions,studies,mobile-read-mix" />
-          </label>
+        <div class="dialog-body">
+          <div class="run-context">
+            <div><span>Project</span><strong id="runProjectName">-</strong></div>
+            <div><span>Target</span><strong id="runTargetUrl">-</strong></div>
+          </div>
+          <label>Script<select id="runScriptSelect"></select></label>
+          <fieldset>
+            <legend>Profile</legend>
+            <div id="runProfileControl" class="segmented-control">
+              <button type="button" data-profile="smoke">Smoke</button>
+              <button type="button" data-profile="standard" aria-pressed="true">Standard</button>
+              <button type="button" data-profile="diagnostic">Diagnostic</button>
+              <button type="button" data-profile="soak">Soak</button>
+              <button type="button" data-profile="custom">Custom</button>
+            </div>
+          </fieldset>
+          <div class="run-settings-grid">
+            <label>Duration<input id="runDuration" value="60s" /></label>
+            <label>VUs<input id="runVus" type="number" min="1" max="1000" value="100" /></label>
+            <label>Max VUs<input id="runMaxVus" type="number" min="1" max="1000" value="500" /></label>
+            <label>Target RPS<input id="runTargetRps" type="number" min="0" max="3000" value="1000" /></label>
+          </div>
+          <details>
+            <summary>Headers and environment</summary>
+            <div class="advanced-settings">
+              <label>Headers JSON
+                <textarea id="runHeaders" spellcheck="false" placeholder='{"Authorization":"Bearer ...","Content-Type":"application/json"}'>{}</textarea>
+              </label>
+              <label>Environment JSON
+                <textarea id="runEnvironment" spellcheck="false" placeholder='{"STUDY_ID":"16"}'>{}</textarea>
+              </label>
+              <p>민감한 값은 실행 시에만 전달되며 결과와 로그에서는 마스킹됩니다.</p>
+            </div>
+          </details>
+          <div id="runFormError" class="form-error" role="alert"></div>
         </div>
-        <p class="run-note">The browser prepares a reviewed command. Execution remains outside the dashboard so the monitoring site cannot run arbitrary processes.</p>
-        <pre id="runCommand" class="run-command"></pre>
         <footer>
-          <button id="copyRunCommandButton" class="primary-action" type="button">Copy run command</button>
+          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
+          <button id="startRunButton" class="button button-primary" type="submit">Run now</button>
         </footer>
       </form>
     </dialog>
 
-    <script type="module" src="/testzone.js?v=2026072401"></script>
+    <dialog id="newScriptDialog" class="testzone-dialog compact-dialog">
+      <form id="newScriptForm">
+        <header>
+          <div><span>Project file</span><h2>New k6 script</h2></div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </header>
+        <div class="dialog-body">
+          <label>File name<input id="newScriptName" value="api-test.js" /></label>
+          <label>Description<input id="newScriptDescription" placeholder="What this script verifies" /></label>
+        </div>
+        <footer>
+          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
+          <button class="button button-primary" type="submit">Create</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="confirmDialog" class="testzone-dialog compact-dialog">
+      <form id="confirmForm">
+        <header><div><span>Confirm action</span><h2 id="confirmTitle">Delete item?</h2></div></header>
+        <div class="dialog-body"><p id="confirmMessage"></p></div>
+        <footer>
+          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
+          <button id="confirmActionButton" class="button button-danger" type="submit">Delete</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+    <script type="module" src="/testzone.js?v=2026072403"></script>
   </body>
 </html>

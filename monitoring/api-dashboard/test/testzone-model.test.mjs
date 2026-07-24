@@ -1,79 +1,76 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  maximumMetric,
-  p95CollectionStatus,
-  resultsFor,
-  runtimeSeries,
-  sustainableCapacity,
-  unique,
+  RUN_PROFILES,
+  buildChartPoints,
+  editorPosition,
+  formatChartLabel,
+  formatMilliseconds,
+  formatPercent,
+  formatRate,
+  lineNumbersFor,
+  parseObjectJson,
+  selectLatestRun,
 } from "../public/testzone-model.js";
 
-const results = [
+const runs = [
   {
-    tool: "k6",
-    runtime: "mvc",
-    scenario: "studies",
-    load: { type: "rps", value: 1000 },
-    summary: {
-      successRps: 990,
-      failureRate: 0,
-      dropped: 0,
-      allRequestP95Ms: 25,
-      successfulRequestP95Ms: 24,
-    },
-    resources: { appCpuP95: 120 },
-    validity: { valid: true },
+    id: "older",
+    status: "completed",
+    createdAt: "2026-07-24T01:00:00Z",
+    summary: { requestRate: 800.2, p95Ms: 41.5, errorRate: 0.001 },
   },
   {
-    tool: "k6",
-    runtime: "webflux",
-    scenario: "studies",
-    load: { type: "rps", value: 1000 },
-    summary: {
-      successRps: 330,
-      failureRate: 0.37,
-      dropped: 4700,
-      allRequestP95Ms: 5000,
-      successfulRequestP95Ms: null,
-    },
-    resources: { appCpuP95: 410 },
-    validity: { valid: true },
+    id: "newer",
+    status: "completed",
+    createdAt: "2026-07-24T02:00:00Z",
+    summary: { requestRate: 995.4, p95Ms: 57.1, errorRate: 0.002 },
+  },
+  {
+    id: "running",
+    status: "running",
+    createdAt: "2026-07-24T03:00:00Z",
+    summary: null,
   },
 ];
 
-test("filters execution results by API scenario and tool", () => {
-  assert.equal(
-    resultsFor({ results }, { scenario: "studies", tool: "k6" }).length,
-    2,
-  );
-  assert.equal(
-    resultsFor({ results }, { scenario: "public-questions", tool: "k6" }).length,
-    0,
-  );
+test("run profiles keep every preset within the 1,000 VU ceiling", () => {
+  for (const profile of Object.values(RUN_PROFILES)) {
+    assert.ok(profile.vus <= 1000);
+    assert.ok(profile.maxVus <= 1000);
+  }
 });
 
-test("sustainable capacity excludes timeout-saturated stages", () => {
-  assert.equal(sustainableCapacity(results, "mvc"), 1000);
-  assert.equal(sustainableCapacity(results, "webflux"), null);
-});
-
-test("runtime series keeps missing successful-only percentiles explicit", () => {
-  assert.deepEqual(
-    runtimeSeries(results, "successfulRequestP95Ms").series,
-    [
-      { runtime: "mvc", values: [24] },
-      { runtime: "webflux", values: [null] },
-    ],
-  );
-});
-
-test("metric and collection helpers do not invent missing values", () => {
-  assert.equal(maximumMetric(results, "summary", "allRequestP95Ms"), 5000);
-  assert.deepEqual(p95CollectionStatus(results), {
-    measured: 1,
-    total: 2,
-    complete: false,
+test("JSON fields accept objects and reject invalid or array values", () => {
+  assert.deepEqual(parseObjectJson('{"Authorization":"Bearer token"}', "Headers"), {
+    Authorization: "Bearer token",
   });
-  assert.deepEqual(unique([1000, 1000, 2000]), [1000, 2000]);
+  assert.throws(() => parseObjectJson("[1]", "Headers"), /JSON object/);
+  assert.throws(() => parseObjectJson("{", "Headers"), /valid JSON/);
+});
+
+test("latest run and chart points use execution timestamps without runtime labels", () => {
+  assert.equal(selectLatestRun(runs).id, "running");
+  assert.deepEqual(buildChartPoints(runs).map(({ id, rps, p95 }) => ({ id, rps, p95 })), [
+    { id: "older", rps: 800.2, p95: 41.5 },
+    { id: "newer", rps: 995.4, p95: 57.1 },
+  ]);
+  assert.match(buildChartPoints(runs)[0].label, /^\d{2}\/\d{2} \d{2}:\d{2}$/);
+});
+
+test("chart labels remain compact and unambiguous", () => {
+  assert.equal(formatChartLabel("2026-07-24T01:58:00Z"), "07/24 10:58");
+});
+
+test("formatters preserve missing values and display operational units", () => {
+  assert.equal(formatRate(995.4), "995 RPS");
+  assert.equal(formatMilliseconds(57.1), "57.1 ms");
+  assert.equal(formatMilliseconds(1500), "1.50 s");
+  assert.equal(formatPercent(0.0123), "1.23%");
+  assert.equal(formatRate(null), "-");
+});
+
+test("editor helpers keep line numbering and caret position stable", () => {
+  assert.equal(lineNumbersFor("one\ntwo\nthree"), "1\n2\n3");
+  assert.deepEqual(editorPosition("one\ntwo", 6), { line: 2, column: 3 });
 });

@@ -9,7 +9,8 @@ one workflow run just because they share a host.
 | --- | --- | --- | --- | --- |
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
-| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone result catalog, Grafana, Loki, monitoring auth |
+| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth |
+| TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
 
 ## Rules
@@ -21,9 +22,10 @@ one workflow run just because they share a host.
 - Backend image build remains in the app repository on GitHub-hosted runners.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
-- Monitoring dashboards, TestZone's generated result catalog, Loki, and Grafana
-  are deployed by the monitoring workflow. Backend deploys must not recreate
-  Grafana or Loki.
+- Monitoring dashboards, the TestZone browser UI, Loki, and Grafana are
+  deployed by the monitoring workflow. TestZone's execution service and
+  InfluxDB are deployed by the TestZone workflow. Backend deploys must not
+  recreate any of them.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions may
   validate deploy mechanics such as image pull, container process survival, and
   nginx syntax only.
@@ -45,9 +47,9 @@ one workflow run just because they share a host.
   into the secret once and is not the continuing configuration source.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
-- Grafana/Loki/API Logs/TestZone dashboard changes: regenerate
-  `monitoring/api-dashboard/public/testzone-data.json`, then run monitoring
-  deploy.
+- Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
+- TestZone runner, InfluxDB integration, k6 validation, or component catalog
+  changes: build `buddystudy-testzone`, then run the TestZone deploy.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The
