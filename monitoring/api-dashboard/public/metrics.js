@@ -2,6 +2,21 @@ import { lokiMetricTimestampToMs } from "./logs.js?v=2026070711";
 
 const RUNTIME_METRICS_MARKER = "runtime_metrics ";
 
+export async function readLokiJson(response) {
+  if (!response.ok) {
+    throw new Error(`Loki query failed: ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      "Loki returned a non-JSON response. Open Server Dashboard at monitoring.lowfidev.cloud.",
+    );
+  }
+
+  return response.json();
+}
+
 export function parseRuntimeMetrics(value) {
   const [nanoseconds, line] = value;
   const markerIndex = line.indexOf(RUNTIME_METRICS_MARKER);

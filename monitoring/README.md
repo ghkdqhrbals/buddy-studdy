@@ -22,9 +22,10 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
 ```
 
-- Loki and Grafana container ports are bound to `127.0.0.1` only. Routingflare
-  exposes the authenticated monitoring gateway and Grafana on separate
-  hostnames and local ports.
+- Loki and both public gateway ports are bound to `127.0.0.1` only.
+  Routingflare exposes the authenticated monitoring gateway and the Grafana
+  gateway on separate hostnames and local ports. Grafana itself remains
+  private on the monitoring Docker network.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
 - k6 can target only hosts in `TESTZONE_ALLOWED_TARGET_HOSTS`.
@@ -50,6 +51,9 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Grafana login and provisioned BuddyStudy dashboards.
   - Anonymous access is disabled; unauthenticated users see the login screen
     instead of a protected default dashboard.
+  - Legacy custom-dashboard paths redirect to
+    `https://monitoring.lowfidev.cloud` so old bookmarks cannot send Loki
+    requests to Grafana.
 - Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
   - See `docs/observability/slack-codex-log-search.md`.
 - `monitoring/grafana/dashboards/buddystudy-logs.json`

@@ -16,8 +16,9 @@ import {
   parseLokiMetricValues,
   parseRuntimeMetrics,
   percentagePoints,
+  readLokiJson,
   ratioPoints,
-} from "./metrics.js?v=2026072303";
+} from "./metrics.js?v=2026072408";
 
 const RUNTIME_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics "';
 const RUNTIME_FAILURE_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics_collection_failed"';
@@ -231,8 +232,7 @@ async function lokiQueryRange(query, range, { limit = 5000, step = null, directi
   });
   if (step) params.set("step", step);
   const response = await fetch(`/loki/api/v1/query_range?${params.toString()}`);
-  if (!response.ok) throw new Error(`Loki query failed: ${response.status}`);
-  const payload = await response.json();
+  const payload = await readLokiJson(response);
   return (payload.data?.result ?? []).flatMap((stream) => stream.values ?? []);
 }
 

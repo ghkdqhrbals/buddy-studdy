@@ -12,6 +12,7 @@ import {
   parseLokiMetricValues,
   parseRuntimeMetrics,
   percentagePoints,
+  readLokiJson,
   ratioPoints,
 } from "../public/metrics.js";
 
@@ -40,6 +41,28 @@ test("parseLokiMetricValues converts Loki seconds and sorts points", () => {
       { ms: 1784790001000, value: 2.5 },
     ],
   );
+});
+
+test("readLokiJson rejects HTML returned by a wrong dashboard origin", async () => {
+  const response = new Response("<!DOCTYPE html><title>Grafana</title>", {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+
+  await assert.rejects(
+    readLokiJson(response),
+    /monitoring\.lowfidev\.cloud/,
+  );
+});
+
+test("readLokiJson returns valid Loki JSON", async () => {
+  const payload = { status: "success", data: { result: [] } };
+  const response = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.deepEqual(await readLokiJson(response), payload);
 });
 
 test("counterDeltaPoints ignores resets and reports interval changes", () => {
