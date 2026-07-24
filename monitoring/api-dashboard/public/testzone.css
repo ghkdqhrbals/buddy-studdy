@@ -642,6 +642,24 @@ body {
   padding: 7px;
 }
 
+.script-list-empty {
+  display: grid;
+  gap: 4px;
+  padding: 14px 10px;
+  color: var(--tz-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.script-list-empty strong {
+  color: var(--tz-text);
+  font-size: 12px;
+}
+
+.script-list-empty span {
+  font-size: 10px;
+}
+
 .script-list button {
   display: grid;
   width: 100%;
@@ -706,6 +724,11 @@ body {
   color: #e6edf7;
   background: transparent;
   font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.editor-file input:disabled {
+  color: #7f91aa;
+  cursor: default;
 }
 
 #editorDirtyMark {
@@ -1232,6 +1255,10 @@ body {
   caret-color: #7fb4ff;
   background: transparent;
   text-shadow: none;
+}
+
+.code-editor #scriptEditor:disabled {
+  cursor: default;
 }
 
 .editor-pane {

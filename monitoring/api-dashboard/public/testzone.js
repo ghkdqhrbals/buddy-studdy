@@ -23,6 +23,7 @@ const state = {
   components: [],
   projectId: null,
   scriptId: null,
+  creatingScript: false,
   selectedRunId: null,
   runSeries: [],
   dirty: false,
@@ -62,7 +63,6 @@ const elementIds = [
   "toggleFilesButton", "focusEditorButton", "validateScriptButton",
   "saveScriptButton", "editorRunButton", "deleteScriptButton",
   "componentGrid", "refreshComponentsButton",
-  "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
   "scriptSnapshotDialog", "scriptSnapshotTitle", "scriptSnapshotCode",
   "componentConfigDialog", "componentConfigForm", "componentConfigTitle", "componentConfigFields",
   "componentCredentialsDialog", "componentCredentialsTitle", "componentCredentialsBody",
@@ -168,6 +168,7 @@ function renderProjects() {
   const selected = project();
   elements.projectSelect.disabled = !selected;
   elements.deleteProjectButton.disabled = !selected;
+  elements.newScriptButton.disabled = !selected;
   elements.overviewRunButton.disabled = !selected;
 }
 
@@ -195,6 +196,7 @@ async function createProject(event) {
     elements.newProjectDialog.close();
     renderProjects();
     await Promise.all([loadScripts(), loadRuns()]);
+    switchTab("scripts");
     toast(`${created.name} project created.`);
   } catch (error) {
     toast(error.message, "error");
@@ -234,6 +236,7 @@ async function loadScripts() {
   if (!state.projectId) {
     state.scripts = [];
     state.scriptId = null;
+    state.creatingScript = false;
     renderScripts();
     return;
   }
@@ -241,26 +244,57 @@ async function loadScripts() {
   if (!state.scripts.some((entry) => entry.id === state.scriptId)) {
     state.scriptId = state.scripts[0]?.id ?? null;
   }
+  state.creatingScript = false;
   renderScripts();
 }
 
 function renderScripts() {
-  elements.scriptList.replaceChildren(...state.scripts.map((entry) => {
+  const items = state.scripts.map((entry) => {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.scriptId = entry.id;
-    button.setAttribute("aria-current", String(entry.id === state.scriptId));
+    button.setAttribute("aria-current", String(!state.creatingScript && entry.id === state.scriptId));
     const name = document.createElement("strong");
     name.textContent = entry.name;
     const detail = document.createElement("span");
     detail.textContent = formatDate(entry.updatedAt);
     button.append(name, detail);
     return button;
-  }));
+  });
+  if (state.creatingScript) {
+    const draft = document.createElement("button");
+    draft.type = "button";
+    draft.dataset.scriptDraft = "true";
+    draft.setAttribute("aria-current", "true");
+    const name = document.createElement("strong");
+    name.textContent = elements.scriptNameInput.value || "untitled.js";
+    const detail = document.createElement("span");
+    detail.textContent = "Unsaved";
+    draft.append(name, detail);
+    items.unshift(draft);
+  } else if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "script-list-empty";
+    empty.innerHTML = "<strong>No scripts</strong><span>Use + to create a file.</span>";
+    items.push(empty);
+  }
+  elements.scriptList.replaceChildren(...items);
   loadScriptIntoEditor();
 }
 
 function loadScriptIntoEditor() {
+  if (state.creatingScript) {
+    elements.scriptNameInput.value = "untitled.js";
+    elements.scriptEditor.value = "";
+    state.dirty = true;
+    renderDirtyState();
+    syncEditorMetrics();
+    renderDiagnostics([]);
+    setFeedback(elements.editorFeedback, "New file");
+    updateEditorControls();
+    window.setTimeout(() => elements.scriptEditor.focus(), 0);
+    return;
+  }
   const selected = script();
   elements.scriptNameInput.value = selected?.name || "";
   elements.scriptEditor.value = selected?.code || "";
@@ -268,24 +302,41 @@ function loadScriptIntoEditor() {
   renderDirtyState();
   syncEditorMetrics();
   renderDiagnostics([]);
-  for (const button of [
-    elements.saveScriptButton,
-    elements.validateScriptButton,
-    elements.editorRunButton,
-    elements.deleteScriptButton,
-  ]) button.disabled = !selected;
+  setFeedback(elements.editorFeedback, selected ? "" : "No files yet. Use + to create a script.");
+  updateEditorControls();
+}
+
+function updateEditorControls() {
+  const selected = script();
+  const canEdit = Boolean(selected || state.creatingScript);
+  elements.scriptNameInput.disabled = !canEdit;
+  elements.scriptEditor.disabled = !canEdit;
+  elements.saveScriptButton.disabled = !canEdit;
+  elements.validateScriptButton.disabled = !selected || state.creatingScript;
+  elements.editorRunButton.disabled = !selected || state.creatingScript;
+  elements.deleteScriptButton.disabled = !selected || state.creatingScript;
+  elements.overviewRunButton.disabled = !selected;
 }
 
 function renderDirtyState() {
   elements.editorDirtyMark.dataset.dirty = String(state.dirty);
 }
 
+function renderDraftFileName() {
+  if (!state.creatingScript) return;
+  const name = elements.scriptList.querySelector("[data-script-draft] strong");
+  if (name) name.textContent = elements.scriptNameInput.value || "untitled.js";
+}
+
 function markDirty() {
+  if (!script() && !state.creatingScript) return;
   state.dirty = true;
   renderDirtyState();
   setFeedback(elements.editorFeedback, "Unsaved");
   window.clearTimeout(state.lintTimer);
-  state.lintTimer = window.setTimeout(() => void validateCurrentScript(true), 700);
+  if (!state.creatingScript) {
+    state.lintTimer = window.setTimeout(() => void validateCurrentScript(true), 700);
+  }
 }
 
 function syncEditorMetrics() {
@@ -320,13 +371,28 @@ function renderDiagnostics(diagnostics = []) {
 
 async function saveScript() {
   const selected = script();
-  if (!selected) return false;
+  if (!selected && !state.creatingScript) return false;
   setButtonBusy(elements.saveScriptButton, true, "Saving");
   try {
-    Object.assign(selected, (await api(`/scripts/${selected.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ name: elements.scriptNameInput.value, code: elements.scriptEditor.value }),
-    })).script);
+    if (state.creatingScript) {
+      const created = (await api("/scripts", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: state.projectId,
+          name: elements.scriptNameInput.value,
+          description: "",
+          code: elements.scriptEditor.value,
+        }),
+      })).script;
+      state.scripts.unshift(created);
+      state.scriptId = created.id;
+      state.creatingScript = false;
+    } else {
+      Object.assign(selected, (await api(`/scripts/${selected.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: elements.scriptNameInput.value, code: elements.scriptEditor.value }),
+      })).script);
+    }
     state.dirty = false;
     renderDirtyState();
     renderScripts();
@@ -366,33 +432,16 @@ async function validateCurrentScript(quiet = false) {
   }
 }
 
-function openNewScriptDialog() {
-  elements.newScriptName.value = "api-test.js";
-  elements.newScriptDescription.value = "";
-  elements.newScriptDialog.showModal();
-  elements.newScriptName.select();
-}
-
-async function createScript(event) {
-  event.preventDefault();
-  try {
-    const payload = await api("/scripts", {
-      method: "POST",
-      body: JSON.stringify({
-        projectId: state.projectId,
-        name: elements.newScriptName.value,
-        description: elements.newScriptDescription.value,
-        code: script()?.code || elements.scriptEditor.value,
-      }),
-    });
-    state.scripts.unshift(payload.script);
-    state.scriptId = payload.script.id;
-    elements.newScriptDialog.close();
-    renderScripts();
-    toast("New script created.");
-  } catch (error) {
-    toast(error.details.map(diagnosticMessage).join(" ") || error.message, "error");
+function beginNewScript() {
+  if (!state.projectId) {
+    toast("Create a project before adding a script.", "error");
+    return;
   }
+  if (state.dirty && !window.confirm("Discard unsaved editor changes?")) return;
+  window.clearTimeout(state.lintTimer);
+  state.scriptId = null;
+  state.creatingScript = true;
+  renderScripts();
 }
 
 async function deleteCurrentScript() {
@@ -1169,8 +1218,13 @@ function bindEvents() {
     button.addEventListener("click", () => closeDialog(button));
   });
   elements.projectSelect.addEventListener("change", async () => {
+    if (state.dirty && !window.confirm("Discard unsaved editor changes?")) {
+      elements.projectSelect.value = state.projectId;
+      return;
+    }
     state.projectId = elements.projectSelect.value;
     state.scriptId = null;
+    state.creatingScript = false;
     state.selectedRunId = null;
     localStorage.setItem("testzone.projectId", state.projectId);
     renderProjects();
@@ -1198,11 +1252,11 @@ function bindEvents() {
     const button = event.target.closest("[data-script-id]");
     if (!button) return;
     if (state.dirty && !window.confirm("Discard unsaved editor changes?")) return;
+    state.creatingScript = false;
     state.scriptId = button.dataset.scriptId;
     renderScripts();
   });
-  elements.newScriptButton.addEventListener("click", openNewScriptDialog);
-  elements.newScriptForm.addEventListener("submit", createScript);
+  elements.newScriptButton.addEventListener("click", beginNewScript);
   elements.scriptEditor.addEventListener("input", () => {
     markDirty();
     syncEditorMetrics();
@@ -1211,7 +1265,10 @@ function bindEvents() {
     elements.scriptEditor.addEventListener(eventName, syncEditorMetrics);
   }
   elements.scriptEditor.addEventListener("keydown", handleEditorKeydown);
-  elements.scriptNameInput.addEventListener("input", markDirty);
+  elements.scriptNameInput.addEventListener("input", () => {
+    markDirty();
+    renderDraftFileName();
+  });
   elements.saveScriptButton.addEventListener("click", saveScript);
   elements.validateScriptButton.addEventListener("click", () => void validateCurrentScript(false));
   elements.editorRunButton.addEventListener("click", () => void startRun(state.scriptId, elements.editorRunButton));

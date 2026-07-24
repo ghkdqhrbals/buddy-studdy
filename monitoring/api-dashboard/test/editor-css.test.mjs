@@ -92,3 +92,20 @@ test("workspace manages projects and components expose restart without apply", (
   assert.doesNotMatch(javascript, /componentAction\("Apply"/);
   assert.doesNotMatch(javascript, /Use Apply/);
 });
+
+test("new projects stay empty and the plus button opens an unsaved blank script", () => {
+  assert.doesNotMatch(html, /id="newScriptDialog"|id="newScriptForm"|id="newScriptDescription"/);
+  assert.match(javascript, /function beginNewScript\(\)/);
+  assert.match(javascript, /state\.scriptId\s*=\s*null;\s*state\.creatingScript\s*=\s*true;\s*renderScripts\(\);/);
+  assert.match(javascript, /elements\.scriptEditor\.value\s*=\s*"";/);
+  assert.match(javascript, /elements\.newScriptButton\.addEventListener\("click",\s*beginNewScript\)/);
+  assert.match(javascript, /switchTab\("scripts"\);\s*toast\(`\$\{created\.name\} project created\.`\)/);
+  assert.match(javascript, /function renderDraftFileName\(\)/);
+  assert.match(
+    javascript,
+    /if\s*\(state\.creatingScript\)\s*\{[\s\S]+?api\("\/scripts",\s*\{[\s\S]+?method:\s*"POST"/,
+  );
+  assert.match(javascript, /code:\s*elements\.scriptEditor\.value/);
+  assert.doesNotMatch(javascript, /code:\s*script\(\)\?\.code\s*\|\|/);
+  assert.match(css, /\.script-list-empty/);
+});

@@ -34,6 +34,11 @@ URL comes from `export const testConfig`; headers, request bodies, duration,
 VUs, arrival rate, and every other execution setting live in the JavaScript
 file. The browser never receives the InfluxDB token.
 
+New projects intentionally start without scripts. In the Scripts tab, `+`
+opens a blank unsaved file directly in the editor. The file is created and
+validated by the TestZone API only when the user selects `Save`; existing
+script contents are never copied into a new file implicitly.
+
 Limits are enforced by the TestZone API:
 
 - 1 active execution by default
