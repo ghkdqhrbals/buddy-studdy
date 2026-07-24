@@ -60,7 +60,7 @@ jobs:
           configure_route monitoring.lowfidev.cloud "${API_DASHBOARD_PORT}"
           configure_route grafana.lowfidev.cloud "${GRAFANA_PORT}"
           "${routingflare_bin}" stop
-          "${routingflare_bin}" start
+          RUNNER_TRACKING_ID="" "${routingflare_bin}" start
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
           echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${GRAFANA_PORT}"
