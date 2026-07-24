@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BuddyStudy TestZone</title>
+    <link rel="stylesheet" href="/styles.css?v=2026072401" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072401" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-nav" aria-label="Monitoring navigation">
+        <div class="side-nav-brand">
+          <span>BuddyStudy</span>
+          <strong>Monitoring</strong>
+        </div>
+        <nav>
+          <a href="/">API Logs</a>
+          <a href="/performance.html">API Performance</a>
+          <a href="/system.html">Server Dashboard</a>
+          <a href="/testzone.html" aria-current="page">TestZone</a>
+        </nav>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar testzone-topbar">
+          <div>
+            <h1>TestZone</h1>
+            <p>Reusable performance runs, runtime comparisons, and regression evidence</p>
+          </div>
+          <button id="newRunButton" class="primary-action" type="button">New run plan</button>
+        </header>
+
+        <section class="testzone-filter-bar" aria-label="TestZone filters">
+          <label>Project<select id="projectSelect"></select></label>
+          <label>Execution<select id="executionSelect"></select></label>
+          <label>API scenario<select id="scenarioSelect"></select></label>
+          <label>Tool<select id="toolSelect"></select></label>
+          <button id="resetFiltersButton" type="button">Reset</button>
+          <span id="generatedAt" class="testzone-generated"></span>
+        </section>
+
+        <section id="verdictBand" class="verdict-band" aria-live="polite">
+          <div>
+            <span class="section-kicker">Selected execution</span>
+            <h2 id="verdictTitle">Loading TestZone data</h2>
+          </div>
+          <p id="verdictDetail"></p>
+        </section>
+
+        <section id="testzoneSummary" class="testzone-summary" aria-label="Selected result summary"></section>
+
+        <main class="testzone-main">
+          <section class="testzone-section testzone-section-wide">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">Capacity</span>
+                <h2>Successful throughput</h2>
+                <p>Completed and validated responses compared with requested arrival rate.</p>
+              </div>
+              <div id="throughputLegend" class="chart-legend"></div>
+            </header>
+            <canvas id="throughputChart" class="testzone-chart" height="290"></canvas>
+          </section>
+
+          <section class="testzone-section testzone-section-wide">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">Latency</span>
+                <h2>All requests versus successful responses</h2>
+                <p id="latencyDescription">The two percentile populations are never mixed.</p>
+              </div>
+            </header>
+            <div class="latency-charts">
+              <div class="metric-chart-panel">
+                <header>
+                  <div>
+                    <h3>All-request p95</h3>
+                    <p>Failures and client timeouts included</p>
+                  </div>
+                  <div id="latencyLegend" class="chart-legend"></div>
+                </header>
+                <canvas id="latencyChart" class="testzone-chart" height="260"></canvas>
+              </div>
+              <div class="metric-chart-panel">
+                <header>
+                  <div>
+                    <h3>Successful-only p95</h3>
+                    <p>Only responses that passed status and JSON validation</p>
+                  </div>
+                  <div id="successLatencyLegend" class="chart-legend"></div>
+                </header>
+                <canvas id="successLatencyChart" class="testzone-chart" height="260"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <section class="testzone-section">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">Resources</span>
+                <h2>Application CPU and memory</h2>
+                <p>CPU p95 and peak resident memory measured during each load stage.</p>
+              </div>
+              <div id="resourceLegend" class="chart-legend"></div>
+            </header>
+            <div class="resource-charts">
+              <canvas id="cpuChart" class="testzone-chart testzone-chart-small" height="240"></canvas>
+              <canvas id="memoryChart" class="testzone-chart testzone-chart-small" height="240"></canvas>
+            </div>
+          </section>
+
+          <section class="testzone-section">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">Analysis</span>
+                <h2>Findings</h2>
+                <p>Only claims supported by the selected run are shown.</p>
+              </div>
+            </header>
+            <ul id="findingList" class="testzone-findings"></ul>
+          </section>
+
+          <section class="testzone-section testzone-section-wide">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">History</span>
+                <h2>Execution history</h2>
+                <p>Choose a row to load its measurements and evidence.</p>
+              </div>
+            </header>
+            <div class="table-wrap">
+              <table class="testzone-table">
+                <thead>
+                  <tr>
+                    <th>Started</th><th>Profile</th><th>Status</th><th>Commit</th>
+                    <th>Measurements</th><th>Scenarios</th>
+                  </tr>
+                </thead>
+                <tbody id="historyRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="testzone-section testzone-section-wide">
+            <header class="testzone-section-heading">
+              <div>
+                <span class="section-kicker">Evidence</span>
+                <h2>Measured API stages</h2>
+                <p>All-request p95 includes timeout samples. Successful-only p95 is shown only when collected.</p>
+              </div>
+            </header>
+            <div class="table-wrap testzone-measurement-wrap">
+              <table class="testzone-table">
+                <thead>
+                  <tr>
+                    <th>Runtime</th><th>Load</th><th>Success RPS</th><th>Target met</th>
+                    <th>All p95</th><th>Success p95</th><th>Timeout</th><th>Error</th>
+                    <th>Dropped</th><th>CPU p95</th><th>RSS peak</th><th>Verdict</th>
+                  </tr>
+                </thead>
+                <tbody id="measurementRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="newRunDialog" class="run-dialog">
+      <form method="dialog">
+        <header>
+          <div>
+            <span class="section-kicker">Reproducible execution</span>
+            <h2>New run plan</h2>
+          </div>
+          <button value="cancel" aria-label="Close" type="submit">Close</button>
+        </header>
+        <div class="run-form-grid">
+          <label>Profile
+            <select id="runProfile">
+              <option value="smoke">Smoke</option>
+              <option value="standard" selected>Standard</option>
+              <option value="diagnostic">Diagnostic</option>
+              <option value="soak">Soak</option>
+            </select>
+          </label>
+          <label>Tool
+            <select id="runTool">
+              <option value="k6">k6</option>
+              <option value="ngrinder">nGrinder</option>
+              <option value="all" selected>Both</option>
+            </select>
+          </label>
+          <label>MVC reference<input id="mvcRefInput" value="eca7e320" /></label>
+          <label>WebFlux reference<input id="webfluxRefInput" value="HEAD" /></label>
+          <label class="run-form-wide">Scenarios
+            <input id="runScenarios" value="public-questions,studies,mobile-read-mix" />
+          </label>
+        </div>
+        <p class="run-note">The browser prepares a reviewed command. Execution remains outside the dashboard so the monitoring site cannot run arbitrary processes.</p>
+        <pre id="runCommand" class="run-command"></pre>
+        <footer>
+          <button id="copyRunCommandButton" class="primary-action" type="button">Copy run command</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script type="module" src="/testzone.js?v=2026072401"></script>
+  </body>
+</html>

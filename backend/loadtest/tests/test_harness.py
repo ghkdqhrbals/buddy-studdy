@@ -11,6 +11,7 @@ sys.path.insert(0, str(LOADTEST))
 from normalize_results import normalize_k6
 from ngrinder.run_test import execution_shape, graph_points
 from report_results import common_direction
+from export_testzone import export
 from validate_scenarios import validate_manifest
 
 
@@ -39,6 +40,10 @@ class HarnessTests(unittest.TestCase):
                             "http_reqs": {"values": {"rate": 990}},
                             "http_req_failed": {"values": {"rate": 0}},
                             "response_validation_failed": {"values": {"rate": 0}},
+                            "request_succeeded": {"values": {"rate": 1}},
+                            "successful_request_count": {
+                                "values": {"count": 990, "rate": 990}
+                            },
                             "dropped_iterations": {"values": {"count": 0}},
                             "http_req_duration": {
                                 "values": {
@@ -48,6 +53,16 @@ class HarnessTests(unittest.TestCase):
                                     "p(99)": 5,
                                 }
                             },
+                            "successful_request_duration": {
+                                "values": {
+                                    "med": 0.8,
+                                    "p(90)": 1.5,
+                                    "p(95)": 2.5,
+                                    "p(99)": 4,
+                                }
+                            },
+                            "request_timed_out": {"values": {"rate": 0}},
+                            "request_timeout_count": {"values": {"count": 0}},
                         }
                     }
                 )
@@ -91,6 +106,10 @@ class HarnessTests(unittest.TestCase):
             self.assertTrue(result["validity"]["valid"])
             self.assertTrue(result["classification"]["sustainable"])
             self.assertEqual(result["summary"]["successRps"], 990)
+            self.assertEqual(result["summary"]["allRequestP95Ms"], 3)
+            self.assertEqual(result["summary"]["successfulRequestP95Ms"], 2.5)
+            self.assertEqual(result["summary"]["timeoutRate"], 0)
+            self.assertEqual(result["summary"]["timeoutCount"], 0)
 
     def test_generator_network_fault_invalidates_run(self):
         from normalize_results import validity
@@ -153,6 +172,69 @@ class HarnessTests(unittest.TestCase):
     def test_ngrinder_rejects_an_unrepresentable_execution_shape(self):
         with self.assertRaisesRegex(ValueError, "cannot be split exactly"):
             execution_shape(997, 4, 250)
+
+    def test_testzone_export_excludes_health_and_marks_timeout_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results_root = root / "results"
+            execution = results_root / "20260724T010000Z-standard"
+            execution.mkdir(parents=True)
+            (execution / "DASHBOARD_DATA.json").write_text(
+                json.dumps(
+                    {
+                        "health": {
+                            "1000": {
+                                "webflux": {
+                                    "summary": {
+                                        "successRps": 1000,
+                                        "p95Ms": 1,
+                                        "failureRate": 0,
+                                        "dropped": 0,
+                                    },
+                                    "telemetry": [],
+                                }
+                            }
+                        },
+                        "studies": {
+                            "1000": {
+                                "webflux": {
+                                    "summary": {
+                                        "successRps": 320,
+                                        "p95Ms": 5000.2,
+                                        "failureRate": 0.4,
+                                        "dropped": 4000,
+                                    },
+                                    "telemetry": [{"cpuPercent": 300, "rssMiB": 900}],
+                                }
+                            }
+                        },
+                    }
+                )
+            )
+            config = root / "projects.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "projects": [
+                            {
+                                "id": "api",
+                                "name": "API",
+                                "resultDirectories": [execution.name],
+                            }
+                        ]
+                    }
+                )
+            )
+            payload = export(config, results_root, root / "testzone.json")
+            exported = payload["executions"][0]
+            self.assertEqual(
+                {result["scenario"] for result in exported["results"]},
+                {"studies"},
+            )
+            self.assertEqual(exported["status"], "failed")
+            self.assertTrue(
+                exported["results"][0]["classification"]["timeoutBoundaryReached"]
+            )
 
 
 if __name__ == "__main__":

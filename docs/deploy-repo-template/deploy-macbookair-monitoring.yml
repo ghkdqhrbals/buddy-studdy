@@ -8,8 +8,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy PLG Receiver
+  deploy_monitoring:
+    name: Deploy Monitoring Module
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
     timeout-minutes: 15
     env:
@@ -60,7 +60,12 @@ jobs:
           curl -fsSL \
             "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
             -o "${monitoring_root}/loki/config/loki.yml"
-          for file in index.html app.js logs.js performance.html performance.js styles.css; do
+          for file in \
+            index.html app.js logs.js \
+            performance.html performance.js \
+            system.html system.js metrics.js \
+            testzone.html testzone.css testzone.js testzone-model.js testzone-data.json \
+            styles.css; do
             curl -fsSL \
               "${MONITORING_SOURCE_BASE}/api-dashboard/public/${file}" \
               -o "${monitoring_root}/api-dashboard/public/${file}"
@@ -132,5 +137,6 @@ jobs:
 
           echo "MacBook Air monitoring module is running."
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
+          echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/grafana/"
           echo "Loki push: http://127.0.0.1:${LOKI_PORT}/loki/api/v1/push"

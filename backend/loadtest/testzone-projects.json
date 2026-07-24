@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "projects": [
+    {
+      "id": "buddystudy-api",
+      "name": "BuddyStudy API",
+      "owner": "BuddyStudy",
+      "environment": "local-isolated",
+      "description": "Database-backed API capacity, latency, and resource regression tracking.",
+      "primaryTool": "k6",
+      "secondaryTool": "nGrinder",
+      "toolDecision": "Use k6 for target-RPS capacity and nGrinder for closed-loop sustained-load cross-validation.",
+      "scenarios": [
+        "public-questions",
+        "studies",
+        "mobile-read-mix"
+      ],
+      "resultDirectories": [
+        "20260722T075419Z-mvc-vs-r2dbc",
+        "20260722-bottleneck-profile",
+        "20260724T000755Z-smoke"
+      ],
+      "regressionThresholds": {
+        "successRpsPercent": -5,
+        "p95Percent": 10,
+        "failureRatePercent": 1
+      }
+    }
+  ]
+}

@@ -52,7 +52,7 @@ test("server-renders the BuddyStudy engineering document", async () => {
   assert.match(html, /25·50·100·200·400·600·800·1,000/);
   assert.match(html, /XADD IDMP/);
   assert.match(html, /Redis 8\.6/);
-  assert.match(html, /Studies API p95 latency by target RPS/);
+  assert.match(html, /Studies API all-request p95 by target RPS/);
   assert.match(html, />328</);
   assert.match(html, />336\.5</);
   assert.match(html, />367\.2</);

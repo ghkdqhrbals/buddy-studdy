@@ -483,8 +483,8 @@ GitHub-hosted build → GHCR → EC2 deploy-only runner`}</code>
             </div>
 
             <PerformanceChart
-              title="Studies API p95 latency by target RPS"
-              description="100 studies 조회, 세 번 반복 중앙값. WebFlux는 5초 timeout 경계에 도달했습니다."
+              title="Studies API all-request p95 by target RPS"
+              description="100 studies 조회, 세 번 반복 중앙값. 성공과 실패를 모두 포함한 값이며 WebFlux의 p95 tail은 모든 측정 구간에서 5초 client timeout 경계에 도달했습니다. 모든 요청이 timeout이라는 뜻은 아닙니다."
               xValues={targetRps}
               xLabel="target requests per second"
               yLabel="p95 latency · ms · log scale"
@@ -538,7 +538,7 @@ GitHub-hosted build → GHCR → EC2 deploy-only runner`}</code>
             <div className="table-wrap compact-table">
               <table>
                 <thead>
-                  <tr><th>Target</th><th>MVC success</th><th>MVC p95</th><th>WebFlux success</th><th>WebFlux p95</th><th>WebFlux error</th></tr>
+                  <tr><th>Target</th><th>MVC success</th><th>MVC all p95</th><th>WebFlux success</th><th>WebFlux all p95</th><th>WebFlux error</th></tr>
                 </thead>
                 <tbody>
                   {targetRps.map((target, index) => (

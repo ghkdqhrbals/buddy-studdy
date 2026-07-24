@@ -246,10 +246,18 @@ def normalize_k6(path, match, root, network_capacity_mbps=None):
     runtime, round_number, scenario, target = match.groups()
     data = json.loads(path.read_text())
     achieved = metric(data, "http_reqs", "rate") or 0.0
-    failure = max(
-        metric(data, "http_req_failed", "rate") or 0.0,
-        metric(data, "response_validation_failed", "rate") or 0.0,
+    success_rate = metric(data, "request_succeeded", "rate")
+    successful_rps = metric(data, "successful_request_count", "rate")
+    failure = (
+        1 - success_rate
+        if success_rate is not None
+        else max(
+            metric(data, "http_req_failed", "rate") or 0.0,
+            metric(data, "response_validation_failed", "rate") or 0.0,
+        )
     )
+    if successful_rps is None:
+        successful_rps = achieved * (1 - failure)
     dropped = metric(data, "dropped_iterations", "count") or 0.0
     target = int(target)
     base = path.stem
@@ -261,7 +269,7 @@ def normalize_k6(path, match, root, network_capacity_mbps=None):
     generator = generator_resources(generator_rows)
     recovery = recovery_summary(root / "recovery" / f"k6-{base}.json")
     saturated = (
-        achieved < target * 0.95
+        successful_rps < target * 0.95
         or failure > 0.01
         or dropped > 0
         or (resources.get("databaseWaitingPeak") or 0) > 0
@@ -276,13 +284,28 @@ def normalize_k6(path, match, root, network_capacity_mbps=None):
         "summary": {
             "targetRps": target,
             "achievedRps": achieved,
-            "successRps": achieved * (1 - failure),
+            "successRps": successful_rps,
             "failureRate": failure,
             "dropped": dropped,
             "p50Ms": metric(data, "http_req_duration", "med"),
             "p90Ms": metric(data, "http_req_duration", "p(90)"),
             "p95Ms": metric(data, "http_req_duration", "p(95)"),
             "p99Ms": metric(data, "http_req_duration", "p(99)"),
+            "allRequestP95Ms": metric(data, "http_req_duration", "p(95)"),
+            "successfulRequestP50Ms": metric(
+                data, "successful_request_duration", "med"
+            ),
+            "successfulRequestP90Ms": metric(
+                data, "successful_request_duration", "p(90)"
+            ),
+            "successfulRequestP95Ms": metric(
+                data, "successful_request_duration", "p(95)"
+            ),
+            "successfulRequestP99Ms": metric(
+                data, "successful_request_duration", "p(99)"
+            ),
+            "timeoutRate": metric(data, "request_timed_out", "rate"),
+            "timeoutCount": metric(data, "request_timeout_count", "count"),
         },
         "resources": resources,
         "generator": generator,

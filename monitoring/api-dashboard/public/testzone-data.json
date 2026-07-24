@@ -1,0 +1,1748 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-24T00:51:44.683035+00:00",
+  "projects": [
+    {
+      "id": "buddystudy-api",
+      "name": "BuddyStudy API",
+      "owner": "BuddyStudy",
+      "environment": "local-isolated",
+      "description": "Database-backed API capacity, latency, and resource regression tracking.",
+      "primaryTool": "k6",
+      "secondaryTool": "nGrinder",
+      "toolDecision": "Use k6 for target-RPS capacity and nGrinder for closed-loop sustained-load cross-validation.",
+      "scenarios": [
+        "public-questions",
+        "studies",
+        "mobile-read-mix"
+      ],
+      "regressionThresholds": {
+        "successRpsPercent": -5,
+        "p95Percent": 10,
+        "failureRatePercent": 1
+      },
+      "summary": {
+        "executionCount": 3,
+        "measurementCount": 36,
+        "validMeasurementCount": 32,
+        "latestStatus": "invalid",
+        "maxSuccessfulRps": 2478.2774029080306,
+        "maxAllRequestP95Ms": 5000.488,
+        "maxAppCpuP95": 427.75
+      },
+      "latestExecutionId": "20260724T000755Z-smoke"
+    }
+  ],
+  "executions": [
+    {
+      "id": "20260724T000755Z-smoke",
+      "startedAt": "2026-07-24T00:07:55+00:00",
+      "profile": "smoke",
+      "status": "invalid",
+      "refs": {
+        "mvc": "eca7e3204177f44474c6eab3ad77340a7b0543f9",
+        "webflux": "5d037155d899a1798ce89bad30c5df03fd24fa11"
+      },
+      "metadata": {
+        "schemaVersion": 1,
+        "createdAt": "2026-07-24T00:09:20.615136+00:00",
+        "profile": "smoke",
+        "tool": "k6",
+        "refs": {
+          "mvc": "eca7e3204177f44474c6eab3ad77340a7b0543f9",
+          "webflux": "5d037155d899a1798ce89bad30c5df03fd24fa11"
+        },
+        "execution": {
+          "targetHost": "http://127.0.0.1:18080",
+          "loadGenerator": "local",
+          "rounds": 1,
+          "targetRps": [
+            5
+          ],
+          "vusers": [
+            1
+          ],
+          "maxConcurrentUsers": 1000,
+          "ngrinderExecution": {
+            "agentCount": 1,
+            "maxProcesses": 4,
+            "maxThreadsPerProcess": 250
+          },
+          "scenarios": [
+            "public-questions",
+            "studies"
+          ],
+          "duration": "5s"
+        },
+        "limits": {
+          "jvmHeap": "512m",
+          "visibleCpu": 4,
+          "databasePool": 10,
+          "loadGeneratorNetworkCapacityMbps": null
+        },
+        "diagnostics": {
+          "jfr": false,
+          "nmt": false
+        },
+        "targetMachine": {
+          "hostname": "ghkdqhrbalsui-MacBookPro.local",
+          "system": "macOS-15.6-arm64-arm-64bit",
+          "logicalCpuCount": 10,
+          "architecture": "arm64",
+          "physicalMemoryBytes": 68719476736,
+          "diskFreeBytes": 45726633984
+        },
+        "loadGeneratorMachine": {
+          "capturedAtEpochNs": 1784851675789098000,
+          "hostname": "ghkdqhrbalsui-MacBookPro.local",
+          "system": "macOS-15.6-arm64-arm-64bit",
+          "architecture": "arm64",
+          "logicalCpuCount": 10,
+          "memoryBytes": 68719476736,
+          "disk": {
+            "path": "/Users/ghkdqhrbals/personal/study-mate",
+            "totalBytes": 494384795648,
+            "freeBytes": 46271758336
+          },
+          "versions": {
+            "python": "3.12.7",
+            "k6": "k6 v2.1.0 (commit/devel, go1.26.4, darwin/arm64)",
+            "docker": "Docker version 27.4.0, build bde2b89",
+            "dockerCompose": "unavailable"
+          },
+          "clockSync": {
+            "measuredSkewMs": -22.866,
+            "roundTripMs": 112.531,
+            "maximumAllowedSkewMs": 2000.0,
+            "valid": true
+          }
+        },
+        "versions": {
+          "java": "java version \"25.0.2\" 2026-01-20 LTS",
+          "docker": "Docker version 27.4.0, build bde2b89",
+          "k6": "k6 v2.1.0 (commit/devel, go1.26.4, darwin/arm64)",
+          "ngrinder": "3.5.9-p1",
+          "python": "3.12.7"
+        },
+        "fixtureVersion": "seed.sql:v1:1-user-100-studies-500-public-questions"
+      },
+      "results": [
+        {
+          "id": "k6-mvc-round1-public-questions-rps5",
+          "tool": "k6",
+          "runtime": "mvc",
+          "round": 1,
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 5
+          },
+          "summary": {
+            "targetRps": 5,
+            "achievedRps": 5.170017003390536,
+            "successRps": 5.170017003390536,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "p50Ms": 28.1705,
+            "p90Ms": 34.3085,
+            "p95Ms": 40.058249999999994,
+            "p99Ms": 43.43725,
+            "allRequestP95Ms": 40.058249999999994,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "samples": 3,
+            "appCpuP95": 18.43,
+            "appCpuCoresP95": 0.1843,
+            "appRssPeakBytes": 929808384.0,
+            "appThreadsPeak": 58.0,
+            "heapPeakBytes": 377487360.0,
+            "nonHeapPeakBytes": 220381944.0,
+            "directMemoryPeakBytes": 10241.0,
+            "jvmThreadsPeak": 40.0,
+            "jvmAllocatedBytes": 0,
+            "jvmPromotedBytes": 0,
+            "gcPauseCount": 0,
+            "gcPauseSeconds": 0,
+            "tomcatBusyPeak": 1.0,
+            "nettyPendingTasksPeak": null,
+            "databaseConnectionsPeak": 10.0,
+            "databaseActivePeak": 0.0,
+            "databaseWaitingPeak": 0.0,
+            "databaseCacheHitPercent": 99.87506940588563,
+            "databaseCpuP95": 3.039,
+            "databaseMemoryPeakBytes": 54599352.32,
+            "redisCpuP95": 1.085,
+            "redisMemoryPeakBytes": 10399776.768,
+            "redisConnectionsPeak": 1.0
+          },
+          "generator": {
+            "samples": 6,
+            "hostCpuP95": 40.0575,
+            "processCpuP95": 0.7000000000000001,
+            "processRssPeakBytes": 57655296.0,
+            "memoryUsedPercentPeak": 72.62544631958008,
+            "networkReceivedBytes": 37607.0,
+            "networkSentBytes": 46863.0,
+            "networkAverageMbps": 0.13480490433232512,
+            "networkReceiveErrors": 124.0,
+            "networkTransmitErrors": 132.0,
+            "networkReceiveDrops": 0,
+            "networkTransmitDrops": 0
+          },
+          "recovery": {
+            "measured": true,
+            "fullyHealthy": true,
+            "failedSamples": 0,
+            "firstHealthyMs": 19.878,
+            "p95Ms": 19.676541909575462
+          },
+          "classification": {
+            "saturated": false,
+            "sustainable": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "load generator network reported 256 errors/drops"
+            ]
+          },
+          "source": "raw/mvc-round1-public-questions-rps5.json",
+          "timeseries": "timeseries/mvc-round1-public-questions-rps5.json"
+        },
+        {
+          "id": "k6-mvc-round1-studies-rps5",
+          "tool": "k6",
+          "runtime": "mvc",
+          "round": 1,
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 5
+          },
+          "summary": {
+            "targetRps": 5,
+            "achievedRps": 5.188098502036328,
+            "successRps": 5.188098502036328,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "p50Ms": 12.5885,
+            "p90Ms": 14.6325,
+            "p95Ms": 15.28675,
+            "p99Ms": 16.464,
+            "allRequestP95Ms": 15.28675,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "samples": 3,
+            "appCpuP95": 43.25,
+            "appCpuCoresP95": 0.4325,
+            "appRssPeakBytes": 937345024.0,
+            "appThreadsPeak": 58.0,
+            "heapPeakBytes": 426770432.0,
+            "nonHeapPeakBytes": 227068504.0,
+            "directMemoryPeakBytes": 10241.0,
+            "jvmThreadsPeak": 40.0,
+            "jvmAllocatedBytes": 0,
+            "jvmPromotedBytes": 0,
+            "gcPauseCount": 0,
+            "gcPauseSeconds": 0,
+            "tomcatBusyPeak": 1.0,
+            "nettyPendingTasksPeak": null,
+            "databaseConnectionsPeak": 10.0,
+            "databaseActivePeak": 0.0,
+            "databaseWaitingPeak": 0.0,
+            "databaseCacheHitPercent": 100.0,
+            "databaseCpuP95": 1.426,
+            "databaseMemoryPeakBytes": 55092183.04,
+            "redisCpuP95": 1.233,
+            "redisMemoryPeakBytes": 10277093.376,
+            "redisConnectionsPeak": 1.0
+          },
+          "generator": {
+            "samples": 6,
+            "hostCpuP95": 26.847500000000004,
+            "processCpuP95": 2.1,
+            "processRssPeakBytes": 62799872.0,
+            "memoryUsedPercentPeak": 72.67520427703857,
+            "networkReceivedBytes": 50569.0,
+            "networkSentBytes": 51012.0,
+            "networkAverageMbps": 0.16209592855274998,
+            "networkReceiveErrors": 73.0,
+            "networkTransmitErrors": 61.0,
+            "networkReceiveDrops": 0,
+            "networkTransmitDrops": 0
+          },
+          "recovery": {
+            "measured": true,
+            "fullyHealthy": true,
+            "failedSamples": 0,
+            "firstHealthyMs": 25.117,
+            "p95Ms": 24.920583004131913
+          },
+          "classification": {
+            "saturated": false,
+            "sustainable": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "load generator network reported 134 errors/drops"
+            ]
+          },
+          "source": "raw/mvc-round1-studies-rps5.json",
+          "timeseries": "timeseries/mvc-round1-studies-rps5.json"
+        },
+        {
+          "id": "k6-webflux-round1-public-questions-rps5",
+          "tool": "k6",
+          "runtime": "webflux",
+          "round": 1,
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 5
+          },
+          "summary": {
+            "targetRps": 5,
+            "achievedRps": 5.146541840593388,
+            "successRps": 5.146541840593388,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "p50Ms": 49.967,
+            "p90Ms": 54.489,
+            "p95Ms": 56.154999999999994,
+            "p99Ms": 66.5385,
+            "allRequestP95Ms": 56.154999999999994,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "samples": 3,
+            "appCpuP95": 109.38,
+            "appCpuCoresP95": 1.0937999999999999,
+            "appRssPeakBytes": 799850496.0,
+            "appThreadsPeak": 54.0,
+            "heapPeakBytes": 344981504.0,
+            "nonHeapPeakBytes": 171652160.0,
+            "directMemoryPeakBytes": 10248.0,
+            "jvmThreadsPeak": 35.0,
+            "jvmAllocatedBytes": 0,
+            "jvmPromotedBytes": 0,
+            "gcPauseCount": 0,
+            "gcPauseSeconds": 0,
+            "tomcatBusyPeak": null,
+            "nettyPendingTasksPeak": 0.0,
+            "databaseConnectionsPeak": 2.0,
+            "databaseActivePeak": 1.0,
+            "databaseWaitingPeak": 0.0,
+            "databaseCacheHitPercent": 100.0,
+            "databaseCpuP95": 4.314,
+            "databaseMemoryPeakBytes": 41680896.0,
+            "redisCpuP95": 1.17,
+            "redisMemoryPeakBytes": 10277093.376,
+            "redisConnectionsPeak": 1.0
+          },
+          "generator": {
+            "samples": 6,
+            "hostCpuP95": 44.8375,
+            "processCpuP95": 16.75,
+            "processRssPeakBytes": 58474496.0,
+            "memoryUsedPercentPeak": 72.67217636108398,
+            "networkReceivedBytes": 2141829.0,
+            "networkSentBytes": 7553202.0,
+            "networkAverageMbps": 15.443043902625508,
+            "networkReceiveErrors": 52072.0,
+            "networkTransmitErrors": 1103820.0,
+            "networkReceiveDrops": 0,
+            "networkTransmitDrops": 0
+          },
+          "recovery": {
+            "measured": true,
+            "fullyHealthy": true,
+            "failedSamples": 0,
+            "firstHealthyMs": 15.382,
+            "p95Ms": 15.147249912843108
+          },
+          "classification": {
+            "saturated": false,
+            "sustainable": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "load generator network reported 1155892 errors/drops"
+            ]
+          },
+          "source": "raw/webflux-round1-public-questions-rps5.json",
+          "timeseries": "timeseries/webflux-round1-public-questions-rps5.json"
+        },
+        {
+          "id": "k6-webflux-round1-studies-rps5",
+          "tool": "k6",
+          "runtime": "webflux",
+          "round": 1,
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 5
+          },
+          "summary": {
+            "targetRps": 5,
+            "achievedRps": 5.172211775017541,
+            "successRps": 5.172211775017541,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "p50Ms": 21.7725,
+            "p90Ms": 23.321,
+            "p95Ms": 23.6595,
+            "p99Ms": 24.057,
+            "allRequestP95Ms": 23.6595,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "samples": 3,
+            "appCpuP95": 62.04,
+            "appCpuCoresP95": 0.6204,
+            "appRssPeakBytes": 810041344.0,
+            "appThreadsPeak": 54.0,
+            "heapPeakBytes": 216530944.0,
+            "nonHeapPeakBytes": 179674480.0,
+            "directMemoryPeakBytes": 10248.0,
+            "jvmThreadsPeak": 36.0,
+            "jvmAllocatedBytes": 0,
+            "jvmPromotedBytes": 0,
+            "gcPauseCount": 0,
+            "gcPauseSeconds": 0,
+            "tomcatBusyPeak": null,
+            "nettyPendingTasksPeak": 0.0,
+            "databaseConnectionsPeak": 2.0,
+            "databaseActivePeak": 0.0,
+            "databaseWaitingPeak": 0.0,
+            "databaseCacheHitPercent": 100.0,
+            "databaseCpuP95": 1.6239999999999999,
+            "databaseMemoryPeakBytes": 41534095.36,
+            "redisCpuP95": 1.342,
+            "redisMemoryPeakBytes": 10288627.712,
+            "redisConnectionsPeak": 1.0
+          },
+          "generator": {
+            "samples": 6,
+            "hostCpuP95": 26.5925,
+            "processCpuP95": 0.625,
+            "processRssPeakBytes": 61521920.0,
+            "memoryUsedPercentPeak": 72.21369743347168,
+            "networkReceivedBytes": 128726.0,
+            "networkSentBytes": 676563.0,
+            "networkAverageMbps": 1.28156297755404,
+            "networkReceiveErrors": 1304.0,
+            "networkTransmitErrors": 1168.0,
+            "networkReceiveDrops": 0,
+            "networkTransmitDrops": 0
+          },
+          "recovery": {
+            "measured": true,
+            "fullyHealthy": true,
+            "failedSamples": 0,
+            "firstHealthyMs": 16.729,
+            "p95Ms": 16.561374999582767
+          },
+          "classification": {
+            "saturated": false,
+            "sustainable": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "load generator network reported 2472 errors/drops"
+            ]
+          },
+          "source": "raw/webflux-round1-studies-rps5.json",
+          "timeseries": "timeseries/webflux-round1-studies-rps5.json"
+        }
+      ],
+      "findings": [
+        {
+          "severity": "warning",
+          "title": "Generator validity failed",
+          "detail": "4 runs must be excluded from conclusions."
+        }
+      ],
+      "projectId": "buddystudy-api"
+    },
+    {
+      "id": "20260722-bottleneck-profile",
+      "startedAt": "2026-07-22T14:30:25.545837+00:00",
+      "profile": "diagnostic",
+      "status": "failed",
+      "refs": {
+        "mvc": "eca7e3204177f44474c6eab3ad77340a7b0543f9",
+        "webflux": "3c9a90706ea32928e9585717eec284421342995c"
+      },
+      "metadata": {},
+      "results": [
+        {
+          "id": "k6-mvc-studies-rps100",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 100
+          },
+          "summary": {
+            "achievedRps": 99.9903709272797,
+            "successRps": 99.9903709272797,
+            "p90Ms": 8.2376,
+            "p95Ms": 9.40365,
+            "p99Ms": 15.26009,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 9.40365,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 102.22,
+            "appRssPeakBytes": 1008369664.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 441450496.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps100",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 100
+          },
+          "summary": {
+            "achievedRps": 99.9887425261911,
+            "successRps": 99.9887425261911,
+            "p90Ms": 16.968,
+            "p95Ms": 21.285,
+            "p99Ms": 28.356,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 21.285,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 200.65,
+            "appRssPeakBytes": 874561536.0,
+            "appThreadsPeak": 61.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 389946368.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps200",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 200
+          },
+          "summary": {
+            "achievedRps": 200.00871602200755,
+            "successRps": 200.00871602200755,
+            "p90Ms": 5.763,
+            "p95Ms": 6.39,
+            "p99Ms": 12.068,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 6.39,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 136.04000000000002,
+            "appRssPeakBytes": 1016528896.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 392736032.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps200",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 200
+          },
+          "summary": {
+            "achievedRps": 198.41665493528194,
+            "successRps": 198.41665493528194,
+            "p90Ms": 18.1961,
+            "p95Ms": 23.212049999999984,
+            "p99Ms": 33.947129999999994,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 23.212049999999984,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 289.14,
+            "appRssPeakBytes": 888111104.0,
+            "appThreadsPeak": 61.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 393070032.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps300",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 300
+          },
+          "summary": {
+            "achievedRps": 299.982796721321,
+            "successRps": 299.982796721321,
+            "p90Ms": 4.82,
+            "p95Ms": 5.368,
+            "p99Ms": 9.929,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 5.368,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 175.84,
+            "appRssPeakBytes": 1024458752.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 390848128.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps300",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 300
+          },
+          "summary": {
+            "achievedRps": 299.7512693732112,
+            "successRps": 299.7512693732112,
+            "p90Ms": 80.715,
+            "p95Ms": 91.284,
+            "p99Ms": 100.074,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 91.284,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 396.5,
+            "appRssPeakBytes": 908820480.0,
+            "appThreadsPeak": 68.0,
+            "jvmThreadsPeak": 49.0,
+            "heapPeakBytes": 393191888.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps400",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 400
+          },
+          "summary": {
+            "achievedRps": 399.8189619740181,
+            "successRps": 399.8189619740181,
+            "p90Ms": 4.801200000000001,
+            "p95Ms": 5.175349999999999,
+            "p99Ms": 10.97425,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 5.175349999999999,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 243.51999999999998,
+            "appRssPeakBytes": 1030029312.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 391963808.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps400",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 400
+          },
+          "summary": {
+            "achievedRps": 368.1908289317075,
+            "successRps": 368.1908289317075,
+            "p90Ms": 684.6474999999999,
+            "p95Ms": 780.9401499999999,
+            "p99Ms": 803.30741,
+            "failureRate": 0.0,
+            "dropped": 196.0,
+            "allRequestP95Ms": 780.9401499999999,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 411.12,
+            "appRssPeakBytes": 903004160.0,
+            "appThreadsPeak": 68.0,
+            "jvmThreadsPeak": 49.0,
+            "heapPeakBytes": 387370448.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps500",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 500
+          },
+          "summary": {
+            "achievedRps": 499.9049680655707,
+            "successRps": 499.9049680655707,
+            "p90Ms": 5.303400000000001,
+            "p95Ms": 10.695699999999988,
+            "p99Ms": 48.50470999999998,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 10.695699999999988,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 242.04,
+            "appRssPeakBytes": 1027850240.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 350601152.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps500",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 500
+          },
+          "summary": {
+            "achievedRps": 369.93669052471796,
+            "successRps": 369.93669052471796,
+            "p90Ms": 1282.5582000000002,
+            "p95Ms": 1290.7429,
+            "p99Ms": 1300.82872,
+            "failureRate": 0.0,
+            "dropped": 934.0,
+            "allRequestP95Ms": 1290.7429,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 427.75,
+            "appRssPeakBytes": 972603392.0,
+            "appThreadsPeak": 64.0,
+            "jvmThreadsPeak": 45.0,
+            "heapPeakBytes": 389983856.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps600",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 600
+          },
+          "summary": {
+            "achievedRps": 599.8841616786281,
+            "successRps": 599.8841616786281,
+            "p90Ms": 5.709,
+            "p95Ms": 7.549,
+            "p99Ms": 18.376,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 7.549,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 297.52,
+            "appRssPeakBytes": 1025703936.0,
+            "appThreadsPeak": 63.0,
+            "jvmThreadsPeak": 44.0,
+            "heapPeakBytes": 392365568.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps600",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 600
+          },
+          "summary": {
+            "achievedRps": 341.2314698003959,
+            "successRps": 341.2314698003959,
+            "p90Ms": 1781.1208,
+            "p95Ms": 1798.3908999999999,
+            "p99Ms": 1825.4919,
+            "failureRate": 0.0,
+            "dropped": 2142.0,
+            "allRequestP95Ms": 1798.3908999999999,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 412.72499999999997,
+            "appRssPeakBytes": 977567744.0,
+            "appThreadsPeak": 65.0,
+            "jvmThreadsPeak": 46.0,
+            "heapPeakBytes": 445638144.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        }
+      ],
+      "findings": [
+        {
+          "severity": "warning",
+          "title": "Capacity target missed",
+          "detail": "3 measured runtime/load combinations were saturated."
+        }
+      ],
+      "projectId": "buddystudy-api"
+    },
+    {
+      "id": "20260722T075419Z-mvc-vs-r2dbc",
+      "startedAt": "2026-07-22T07:54:19+00:00",
+      "profile": "standard",
+      "status": "failed",
+      "refs": {
+        "mvc": "eca7e3204177f44474c6eab3ad77340a7b0543f9",
+        "webflux": "1b00033adf48a2c08524dfc30a7c5ad7e9efe865"
+      },
+      "metadata": {},
+      "results": [
+        {
+          "id": "k6-mvc-public-questions-rps1000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 1000
+          },
+          "summary": {
+            "achievedRps": 692.6445888299611,
+            "successRps": 692.6445888299611,
+            "p90Ms": 3605.2782,
+            "p95Ms": 3775.4692,
+            "p99Ms": 3864.55038,
+            "failureRate": 0.0,
+            "dropped": 1918.0,
+            "allRequestP95Ms": 3775.4692,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 172.9,
+            "appRssPeakBytes": 973127680.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 320939712.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-public-questions-rps1000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 1000
+          },
+          "summary": {
+            "achievedRps": 481.0090180316637,
+            "successRps": 116.19496875785278,
+            "p90Ms": 5000.358,
+            "p95Ms": 5000.488,
+            "p99Ms": 5000.79095,
+            "failureRate": 0.7589711678075088,
+            "dropped": 5381.0,
+            "allRequestP95Ms": 5000.488,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 382.06,
+            "appRssPeakBytes": 953040896.0,
+            "appThreadsPeak": 77.0,
+            "jvmThreadsPeak": 59.0,
+            "heapPeakBytes": 492053016.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-public-questions-rps1500",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 1500
+          },
+          "summary": {
+            "achievedRps": 725.6137977518248,
+            "successRps": 725.6137977518248,
+            "p90Ms": 4300.573,
+            "p95Ms": 4326.527,
+            "p99Ms": 4333.7737,
+            "failureRate": 0.0,
+            "dropped": 8584.0,
+            "allRequestP95Ms": 4326.527,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 177.1,
+            "appRssPeakBytes": 965132288.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 0.0,
+            "heapPeakBytes": 0.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-public-questions-rps1500",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 1500
+          },
+          "summary": {
+            "achievedRps": 535.3062147214964,
+            "successRps": 223.190213859762,
+            "p90Ms": 5000.276,
+            "p95Ms": 5000.394,
+            "p99Ms": 5000.94952,
+            "failureRate": 0.5830606712162288,
+            "dropped": 11803.0,
+            "allRequestP95Ms": 5000.394,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 341.90999999999997,
+            "appRssPeakBytes": 968556544.0,
+            "appThreadsPeak": 84.0,
+            "jvmThreadsPeak": 66.0,
+            "heapPeakBytes": 487703024.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-public-questions-rps2000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 2000
+          },
+          "summary": {
+            "achievedRps": 727.7221413525899,
+            "successRps": 727.7221413525899,
+            "p90Ms": 4223.471,
+            "p95Ms": 4244.376,
+            "p99Ms": 4254.704000000001,
+            "failureRate": 0.0,
+            "dropped": 16043.0,
+            "allRequestP95Ms": 4244.376,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 199.2,
+            "appRssPeakBytes": 949649408.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 0.0,
+            "heapPeakBytes": 0.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-public-questions-rps2000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 2000
+          },
+          "summary": {
+            "achievedRps": 543.1936653422754,
+            "successRps": 281.3657802355457,
+            "p90Ms": 5000.235,
+            "p95Ms": 5000.346,
+            "p99Ms": 5000.8686,
+            "failureRate": 0.4820157189089228,
+            "dropped": 19186.0,
+            "allRequestP95Ms": 5000.346,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 318.455,
+            "appRssPeakBytes": 979566592.0,
+            "appThreadsPeak": 89.0,
+            "jvmThreadsPeak": 71.0,
+            "heapPeakBytes": 471831048.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-public-questions-rps2500",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 2500
+          },
+          "summary": {
+            "achievedRps": 723.0108220891652,
+            "successRps": 723.0108220891652,
+            "p90Ms": 4242.0728,
+            "p95Ms": 4316.788,
+            "p99Ms": 4402.34532,
+            "failureRate": 0.0,
+            "dropped": 23707.0,
+            "allRequestP95Ms": 4316.788,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 176.0,
+            "appRssPeakBytes": 972898304.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 0.0,
+            "heapPeakBytes": 0.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-public-questions-rps2500",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 2500
+          },
+          "summary": {
+            "achievedRps": 541.905573029234,
+            "successRps": 284.2569218150605,
+            "p90Ms": 5000.221,
+            "p95Ms": 5000.323,
+            "p99Ms": 5000.65294,
+            "failureRate": 0.4742354031510658,
+            "dropped": 26729.0,
+            "allRequestP95Ms": 5000.323,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 297.95,
+            "appRssPeakBytes": 981434368.0,
+            "appThreadsPeak": 89.0,
+            "jvmThreadsPeak": 72.0,
+            "heapPeakBytes": 455292824.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-public-questions-rps3000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 3000
+          },
+          "summary": {
+            "achievedRps": 693.5455475823964,
+            "successRps": 693.5455475823964,
+            "p90Ms": 4331.7875,
+            "p95Ms": 4350.72515,
+            "p99Ms": 4377.43765,
+            "failureRate": 0.0,
+            "dropped": 31590.0,
+            "allRequestP95Ms": 4350.72515,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 174.4,
+            "appRssPeakBytes": 954744832.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 0.0,
+            "heapPeakBytes": 0.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-public-questions-rps3000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "public-questions",
+          "load": {
+            "type": "rps",
+            "value": 3000
+          },
+          "summary": {
+            "achievedRps": 542.981638013621,
+            "successRps": 288.829686038295,
+            "p90Ms": 5000.177,
+            "p95Ms": 5000.285,
+            "p99Ms": 5000.64416,
+            "failureRate": 0.47076809042898177,
+            "dropped": 34249.0,
+            "allRequestP95Ms": 5000.285,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 290.24499999999995,
+            "appRssPeakBytes": 986791936.0,
+            "appThreadsPeak": 92.0,
+            "jvmThreadsPeak": 74.0,
+            "heapPeakBytes": 476425816.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps1000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 1000
+          },
+          "summary": {
+            "achievedRps": 999.8377038324891,
+            "successRps": 999.8377038324891,
+            "p90Ms": 3.501,
+            "p95Ms": 4.078,
+            "p99Ms": 9.721,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 4.078,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 235.09499999999997,
+            "appRssPeakBytes": 991232000.0,
+            "appThreadsPeak": 60.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 349080264.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps1000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 1000
+          },
+          "summary": {
+            "achievedRps": 523.3404111613588,
+            "successRps": 328.01846858213406,
+            "p90Ms": 5000.246,
+            "p95Ms": 5000.365,
+            "p99Ms": 5000.731,
+            "failureRate": 0.37322159423114404,
+            "dropped": 4738.0,
+            "allRequestP95Ms": 5000.365,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 360.75,
+            "appRssPeakBytes": 1001504768.0,
+            "appThreadsPeak": 96.0,
+            "jvmThreadsPeak": 78.0,
+            "heapPeakBytes": 451749048.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps1500",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 1500
+          },
+          "summary": {
+            "achievedRps": 1499.7138339919895,
+            "successRps": 1499.7138339919895,
+            "p90Ms": 3.721,
+            "p95Ms": 4.909,
+            "p99Ms": 14.278,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 4.909,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 221.01,
+            "appRssPeakBytes": 987643904.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 385457600.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps1500",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 1500
+          },
+          "summary": {
+            "achievedRps": 555.4331582647525,
+            "successRps": 336.52419471357206,
+            "p90Ms": 5000.1897,
+            "p95Ms": 5000.3225,
+            "p99Ms": 5000.9455,
+            "failureRate": 0.394122965641953,
+            "dropped": 11441.0,
+            "allRequestP95Ms": 5000.3225,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 318.79,
+            "appRssPeakBytes": 1007566848.0,
+            "appThreadsPeak": 95.0,
+            "jvmThreadsPeak": 78.0,
+            "heapPeakBytes": 473457192.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps2000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 2000
+          },
+          "summary": {
+            "achievedRps": 1999.5743714564142,
+            "successRps": 1999.5743714564142,
+            "p90Ms": 7.459,
+            "p95Ms": 13.247,
+            "p99Ms": 23.935,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 13.247,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 288.25,
+            "appRssPeakBytes": 979714048.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 364816808.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps2000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 2000
+          },
+          "summary": {
+            "achievedRps": 565.0996373802808,
+            "successRps": 367.2351872609384,
+            "p90Ms": 5000.188,
+            "p95Ms": 5000.293,
+            "p99Ms": 5000.70508,
+            "failureRate": 0.35014081947851367,
+            "dropped": 18994.0,
+            "allRequestP95Ms": 5000.293,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 321.87,
+            "appRssPeakBytes": 1005060096.0,
+            "appThreadsPeak": 77.0,
+            "jvmThreadsPeak": 60.0,
+            "heapPeakBytes": 432638024.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps2500",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 2500
+          },
+          "summary": {
+            "achievedRps": 2478.2774029080306,
+            "successRps": 2478.2774029080306,
+            "p90Ms": 258.692,
+            "p95Ms": 290.8774,
+            "p99Ms": 301.34924,
+            "failureRate": 0.0,
+            "dropped": 0.0,
+            "allRequestP95Ms": 290.8774,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 363.13,
+            "appRssPeakBytes": 984481792.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 385281504.0
+          },
+          "classification": {
+            "saturated": false,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps2500",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 2500
+          },
+          "summary": {
+            "achievedRps": 572.0550609101718,
+            "successRps": 345.03093872681814,
+            "p90Ms": 5000.165,
+            "p95Ms": 5000.267,
+            "p99Ms": 5000.7019,
+            "failureRate": 0.396857116904351,
+            "dropped": 26495.0,
+            "allRequestP95Ms": 5000.267,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 320.95,
+            "appRssPeakBytes": 1006895104.0,
+            "appThreadsPeak": 77.0,
+            "jvmThreadsPeak": 60.0,
+            "heapPeakBytes": 447405352.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-mvc-studies-rps3000",
+          "tool": "k6",
+          "runtime": "mvc",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 3000
+          },
+          "summary": {
+            "achievedRps": 2375.34702369061,
+            "successRps": 2375.34702369061,
+            "p90Ms": 1287.1413,
+            "p95Ms": 1362.64055,
+            "p99Ms": 1397.138,
+            "failureRate": 0.0,
+            "dropped": 6381.0,
+            "allRequestP95Ms": 1362.64055,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 332.6,
+            "appRssPeakBytes": 960036864.0,
+            "appThreadsPeak": 59.0,
+            "jvmThreadsPeak": 42.0,
+            "heapPeakBytes": 232280992.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": false
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        },
+        {
+          "id": "k6-webflux-studies-rps3000",
+          "tool": "k6",
+          "runtime": "webflux",
+          "scenario": "studies",
+          "load": {
+            "type": "rps",
+            "value": 3000
+          },
+          "summary": {
+            "achievedRps": 567.9760775378286,
+            "successRps": 367.12987039097857,
+            "p90Ms": 5000.143,
+            "p95Ms": 5000.243,
+            "p99Ms": 5000.58104,
+            "failureRate": 0.35361737067785787,
+            "dropped": 34040.0,
+            "allRequestP95Ms": 5000.243,
+            "successfulRequestP95Ms": null,
+            "timeoutRate": null,
+            "timeoutCount": null
+          },
+          "resources": {
+            "appCpuP95": 332.95,
+            "appRssPeakBytes": 1008369664.0,
+            "appThreadsPeak": 73.0,
+            "jvmThreadsPeak": 56.0,
+            "heapPeakBytes": 482068008.0
+          },
+          "classification": {
+            "saturated": true,
+            "timeoutBoundaryReached": true
+          },
+          "validity": {
+            "valid": true,
+            "reasons": []
+          }
+        }
+      ],
+      "findings": [
+        {
+          "severity": "critical",
+          "title": "Client timeout boundary reached",
+          "detail": "All-request p95 reached the 5-second timeout in public-questions, studies for webflux."
+        },
+        {
+          "severity": "warning",
+          "title": "Capacity target missed",
+          "detail": "16 measured runtime/load combinations were saturated."
+        }
+      ],
+      "projectId": "buddystudy-api"
+    }
+  ]
+}

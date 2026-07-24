@@ -1,6 +1,6 @@
 import http from "k6/http";
 import { check } from "k6";
-import { Rate } from "k6/metrics";
+import { Counter, Rate, Trend } from "k6/metrics";
 
 const manifest = JSON.parse(open("../scenarios.json"));
 const baseUrl = __ENV.BASE_URL || "http://127.0.0.1:18080";
@@ -48,6 +48,11 @@ export const options = {
 };
 
 const responseValidationFailed = new Rate("response_validation_failed");
+const successfulRequestDuration = new Trend("successful_request_duration", true);
+const successfulRequestCount = new Counter("successful_request_count");
+const requestSucceeded = new Rate("request_succeeded");
+const requestTimedOut = new Rate("request_timed_out");
+const requestTimeoutCount = new Counter("request_timeout_count");
 
 const scenarioDefinition = manifest.scenarios[scenario];
 if (!scenarioDefinition) {
@@ -126,7 +131,21 @@ export default function () {
     }
   }
   const valid = check(response, checks);
+  const timedOut = response.error_code === 1050;
+  const succeeded = valid && !timedOut;
   responseValidationFailed.add(!valid);
+  requestSucceeded.add(succeeded);
+  requestTimedOut.add(timedOut);
+  if (timedOut) {
+    requestTimeoutCount.add(1);
+  }
+  if (succeeded) {
+    successfulRequestCount.add(1);
+    successfulRequestDuration.add(response.timings.duration, {
+      scenario,
+      endpoint: request.name,
+    });
+  }
 }
 
 export function handleSummary(data) {

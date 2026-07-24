@@ -153,6 +153,27 @@ Each run creates:
 - `REPORT.md`: repeated-run medians and verdict
 - `DASHBOARD.html`: self-contained interactive comparison dashboard
 
+Completed runs can also be published into the read-only monitoring TestZone:
+
+```bash
+python3 backend/loadtest/export_testzone.py \
+  --output monitoring/api-dashboard/public/testzone-data.json
+```
+
+The TestZone catalog keeps immutable execution history and exposes project,
+scenario, tool, runtime, capacity, latency, timeout, error, dropped-request and
+resource evidence. See
+[`docs/performance/TESTZONE_DESIGN.md`](../../docs/performance/TESTZONE_DESIGN.md).
+
+For k6, `http_req_duration` is reported as **all-request p95**. It includes
+failed requests and timeouts. New runs also collect
+`successful_request_duration`, `successful_request_count`,
+`request_succeeded`, `request_timed_out`, and `request_timeout_count`.
+Successful RPS therefore comes from a directly counted, contract-valid
+population instead of subtracting overlapping error rates. Historical runs
+without those metrics explicitly show successful-only p95 and timeout rate as
+`not collected`.
+
 The dashboard can filter by tool, scenario, round, and load. Its capacity chart
 compares repeated load levels, while the selected-run chart reads the original
 one-second k6 or nGrinder series rather than reconstructing points from
