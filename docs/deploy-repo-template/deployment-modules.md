@@ -86,8 +86,8 @@ deployment.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy owns persistent local InfluxDB/component credentials under
-  `MACBOOKAIR_TESTZONE_ROOT`. Run Plan values are injected by the runner and
-  are not stored in user-authored JavaScript.
+  `MACBOOKAIR_TESTZONE_ROOT`. Target URL and all load settings are stored in
+  the user-authored JavaScript and executed without runner-side injection.
 - Monitoring hostname or port changes: run the monitoring routing workflow
   after the monitoring deploy. Routingflare maps
   `monitoring.lowfidev.cloud` to the monitoring nginx gateway and

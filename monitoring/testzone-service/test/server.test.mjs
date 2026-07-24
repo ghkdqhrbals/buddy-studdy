@@ -20,7 +20,6 @@ async function fixture() {
     maxTargetRps: 3000,
     maxDurationSeconds: 3600,
     maxConcurrentRuns: 1,
-    allowedTargetHosts: [],
     grafanaBaseUrl: "https://grafana.example.test/grafana",
     influx: { url: "", token: "", org: "", bucket: "" },
     componentPassword: "test",

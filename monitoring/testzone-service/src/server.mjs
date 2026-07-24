@@ -150,7 +150,6 @@ export async function createTestZoneServer(dependencies = {}) {
           maxVus: config.maxVus,
           maxTargetRps: config.maxTargetRps,
           maxDurationSeconds: config.maxDurationSeconds,
-          allowedTargetHosts: config.allowedTargetHosts,
         });
         const script = await store.createScript({
           projectId: body.projectId,
@@ -172,7 +171,6 @@ export async function createTestZoneServer(dependencies = {}) {
             maxVus: config.maxVus,
             maxTargetRps: config.maxTargetRps,
             maxDurationSeconds: config.maxDurationSeconds,
-            allowedTargetHosts: config.allowedTargetHosts,
           });
         }
         const script = await store.updateScript(match[0], {
@@ -197,7 +195,6 @@ export async function createTestZoneServer(dependencies = {}) {
           maxVus: config.maxVus,
           maxTargetRps: config.maxTargetRps,
           maxDurationSeconds: config.maxDurationSeconds,
-          allowedTargetHosts: config.allowedTargetHosts,
         });
         return sendJson(response, 200, { validation });
       }
@@ -226,7 +223,6 @@ export async function createTestZoneServer(dependencies = {}) {
           maxVus: config.maxVus,
           maxTargetRps: config.maxTargetRps,
           maxDurationSeconds: config.maxDurationSeconds,
-          allowedTargetHosts: config.allowedTargetHosts,
         });
         const {
           targetUrl,

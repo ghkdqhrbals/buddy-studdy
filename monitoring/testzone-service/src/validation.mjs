@@ -52,24 +52,12 @@ export function normalizeBaseUrl(value) {
   return url.toString().replace(/\/$/, "");
 }
 
-export function validateTargetHost(baseUrl, allowedHosts = []) {
-  const normalized = normalizeBaseUrl(baseUrl);
-  if (!allowedHosts.length) return normalized;
-  const hostname = new URL(normalized).hostname.toLowerCase();
-  const allowed = allowedHosts.some((entry) => hostname === entry || hostname.endsWith(`.${entry}`));
-  if (!allowed) {
-    throw new ValidationError(`Target host ${hostname} is not in the TestZone allowlist.`);
-  }
-  return normalized;
-}
-
 export function validateScript(code, options = {}) {
   const source = String(code ?? "");
   const errors = [];
   const add = (message, index = 0) => errors.push(diagnostic(source, message, index));
   const maxVus = Number(options.maxVus ?? 1000);
   const maxDurationSeconds = Number(options.maxDurationSeconds ?? 3600);
-  const allowedTargetHosts = options.allowedTargetHosts || [];
 
   if (!source.trim()) add("Script is empty.");
   if (source.length > 250_000) add("Script exceeds the 250 KB limit.");
@@ -90,7 +78,7 @@ export function validateScript(code, options = {}) {
   let targetUrl = null;
   if (targetUrlMatch) {
     try {
-      targetUrl = validateTargetHost(targetUrlMatch[1], allowedTargetHosts);
+      targetUrl = normalizeBaseUrl(targetUrlMatch[1]);
     } catch (error) {
       add(error.message, testConfigMatch.index);
     }
@@ -139,7 +127,7 @@ export function validateScript(code, options = {}) {
   for (const match of source.matchAll(new RegExp(URL_PATTERN.source, "g"))) {
     const literal = match[0];
     try {
-      validateTargetHost(literal, allowedTargetHosts);
+      normalizeBaseUrl(literal);
     } catch (error) {
       add(error.message, match.index);
     }

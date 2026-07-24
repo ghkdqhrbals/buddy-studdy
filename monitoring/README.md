@@ -28,7 +28,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   private on the monitoring Docker network.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
-- k6 can target only hosts in `TESTZONE_ALLOWED_TARGET_HOSTS`.
+- Saved k6 scripts may target any valid HTTP or HTTPS URL. The authenticated
+  operator is responsible for testing only systems they are authorized to load.
 - Disposable components are selected from a fixed server-side catalog. The
   browser cannot submit Docker images or commands.
 
@@ -75,9 +76,8 @@ TestZone consists of two independently deployed modules:
    dashboard, and InfluxDB datasource definition.
 2. The TestZone workflow deploys the k6 execution service and InfluxDB.
 
-Run duration, VUs, maximum VUs, and target RPS are configured in Run Plan.
-The service injects those values into an internal execution wrapper, while
-saved scripts and run history contain only user-authored API test logic.
+Target URL, request settings, duration, VUs, and target RPS are owned by each
+saved k6 script. Tests run only from the script editor.
 
 See [TestZone Operations](../docs/performance/TESTZONE_OPERATIONS.md).
 

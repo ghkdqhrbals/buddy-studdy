@@ -9,7 +9,7 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/performance.html`: endpoint latency and throughput grouped by API
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/testzone.html`: live k6 script workspace, execution history, disposable
-  test components, OpenAI assistance, and Grafana links
+  test components, and Grafana links
 
 ## TestZone Behavior
 
@@ -21,15 +21,13 @@ multiple deployments without rewriting project settings.
 The browser can:
 
 - create, edit, validate, and delete k6 JavaScript files
-- choose a target URL for every execution
-- configure headers and environment values without embedding credentials in
-  source files
 - start, cancel, and delete executions
-- deploy, restart, and delete allowlisted PostgreSQL, Redis, and Kafka test
+- deploy, restart, and delete fixed-catalog PostgreSQL and Redis test
   components
 - open an execution in Grafana using its `run_id`
 
-`New run` immediately starts the currently selected saved script. The target
+Tests can be started only with `Run` in the saved script editor. The Overview
+page is read-only and does not expose a separate execution action. The target
 URL comes from `export const testConfig`; headers, request bodies, duration,
 VUs, arrival rate, and every other execution setting live in the JavaScript
 file. The browser never receives the InfluxDB token.
@@ -45,7 +43,7 @@ Limits are enforced by the TestZone API:
 - 1,000 VUs maximum
 - 3,000 target RPS maximum
 - 60 minutes maximum duration
-- target hostname allowlist
+- valid absolute HTTP or HTTPS target URL
 - no remote JavaScript imports
 
 The old `testzone-data.json` exporter is retained only for historical result

@@ -28,7 +28,6 @@ jobs:
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
       TESTZONE_ROOT: ${{ vars.MACBOOKAIR_TESTZONE_ROOT || '$HOME/buddystudy/monitoring/testzone' }}
-      TESTZONE_ALLOWED_TARGET_HOSTS: ${{ vars.TESTZONE_ALLOWED_TARGET_HOSTS || 'api.ghkdqhrbals.org,host.docker.internal' }}
       TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
       TESTZONE_INFLUX_BUCKET: ${{ vars.TESTZONE_INFLUX_BUCKET || 'testzone' }}
 
@@ -122,7 +121,6 @@ jobs:
             -e TESTZONE_MAX_TARGET_RPS=3000 \
             -e TESTZONE_MAX_DURATION_SECONDS=3600 \
             -e TESTZONE_MAX_CONCURRENT_RUNS=1 \
-            -e TESTZONE_ALLOWED_TARGET_HOSTS="${TESTZONE_ALLOWED_TARGET_HOSTS}" \
             -e TESTZONE_GRAFANA_URL=https://grafana.lowfidev.cloud/ \
             -e TESTZONE_INFLUX_URL=http://buddystudy-testzone-influxdb:8086 \
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \

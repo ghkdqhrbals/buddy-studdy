@@ -20,7 +20,7 @@ test("script editor hides native glyphs behind the syntax highlight layer", () =
   assert.doesNotMatch(highlightRule, /height:\s*100%;/);
 });
 
-test("script workspace contains only files, editor, and Run Plan controls", () => {
+test("script workspace contains only files, editor, and editor actions", () => {
   for (const source of [html, css, javascript]) {
     assert.doesNotMatch(source, /assistant/i);
   }
@@ -28,20 +28,22 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
   assert.doesNotMatch(html, /id="runDialog"/);
 });
 
-test("workspace starts the selected script immediately without a run form", () => {
-  assert.equal((html.match(/id="overviewRunButton"/g) || []).length, 1);
-  assert.doesNotMatch(html, /id="headerRunButton"|>Run test</);
-  assert.match(html, /id="overviewRunButton" class="run-launch-button"/);
-  assert.match(html, /class="run-launch-icon" aria-hidden="true">\+<\/span>/);
-  assert.match(css, /\.run-launch-button:focus-visible/);
+test("workspace runs tests only from the saved script editor", () => {
+  assert.doesNotMatch(html, /id="overviewRunButton"|id="headerRunButton"|>New run<|>Run test</);
+  assert.doesNotMatch(css, /\.run-launch-button|\.run-launch-icon/);
+  assert.equal((html.match(/id="editorRunButton"/g) || []).length, 1);
   assert.doesNotMatch(html, /id="projectBaseUrl"|id="saveProjectButton"|id="newProjectBaseUrl"/);
   assert.doesNotMatch(html, /runTargetUrl|runHeaders|runEnvironment|startRunButton/);
-  assert.match(javascript, /async function startRun\(scriptId = state\.scriptId/);
+  assert.match(
+    javascript,
+    /async function startRun\(scriptId = state\.scriptId,\s*button = elements\.editorRunButton\)/,
+  );
   assert.match(javascript, /body:\s*JSON\.stringify\(\{\s*projectId:\s*state\.projectId,\s*scriptId:\s*selectedScript\.id,\s*\}\)/);
   assert.match(javascript, /run\.targetUrl\s*\|\|\s*"-"/);
   assert.doesNotMatch(html, /id="runDuration"|id="runVus"|id="runMaxVus"|id="runTargetRps"/);
   assert.doesNotMatch(html, /id="runProfileControl"|id="profileShortcuts"|id="quickScriptSelect"/);
   assert.doesNotMatch(javascript, /openRunDialog|runForm|runTargetUrl|runHeaders|runEnvironment/);
+  assert.doesNotMatch(javascript, /overviewRunButton/);
   assert.match(javascript, /formatRunLoadPlan\(run\.options\)/);
 });
 
@@ -100,7 +102,7 @@ test("new projects stay empty and the plus button opens an unsaved blank script"
   assert.match(javascript, /elements\.scriptEditor\.value\s*=\s*"";/);
   assert.match(javascript, /elements\.newScriptButton\.addEventListener\("click",\s*beginNewScript\)/);
   assert.match(javascript, /switchTab\("scripts"\);\s*toast\(`\$\{created\.name\} project created\.`\)/);
-  assert.match(javascript, /function renderDraftFileName\(\)/);
+  assert.match(javascript, /function renderEditorFileName\(\)/);
   assert.match(
     javascript,
     /if\s*\(state\.creatingScript\)\s*\{[\s\S]+?api\("\/scripts",\s*\{[\s\S]+?method:\s*"POST"/,
@@ -108,4 +110,13 @@ test("new projects stay empty and the plus button opens an unsaved blank script"
   assert.match(javascript, /code:\s*elements\.scriptEditor\.value/);
   assert.doesNotMatch(javascript, /code:\s*script\(\)\?\.code\s*\|\|/);
   assert.match(css, /\.script-list-empty/);
+});
+
+test("file names update immediately and save shortcuts work across the editor toolbar", () => {
+  assert.match(javascript, /document\.querySelector\("\.editor-pane"\)\.addEventListener\("keydown",\s*handleEditorKeydown\)/);
+  assert.match(javascript, /\(event\.metaKey \|\| event\.ctrlKey\) && event\.key\.toLowerCase\(\) === "s"/);
+  assert.match(javascript, /if \(!elements\.saveScriptButton\.disabled\) void saveScript\(\)/);
+  assert.match(javascript, /elements\.scriptNameInput\.addEventListener\("input",[\s\S]+?renderEditorFileName\(\)/);
+  assert.match(javascript, /detail\.textContent = "Unsaved"/);
+  assert.doesNotMatch(javascript, /elements\.scriptEditor\.addEventListener\("keydown",\s*handleEditorKeydown\)/);
 });

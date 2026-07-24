@@ -11,14 +11,13 @@ It deliberately does not infer or display the target's server framework.
 
 ## Runtime Flow
 
-1. The operator selects a project and target URL.
+1. The operator selects a project and opens a saved script.
 2. The operator writes and saves the API request and response checks as a k6
    JavaScript file.
-3. The TestZone API validates imports, literal URLs, duration, VUs, target RPS,
-   and target-host allowlist.
-4. `Run now` creates an internal execution wrapper from Run Plan settings and
-   starts the bundled k6 binary. The saved script remains free of VU, RPS, and
-   duration boilerplate.
+3. The TestZone API validates imports, HTTP/HTTPS URLs, duration, VUs, and
+   target RPS.
+4. The editor's `Run` action starts the bundled k6 binary with the saved file.
+   Target URL, request options, VUs, RPS, and duration stay in that file.
 5. k6 writes a summary, JSONL metric stream, and bounded log tail.
 6. The service stores run metadata locally and imports one-second metric
    aggregates into InfluxDB.
@@ -99,26 +98,18 @@ metadata, or workflow summaries.
 - maximum request body accepted by the TestZone API: 1 MB
 - maximum JavaScript source: 250 KB
 - remote JavaScript imports: prohibited
-- targets outside `TESTZONE_ALLOWED_TARGET_HOSTS`: prohibited
+- target URL must use HTTP or HTTPS
 
-Before testing a shared or production-like endpoint, the operator remains
-responsible for service ownership and traffic approval. The allowlist is a
-technical guard, not authorization to load test any listed service.
+Before testing any shared, third-party, or production-like endpoint, the
+authenticated operator remains responsible for service ownership and traffic
+approval.
 
 ## Script Contract
 
-Scripts use:
-
-- `__ENV.BASE_URL`
-- `__ENV.HEADERS_JSON`
-- `__ENV.VUS`
-- `__ENV.MAX_VUS`
-- `__ENV.TARGET_RPS`
-- `__ENV.DURATION`
-
-Every request should include a stable `api` tag and validate both HTTP status
-and required response fields. Credentials belong in the run dialog's header
-or environment input, not JavaScript.
+Every script exports `testConfig` with a name and absolute target URL, exports
+bounded k6 `options`, includes a stable `api` tag, and validates both HTTP
+status and required response fields. Credentials must not be committed or
+stored in reusable scripts.
 
 ## Failure Handling
 

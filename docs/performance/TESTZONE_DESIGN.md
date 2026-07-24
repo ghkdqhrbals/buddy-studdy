@@ -117,8 +117,6 @@ TestZone provides:
 - runtime-neutral target projects
 - a code-focused JavaScript editor with syntax highlighting, line/column
   diagnostics, file management, and focused editing mode
-- server-side OpenAI script generation with an editable draft; unsafe output
-  stays visible with actionable diagnostics instead of being discarded
 - direct execution, cancellation, and run deletion
 - user-defined test names and immutable script snapshots attached to history
 - live one-second RPS, p95, error, VU, and dropped-iteration samples while k6
@@ -126,8 +124,7 @@ TestZone provides:
 - a selectable per-run time-series detail view, with the same run linked into
   Grafana before and after completion
 - a hard 1,000-VUser and 3,000-RPS ceiling
-- request headers and environment injection without source-code secrets
-- allowlisted PostgreSQL and Redis component configuration, deploy, restart,
+- fixed-catalog PostgreSQL and Redis component configuration, deploy, restart,
   destructive reset, credential retrieval, and return/delete controls
 - local run metadata and raw artifact retention
 - InfluxDB live/final time-series ingestion and per-run Grafana analysis
@@ -159,7 +156,7 @@ contract.
 The execution boundary remains private:
 
 - Nginx Basic Auth protects UI and API.
-- k6 targets must match a deployment allowlist.
+- k6 targets must be valid absolute HTTP or HTTPS URLs.
 - JavaScript may import k6 or project-local modules only.
 - the browser cannot provide Docker images, container commands, OpenAI keys,
   or InfluxDB credentials.
@@ -175,7 +172,7 @@ The execution boundary remains private:
   TestZone, and routing are deployed as separate modules.
 
 The Docker socket is mounted only into the private TestZone service because it
-owns the allowlisted component lifecycle. This is a privileged boundary and
+owns the fixed-catalog component lifecycle. This is a privileged boundary and
 must remain on the MacBook Air's private monitoring host, not a public
 multi-tenant runner.
 

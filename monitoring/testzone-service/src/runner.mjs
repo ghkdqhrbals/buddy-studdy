@@ -26,7 +26,6 @@ export class RunManager {
       maxVus: this.config.maxVus,
       maxTargetRps: this.config.maxTargetRps,
       maxDurationSeconds: this.config.maxDurationSeconds,
-      allowedTargetHosts: this.config.allowedTargetHosts,
     });
 
     const runDirectory = this.store.runPath(run.id);

@@ -49,7 +49,6 @@ const elementIds = [
   "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
   "newProjectName", "createProjectButton",
-  "overviewRunButton",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
@@ -169,7 +168,6 @@ function renderProjects() {
   elements.projectSelect.disabled = !selected;
   elements.deleteProjectButton.disabled = !selected;
   elements.newScriptButton.disabled = !selected;
-  elements.overviewRunButton.disabled = !selected;
 }
 
 function openNewProjectDialog() {
@@ -315,17 +313,21 @@ function updateEditorControls() {
   elements.validateScriptButton.disabled = !selected || state.creatingScript;
   elements.editorRunButton.disabled = !selected || state.creatingScript;
   elements.deleteScriptButton.disabled = !selected || state.creatingScript;
-  elements.overviewRunButton.disabled = !selected;
 }
 
 function renderDirtyState() {
   elements.editorDirtyMark.dataset.dirty = String(state.dirty);
 }
 
-function renderDraftFileName() {
-  if (!state.creatingScript) return;
-  const name = elements.scriptList.querySelector("[data-script-draft] strong");
+function renderEditorFileName() {
+  const button = state.creatingScript
+    ? elements.scriptList.querySelector("[data-script-draft]")
+    : [...elements.scriptList.querySelectorAll("[data-script-id]")]
+      .find((entry) => entry.dataset.scriptId === state.scriptId);
+  const name = button?.querySelector("strong");
+  const detail = button?.querySelector("span");
   if (name) name.textContent = elements.scriptNameInput.value || "untitled.js";
+  if (detail) detail.textContent = "Unsaved";
 }
 
 function markDirty() {
@@ -932,7 +934,7 @@ function formatRunLoadPlan(options = {}) {
     : `${duration} · ${maxVus.toLocaleString()} VUs`;
 }
 
-async function startRun(scriptId = state.scriptId, button = elements.overviewRunButton) {
+async function startRun(scriptId = state.scriptId, button = elements.editorRunButton) {
   const selectedProject = project();
   const selectedScript = state.scripts.find((entry) => entry.id === scriptId);
   if (!selectedProject || !selectedScript) {
@@ -1187,7 +1189,7 @@ function closeDialog(button) {
 }
 
 function handleEditorKeydown(event) {
-  if (event.key === "Tab") {
+  if (event.key === "Tab" && event.target === elements.scriptEditor) {
     event.preventDefault();
     elements.scriptEditor.setRangeText(
       "  ",
@@ -1200,7 +1202,7 @@ function handleEditorKeydown(event) {
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    void saveScript();
+    if (!elements.saveScriptButton.disabled) void saveScript();
   }
 }
 
@@ -1233,7 +1235,6 @@ function bindEvents() {
   elements.newProjectButton.addEventListener("click", openNewProjectDialog);
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
-  elements.overviewRunButton.addEventListener("click", () => void startRun());
   elements.refreshRunsButton.addEventListener("click", loadRuns);
   elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
   elements.cancelSelectedRunButton.addEventListener("click", () => {
@@ -1264,10 +1265,10 @@ function bindEvents() {
   for (const eventName of ["scroll", "click", "keyup"]) {
     elements.scriptEditor.addEventListener(eventName, syncEditorMetrics);
   }
-  elements.scriptEditor.addEventListener("keydown", handleEditorKeydown);
+  document.querySelector(".editor-pane").addEventListener("keydown", handleEditorKeydown);
   elements.scriptNameInput.addEventListener("input", () => {
     markDirty();
-    renderDraftFileName();
+    renderEditorFileName();
   });
   elements.saveScriptButton.addEventListener("click", saveScript);
   elements.validateScriptButton.addEventListener("click", () => void validateCurrentScript(false));

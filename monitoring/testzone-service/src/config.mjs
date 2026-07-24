@@ -5,13 +5,6 @@ function integer(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function csv(value) {
-  return String(value ?? "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 export function loadConfig(env = process.env) {
   const dataDir = path.resolve(env.TESTZONE_DATA_DIR || "./data");
   return {
@@ -21,7 +14,6 @@ export function loadConfig(env = process.env) {
     maxTargetRps: Math.min(integer(env.TESTZONE_MAX_TARGET_RPS, 3000), 3000),
     maxDurationSeconds: integer(env.TESTZONE_MAX_DURATION_SECONDS, 3600),
     maxConcurrentRuns: integer(env.TESTZONE_MAX_CONCURRENT_RUNS, 1),
-    allowedTargetHosts: csv(env.TESTZONE_ALLOWED_TARGET_HOSTS),
     grafanaBaseUrl: env.TESTZONE_GRAFANA_URL || "https://grafana.lowfidev.cloud",
     influx: {
       url: env.TESTZONE_INFLUX_URL || "http://buddystudy-testzone-influxdb:8086",

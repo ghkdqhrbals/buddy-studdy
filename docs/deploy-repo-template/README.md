@@ -67,7 +67,6 @@ Repository variables:
 - `GRAFANA_PORT`: MacBook Air Grafana host port, defaults to `3000`.
 - `LOKI_PORT`: MacBook Air Loki host port, defaults to `3100`.
 - `MACBOOKAIR_TESTZONE_ROOT`: persistent TestZone and InfluxDB path.
-- `TESTZONE_ALLOWED_TARGET_HOSTS`: comma-separated host allowlist for k6.
 - `TESTZONE_INFLUX_ORG` and `TESTZONE_INFLUX_BUCKET`: Grafana and runner
   storage coordinates.
 

@@ -133,54 +133,6 @@ body {
   background: var(--tz-blue-hover);
 }
 
-.run-launch-button {
-  display: inline-flex;
-  min-height: 34px;
-  padding: 0 13px 0 10px;
-  align-items: center;
-  align-self: flex-start;
-  gap: 7px;
-  border: 1px solid #b9c8dc;
-  border-radius: 6px;
-  color: #1b559f;
-  background: var(--tz-surface);
-  box-shadow: 0 1px 1px rgba(21, 32, 51, 0.04);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition:
-    border-color 120ms ease,
-    background-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.run-launch-icon {
-  color: var(--tz-blue);
-  font-size: 18px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.run-launch-button:hover {
-  border-color: #7fa3d3;
-  background: #f7faff;
-  box-shadow: 0 2px 5px rgba(33, 102, 209, 0.1);
-}
-
-.run-launch-button:focus-visible {
-  outline: 3px solid rgba(33, 102, 209, 0.18);
-  outline-offset: 2px;
-}
-
-.run-launch-button:disabled {
-  color: var(--tz-muted);
-  background: var(--tz-surface-muted);
-  box-shadow: none;
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
 .button-secondary {
   color: var(--tz-text);
   background: var(--tz-surface);

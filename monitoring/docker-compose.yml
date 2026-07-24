@@ -103,7 +103,6 @@ services:
       TESTZONE_MAX_TARGET_RPS: "3000"
       TESTZONE_MAX_DURATION_SECONDS: "3600"
       TESTZONE_MAX_CONCURRENT_RUNS: "1"
-      TESTZONE_ALLOWED_TARGET_HOSTS: ${TESTZONE_ALLOWED_TARGET_HOSTS:-api.ghkdqhrbals.org,host.docker.internal}
       TESTZONE_GRAFANA_URL: https://grafana.lowfidev.cloud/
       TESTZONE_INFLUX_URL: http://buddystudy-testzone-influxdb:8086
       TESTZONE_INFLUX_ORG: ${TESTZONE_INFLUX_ORG:-buddystudy}

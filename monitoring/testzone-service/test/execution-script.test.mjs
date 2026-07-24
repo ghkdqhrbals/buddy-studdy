@@ -21,6 +21,6 @@ test("runner executes the saved script without injecting load options", () => {
 });
 
 test("runner leaves target URL and headers entirely to the saved script", () => {
-  assert.match(runnerSource, /allowedTargetHosts:\s*this\.config\.allowedTargetHosts/);
+  assert.doesNotMatch(runnerSource, /allowedTargetHosts|TESTZONE_ALLOWED_TARGET_HOSTS/);
   assert.doesNotMatch(runnerSource, /BASE_URL|HEADERS_JSON|environment\.json/);
 });

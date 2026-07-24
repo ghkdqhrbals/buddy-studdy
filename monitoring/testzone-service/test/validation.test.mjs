@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   durationToSeconds,
   validateScript,
-  validateTargetHost,
   ValidationError,
 } from "../src/validation.mjs";
 
@@ -29,7 +28,6 @@ test("durationToSeconds parses supported k6 durations", () => {
 test("validateScript accepts a bounded k6 script", () => {
   const validation = validateScript(VALID_SCRIPT, {
     maxVus: 1000,
-    allowedTargetHosts: ["ghkdqhrbals.org"],
   });
   assert.equal(validation.valid, true);
   assert.deepEqual(validation.execution, {
@@ -78,25 +76,16 @@ test("validateScript requires a script-owned target URL", () => {
   assert.throws(
     () => validateScript(VALID_SCRIPT.replace(/export const testConfig[\s\S]+?};\n/, ""), {
       maxVus: 1000,
-      allowedTargetHosts: ["ghkdqhrbals.org"],
     }),
     (error) => error instanceof ValidationError
       && error.details.some((detail) => detail.message.includes("export const testConfig")),
   );
-  assert.throws(
-    () => validateScript(VALID_SCRIPT.replace("api.ghkdqhrbals.org", "example.com"), {
-      maxVus: 1000,
-      allowedTargetHosts: ["ghkdqhrbals.org"],
-    }),
-    (error) => error instanceof ValidationError
-      && error.details.some((detail) => detail.message.includes("allowlist")),
-  );
 });
 
-test("target allowlist accepts subdomains and rejects unrelated hosts", () => {
-  assert.equal(
-    validateTargetHost("https://api.ghkdqhrbals.org/", ["ghkdqhrbals.org"]),
-    "https://api.ghkdqhrbals.org",
+test("validateScript accepts any absolute HTTP or HTTPS target", () => {
+  const validation = validateScript(
+    VALID_SCRIPT.replaceAll("api.ghkdqhrbals.org", "www.google.com"),
+    { maxVus: 1000 },
   );
-  assert.throws(() => validateTargetHost("https://example.com", ["ghkdqhrbals.org"]), ValidationError);
+  assert.equal(validation.execution.targetUrl, "https://www.google.com");
 });
