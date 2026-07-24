@@ -1,11 +1,3 @@
-export const RUN_PROFILES = Object.freeze({
-  smoke: { label: "Smoke", duration: "10s", vus: 1, maxVus: 10, targetRps: 5 },
-  standard: { label: "Standard", duration: "60s", vus: 100, maxVus: 1000, targetRps: 1000 },
-  diagnostic: { label: "Diagnostic", duration: "120s", vus: 500, maxVus: 1000, targetRps: 2000 },
-  soak: { label: "Soak", duration: "15m", vus: 300, maxVus: 1000, targetRps: 0 },
-  custom: { label: "Custom", duration: "60s", vus: 100, maxVus: 1000, targetRps: 0 },
-});
-
 export function formatDate(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", {

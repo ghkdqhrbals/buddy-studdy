@@ -2,8 +2,23 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+export const DEFAULT_EXECUTION_OPTIONS = `export const options = {
+  scenarios: {
+    publicQuestions: {
+      executor: "constant-arrival-rate",
+      rate: 300,
+      timeUnit: "1s",
+      duration: "30s",
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+    },
+  },
+};`;
+
 export const DEFAULT_SCRIPT = `import http from "k6/http";
 import { check, sleep } from "k6";
+
+${DEFAULT_EXECUTION_OPTIONS}
 
 const baseUrl = __ENV.BASE_URL;
 const headers = JSON.parse(__ENV.HEADERS_JSON || "{}");
@@ -29,6 +44,11 @@ const MANAGED_EXECUTION_OPTIONS = /const targetRps = Number\(__ENV\.TARGET_RPS \
 
 export function stripManagedExecutionOptions(code) {
   return code.replace(MANAGED_EXECUTION_OPTIONS, "").replace(/^\s*\n/, "");
+}
+
+export function ensureScriptExecutionOptions(code) {
+  if (/export\s+const\s+options\s*=/.test(code)) return code;
+  return `${DEFAULT_EXECUTION_OPTIONS}\n\n${code}`;
 }
 
 function now() {
@@ -90,8 +110,10 @@ export class TestZoneStore {
     await Promise.all(this.state.scripts.map(async (script) => {
       const scriptPath = this.scriptPath(script.id);
       const code = await fs.readFile(scriptPath, "utf8");
-      const migrated = stripManagedExecutionOptions(
-        code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+      const migrated = ensureScriptExecutionOptions(
+        stripManagedExecutionOptions(
+          code.replace(LEGACY_MAX_VUS_OPTION, FIXED_MAX_VUS_OPTION),
+        ),
       );
       if (migrated === code) return;
       await fs.writeFile(

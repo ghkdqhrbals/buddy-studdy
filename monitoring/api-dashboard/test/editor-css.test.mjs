@@ -38,10 +38,14 @@ test("workspace exposes one new run action and keeps target URL in the run form"
   assert.match(html, /<input[\s\S]+?id="runTargetUrl"[\s\S]+?required/);
   assert.match(javascript, /targetUrl:\s*elements\.runTargetUrl\.value/);
   assert.match(javascript, /run\.targetUrl\s*\|\|\s*"-"/);
+  assert.doesNotMatch(html, /id="runDuration"|id="runVus"|id="runMaxVus"|id="runTargetRps"/);
+  assert.doesNotMatch(html, /id="runProfileControl"|id="profileShortcuts"|id="quickScriptSelect"/);
+  assert.doesNotMatch(javascript, /profile:\s*elements|options:\s*\{\s*duration:/);
+  assert.match(javascript, /formatRunLoadPlan\(run\.options\)/);
 });
 
 test("run charts use vendored uPlot with unit-specific live series", () => {
-  const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function applyProfile/)?.[0] ?? "";
+  const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function formatRunLoadPlan/)?.[0] ?? "";
   assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);
   assert.match(html, /vendor\/uplot\/uPlot\.min\.css\?v=1\.6\.32/);
   assert.match(css, /\.run-history-chart \.u-legend/);
@@ -54,7 +58,7 @@ test("run charts use vendored uPlot with unit-specific live series", () => {
 });
 
 test("run charts cap their content width and support horizontal drag inspection", () => {
-  const chartCode = javascript.match(/const MAX_RUN_CHART_WIDTH[\s\S]+?function applyProfile/)?.[0] ?? "";
+  const chartCode = javascript.match(/const MAX_RUN_CHART_WIDTH[\s\S]+?function formatRunLoadPlan/)?.[0] ?? "";
   assert.match(chartCode, /MAX_RUN_CHART_WIDTH\s*=\s*1200/);
   assert.match(chartCode, /RUN_CHART_VISIBLE_SAMPLES\s*=\s*120/);
   assert.match(chartCode, /Math\.min\(MAX_RUN_CHART_WIDTH,\s*runChartViewportWidth\(host\)\)/);

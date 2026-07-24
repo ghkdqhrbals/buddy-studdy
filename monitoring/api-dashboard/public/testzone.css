@@ -105,9 +105,7 @@ body {
 
 .button,
 .icon-button,
-.testzone-tabs button,
-.profile-shortcuts button,
-.segmented-control button {
+.testzone-tabs button {
   border: 1px solid transparent;
   font: inherit;
   cursor: pointer;
@@ -268,8 +266,7 @@ body {
 .workspace-bar select,
 .testzone-dialog input,
 .testzone-dialog select,
-.testzone-dialog textarea,
-.quick-start select {
+.testzone-dialog textarea {
   width: 100%;
   min-height: 36px;
   box-sizing: border-box;
@@ -393,7 +390,7 @@ body {
 
 .overview-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -477,51 +474,6 @@ body {
   color: var(--tz-ink);
   font-variant-numeric: tabular-nums;
   font-weight: 750;
-}
-
-.quick-start {
-  display: flex;
-  min-height: 310px;
-  flex-direction: column;
-}
-
-.quick-start label {
-  display: grid;
-  gap: 5px;
-  margin: 18px 0 12px;
-  color: var(--tz-muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.profile-shortcuts {
-  display: grid;
-  gap: 7px;
-}
-
-.profile-shortcuts button {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  border-color: var(--tz-border);
-  border-radius: 5px;
-  color: var(--tz-text);
-  background: var(--tz-surface-muted);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.profile-shortcuts button:hover {
-  border-color: #a9bdd5;
-  background: var(--tz-blue-soft);
-}
-
-.profile-shortcuts span {
-  color: var(--tz-muted);
-  font-size: 11px;
-  font-weight: 500;
 }
 
 .runs-section {
@@ -1001,38 +953,6 @@ body {
   white-space: nowrap;
 }
 
-.segmented-control {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--tz-border-strong);
-  border-radius: 5px;
-}
-
-.segmented-control button {
-  min-height: 36px;
-  border-right: 1px solid var(--tz-border-strong);
-  color: var(--tz-muted);
-  background: #fff;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.segmented-control button:last-child {
-  border-right: 0;
-}
-
-.segmented-control button[aria-pressed="true"] {
-  color: var(--tz-blue);
-  background: var(--tz-blue-soft);
-}
-
-.run-settings-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-
 .testzone-dialog details {
   padding: 10px 12px;
   border: 1px solid var(--tz-border);
@@ -1174,7 +1094,6 @@ body {
     min-width: 170px;
   }
 
-  .run-settings-grid,
   .advanced-settings {
     grid-template-columns: 1fr 1fr;
   }

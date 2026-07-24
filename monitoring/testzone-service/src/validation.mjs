@@ -2,6 +2,9 @@ const DURATION_PATTERN = /^(\d+)(ms|s|m|h)$/;
 const K6_IMPORT_PATTERN = /from\s+["']([^"']+)["']/g;
 const URL_PATTERN = /https?:\/\/[^\s"'`)}\]]+/g;
 const VU_OPTION_PATTERN = /\b(?:vus|preAllocatedVUs|maxVUs)\s*:\s*(\d+)/g;
+const DURATION_OPTION_PATTERN = /\b(?:duration|maxDuration)\s*:\s*["'](\d+(?:ms|s|m|h))["']/g;
+const RATE_OPTION_PATTERN = /\brate\s*:\s*(\d+)/g;
+const OPTIONS_EXPORT_PATTERN = /export\s+const\s+options\s*=/;
 
 export class ValidationError extends Error {
   constructor(message, details = []) {
@@ -70,6 +73,9 @@ export function validateScript(code, options = {}) {
   if (!/export\s+default\s+function/.test(source)) {
     add("Script must export a default k6 function.");
   }
+  if (!OPTIONS_EXPORT_PATTERN.test(source)) {
+    add("Script must export k6 load settings with `export const options = ...`.");
+  }
 
   for (const match of source.matchAll(K6_IMPORT_PATTERN)) {
     const specifier = match[1];
@@ -81,16 +87,34 @@ export function validateScript(code, options = {}) {
     }
   }
 
-  for (const match of source.matchAll(VU_OPTION_PATTERN)) {
+  const vuMatches = [...source.matchAll(VU_OPTION_PATTERN)];
+  for (const match of vuMatches) {
     if (Number(match[1]) > maxVus) {
       add(`Script requests ${match[1]} VUs; the TestZone maximum is ${maxVus}.`, match.index);
     }
   }
 
-  const duration = durationToSeconds(options.duration);
-  if (options.duration && duration === null) add("Duration must look like 30s, 5m, or 1h.");
-  if (duration !== null && duration > maxDurationSeconds) {
-    add(`Duration exceeds the ${maxDurationSeconds} second limit.`);
+  const durationMatches = [...source.matchAll(DURATION_OPTION_PATTERN)];
+  const durationSeconds = durationMatches.reduce(
+    (total, match) => total + (durationToSeconds(match[1]) || 0),
+    0,
+  );
+  if (OPTIONS_EXPORT_PATTERN.test(source) && !durationMatches.length) {
+    add("Script options must include a bounded duration or maxDuration.");
+  }
+  if (durationMatches.length && durationSeconds <= 0) {
+    add("Script duration must be greater than zero.");
+  }
+  if (durationSeconds > maxDurationSeconds) {
+    add(`Script duration exceeds the ${maxDurationSeconds} second limit.`);
+  }
+
+  const maxTargetRps = Number(options.maxTargetRps ?? 3000);
+  const rateMatches = [...source.matchAll(RATE_OPTION_PATTERN)];
+  for (const match of rateMatches) {
+    if (Number(match[1]) > maxTargetRps) {
+      add(`Script requests ${match[1]} RPS; the TestZone maximum is ${maxTargetRps}.`, match.index);
+    }
   }
 
   if (targetBaseUrl) {
@@ -105,7 +129,24 @@ export function validateScript(code, options = {}) {
   }
 
   if (errors.length) throw new ValidationError("Fix the script diagnostics before running the test.", errors);
-  return { valid: true, bytes: Buffer.byteLength(source), maxVus, diagnostics: [] };
+  const requestedVus = vuMatches.map((match) => Number(match[1]));
+  const requestedRates = rateMatches.map((match) => Number(match[1]));
+  const duration = durationMatches.length === 1
+    ? durationMatches[0][1]
+    : `${durationSeconds}s`;
+  return {
+    valid: true,
+    bytes: Buffer.byteLength(source),
+    maxVus,
+    diagnostics: [],
+    execution: {
+      duration,
+      durationSeconds,
+      vus: requestedVus[0] || 1,
+      maxVus: Math.max(...requestedVus, 1),
+      targetRps: Math.max(...requestedRates, 0),
+    },
+  };
 }
 
 export function validateScriptReport(code, options = {}) {
@@ -120,27 +161,4 @@ export function validateScriptReport(code, options = {}) {
       diagnostics: error.details,
     };
   }
-}
-
-export function normalizeRunOptions(input, config) {
-  const duration = String(input.duration || "30s").trim();
-  const durationSeconds = durationToSeconds(duration);
-  const vus = Number.parseInt(input.vus ?? 10, 10);
-  const maxVus = Number.parseInt(input.maxVus ?? Math.max(vus, 100), 10);
-  const targetRps = Number.parseInt(input.targetRps ?? 0, 10);
-
-  if (durationSeconds === null || durationSeconds <= 0 || durationSeconds > config.maxDurationSeconds) {
-    throw new ValidationError(`Duration must be between 1ms and ${config.maxDurationSeconds} seconds.`);
-  }
-  if (!Number.isFinite(vus) || vus < 1 || vus > config.maxVus) {
-    throw new ValidationError(`VUs must be between 1 and ${config.maxVus}.`);
-  }
-  if (!Number.isFinite(maxVus) || maxVus < vus || maxVus > config.maxVus) {
-    throw new ValidationError(`Max VUs must be between ${vus} and ${config.maxVus}.`);
-  }
-  const maxTargetRps = Number(config.maxTargetRps ?? 3000);
-  if (!Number.isFinite(targetRps) || targetRps < 0 || targetRps > maxTargetRps) {
-    throw new ValidationError(`Target RPS must be between 0 and ${maxTargetRps}.`);
-  }
-  return { duration, durationSeconds, vus, maxVus, targetRps };
 }

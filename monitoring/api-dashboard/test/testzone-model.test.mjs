@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  RUN_PROFILES,
   diagnosticMessage,
   editorPosition,
   formatMilliseconds,
@@ -34,13 +33,6 @@ const runs = [
     summary: null,
   },
 ];
-
-test("run profiles keep every preset within the 1,000 VU ceiling", () => {
-  for (const profile of Object.values(RUN_PROFILES)) {
-    assert.ok(profile.vus <= 1000);
-    assert.ok(profile.maxVus <= 1000);
-  }
-});
 
 test("JSON fields accept objects and reject invalid or array values", () => {
   assert.deepEqual(parseObjectJson('{"Authorization":"Bearer token"}', "Headers"), {

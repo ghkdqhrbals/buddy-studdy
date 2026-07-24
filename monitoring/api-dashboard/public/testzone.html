@@ -6,7 +6,7 @@
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
     <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css?v=1.6.32" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072502" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072503" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -110,25 +110,6 @@
                   <button id="viewRunScriptButton" class="row-action" type="button">View script</button>
                 </footer>
               </article>
-
-              <article class="workspace-section quick-start">
-                <header>
-                  <div>
-                    <h3>Quick start</h3>
-                    <p>저장된 스크립트로 바로 실행합니다.</p>
-                  </div>
-                </header>
-                <label>
-                  Script
-                  <select id="quickScriptSelect"></select>
-                </label>
-                <div class="profile-shortcuts" id="profileShortcuts">
-                  <button type="button" data-profile="smoke">Smoke<span>10s · 1 VU</span></button>
-                  <button type="button" data-profile="standard">Standard<span>60s · 100 VU</span></button>
-                  <button type="button" data-profile="diagnostic">Diagnostic<span>120s · 500 VU</span></button>
-                  <button type="button" data-profile="soak">Soak<span>15m · 300 VU</span></button>
-                </div>
-              </article>
             </section>
 
             <section class="workspace-section runs-section">
@@ -146,7 +127,7 @@
                       <th>Started</th>
                       <th>Test name</th>
                       <th>Script</th>
-                      <th>Profile</th>
+                      <th>Load plan</th>
                       <th>Status</th>
                       <th>RPS</th>
                       <th>p95</th>
@@ -284,24 +265,8 @@
               required
             />
           </label>
-          <label>Test name<input id="runName" maxlength="120" placeholder="Public questions · standard" /></label>
+          <label>Test name<input id="runName" maxlength="120" placeholder="Public questions" /></label>
           <label>Script<select id="runScriptSelect"></select></label>
-          <fieldset>
-            <legend>Profile</legend>
-            <div id="runProfileControl" class="segmented-control">
-              <button type="button" data-profile="smoke">Smoke</button>
-              <button type="button" data-profile="standard" aria-pressed="true">Standard</button>
-              <button type="button" data-profile="diagnostic">Diagnostic</button>
-              <button type="button" data-profile="soak">Soak</button>
-              <button type="button" data-profile="custom">Custom</button>
-            </div>
-          </fieldset>
-          <div class="run-settings-grid">
-            <label>Duration<input id="runDuration" value="60s" /></label>
-            <label>VUs<input id="runVus" type="number" min="1" max="1000" value="100" /></label>
-            <label>Max VUs<input id="runMaxVus" type="number" min="1" max="1000" value="500" /></label>
-            <label>Target RPS<input id="runTargetRps" type="number" min="0" max="3000" value="1000" /></label>
-          </div>
           <details>
             <summary>Headers and environment</summary>
             <div class="advanced-settings">
@@ -403,6 +368,6 @@
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
     <script src="/vendor/uplot/uPlot.iife.min.js?v=1.6.32"></script>
-    <script type="module" src="/testzone.js?v=2026072502"></script>
+    <script type="module" src="/testzone.js?v=2026072503"></script>
   </body>
 </html>

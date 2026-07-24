@@ -6,7 +6,6 @@ import { InfluxWriter } from "./influx.mjs";
 import { RunManager } from "./runner.mjs";
 import { TestZoneStore } from "./store.mjs";
 import {
-  normalizeRunOptions,
   validateScript,
   validateTargetHost,
   ValidationError,
@@ -223,7 +222,12 @@ export async function createTestZoneServer(dependencies = {}) {
           return sendJson(response, 404, { error: "Project or script not found." });
         }
         const targetUrl = validateTargetHost(body.targetUrl, config.allowedTargetHosts);
-        const options = normalizeRunOptions(body.options || {}, config);
+        const validation = validateScript(script.code, {
+          maxVus: config.maxVus,
+          maxTargetRps: config.maxTargetRps,
+          maxDurationSeconds: config.maxDurationSeconds,
+          targetBaseUrl: targetUrl,
+        });
         const environment = safeEnvironment(body.environment || {});
         environment.HEADERS_JSON = JSON.stringify(body.headers || {});
         const run = await store.createRun({
@@ -232,8 +236,8 @@ export async function createTestZoneServer(dependencies = {}) {
           scriptName: script.name,
           targetUrl,
           name: requireText(body.name || script.name, "Test name", 120),
-          profile: String(body.profile || "custom").slice(0, 40),
-          options,
+          profile: "script",
+          options: validation.execution,
         });
         await runs.start(run, project, script, environment);
         return sendJson(response, 202, {

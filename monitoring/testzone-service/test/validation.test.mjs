@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   durationToSeconds,
-  normalizeRunOptions,
   validateScript,
   validateTargetHost,
   ValidationError,
@@ -10,7 +9,7 @@ import {
 
 const VALID_SCRIPT = `
 import http from "k6/http";
-export const options = { vus: 10 };
+export const options = { vus: 10, duration: "30s" };
 export default function () {
   http.get(\`\${__ENV.BASE_URL}/api/v1/studies\`);
 }
@@ -24,7 +23,15 @@ test("durationToSeconds parses supported k6 durations", () => {
 });
 
 test("validateScript accepts a bounded k6 script", () => {
-  assert.equal(validateScript(VALID_SCRIPT, { maxVus: 1000 }).valid, true);
+  const validation = validateScript(VALID_SCRIPT, { maxVus: 1000 });
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.execution, {
+    duration: "30s",
+    durationSeconds: 30,
+    vus: 10,
+    maxVus: 10,
+    targetRps: 0,
+  });
 });
 
 test("validateScript rejects remote imports and excess VUs", () => {
@@ -34,23 +41,34 @@ test("validateScript rejects remote imports and excess VUs", () => {
   );
 });
 
+test("validateScript requires bounded script-owned options and enforces rate limits", () => {
+  assert.throws(
+    () => validateScript("export default function () {}", { maxVus: 1000 }),
+    (error) => error instanceof ValidationError
+      && error.details.some((detail) => detail.message.includes("export const options")),
+  );
+  assert.throws(
+    () => validateScript(VALID_SCRIPT.replace("vus: 10", "rate: 3001, vus: 10"), {
+      maxVus: 1000,
+      maxTargetRps: 3000,
+    }),
+    (error) => error instanceof ValidationError
+      && error.details.some((detail) => detail.message.includes("3001 RPS")),
+  );
+  assert.throws(
+    () => validateScript(VALID_SCRIPT.replace('duration: "30s"', 'duration: "0s"'), {
+      maxVus: 1000,
+      maxTargetRps: 3000,
+    }),
+    (error) => error instanceof ValidationError
+      && error.details.some((detail) => detail.message.includes("greater than zero")),
+  );
+});
+
 test("target allowlist accepts subdomains and rejects unrelated hosts", () => {
   assert.equal(
     validateTargetHost("https://api.ghkdqhrbals.org/", ["ghkdqhrbals.org"]),
     "https://api.ghkdqhrbals.org",
   );
   assert.throws(() => validateTargetHost("https://example.com", ["ghkdqhrbals.org"]), ValidationError);
-});
-
-test("run options enforce the 1000 VU ceiling", () => {
-  const config = { maxVus: 1000, maxTargetRps: 3000, maxDurationSeconds: 3600 };
-  assert.deepEqual(
-    normalizeRunOptions({ duration: "1m", vus: 100, maxVus: 1000, targetRps: 2000 }, config),
-    { duration: "1m", durationSeconds: 60, vus: 100, maxVus: 1000, targetRps: 2000 },
-  );
-  assert.throws(() => normalizeRunOptions({ vus: 1001, maxVus: 1001 }, config), ValidationError);
-  assert.throws(
-    () => normalizeRunOptions({ vus: 100, maxVus: 1000, targetRps: 3001 }, config),
-    ValidationError,
-  );
 });

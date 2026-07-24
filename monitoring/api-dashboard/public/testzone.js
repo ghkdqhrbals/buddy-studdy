@@ -1,5 +1,4 @@
 import {
-  RUN_PROFILES,
   diagnosticMessage,
   editorPosition,
   formatDate,
@@ -50,7 +49,7 @@ const elementIds = [
   "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
   "newProjectName", "createProjectButton",
-  "overviewRunButton", "quickScriptSelect", "profileShortcuts",
+  "overviewRunButton",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
@@ -65,7 +64,6 @@ const elementIds = [
   "saveScriptButton", "editorRunButton", "deleteScriptButton",
   "componentGrid", "refreshComponentsButton",
   "runDialog", "runForm", "runProjectName", "runTargetUrl", "runName", "runScriptSelect",
-  "runProfileControl", "runDuration", "runVus", "runMaxVus", "runTargetRps",
   "runHeaders", "runEnvironment", "runFormError", "startRunButton",
   "newScriptDialog", "newScriptForm", "newScriptName", "newScriptDescription",
   "scriptSnapshotDialog", "scriptSnapshotTitle", "scriptSnapshotCode",
@@ -268,10 +266,8 @@ function renderScripts() {
     option.textContent = entry.name;
     return option;
   });
-  elements.quickScriptSelect.replaceChildren(...options.map((entry) => entry.cloneNode(true)));
   elements.runScriptSelect.replaceChildren(...options);
   if (state.scriptId) {
-    elements.quickScriptSelect.value = state.scriptId;
     elements.runScriptSelect.value = state.scriptId;
   }
   loadScriptIntoEditor();
@@ -365,7 +361,6 @@ async function validateCurrentScript(quiet = false) {
       method: "POST",
       body: JSON.stringify({
         code: elements.scriptEditor.value,
-        duration: elements.runDuration.value,
       }),
     })).validation;
     renderDiagnostics([]);
@@ -494,8 +489,8 @@ function renderRuns() {
       void openRunScript(run);
     });
     scriptCell.append(scriptButton);
-    const profile = document.createElement("td");
-    profile.textContent = run.profile;
+    const loadPlan = document.createElement("td");
+    loadPlan.textContent = formatRunLoadPlan(run.options);
     const statusCell = document.createElement("td");
     const status = document.createElement("span");
     status.className = "status-pill";
@@ -526,7 +521,7 @@ function renderRuns() {
     } else {
       actions.append(actionButton("Delete", () => deleteRun(run), true));
     }
-    row.append(started, name, scriptCell, profile, statusCell, ...metrics, actions);
+    row.append(started, name, scriptCell, loadPlan, statusCell, ...metrics, actions);
     return row;
   }));
   renderSelectedRun();
@@ -588,7 +583,7 @@ function renderSelectedRun() {
   }
   elements.timelineTitle.textContent = run.name || run.scriptName;
   elements.timelineGrafanaLink.href = run.grafanaUrl;
-  elements.timelineRunMeta.textContent = `${run.profile} · ${formatDate(run.startedAt || run.createdAt)} · ${run.status}`;
+  elements.timelineRunMeta.textContent = `${formatRunLoadPlan(run.options)} · ${formatDate(run.startedAt || run.createdAt)} · ${run.status}`;
   elements.liveRps.textContent = formatRate(run.live?.requestRate);
   elements.liveProgress.textContent = run.live
     ? `${Math.round((run.live.progress || 0) * 100)}% · ${run.live.vus || 0} VUs · p95 ${formatMilliseconds(run.live.p95Ms)}`
@@ -596,7 +591,7 @@ function renderSelectedRun() {
   elements.runDetailTitle.textContent = run.name || run.scriptName;
   elements.runDetailMeta.textContent = `${formatDate(run.startedAt || run.createdAt)} · ${run.id}`;
   elements.runDetailTarget.textContent = run.targetUrl || "-";
-  elements.runDetailConfig.textContent = `${run.options?.duration || "-"} · ${run.options?.targetRps || 0} RPS · ${run.options?.maxVus || 0} max VUs`;
+  elements.runDetailConfig.textContent = formatRunLoadPlan(run.options);
   elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
   elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
   elements.runLogTail.textContent = (run.logTail || []).join("\n") || "No k6 log output.";
@@ -890,18 +885,13 @@ function scheduleRunChartResize() {
   state.chartResizeTimer = window.setTimeout(resizeRunCharts, 100);
 }
 
-function applyProfile(name) {
-  const profile = RUN_PROFILES[name] || RUN_PROFILES.custom;
-  elements.runProfileControl.querySelectorAll("button").forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.profile === name));
-  });
-  elements.runDuration.value = profile.duration;
-  elements.runVus.value = profile.vus;
-  elements.runMaxVus.value = profile.maxVus;
-  elements.runTargetRps.value = profile.targetRps;
-  elements.runForm.dataset.profile = name;
-  const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
-  elements.runName.value = `${selectedScript?.name?.replace(/\.js$/, "") || "API test"} · ${profile.label}`;
+function formatRunLoadPlan(options = {}) {
+  const duration = options.duration || "-";
+  const rate = Number(options.targetRps || 0);
+  const maxVus = Number(options.maxVus || options.vus || 0);
+  return rate > 0
+    ? `${duration} · ${rate.toLocaleString()} RPS · ${maxVus.toLocaleString()} max VUs`
+    : `${duration} · ${maxVus.toLocaleString()} VUs`;
 }
 
 function targetUrlStorageKey() {
@@ -916,7 +906,7 @@ function suggestedTargetUrl() {
   return latestWithTarget?.targetUrl || project()?.baseUrl || "";
 }
 
-function openRunDialog(profileName = "standard", scriptId = null) {
+function openRunDialog(scriptId = null) {
   const selectedProject = project();
   if (!selectedProject || !state.scripts.length) {
     toast("Create a project script before starting a run.", "error");
@@ -925,7 +915,8 @@ function openRunDialog(profileName = "standard", scriptId = null) {
   elements.runProjectName.textContent = selectedProject.name;
   elements.runTargetUrl.value = suggestedTargetUrl();
   elements.runScriptSelect.value = scriptId || state.scriptId || state.scripts[0].id;
-  applyProfile(profileName);
+  const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
+  elements.runName.value = selectedScript?.name?.replace(/\.js$/, "") || "API test";
   elements.runFormError.textContent = "";
   elements.runDialog.showModal();
 }
@@ -942,13 +933,6 @@ async function startRun(event) {
         projectId: state.projectId,
         scriptId: elements.runScriptSelect.value,
         targetUrl: elements.runTargetUrl.value,
-        profile: elements.runForm.dataset.profile || "custom",
-        options: {
-          duration: elements.runDuration.value,
-          vus: Number(elements.runVus.value),
-          maxVus: Number(elements.runMaxVus.value),
-          targetRps: Number(elements.runTargetRps.value),
-        },
         headers: parseObjectJson(elements.runHeaders.value, "Headers"),
         environment: parseObjectJson(elements.runEnvironment.value, "Environment"),
       }),
@@ -1231,10 +1215,6 @@ function bindEvents() {
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
   elements.overviewRunButton.addEventListener("click", () => openRunDialog());
-  elements.profileShortcuts.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-profile]");
-    if (button) openRunDialog(button.dataset.profile, elements.quickScriptSelect.value);
-  });
   elements.refreshRunsButton.addEventListener("click", loadRuns);
   elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
   elements.cancelSelectedRunButton.addEventListener("click", () => {
@@ -1269,7 +1249,7 @@ function bindEvents() {
   elements.scriptNameInput.addEventListener("input", markDirty);
   elements.saveScriptButton.addEventListener("click", saveScript);
   elements.validateScriptButton.addEventListener("click", () => void validateCurrentScript(false));
-  elements.editorRunButton.addEventListener("click", () => openRunDialog("standard", state.scriptId));
+  elements.editorRunButton.addEventListener("click", () => openRunDialog(state.scriptId));
   elements.deleteScriptButton.addEventListener("click", deleteCurrentScript);
   elements.toggleFilesButton.addEventListener("click", () =>
     togglePane(document.querySelector(".file-pane"), elements.toggleFilesButton, "files-hidden"));
@@ -1280,11 +1260,10 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
-  elements.runProfileControl.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-profile]");
-    if (button) applyProfile(button.dataset.profile);
+  elements.runScriptSelect.addEventListener("change", () => {
+    const selectedScript = state.scripts.find((entry) => entry.id === elements.runScriptSelect.value);
+    elements.runName.value = selectedScript?.name?.replace(/\.js$/, "") || "API test";
   });
-  elements.runScriptSelect.addEventListener("change", () => applyProfile(elements.runForm.dataset.profile || "custom"));
   elements.runForm.addEventListener("submit", startRun);
   elements.refreshComponentsButton.addEventListener("click", loadComponents);
   elements.componentConfigForm.addEventListener("submit", saveComponentConfig);

@@ -183,8 +183,6 @@ test("run API starts a saved script instead of returning a copied command", asyn
       scriptId: script.id,
       targetUrl: "https://api.example.test",
       name: "Public API peak",
-      profile: "custom",
-      options: { duration: "30s", vus: 20, maxVus: 100, targetRps: 50 },
       headers: { Authorization: "Bearer test" },
     }),
   });
@@ -194,6 +192,14 @@ test("run API starts a saved script instead of returning a copied command", asyn
   assert.equal(body.run.name, "Public API peak");
   assert.equal(body.run.scriptName, script.name);
   assert.equal(body.run.targetUrl, "https://api.example.test");
+  assert.equal(body.run.profile, "script");
+  assert.deepEqual(body.run.options, {
+    duration: "30s",
+    durationSeconds: 30,
+    vus: 50,
+    maxVus: 500,
+    targetRps: 300,
+  });
   assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
 
   const secondResponse = await fetch(`${app.baseUrl}/api/runs`, {
@@ -204,8 +210,6 @@ test("run API starts a saved script instead of returning a copied command", asyn
       scriptId: script.id,
       targetUrl: "https://staging.example.test/base/",
       name: "Public API staging",
-      profile: "smoke",
-      options: { duration: "10s", vus: 1, maxVus: 1, targetRps: 1 },
     }),
   });
   assert.equal(secondResponse.status, 202);
@@ -436,7 +440,8 @@ export const options = targetRps > 0
   const migratedStore = await new TestZoneStore(dataDir).init();
   const migratedScript = (await migratedStore.listScripts())[0];
 
-  assert.doesNotMatch(migratedScript.code, /TARGET_RPS|MAX_VUS|export const options/);
+  assert.doesNotMatch(migratedScript.code, /TARGET_RPS|MAX_VUS/);
+  assert.match(migratedScript.code, /export const options/);
   assert.match(migratedScript.code, /export default function/);
 });
 

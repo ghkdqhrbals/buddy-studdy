@@ -29,9 +29,10 @@ The browser can:
   components
 - open an execution in Grafana using its `run_id`
 
-`New run` calls the TestZone service and starts k6. It does not copy a shell
-command. Sensitive header and environment names are redacted from persisted
-metadata. The browser never receives the OpenAI API key or InfluxDB token.
+`New run` selects the target URL and saved script, then starts k6. Duration,
+VUs, arrival rate, and other load behavior are defined only in the script's
+`export const options`. Sensitive header and environment names are redacted
+from persisted metadata. The browser never receives the InfluxDB token.
 
 Limits are enforced by the TestZone API:
 
