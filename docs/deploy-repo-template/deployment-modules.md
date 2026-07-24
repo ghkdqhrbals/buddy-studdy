@@ -14,6 +14,15 @@ one workflow run just because they share a host.
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
 
+Explicit release tags provide a CLI-independent deployment entry point:
+
+- `deploy/backend-*` builds and deploys the backend module.
+- `deploy/testzone-*` builds and deploys the TestZone execution module.
+- `deploy/monitoring-*` dispatches the monitoring receiver deployment.
+
+The tags are intentional release commands. Ordinary branch pushes do not deploy
+runtime modules.
+
 ## Rules
 
 - A workflow must deploy one module. If two modules need to change, run two
@@ -49,6 +58,9 @@ one workflow run just because they share a host.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
+  The app repository dispatches this module through
+  `monitoring-source-published` when an explicit `deploy/monitoring-*` tag is
+  pushed.
   Grafana persists writable runtime state in the `buddystudy-grafana-data`
   Docker volume; dashboards and provisioning files remain read-only bind
   mounts from the monitoring release. Every monitoring deploy synchronizes the

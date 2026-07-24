@@ -1,6 +1,8 @@
 name: Deploy BuddyStudy Monitoring on MacBook Air
 
 on:
+  repository_dispatch:
+    types: [monitoring-source-published]
   workflow_dispatch:
 
 concurrency:
@@ -14,7 +16,7 @@ jobs:
     timeout-minutes: 15
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
-      MONITORING_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/main/monitoring
+      MONITORING_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${{ github.event.client_payload.sha || 'main' }}/monitoring
       API_DASHBOARD_PORT: ${{ vars.API_DASHBOARD_PORT || '3000' }}
       GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}

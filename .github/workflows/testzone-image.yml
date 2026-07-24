@@ -1,6 +1,9 @@
 name: Build TestZone Image
 
 on:
+  push:
+    tags:
+      - "deploy/testzone-*"
   workflow_dispatch:
     inputs:
       image_tag:
@@ -82,7 +85,7 @@ jobs:
     name: Notify TestZone Deploy
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ inputs.dispatch_deploy == true }}
+    if: ${{ github.event_name == 'push' || inputs.dispatch_deploy == true }}
 
     steps:
       - name: Dispatch personal-deploy
