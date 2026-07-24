@@ -128,3 +128,26 @@ test("InfluxWriter reduces request samples to one-second API aggregates", async 
   assert.match(writes[0], /metric=http_req_duration[^ ]* value=40 /);
   assert.match(writes[0], /metric=http_req_failed[^ ]* value=0.5 /);
 });
+
+test("InfluxWriter deletes every series belonging to one run id", async () => {
+  const requests = [];
+  const writer = new InfluxWriter(
+    { url: "http://influx.test", token: "token", org: "org", bucket: "bucket" },
+    async (url, request) => {
+      requests.push({ url: String(url), request });
+      return { ok: true };
+    },
+  );
+
+  const result = await writer.deleteRun("run-with-quotes");
+
+  assert.deepEqual(result, { deleted: true, skipped: false });
+  assert.match(requests[0].url, /api\/v2\/delete/);
+  assert.match(requests[0].url, /org=org/);
+  assert.match(requests[0].url, /bucket=bucket/);
+  assert.equal(requests[0].request.headers.Authorization, "Token token");
+  const body = JSON.parse(requests[0].request.body);
+  assert.equal(body.start, "1970-01-01T00:00:00Z");
+  assert.equal(body.predicate, "run_id=\"run-with-quotes\"");
+  assert.ok(Date.parse(body.stop) > Date.now());
+});
