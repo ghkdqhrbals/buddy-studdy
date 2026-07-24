@@ -173,6 +173,22 @@ jobs:
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
             grafana/grafana:12.3.0
 
+          grafana_password_reset=false
+          for attempt in $(seq 1 15); do
+            if docker exec buddystudy-grafana \
+              grafana cli \
+              --homepath /usr/share/grafana \
+              admin reset-admin-password "${GRAFANA_ADMIN_PASSWORD}"; then
+              grafana_password_reset=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "${grafana_password_reset}" != "true" ]; then
+            echo "Failed to synchronize the Grafana admin password." >&2
+            exit 1
+          fi
+
           docker run -d \
             --name buddystudy-grafana-gateway \
             --network buddystudy-monitoring \

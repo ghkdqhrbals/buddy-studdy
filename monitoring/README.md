@@ -49,6 +49,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Timestamps are rendered in KST with millisecond precision.
 - `https://grafana.lowfidev.cloud`
   - Grafana login and provisioned BuddyStudy dashboards.
+  - The monitoring deployment synchronizes the persisted `admin` account with
+    the `GRAFANA_ADMIN_PASSWORD` deployment secret on every rollout.
   - Anonymous access is disabled; unauthenticated users see the login screen
     instead of a protected default dashboard.
   - Legacy custom-dashboard paths redirect to
