@@ -20,6 +20,19 @@
   ],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Server",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "influxdb",
         "uid": "buddystudy-testzone-influx"
@@ -47,7 +60,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -105,7 +118,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -180,7 +193,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 3,
       "options": {
@@ -236,7 +249,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 10
       },
       "id": 4,
       "options": {
@@ -294,7 +307,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 18
       },
       "id": 7,
       "options": {
@@ -343,6 +356,19 @@
       "type": "stat"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Database",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "influxdb",
         "uid": "buddystudy-testzone-influx"
@@ -370,7 +396,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 24
       },
       "id": 5,
       "options": {
@@ -389,12 +415,13 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component =~ /^${component:regex}$/)\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component == \"postgres\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ],
-      "title": "Test component CPU",
-      "type": "timeseries"
+      "title": "PostgreSQL CPU",
+      "type": "timeseries",
+      "description": "PostgreSQL container CPU utilization sampled during TestZone runs."
     },
     {
       "datasource": {
@@ -424,7 +451,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 24
       },
       "id": 6,
       "options": {
@@ -443,12 +470,136 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component =~ /^${component:regex}$/)\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component == \"postgres\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ],
-      "title": "Test component memory",
-      "type": "timeseries"
+      "title": "PostgreSQL memory",
+      "type": "timeseries",
+      "description": "PostgreSQL container memory usage sampled during TestZone runs."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Redis",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisLabel": "CPU"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component == \"redis\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis CPU",
+      "type": "timeseries",
+      "description": "Redis container CPU utilization sampled during TestZone runs."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisLabel": "memory"
+          },
+          "unit": "decmbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component == \"redis\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis memory",
+      "type": "timeseries",
+      "description": "Redis container memory usage sampled during TestZone runs."
     }
   ],
   "refresh": "5s",
@@ -486,34 +637,6 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        },
-        "datasource": {
-          "type": "influxdb",
-          "uid": "buddystudy-testzone-influx"
-        },
-        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"component\", predicate: (r) => r._measurement == \"testzone_component_runtime\", start: -30d)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Component",
-        "multi": true,
-        "name": "component",
-        "options": [],
-        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${TESTZONE_INFLUX_BUCKET}\", tag: \"component\", predicate: (r) => r._measurement == \"testzone_component_runtime\", start: -30d)",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "current": {
           "selected": false,
           "text": "testzone",
           "value": "testzone"
@@ -535,5 +658,5 @@
   "timezone": "browser",
   "title": "BuddyStudy TestZone Runs",
   "uid": "testzone-runs",
-  "version": 3
+  "version": 4
 }

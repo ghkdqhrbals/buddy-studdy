@@ -11,6 +11,10 @@ const serverRuntimeDashboardPath = path.resolve(
   testDirectory,
   "../../grafana/dashboards/buddystudy-server-runtime.json",
 );
+const testzoneDashboardPath = path.resolve(
+  testDirectory,
+  "../../grafana/dashboards/buddystudy-testzone.json",
+);
 const deployTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/deploy-macbookair-monitoring.yml",
@@ -84,4 +88,22 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
+});
+
+test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {
+  const dashboard = JSON.parse(
+    await fs.readFile(testzoneDashboardPath, "utf8"),
+  );
+  const rows = dashboard.panels
+    .filter((panel) => panel.type === "row")
+    .map((panel) => panel.title);
+  const panels = new Map(dashboard.panels.map((panel) => [panel.title, panel]));
+  const templateNames = dashboard.templating.list.map((template) => template.name);
+
+  assert.deepEqual(rows, ["Server", "Database", "Redis"]);
+  assert.match(panels.get("PostgreSQL CPU")?.targets[0].query ?? "", /r\.component == "postgres"/);
+  assert.match(panels.get("PostgreSQL memory")?.targets[0].query ?? "", /r\.component == "postgres"/);
+  assert.match(panels.get("Redis CPU")?.targets[0].query ?? "", /r\.component == "redis"/);
+  assert.match(panels.get("Redis memory")?.targets[0].query ?? "", /r\.component == "redis"/);
+  assert.ok(!templateNames.includes("component"));
 });
