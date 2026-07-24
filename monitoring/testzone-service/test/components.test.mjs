@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { ComponentManager } from "../src/components.mjs";
 
-test("ComponentManager deploys, restarts, and removes an approved isolated component", async () => {
+test("ComponentManager deploys, recreates on restart, and removes an approved isolated component", async () => {
   const commands = [];
   let deployed = false;
   const exec = async (command, args) => {
@@ -38,7 +38,8 @@ test("ComponentManager deploys, restarts, and removes an approved isolated compo
 
   const restarted = await manager.restart("redis");
   assert.equal(restarted.status, "running");
-  assert.ok(commands.some((entry) => entry.join(" ") === "docker restart buddystudy-testzone-redis"));
+  assert.equal(commands.filter((entry) => entry.join(" ") === "docker pull redis:7.4-alpine").length, 2);
+  assert.equal(commands.filter((entry) => entry[0] === "docker" && entry[1] === "run").length, 2);
 
   const deleted = await manager.delete("redis");
   assert.deepEqual(deleted, { id: "redis", status: "not-deployed" });

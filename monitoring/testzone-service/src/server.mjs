@@ -141,6 +141,21 @@ export async function createTestZoneServer(dependencies = {}) {
         });
         return project ? sendJson(response, 200, { project }) : sendJson(response, 404, { error: "Project not found." });
       }
+      if (match && request.method === "DELETE") {
+        const project = store.state.projects.find((entry) => entry.id === match[0]);
+        if (!project) return sendJson(response, 404, { error: "Project not found." });
+        const projectRuns = store.state.runs.filter((run) => run.projectId === project.id);
+        if (projectRuns.some((run) => ["queued", "running", "cancelling"].includes(run.status))) {
+          return sendJson(response, 409, { error: "Cancel active project runs before deleting the project." });
+        }
+        await Promise.all(projectRuns.map((run) => influx.deleteRun(run.id)));
+        const deleted = await store.deleteProject(project.id);
+        return sendJson(response, 200, {
+          deleted: true,
+          removedScripts: deleted.scriptIds.length,
+          removedRuns: deleted.runIds.length,
+        });
+      }
 
       if (request.method === "GET" && pathname === "/api/scripts") {
         const scripts = await store.listScripts(requestUrl.searchParams.get("projectId"));

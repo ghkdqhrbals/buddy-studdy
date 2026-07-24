@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072410" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072411" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -37,10 +37,16 @@
         </header>
 
         <div class="workspace-bar">
-          <label>
-            <span>Project</span>
-            <select id="projectSelect" aria-label="Project"></select>
-          </label>
+          <div class="workspace-project">
+            <label>
+              <span>Project</span>
+              <select id="projectSelect" aria-label="Project"></select>
+            </label>
+            <div class="workspace-project-actions">
+              <button id="newProjectButton" class="button button-secondary" type="button">New project</button>
+              <button id="deleteProjectButton" class="button button-secondary danger-text" type="button">Delete</button>
+            </div>
+          </div>
           <label class="workspace-target">
             <span>Target URL</span>
             <input id="projectBaseUrl" type="url" autocomplete="off" />
@@ -338,6 +344,23 @@
       </form>
     </dialog>
 
+    <dialog id="newProjectDialog" class="testzone-dialog compact-dialog">
+      <form id="newProjectForm">
+        <header>
+          <div><span>Test workspace</span><h2>New project</h2></div>
+          <button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button>
+        </header>
+        <div class="dialog-body">
+          <label>Project name<input id="newProjectName" maxlength="120" autocomplete="off" required /></label>
+          <label>Target URL<input id="newProjectBaseUrl" type="url" autocomplete="off" placeholder="https://api.example.com" required /></label>
+        </div>
+        <footer>
+          <button class="button button-secondary" type="button" data-close-dialog>Cancel</button>
+          <button id="createProjectButton" class="button button-primary" type="submit">Create project</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="componentConfigDialog" class="testzone-dialog compact-dialog">
       <form id="componentConfigForm">
         <header>
@@ -391,6 +414,6 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script type="module" src="/testzone.js?v=2026072410"></script>
+    <script type="module" src="/testzone.js?v=2026072411"></script>
   </body>
 </html>

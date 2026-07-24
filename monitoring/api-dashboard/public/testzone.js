@@ -39,6 +39,8 @@ const state = {
 
 const elementIds = [
   "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
+  "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
+  "newProjectName", "newProjectBaseUrl", "createProjectButton",
   "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
   "runChartTooltip",
@@ -145,14 +147,29 @@ async function loadProjects() {
 }
 
 function renderProjects() {
-  elements.projectSelect.replaceChildren(...state.projects.map((entry) => {
+  const options = state.projects.map((entry) => {
     const option = document.createElement("option");
     option.value = entry.id;
     option.textContent = entry.name;
     option.selected = entry.id === state.projectId;
     return option;
-  }));
-  elements.projectBaseUrl.value = project()?.baseUrl || "";
+  });
+  if (!options.length) {
+    const option = document.createElement("option");
+    option.textContent = "No projects";
+    option.disabled = true;
+    option.selected = true;
+    options.push(option);
+  }
+  elements.projectSelect.replaceChildren(...options);
+  const selected = project();
+  elements.projectBaseUrl.value = selected?.baseUrl || "";
+  elements.projectSelect.disabled = !selected;
+  elements.projectBaseUrl.disabled = !selected;
+  elements.saveProjectButton.disabled = !selected;
+  elements.deleteProjectButton.disabled = !selected;
+  elements.headerRunButton.disabled = !selected;
+  elements.overviewRunButton.disabled = !selected;
 }
 
 async function saveProject() {
@@ -172,8 +189,74 @@ async function saveProject() {
   }
 }
 
+function openNewProjectDialog() {
+  elements.newProjectForm.reset();
+  elements.newProjectBaseUrl.value = project()?.baseUrl || "https://";
+  elements.newProjectDialog.showModal();
+  elements.newProjectName.focus();
+}
+
+async function createProject(event) {
+  event.preventDefault();
+  setButtonBusy(elements.createProjectButton, true, "Creating");
+  try {
+    const created = (await api("/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: elements.newProjectName.value,
+        baseUrl: elements.newProjectBaseUrl.value,
+      }),
+    })).project;
+    state.projects.unshift(created);
+    state.projectId = created.id;
+    state.scriptId = null;
+    state.selectedRunId = null;
+    localStorage.setItem("testzone.projectId", created.id);
+    elements.newProjectDialog.close();
+    renderProjects();
+    await Promise.all([loadScripts(), loadRuns()]);
+    toast(`${created.name} project created.`);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setButtonBusy(elements.createProjectButton, false);
+  }
+}
+
+async function deleteProject() {
+  const selected = project();
+  if (!selected) return;
+  const scriptCount = state.scripts.length;
+  const runCount = state.runs.length;
+  const message = `${scriptCount} scripts and ${runCount} runs, including their stored time-series, will be deleted. Active runs must be cancelled first.`;
+  if (!await confirmAction(`Delete ${selected.name}?`, message, "Delete project")) return;
+  setButtonBusy(elements.deleteProjectButton, true, "Deleting");
+  try {
+    await api(`/projects/${selected.id}`, { method: "DELETE" });
+    state.projects = state.projects.filter((entry) => entry.id !== selected.id);
+    state.projectId = state.projects[0]?.id ?? null;
+    state.scriptId = null;
+    state.selectedRunId = null;
+    if (state.projectId) localStorage.setItem("testzone.projectId", state.projectId);
+    else localStorage.removeItem("testzone.projectId");
+    renderProjects();
+    await Promise.all([loadScripts(), loadRuns()]);
+    toast(`${selected.name} project deleted.`);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setButtonBusy(elements.deleteProjectButton, false);
+    renderProjects();
+  }
+}
+
 async function loadScripts() {
-  if (!state.projectId) return;
+  if (!state.projectId) {
+    state.scripts = [];
+    state.scriptId = null;
+    renderScripts();
+    return;
+  }
   state.scripts = (await api(`/scripts?projectId=${encodeURIComponent(state.projectId)}`)).scripts;
   if (!state.scripts.some((entry) => entry.id === state.scriptId)) {
     state.scriptId = state.scripts[0]?.id ?? null;
@@ -360,7 +443,14 @@ async function deleteCurrentScript() {
 }
 
 async function loadRuns() {
-  if (!state.projectId) return;
+  if (!state.projectId) {
+    state.runs = [];
+    state.selectedRunId = null;
+    state.runSeries = [];
+    renderRuns();
+    renderSelectedRun();
+    return;
+  }
   state.runs = (await api(`/runs?projectId=${encodeURIComponent(state.projectId)}`)).runs;
   if (!state.runs.some((run) => run.id === state.selectedRunId)) {
     state.selectedRunId = selectLatestRun(state.runs)?.id || null;
@@ -872,8 +962,7 @@ function renderComponents() {
       actions.append(componentAction("Deploy", component.id, "deploy", true));
     } else {
       actions.append(
-        componentAction("Apply", component.id, "deploy", true),
-        componentAction("Restart", component.id, "restart"),
+        componentAction("Restart", component.id, "restart", true),
         componentAction("Reset", component.id, "reset", false, true),
         componentAction("Return", component.id, "delete", false, true),
       );
@@ -976,7 +1065,7 @@ async function saveComponentConfig(event) {
       body: JSON.stringify(values),
     });
     elements.componentConfigDialog.close();
-    toast("Parameters saved. Use Apply to recreate the container. Reset is required for PostgreSQL database or username changes.");
+    toast("Parameters saved. Use Restart to recreate the container with these settings. Reset is required to replace PostgreSQL data.");
     await loadComponents();
   } catch (error) {
     toast(error.message, "error");
@@ -1070,6 +1159,9 @@ function bindEvents() {
     renderProjects();
     await Promise.all([loadScripts(), loadRuns()]);
   });
+  elements.newProjectButton.addEventListener("click", openNewProjectDialog);
+  elements.newProjectForm.addEventListener("submit", createProject);
+  elements.deleteProjectButton.addEventListener("click", deleteProject);
   elements.saveProjectButton.addEventListener("click", saveProject);
   elements.headerRunButton.addEventListener("click", () => openRunDialog());
   elements.overviewRunButton.addEventListener("click", () => openRunDialog());

@@ -333,8 +333,7 @@ export class ComponentManager {
 
   async restart(id) {
     await this.componentState(id);
-    await this.exec("docker", ["restart", this.name(id)]);
-    return (await this.list()).find((entry) => entry.id === id);
+    return this.deploy(id);
   }
 
   async reset(id) {

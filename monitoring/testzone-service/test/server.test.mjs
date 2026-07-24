@@ -99,6 +99,76 @@ test("status and project APIs expose runtime-neutral TestZone state", async (con
   assert.equal("runtime" in projects.projects[0], false);
 });
 
+test("project APIs create and delete projects with their scripts, runs, and time-series", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+
+  const createdResponse = await fetch(`${app.baseUrl}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Catalog API",
+      baseUrl: "https://catalog.example.test",
+    }),
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = (await createdResponse.json()).project;
+  const script = await app.store.createScript({
+    projectId: created.id,
+    name: "catalog.js",
+    description: "",
+    code: "export default function () {}",
+  });
+  const run = await app.store.createRun({
+    projectId: created.id,
+    scriptId: script.id,
+    scriptName: script.name,
+    name: "Catalog read",
+    profile: "standard",
+    options: {},
+  });
+  await app.store.patchRun(run.id, { status: "completed" });
+
+  const deletedResponse = await fetch(`${app.baseUrl}/api/projects/${created.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(deletedResponse.status, 200);
+  assert.deepEqual(await deletedResponse.json(), {
+    deleted: true,
+    removedScripts: 1,
+    removedRuns: 1,
+  });
+  assert.equal(app.store.state.projects.some((entry) => entry.id === created.id), false);
+  assert.equal(app.store.state.scripts.some((entry) => entry.projectId === created.id), false);
+  assert.equal(app.store.state.runs.some((entry) => entry.projectId === created.id), false);
+  assert.deepEqual(app.calls.influxDeletes, [run.id]);
+  await assert.rejects(fs.stat(app.store.scriptPath(script.id)), { code: "ENOENT" });
+  await assert.rejects(fs.stat(app.store.runPath(run.id)), { code: "ENOENT" });
+});
+
+test("project deletion rejects active runs", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+  const script = await app.store.getScript(app.store.state.scripts[0].id);
+  const run = await app.store.createRun({
+    projectId: project.id,
+    scriptId: script.id,
+    scriptName: script.name,
+    name: "Active run",
+    profile: "standard",
+    options: {},
+  });
+  await app.store.patchRun(run.id, { status: "running" });
+
+  const response = await fetch(`${app.baseUrl}/api/projects/${project.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(response.status, 409);
+  assert.equal(app.store.state.projects.some((entry) => entry.id === project.id), true);
+  assert.deepEqual(app.calls.influxDeletes, []);
+});
+
 test("run API starts a saved script instead of returning a copied command", async (context) => {
   const app = await fixture();
   context.after(() => app.close());

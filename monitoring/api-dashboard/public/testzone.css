@@ -182,6 +182,31 @@ body {
   border-bottom: 1px solid var(--tz-border);
 }
 
+.workspace-project {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.workspace-project-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.workspace-project-actions .button {
+  white-space: nowrap;
+}
+
+.danger-text {
+  color: var(--tz-red);
+}
+
+.danger-text:hover {
+  border-color: #efb2b2;
+  color: var(--tz-red);
+  background: #fff0f0;
+}
+
 .workspace-bar label {
   display: grid;
   gap: 4px;
@@ -1080,9 +1105,19 @@ body {
   }
 
   .workspace-bar label,
+  .workspace-project,
   .workspace-bar .workspace-target {
     min-width: 0;
     width: 100%;
+  }
+
+  .workspace-project {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-project-actions .button {
+    flex: 1;
   }
 
   .run-summary,

@@ -48,3 +48,14 @@ test("selected history run renders its time-series inside the detail panel", () 
     /drawRunChartCanvas\(\s*elements\.runDetailChart,\s*elements\.runDetailChartTooltip,\s*elements\.runDetailChartEmpty/,
   );
 });
+
+test("workspace manages projects and components expose restart without apply", () => {
+  assert.match(html, /id="newProjectButton"/);
+  assert.match(html, /id="deleteProjectButton"/);
+  assert.match(html, /id="newProjectDialog"/);
+  assert.match(javascript, /api\("\/projects",\s*\{[\s\S]+?method:\s*"POST"/);
+  assert.match(javascript, /api\(`\/projects\/\$\{selected\.id\}`,\s*\{\s*method:\s*"DELETE"/);
+  assert.match(javascript, /componentAction\("Restart", component\.id, "restart", true\)/);
+  assert.doesNotMatch(javascript, /componentAction\("Apply"/);
+  assert.doesNotMatch(javascript, /Use Apply/);
+});

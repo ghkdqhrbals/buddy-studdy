@@ -232,6 +232,29 @@ export class TestZoneStore {
     return project;
   }
 
+  async deleteProject(id) {
+    const index = this.state.projects.findIndex((entry) => entry.id === id);
+    if (index < 0) return null;
+    const projectRuns = this.state.runs.filter((run) => run.projectId === id);
+    if (projectRuns.some((run) => ["queued", "running", "cancelling"].includes(run.status))) {
+      throw new Error("Cancel active project runs before deleting the project.");
+    }
+    const projectScripts = this.state.scripts.filter((script) => script.projectId === id);
+    const [project] = this.state.projects.splice(index, 1);
+    this.state.scripts = this.state.scripts.filter((script) => script.projectId !== id);
+    this.state.runs = this.state.runs.filter((run) => run.projectId !== id);
+    await Promise.all([
+      ...projectScripts.map((script) => fs.rm(this.scriptPath(script.id), { force: true })),
+      ...projectRuns.map((run) => fs.rm(this.runPath(run.id), { recursive: true, force: true })),
+    ]);
+    await this.persist();
+    return {
+      project,
+      scriptIds: projectScripts.map((script) => script.id),
+      runIds: projectRuns.map((run) => run.id),
+    };
+  }
+
   async createRun(input) {
     const timestamp = now();
     const run = {
