@@ -49,6 +49,9 @@ one workflow run just because they share a host.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
+  Grafana persists writable runtime state in the `buddystudy-grafana-data`
+  Docker volume; dashboards and provisioning files remain read-only bind
+  mounts from the monitoring release.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns

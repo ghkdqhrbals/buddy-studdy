@@ -117,6 +117,25 @@ jobs:
             cp "${docker_config_backup}" "${HOME}/.docker/config.json"
           fi
 
+          grafana_volume="buddystudy-grafana-data"
+          docker volume create "${grafana_volume}" >/dev/null
+          if [ -z "$(docker run --rm \
+            -v "${grafana_volume}:/target" \
+            nginx:1.27-alpine \
+            sh -c 'find /target -mindepth 1 -maxdepth 1 -print -quit')" ]; then
+            docker run --rm \
+              --user 0 \
+              -v "${monitoring_root}/grafana/data:/source:ro" \
+              -v "${grafana_volume}:/target" \
+              nginx:1.27-alpine \
+              sh -c 'cp -a /source/. /target/'
+          fi
+          docker run --rm \
+            --user 0 \
+            -v "${grafana_volume}:/var/lib/grafana" \
+            nginx:1.27-alpine \
+            chown -R 472:0 /var/lib/grafana
+
           docker rm -f buddystudy-api-dashboard buddystudy-loki buddystudy-grafana >/dev/null 2>&1 || true
 
           docker run -d \
@@ -143,7 +162,7 @@ jobs:
             -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
             -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/buddystudy-logs.json \
-            -v "${monitoring_root}/grafana/data:/var/lib/grafana" \
+            -v "${grafana_volume}:/var/lib/grafana" \
             -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
             grafana/grafana:12.3.0
