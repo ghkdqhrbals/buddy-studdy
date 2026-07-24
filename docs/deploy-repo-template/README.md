@@ -54,12 +54,10 @@ MacBook Air TestZone deploy:
 
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_SESSION_TOKEN` (only for temporary AWS credentials)
 
 The TestZone deploy reads `OPENAI_API_KEY` from the existing
-`buddystudy/prod` AWS Secrets Manager document. InfluxDB and component
+`buddystudy/prod` AWS Secrets Manager document through the deploy runner's
+local AWS credential chain. InfluxDB and component
 credentials are generated once on the MacBook Air with mode `0600`, under
 `MACBOOKAIR_TESTZONE_ROOT`, and are reused by later TestZone and monitoring
 deploys.
