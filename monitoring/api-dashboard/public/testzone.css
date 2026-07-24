@@ -530,6 +530,10 @@ body {
   font-size: 13px;
 }
 
+.empty-state[hidden] {
+  display: none;
+}
+
 .empty-state strong {
   color: var(--tz-text);
 }
