@@ -21,7 +21,7 @@ Explicit release tags provide a CLI-independent deployment entry point:
 - `deploy/monitoring-*` dispatches the monitoring receiver deployment.
 
 The tags are intentional release commands. Ordinary branch pushes do not deploy
-runtime modules. Backend and monitoring source workflows wait for the matching
+runtime modules. Backend, monitoring, and TestZone source workflows wait for the matching
 private deploy workflow and fail when that deploy does not complete
 successfully; a successful dispatch alone is not reported as a successful
 deployment.
