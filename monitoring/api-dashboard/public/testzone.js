@@ -551,7 +551,7 @@ async function goToRunPage(page) {
   state.runPage = nextPage;
   state.selectedRunId = null;
   await loadRuns();
-  document.querySelector(".runs-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(".runs-section")?.scrollIntoView({ block: "start" });
 }
 
 function openRunPageJump(start, end) {
@@ -682,7 +682,7 @@ async function selectRun(id) {
   state.runSeriesId = null;
   renderRuns();
   await loadSelectedRunSeries();
-  elements.runDetail.scrollIntoView({ behavior: "smooth", block: "start" });
+  elements.runDetail.scrollIntoView({ block: "start" });
 }
 
 async function loadSelectedRunSeries() {
