@@ -52,7 +52,8 @@ one workflow run just because they share a host.
   Grafana persists writable runtime state in the `buddystudy-grafana-data`
   Docker volume; dashboards and provisioning files remain read-only bind
   mounts from the monitoring release. The deploy records a bounded Grafana
-  startup log for incident diagnosis without using it as a health gate.
+  and monitoring gateway startup log for incident diagnosis without using
+  either log as a health gate.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns

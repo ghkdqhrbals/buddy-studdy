@@ -181,6 +181,8 @@ jobs:
           sleep 2
           echo "Grafana startup log:"
           docker logs --tail 80 buddystudy-grafana || true
+          echo "Monitoring gateway startup log:"
+          docker logs --tail 80 buddystudy-api-dashboard || true
 
           echo "MacBook Air monitoring module is running."
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
