@@ -6,6 +6,12 @@ const css = await readFile(new URL("../public/testzone.css", import.meta.url), "
 const html = await readFile(new URL("../public/testzone.html", import.meta.url), "utf8");
 const javascript = await readFile(new URL("../public/testzone.js", import.meta.url), "utf8");
 
+test("TestZone uses a white monitoring workspace", () => {
+  assert.match(css, /--tz-bg:\s*#ffffff;/);
+  assert.match(css, /\.testzone-workspace\s*\{[\s\S]+?background:\s*#ffffff;/);
+  assert.match(css, /\.workspace-section\s*\{[\s\S]+?background:\s*var\(--tz-surface\)/);
+});
+
 test("script editor hides native glyphs behind the syntax highlight layer", () => {
   const editorRule = css.match(/\.code-editor #scriptEditor \{(?<body>[^}]+)\}/)?.groups?.body ?? "";
   assert.match(editorRule, /color:\s*transparent;/);
@@ -47,21 +53,26 @@ test("workspace runs tests only from the saved script editor", () => {
   assert.match(javascript, /formatRunLoadPlan\(run\.options\)/);
 });
 
-test("run charts use vendored uPlot with separate RED and latency percentile views", () => {
+test("run detail charts use vendored uPlot with cursor tooltips", () => {
   const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function formatRunLoadPlan/)?.[0] ?? "";
   assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);
   assert.match(html, /vendor\/uplot\/uPlot\.min\.css\?v=1\.6\.32/);
-  assert.match(css, /\.run-history-chart \.u-legend/);
+  assert.match(css, /\.run-chart-tooltip/);
   assert.match(chartCode, /new window\.uPlot/);
+  assert.match(chartCode, /function runChartTooltipPlugin/);
+  assert.match(chartCode, /function nearestTimestampIndex/);
+  assert.match(chartCode, /plot\.over\.addEventListener\("pointermove",\s*updateFromPointer\)/);
+  assert.match(chartCode, /setCursor:/);
+  assert.match(chartCode, /legend:\s*\{\s*show:\s*false/);
   assert.match(chartCode, /label:\s*"RPS"/);
   assert.match(chartCode, /label:\s*"Median"/);
   assert.match(chartCode, /label:\s*"p90"/);
   assert.match(chartCode, /label:\s*"p95"/);
   assert.match(chartCode, /label:\s*"Error"/);
-  assert.match(html, /id="runTrafficChart"/);
-  assert.match(html, /id="runLatencyChart"/);
+  assert.match(html, /id="runDetailTrafficChart"/);
+  assert.match(html, /id="runDetailLatencyChart"/);
+  assert.doesNotMatch(html, /id="runTrafficChart"|id="runLatencyChart"/);
   assert.doesNotMatch(chartCode, /VUs|point\.vus/);
-  assert.doesNotMatch(html, /runChartTooltip/);
 });
 
 test("run charts cap their content width and support horizontal drag inspection", () => {
@@ -91,11 +102,15 @@ test("selected history run renders its time-series inside the detail panel", () 
 
 test("run history paginates by ten and can rerun immutable script snapshots", () => {
   assert.match(html, /id="runPreviousPageButton"/);
-  assert.match(html, /id="runPageLabel"/);
+  assert.match(html, /id="runPaginationTotal"/);
+  assert.match(html, /id="runPageNumbers"/);
   assert.match(html, /id="runNextPageButton"/);
+  assert.match(html, /id="runPageJumpDialog"/);
   assert.match(html, /id="rerunSelectedRunButton"/);
   assert.match(javascript, /&page=\$\{state\.runPage\}/);
   assert.match(javascript, /payload\.pagination\?\.pageSize\s*\?\?\s*10/);
+  assert.match(javascript, /paginationItems\(state\.runPage,\s*state\.runTotalPages\)/);
+  assert.match(javascript, /openRunPageJump\(item\.start,\s*item\.end\)/);
   assert.match(javascript, /api\(`\/runs\/\$\{run\.id\}\/rerun`,\s*\{\s*method:\s*"POST"\s*\}\)/);
   assert.match(javascript, /actionButton\("Rerun"/);
 });
@@ -155,17 +170,13 @@ test("save failures stay visible beside the editor and clear only after a succes
   assert.match(javascript, /state\.dirty\s*=\s*false;[\s\S]+?clearEditorProblem\(\);[\s\S]+?"Saved"/);
 });
 
-test("overview keeps run creation in the script editor and exposes six latency summary values", () => {
+test("history is the overview and run details appear only after selecting a row", () => {
   assert.doesNotMatch(html, /id="overviewRunButton"|>New run</i);
-  for (const id of [
-    "summaryAverage",
-    "summaryMinimum",
-    "summaryMedian",
-    "summaryMaximum",
-    "summaryP90",
-    "summaryLatencyP95",
-  ]) {
-    assert.match(html, new RegExp(`id="${id}"`));
-  }
+  assert.match(html, /data-tab="overview"[^>]+>History</);
+  assert.match(html, /<h2>Run history<\/h2>/);
+  assert.doesNotMatch(html, /Execution overview|id="runSummary"|latencySummaryRun|recentRunSelect/);
+  assert.match(javascript, /state\.selectedRunId\s*=\s*null;/);
+  assert.match(javascript, /elements\.runDetail\.hidden\s*=\s*!run/);
+  assert.match(javascript, /row\.addEventListener\("click",\s*\(\)\s*=>\s*void selectRun\(run\.id\)\)/);
   assert.match(javascript, /function renderLatencySummary/);
 });

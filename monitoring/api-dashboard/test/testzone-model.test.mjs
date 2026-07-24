@@ -8,6 +8,7 @@ import {
   formatRate,
   highlightJavaScript,
   lineNumbersFor,
+  paginationItems,
   parseObjectJson,
   runScriptName,
   selectLatestRun,
@@ -53,6 +54,32 @@ test("run history keeps the execution-time script name and supports legacy runs"
     "legacy-name.js",
   );
   assert.equal(runScriptName({ scriptId: "missing" }, []), "Deleted script");
+});
+
+test("pagination exposes all short ranges and selectable gaps for long history", () => {
+  assert.deepEqual(
+    paginationItems(1, 4).map((item) => item.page),
+    [1, 2, 3, 4],
+  );
+  assert.deepEqual(paginationItems(1, 20), [
+    { type: "page", page: 1 },
+    { type: "page", page: 2 },
+    { type: "page", page: 3 },
+    { type: "gap", start: 4, end: 18 },
+    { type: "page", page: 19 },
+    { type: "page", page: 20 },
+  ]);
+  assert.deepEqual(paginationItems(5, 20), [
+    { type: "page", page: 1 },
+    { type: "page", page: 2 },
+    { type: "page", page: 3 },
+    { type: "page", page: 4 },
+    { type: "page", page: 5 },
+    { type: "page", page: 6 },
+    { type: "gap", start: 7, end: 18 },
+    { type: "page", page: 19 },
+    { type: "page", page: 20 },
+  ]);
 });
 
 test("formatters preserve missing values and display operational units", () => {

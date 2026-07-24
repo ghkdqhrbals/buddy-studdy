@@ -48,6 +48,39 @@ export function selectLatestRun(runs = []) {
   return [...runs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0] || null;
 }
 
+export function paginationItems(currentPage, totalPages) {
+  if (totalPages <= 10) {
+    return Array.from({ length: totalPages }, (_, index) => ({
+      type: "page",
+      page: index + 1,
+    }));
+  }
+  const pages = new Set([
+    1,
+    2,
+    3,
+    currentPage - 1,
+    currentPage,
+    currentPage + 1,
+    totalPages - 1,
+    totalPages,
+  ]);
+  const visiblePages = [...pages]
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+  const items = [];
+  for (const page of visiblePages) {
+    const previousPage = items.at(-1)?.page;
+    if (previousPage && page - previousPage === 2) {
+      items.push({ type: "page", page: previousPage + 1 });
+    } else if (previousPage && page - previousPage > 2) {
+      items.push({ type: "gap", start: previousPage + 1, end: page - 1 });
+    }
+    items.push({ type: "page", page });
+  }
+  return items;
+}
+
 export function runScriptName(run, scripts = []) {
   return run.scriptName
     || scripts.find((entry) => entry.id === run.scriptId)?.name

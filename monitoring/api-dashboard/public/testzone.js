@@ -7,9 +7,9 @@ import {
   formatRate,
   highlightJavaScript,
   lineNumbersFor,
+  paginationItems,
   runScriptName,
-  selectLatestRun,
-} from "./testzone-model.js?v=2026072406";
+} from "./testzone-model.js?v=2026072509";
 
 const API_BASE = "/testzone/api";
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
@@ -38,11 +38,9 @@ const state = {
   lintTimer: null,
   componentId: null,
   runCharts: {
-    overview: { traffic: null, latency: null },
     detail: { traffic: null, latency: null },
   },
   runChartRanges: {
-    overview: null,
     detail: null,
   },
   runSeriesId: null,
@@ -53,15 +51,10 @@ const elementIds = [
   "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
   "newProjectName", "createProjectButton",
-  "summaryStatus", "summaryRps", "summaryP95", "summaryError",
-  "summaryAverage", "summaryMinimum", "summaryMedian", "summaryMaximum",
-  "summaryP90", "summaryLatencyP95", "latencySummaryRun",
-  "runTrafficChart", "runLatencyChart",
-  "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
-  "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
-  "cancelSelectedRunButton", "viewRunScriptButton",
   "runRows", "runEmptyState", "runCount", "refreshRunsButton",
-  "runPagination", "runPreviousPageButton", "runPageLabel", "runNextPageButton",
+  "runPagination", "runPaginationTotal", "runPreviousPageButton", "runPageNumbers",
+  "runNextPageButton", "runPageJumpDialog", "runPageJumpForm",
+  "runPageJumpTitle", "runPageJumpSelect",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
   "runDetailScriptButton", "runDetailStatus", "runDetailTrafficChart", "runDetailLatencyChart",
   "detailAverage", "detailMinimum", "detailMedian", "detailMaximum", "detailP90", "detailP95",
@@ -524,7 +517,7 @@ async function loadRuns() {
   state.runTotal = payload.pagination?.total ?? state.runs.length;
   state.runTotalPages = payload.pagination?.totalPages ?? 1;
   if (!state.runs.some((run) => run.id === state.selectedRunId)) {
-    state.selectedRunId = selectLatestRun(state.runs)?.id || null;
+    state.selectedRunId = null;
   }
   renderRuns();
   await loadSelectedRunSeries();
@@ -552,40 +545,58 @@ function renderLatencySummary(run, targets) {
   }
 }
 
-function renderRuns() {
-  const latest = selectLatestRun(state.runs);
-  const summaryRun = selectedRun() || latest;
-  elements.summaryStatus.textContent = summaryRun?.status || "No runs";
-  elements.summaryRps.textContent = formatRate(summaryRun ? runMetric(summaryRun, "requestRate") : null);
-  elements.summaryP95.textContent = formatMilliseconds(summaryRun ? runMetric(summaryRun, "p95Ms") : null);
-  elements.summaryError.textContent = formatPercent(summaryRun ? runMetric(summaryRun, "errorRate") : null);
-  elements.latencySummaryRun.textContent = summaryRun
-    ? `${summaryRun.name || summaryRun.scriptName} · ${formatDate(summaryRun.startedAt || summaryRun.createdAt)}`
-    : "Select a run to inspect its completed-request latency.";
-  renderLatencySummary(summaryRun, {
-    averageMs: elements.summaryAverage,
-    minimumMs: elements.summaryMinimum,
-    medianMs: elements.summaryMedian,
-    maximumMs: elements.summaryMaximum,
-    p90Ms: elements.summaryP90,
-    p95Ms: elements.summaryLatencyP95,
+async function goToRunPage(page) {
+  const nextPage = Math.max(1, Math.min(Number(page) || 1, state.runTotalPages));
+  if (nextPage === state.runPage) return;
+  state.runPage = nextPage;
+  state.selectedRunId = null;
+  await loadRuns();
+  document.querySelector(".runs-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function openRunPageJump(start, end) {
+  elements.runPageJumpTitle.textContent = `Choose page ${start}-${end}`;
+  elements.runPageJumpSelect.replaceChildren(
+    ...Array.from({ length: end - start + 1 }, (_, index) => {
+      const option = document.createElement("option");
+      option.value = String(start + index);
+      option.textContent = `Page ${start + index}`;
+      return option;
+    }),
+  );
+  elements.runPageJumpDialog.showModal();
+}
+
+function renderRunPageNumbers() {
+  const controls = paginationItems(state.runPage, state.runTotalPages).map((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    if (item.type === "gap") {
+      button.className = "page-gap";
+      button.textContent = "…";
+      button.title = `Choose page ${item.start}-${item.end}`;
+      button.setAttribute("aria-label", `Choose a page between ${item.start} and ${item.end}`);
+      button.addEventListener("click", () => openRunPageJump(item.start, item.end));
+      return button;
+    }
+    button.className = "page-number";
+    button.textContent = String(item.page);
+    button.setAttribute("aria-label", `Page ${item.page}`);
+    if (item.page === state.runPage) button.setAttribute("aria-current", "page");
+    button.addEventListener("click", () => void goToRunPage(item.page));
+    return button;
   });
-  elements.runCount.textContent = state.runTotalPages > 1
-    ? `${state.runTotal.toLocaleString()} runs · page ${state.runPage} of ${state.runTotalPages}`
-    : `${state.runTotal.toLocaleString()} runs`;
+  elements.runPageNumbers.replaceChildren(...controls);
+}
+
+function renderRuns() {
+  elements.runCount.textContent = `${state.runTotal.toLocaleString()} total runs`;
   elements.runEmptyState.hidden = state.runs.length > 0;
   elements.runPagination.hidden = state.runTotalPages <= 1;
-  elements.runPageLabel.textContent = `Page ${state.runPage} of ${state.runTotalPages}`;
+  elements.runPaginationTotal.textContent = `${state.runTotal.toLocaleString()} total`;
   elements.runPreviousPageButton.disabled = state.runPage <= 1;
   elements.runNextPageButton.disabled = state.runPage >= state.runTotalPages;
-
-  elements.recentRunSelect.replaceChildren(...state.runs.map((run) => {
-    const option = document.createElement("option");
-    option.value = run.id;
-    option.textContent = `${run.name || run.scriptName} · ${formatDate(run.startedAt || run.createdAt)}`;
-    option.selected = run.id === state.selectedRunId;
-    return option;
-  }));
+  renderRunPageNumbers();
 
   elements.runRows.replaceChildren(...state.runs.map((run) => {
     const row = document.createElement("tr");
@@ -667,8 +678,11 @@ function actionButton(label, handler, danger = false) {
 
 async function selectRun(id) {
   state.selectedRunId = id;
+  state.runSeries = [];
+  state.runSeriesId = null;
   renderRuns();
   await loadSelectedRunSeries();
+  elements.runDetail.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadSelectedRunSeries() {
@@ -676,13 +690,11 @@ async function loadSelectedRunSeries() {
   if (!run) {
     state.runSeries = [];
     state.runSeriesId = null;
-    state.runChartRanges.overview = null;
     state.runChartRanges.detail = null;
     renderSelectedRun();
     return;
   }
   if (state.runSeriesId !== run.id) {
-    state.runChartRanges.overview = null;
     state.runChartRanges.detail = null;
   }
   try {
@@ -697,25 +709,12 @@ async function loadSelectedRunSeries() {
 function renderSelectedRun() {
   const run = selectedRun();
   elements.runDetail.hidden = !run;
-  elements.liveRunStrip.hidden = !run || !ACTIVE_STATUSES.has(run.status);
-  elements.cancelSelectedRunButton.disabled = !run || !ACTIVE_STATUSES.has(run.status);
   elements.rerunSelectedRunButton.hidden = !run || ACTIVE_STATUSES.has(run.status);
   elements.rerunSelectedRunButton.disabled = !run || ACTIVE_STATUSES.has(run.status);
-  elements.viewRunScriptButton.disabled = !run;
   if (!run) {
-    elements.timelineTitle.textContent = "Run time-series";
-    elements.timelineRunMeta.textContent = "Select a run from history.";
-    elements.timelineGrafanaLink.href = "https://grafana.lowfidev.cloud/";
     drawRunChart();
     return;
   }
-  elements.timelineTitle.textContent = run.name || run.scriptName;
-  elements.timelineGrafanaLink.href = run.grafanaUrl;
-  elements.timelineRunMeta.textContent = `${formatRunLoadPlan(run.options)} · ${formatDate(run.startedAt || run.createdAt)} · ${run.status}`;
-  elements.liveRps.textContent = formatRate(run.live?.requestRate);
-  elements.liveProgress.textContent = run.live
-    ? `${Math.round((run.live.progress || 0) * 100)}% · ${run.live.vus || 0} VUs · p95 ${formatMilliseconds(run.live.p95Ms)}`
-    : "Preparing k6 metrics";
   elements.runDetailTitle.textContent = run.name || run.scriptName;
   elements.runDetailMeta.textContent = `${formatDate(run.startedAt || run.createdAt)} · ${run.id}`;
   elements.runDetailTarget.textContent = run.targetUrl || "-";
@@ -767,9 +766,9 @@ async function rerunRun(run, button = elements.rerunSelectedRunButton) {
   if (!run || ACTIVE_STATUSES.has(run.status)) return;
   setButtonBusy(button, true, "Starting");
   try {
-    const payload = await api(`/runs/${run.id}/rerun`, { method: "POST" });
+    await api(`/runs/${run.id}/rerun`, { method: "POST" });
     state.runPage = 1;
-    state.selectedRunId = payload.run.id;
+    state.selectedRunId = null;
     switchTab("overview");
     toast(`${run.name || run.scriptName} rerun started.`);
     await loadRuns();
@@ -910,20 +909,121 @@ function runChartPanPlugin(host, scope) {
   };
 }
 
+function runChartTooltipPlugin() {
+  let tooltip = null;
+
+  function hideTooltip() {
+    if (tooltip) tooltip.hidden = true;
+  }
+
+  function nearestTimestampIndex(timestamps, target) {
+    if (!timestamps.length || !Number.isFinite(target)) return null;
+    let low = 0;
+    let high = timestamps.length - 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (timestamps[middle] < target) low = middle + 1;
+      else high = middle;
+    }
+    if (low === 0) return 0;
+    const previous = low - 1;
+    return Math.abs(timestamps[low] - target) < Math.abs(timestamps[previous] - target)
+      ? low
+      : previous;
+  }
+
+  function showTooltip(plot, index, cursorLeft, cursorTop) {
+    if (!tooltip || index === null || index === undefined) {
+      hideTooltip();
+      return;
+    }
+    const timestamp = plot.data[0][index];
+    if (!Number.isFinite(timestamp)) {
+      hideTooltip();
+      return;
+    }
+
+    const time = document.createElement("div");
+    time.className = "run-chart-tooltip-time";
+    time.textContent = chartTime(timestamp);
+    const rows = plot.series.slice(1).map((series, seriesIndex) => {
+      const value = plot.data[seriesIndex + 1][index];
+      const row = document.createElement("div");
+      row.className = "run-chart-tooltip-row";
+      const swatch = document.createElement("span");
+      swatch.className = "run-chart-tooltip-swatch";
+      swatch.style.background = typeof series.stroke === "string" ? series.stroke : "#64748b";
+      const label = document.createElement("span");
+      label.className = "run-chart-tooltip-label";
+      label.textContent = series.label;
+      const formattedValue = document.createElement("strong");
+      formattedValue.className = "run-chart-tooltip-value";
+      formattedValue.textContent = typeof series.value === "function"
+        ? series.value(plot, value)
+        : String(value ?? "-");
+      row.append(swatch, label, formattedValue);
+      return row;
+    });
+    tooltip.replaceChildren(time, ...rows);
+    tooltip.hidden = false;
+
+    const left = Math.min(
+      Math.max((cursorLeft ?? 0) + 12, 8),
+      Math.max(8, plot.over.clientWidth - tooltip.offsetWidth - 8),
+    );
+    const top = Math.min(
+      Math.max((cursorTop ?? 0) + 12, 8),
+      Math.max(8, plot.over.clientHeight - tooltip.offsetHeight - 8),
+    );
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  return {
+    hooks: {
+      ready: [(plot) => {
+        tooltip = document.createElement("div");
+        tooltip.className = "run-chart-tooltip";
+        tooltip.hidden = true;
+        plot.over.append(tooltip);
+        const updateFromPointer = (event) => {
+          const bounds = plot.over.getBoundingClientRect();
+          const cursorLeft = event.clientX - bounds.left;
+          const cursorTop = event.clientY - bounds.top;
+          const timestamp = plot.posToVal(cursorLeft, "x");
+          showTooltip(
+            plot,
+            nearestTimestampIndex(plot.data[0], timestamp),
+            cursorLeft,
+            cursorTop,
+          );
+        };
+        plot.over.addEventListener("pointermove", updateFromPointer);
+        plot.over.addEventListener("mousemove", updateFromPointer);
+        plot.over.addEventListener("pointerleave", hideTooltip);
+        plot.over.addEventListener("mouseleave", hideTooltip);
+      }],
+      setCursor: [(plot) => {
+        showTooltip(plot, plot.cursor.idx, plot.cursor.left, plot.cursor.top);
+      }],
+      destroy: [hideTooltip],
+    },
+  };
+}
+
 function baseRunChartOptions(width, host, scope, range) {
   return {
     width,
     height: 240,
     padding: [12, 10, 0, 0],
-    plugins: [runChartPanPlugin(host, scope)],
+    plugins: [runChartPanPlugin(host, scope), runChartTooltipPlugin()],
     cursor: {
       show: true,
       drag: { x: false, y: false },
       points: { size: 7, width: 2 },
     },
     legend: {
-      show: true,
-      live: true,
+      show: false,
     },
     scales: {
       x: range
@@ -1093,10 +1193,6 @@ function renderRunCharts(scope, hosts, emptyState) {
 }
 
 function drawRunChart() {
-  renderRunCharts("overview", {
-    traffic: elements.runTrafficChart,
-    latency: elements.runLatencyChart,
-  }, elements.timelineEmptyState);
   renderRunCharts("detail", {
     traffic: elements.runDetailTrafficChart,
     latency: elements.runDetailLatencyChart,
@@ -1105,10 +1201,6 @@ function drawRunChart() {
 
 function resizeRunCharts() {
   for (const [scope, hosts] of Object.entries({
-    overview: {
-      traffic: elements.runTrafficChart,
-      latency: elements.runLatencyChart,
-    },
     detail: {
       traffic: elements.runDetailTrafficChart,
       latency: elements.runDetailLatencyChart,
@@ -1150,7 +1242,7 @@ async function startRun(scriptId = state.scriptId, button = elements.editorRunBu
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
-    const payload = await api("/runs", {
+    await api("/runs", {
       method: "POST",
       body: JSON.stringify({
         projectId: state.projectId,
@@ -1158,7 +1250,7 @@ async function startRun(scriptId = state.scriptId, button = elements.editorRunBu
       }),
     });
     state.runPage = 1;
-    state.selectedRunId = payload.run.id;
+    state.selectedRunId = null;
     switchTab("overview");
     toast("Performance test started.");
     await loadRuns();
@@ -1440,24 +1532,17 @@ function bindEvents() {
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
   elements.refreshRunsButton.addEventListener("click", loadRuns);
-  elements.runPreviousPageButton.addEventListener("click", async () => {
-    if (state.runPage <= 1) return;
-    state.runPage -= 1;
-    state.selectedRunId = null;
-    await loadRuns();
+  elements.runPreviousPageButton.addEventListener("click", () => {
+    if (state.runPage > 1) void goToRunPage(state.runPage - 1);
   });
-  elements.runNextPageButton.addEventListener("click", async () => {
-    if (state.runPage >= state.runTotalPages) return;
-    state.runPage += 1;
-    state.selectedRunId = null;
-    await loadRuns();
+  elements.runNextPageButton.addEventListener("click", () => {
+    if (state.runPage < state.runTotalPages) void goToRunPage(state.runPage + 1);
   });
-  elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
-  elements.cancelSelectedRunButton.addEventListener("click", () => {
-    if (state.selectedRunId) void cancelRun(state.selectedRunId);
-  });
-  elements.viewRunScriptButton.addEventListener("click", () => {
-    if (selectedRun()) void openRunScript(selectedRun());
+  elements.runPageJumpForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const page = Number(elements.runPageJumpSelect.value);
+    elements.runPageJumpDialog.close();
+    void goToRunPage(page);
   });
   elements.runDetailScriptButton.addEventListener("click", () => {
     if (selectedRun()) void openRunScript(selectedRun());
@@ -1466,7 +1551,10 @@ function bindEvents() {
     if (selectedRun()) void rerunRun(selectedRun(), elements.rerunSelectedRunButton);
   });
   elements.closeRunDetailButton.addEventListener("click", () => {
-    elements.runDetail.hidden = true;
+    state.selectedRunId = null;
+    state.runSeries = [];
+    state.runSeriesId = null;
+    renderRuns();
   });
   elements.scriptList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-script-id]");
