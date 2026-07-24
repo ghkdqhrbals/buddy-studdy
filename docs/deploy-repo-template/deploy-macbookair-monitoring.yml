@@ -98,6 +98,11 @@ jobs:
             "${MONITORING_SOURCE_BASE}/grafana-gateway/nginx.conf" \
             -o "${monitoring_root}/gateway/grafana-nginx.conf"
 
+          grep -q 'X-Forwarded-Proto \$public_forwarded_proto' \
+            "${monitoring_root}/api-dashboard/nginx.conf"
+          grep -q 'X-Forwarded-Proto \$public_forwarded_proto' \
+            "${monitoring_root}/gateway/grafana-nginx.conf"
+
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 
           docker_config_backup=""

@@ -124,6 +124,40 @@ export function chooseMetricStepMs(durationMs) {
   return steps.find((step) => step >= target) ?? 1_800_000;
 }
 
+export function relativeMetricRange(durationMs, endMs = Date.now()) {
+  const duration = Number(durationMs);
+  const end = Number(endMs);
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(end)) {
+    throw new Error("Time range is invalid.");
+  }
+  return { startMs: end - duration, endMs: end };
+}
+
+export function customMetricRange(fromValue, toValue) {
+  const startMs = new Date(fromValue).getTime();
+  const endMs = new Date(toValue).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    throw new Error("Select both From and To.");
+  }
+  if (startMs >= endMs) {
+    throw new Error("From must be earlier than To.");
+  }
+  return { startMs, endMs };
+}
+
+export function toDateTimeLocalValue(ms) {
+  const date = new Date(ms);
+  if (!Number.isFinite(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 19);
+}
+
+export function hasUnrecoveredRuntimeFailure(snapshots, failures) {
+  const latestSnapshotMs = Number(snapshots.at(-1)?.ms ?? 0);
+  const latestFailureMs = Number(failures.at(-1)?.ms ?? 0);
+  return latestFailureMs > latestSnapshotMs;
+}
+
 export function formatLogqlDuration(ms) {
   if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
   if (ms % 60_000 === 0) return `${ms / 60_000}m`;

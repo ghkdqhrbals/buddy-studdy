@@ -107,6 +107,7 @@ class RuntimeMetricsReporterTest {
 
         val payload = ObjectMapper().readTree(formatRuntimeMetrics(ObjectMapper(), snapshot))
 
+        assertThat(payload.size()).isEqualTo(52)
         assertThat(payload["processCpuPercent"].doubleValue()).isEqualTo(14.5)
         assertThat(payload["heapUsedBytes"].longValue()).isEqualTo(100)
         assertThat(payload["threadsBlocked"].intValue()).isEqualTo(1)

@@ -6,6 +6,7 @@ import {
   chooseMetricStepMs,
   counterDeltaPoints,
   counterRatePoints,
+  customMetricRange,
   formatBytes,
   formatCount,
   formatDurationSeconds,
@@ -13,12 +14,15 @@ import {
   formatMilliseconds,
   formatPercent,
   formatRate,
+  hasUnrecoveredRuntimeFailure,
   parseLokiMetricValues,
   parseRuntimeMetrics,
   percentagePoints,
   readLokiJson,
+  relativeMetricRange,
   ratioPoints,
-} from "./metrics.js?v=2026072408";
+  toDateTimeLocalValue,
+} from "./metrics.js?v=2026072501";
 
 const RUNTIME_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics "';
 const RUNTIME_FAILURE_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics_collection_failed"';
@@ -47,6 +51,10 @@ const state = {
 
 const els = {
   rangeSelect: document.querySelector("#rangeSelect"),
+  customRangeFields: document.querySelector("#customRangeFields"),
+  rangeFromInput: document.querySelector("#rangeFromInput"),
+  rangeToInput: document.querySelector("#rangeToInput"),
+  applyRangeButton: document.querySelector("#applyRangeButton"),
   refreshButton: document.querySelector("#refreshButton"),
   statusMessage: document.querySelector("#statusMessage"),
   rpsSummary: document.querySelector("#rpsSummary"),
@@ -217,9 +225,20 @@ function ns(ms) {
 }
 
 function currentRange() {
-  const endMs = Date.now();
-  const startMs = endMs - Number(els.rangeSelect.value);
+  const { startMs, endMs } = els.rangeSelect.value === "custom"
+    ? customMetricRange(els.rangeFromInput.value, els.rangeToInput.value)
+    : relativeMetricRange(els.rangeSelect.value);
   return { startMs, endMs, startNs: ns(startMs), endNs: ns(endMs) };
+}
+
+function initializeCustomRange() {
+  const endMs = Date.now();
+  els.rangeFromInput.value = toDateTimeLocalValue(endMs - 3_600_000);
+  els.rangeToInput.value = toDateTimeLocalValue(endMs);
+}
+
+function updateCustomRangeVisibility() {
+  els.customRangeFields.classList.toggle("is-custom", els.rangeSelect.value === "custom");
 }
 
 async function lokiQueryRange(query, range, { limit = 5000, step = null, direction = "forward" } = {}) {
@@ -239,6 +258,7 @@ async function lokiQueryRange(query, range, { limit = 5000, step = null, directi
 async function loadMetrics() {
   setStatus("Loading server metrics...", "loading");
   els.refreshButton.disabled = true;
+  els.applyRangeButton.disabled = true;
   try {
     const range = currentRange();
     const stepMs = chooseMetricStepMs(range.endMs - range.startMs);
@@ -293,15 +313,16 @@ async function loadMetrics() {
 
     const hasData = state.snapshots.length || state.requestRate.length;
     const latest = state.snapshots.at(-1);
-    if (latest?.runtimeMetricsDegraded) {
-      setStatus("Ready with partial runtime metrics", "warning");
-    } else if (state.collectionFailures.length && !state.snapshots.length) {
+    if (hasUnrecoveredRuntimeFailure(state.snapshots, state.collectionFailures)) {
       setStatus("Runtime metric collection failed", "error");
+    } else if (latest?.runtimeMetricsDegraded) {
+      setStatus("Ready with partial runtime metrics", "warning");
     } else {
       setStatus(hasData ? "Ready" : "Waiting for server samples", hasData ? "ready" : "loading");
     }
   } finally {
     els.refreshButton.disabled = false;
+    els.applyRangeButton.disabled = false;
   }
 }
 
@@ -408,7 +429,7 @@ function renderDiagnosis() {
       `Runtime metrics are partial. Unavailable collectors: ${latest.runtimeMetricsUnavailable || "unknown"}.`,
     ]);
   }
-  if (!latest && state.collectionFailures.length) {
+  if (hasUnrecoveredRuntimeFailure(state.snapshots, state.collectionFailures)) {
     const failure = state.collectionFailures.at(-1);
     issues.push([
       "critical",
@@ -648,6 +669,12 @@ function escapeHtml(value) {
 }
 
 els.rangeSelect.addEventListener("change", () => {
+  updateCustomRangeVisibility();
+  if (els.rangeSelect.value !== "custom") {
+    loadMetrics().catch((error) => setStatus(error.message, "error"));
+  }
+});
+els.applyRangeButton.addEventListener("click", () => {
   loadMetrics().catch((error) => setStatus(error.message, "error"));
 });
 els.refreshButton.addEventListener("click", () => {
@@ -658,4 +685,6 @@ window.addEventListener("resize", () => {
   window.metricsResizeTimer = window.setTimeout(render, 120);
 });
 
+initializeCustomRange();
+updateCustomRangeVisibility();
 loadMetrics().catch((error) => setStatus(error.message, "error"));

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Server Dashboard</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072303" />
+    <link rel="stylesheet" href="/styles.css?v=2026072501" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -31,15 +31,29 @@
         </header>
 
         <section class="filters system-filters" aria-label="Server metric filters">
-          <label>
-            Time range
-            <select id="rangeSelect">
-              <option value="900000">Last 15 minutes</option>
-              <option value="3600000" selected>Last 1 hour</option>
-              <option value="21600000">Last 6 hours</option>
-              <option value="86400000">Last 24 hours</option>
-            </select>
-          </label>
+          <div class="time-range-filter system-time-range-filter">
+            <label>
+              Time range
+              <select id="rangeSelect">
+                <option value="900000">Last 15 minutes</option>
+                <option value="3600000" selected>Last 1 hour</option>
+                <option value="21600000">Last 6 hours</option>
+                <option value="86400000">Last 24 hours</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <div id="customRangeFields" class="custom-range-fields system-custom-range-fields">
+              <label>
+                From
+                <input id="rangeFromInput" type="datetime-local" step="1" />
+              </label>
+              <label>
+                To
+                <input id="rangeToInput" type="datetime-local" step="1" />
+              </label>
+              <button id="applyRangeButton" type="button">Apply</button>
+            </div>
+          </div>
           <button id="refreshButton" type="button">Refresh</button>
           <span id="statusMessage" class="status-message" data-tone="loading">Loading...</span>
         </section>
@@ -262,6 +276,6 @@
       </div>
     </div>
 
-    <script type="module" src="/system.js?v=2026072408"></script>
+    <script type="module" src="/system.js?v=2026072501"></script>
   </body>
 </html>

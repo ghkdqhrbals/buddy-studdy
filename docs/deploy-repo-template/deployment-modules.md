@@ -61,7 +61,13 @@ one workflow run just because they share a host.
   the anonymous home page. Unauthenticated visits therefore reach Grafana's
   login screen instead of rendering a dashboard shell that fails with
   `Unauthorized`. Grafana Live accepts WebSocket connections only from
-  `https://grafana.lowfidev.cloud`, matching the public gateway origin.
+  `https://grafana.lowfidev.cloud`, matching the public gateway origin. The
+  Grafana and monitoring gateways preserve Cloudflare's incoming
+  `X-Forwarded-Proto` value instead of replacing it with the local HTTP hop;
+  this keeps Grafana's origin checks aligned with its public HTTPS `root_url`.
+  The Server Dashboard supports fixed and explicit From/To time ranges and
+  reads the same structured Micrometer runtime samples as the provisioned
+  Grafana Server Runtime dashboard.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy owns persistent local InfluxDB/component credentials under

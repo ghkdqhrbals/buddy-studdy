@@ -318,12 +318,25 @@ button {
 }
 
 .system-filters {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 
-.system-filters label {
+.system-filters .system-time-range-filter {
   flex: 0 0 220px;
+}
+
+.system-filters .system-time-range-filter:has(.system-custom-range-fields.is-custom) {
+  flex: 1 0 min(100%, 760px);
+  grid-template-columns: 180px minmax(0, 1fr);
+}
+
+.system-custom-range-fields {
+  grid-template-columns: minmax(210px, 1fr) minmax(210px, 1fr) 76px;
+}
+
+.system-custom-range-fields label {
+  min-width: 0;
 }
 
 .system-filters > button {
@@ -1177,6 +1190,8 @@ pre {
   .filters,
   .time-range-filter,
   .log-filters .time-range-filter:has(.custom-range-fields.is-custom),
+  .system-filters .system-time-range-filter:has(.system-custom-range-fields.is-custom),
+  .system-custom-range-fields,
   .custom-range-fields {
     display: grid;
     grid-template-columns: 1fr;
@@ -1185,7 +1200,8 @@ pre {
   .filters label,
   .filters > button,
   .time-range-filter,
-  .log-filters .time-range-filter:has(.custom-range-fields.is-custom) {
+  .log-filters .time-range-filter:has(.custom-range-fields.is-custom),
+  .system-filters .system-time-range-filter:has(.system-custom-range-fields.is-custom) {
     width: 100%;
     flex-basis: auto;
   }

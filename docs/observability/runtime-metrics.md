@@ -38,6 +38,9 @@ The collector follows these rules:
    `runtime_metrics_collection_failed` with the exception type and stack trace.
 6. The dashboard labels the process as `native-image` or `jvm` and does not call
    unavailable Native Image counters JVM metrics.
+7. The Loki payload is written as an explicit 52-field Jackson tree. It does
+   not rely on reflection-based Kotlin data-class serialization, which keeps
+   the reporter safe in a GraalVM Native Image.
 
 ## Metric Sources
 
@@ -59,6 +62,11 @@ model. It consumes the same Micrometer names published by Spring Boot,
 Reactor Netty, the JVM binder, and the R2DBC pool. Direct pool/MXBean reads are
 fallbacks so Native Image limitations do not erase the full sample.
 
+Spring Boot Actuator automatically registers the standard JVM and system
+Micrometer binders. Their values are sampled into the structured log rather
+than exposing a public metrics endpoint or adding a Prometheus container to the
+small production host.
+
 ## Failure Diagnosis
 
 When traffic and latency charts have data but runtime charts do not:
@@ -77,6 +85,17 @@ The server dashboard surfaces all three states:
 - complete runtime sample;
 - partial runtime sample with unavailable collectors;
 - collection failure with a pointer to the backend stack trace.
+
+A collection failure is considered recovered when a newer valid runtime sample
+arrives. Historic failures in the selected range no longer keep the dashboard
+in a failed state after recovery.
+
+## Dashboard Time Range
+
+`/system.html` provides the standard 15-minute, 1-hour, 6-hour, and 24-hour
+ranges plus a `Custom` option. Custom From and To values include both calendar
+date and local time. `Apply` fixes that explicit interval; `Refresh` reruns the
+same interval instead of silently moving its end time.
 
 ## Verification
 

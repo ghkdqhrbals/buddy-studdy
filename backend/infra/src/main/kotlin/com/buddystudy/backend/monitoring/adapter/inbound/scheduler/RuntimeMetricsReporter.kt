@@ -1,6 +1,7 @@
 package com.buddystudy.backend.monitoring.adapter.inbound.scheduler
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Tag
 import io.r2dbc.pool.ConnectionPool
@@ -404,7 +405,76 @@ internal data class NetworkIoSnapshot(
 internal fun formatRuntimeMetrics(
     objectMapper: ObjectMapper,
     snapshot: RuntimeMetricsSnapshot,
-): String = objectMapper.writeValueAsString(snapshot)
+): String = objectMapper.createObjectNode().apply {
+    put("capturedAtEpochMs", snapshot.capturedAtEpochMs)
+    put("runtimeKind", snapshot.runtimeKind)
+    put("runtimeName", snapshot.runtimeName)
+    put("runtimeVersion", snapshot.runtimeVersion)
+    put("runtimeMetricsDegraded", snapshot.runtimeMetricsDegraded)
+    putNullable("runtimeMetricsUnavailable", snapshot.runtimeMetricsUnavailable)
+    put("availableProcessors", snapshot.availableProcessors)
+    putNullable("processCpuPercent", snapshot.processCpuPercent)
+    putNullable("systemCpuPercent", snapshot.systemCpuPercent)
+    putNullable("systemLoadAverage1m", snapshot.systemLoadAverage1m)
+    putNullable("processUptimeSeconds", snapshot.processUptimeSeconds)
+    putNullable("hostMemoryTotalBytes", snapshot.hostMemoryTotalBytes)
+    putNullable("hostMemoryAvailableBytes", snapshot.hostMemoryAvailableBytes)
+    putNullable("hostMemoryUsedBytes", snapshot.hostMemoryUsedBytes)
+    putNullable("processResidentMemoryBytes", snapshot.processResidentMemoryBytes)
+    putNullable("processOpenFileDescriptors", snapshot.processOpenFileDescriptors)
+    putNullable("rootDiskTotalBytes", snapshot.rootDiskTotalBytes)
+    putNullable("rootDiskUsableBytes", snapshot.rootDiskUsableBytes)
+    putNullable("rootDiskUsedBytes", snapshot.rootDiskUsedBytes)
+    putNullable("networkReceiveBytesTotal", snapshot.networkReceiveBytesTotal)
+    putNullable("networkTransmitBytesTotal", snapshot.networkTransmitBytesTotal)
+    putNullable("heapUsedBytes", snapshot.heapUsedBytes)
+    putNullable("heapCommittedBytes", snapshot.heapCommittedBytes)
+    putNullable("heapMaxBytes", snapshot.heapMaxBytes)
+    putNullable("nonHeapUsedBytes", snapshot.nonHeapUsedBytes)
+    putNullable("nonHeapCommittedBytes", snapshot.nonHeapCommittedBytes)
+    putNullable("directBufferCount", snapshot.directBufferCount)
+    putNullable("directBufferMemoryUsedBytes", snapshot.directBufferMemoryUsedBytes)
+    putNullable("directBufferCapacityBytes", snapshot.directBufferCapacityBytes)
+    putNullable("threadsLive", snapshot.threadsLive)
+    putNullable("threadsDaemon", snapshot.threadsDaemon)
+    putNullable("threadsPeak", snapshot.threadsPeak)
+    putNullable("threadsStartedTotal", snapshot.threadsStartedTotal)
+    putNullable("threadsRunnable", snapshot.threadsRunnable)
+    putNullable("threadsBlocked", snapshot.threadsBlocked)
+    putNullable("threadsWaiting", snapshot.threadsWaiting)
+    putNullable("threadsTimedWaiting", snapshot.threadsTimedWaiting)
+    putNullable("gcCollectionsTotal", snapshot.gcCollectionsTotal)
+    putNullable("gcCollectionTimeMsTotal", snapshot.gcCollectionTimeMsTotal)
+    putNullable("classesLoaded", snapshot.classesLoaded)
+    putNullable("classesLoadedTotal", snapshot.classesLoadedTotal)
+    putNullable("classesUnloadedTotal", snapshot.classesUnloadedTotal)
+    putNullable("dbPoolAcquired", snapshot.dbPoolAcquired)
+    putNullable("dbPoolAllocated", snapshot.dbPoolAllocated)
+    putNullable("dbPoolIdle", snapshot.dbPoolIdle)
+    putNullable("dbPoolPending", snapshot.dbPoolPending)
+    putNullable("dbPoolMaxAllocated", snapshot.dbPoolMaxAllocated)
+    putNullable("dbPoolMaxPending", snapshot.dbPoolMaxPending)
+    putNullable("reactorNettyEventLoopPendingTasks", snapshot.reactorNettyEventLoopPendingTasks)
+    putNullable("reactorNettyEventLoopMaxPendingTasks", snapshot.reactorNettyEventLoopMaxPendingTasks)
+    putNullable("reactorNettyActiveConnections", snapshot.reactorNettyActiveConnections)
+    putNullable("reactorNettyDirectMemoryBytes", snapshot.reactorNettyDirectMemoryBytes)
+}.toString()
+
+private fun ObjectNode.putNullable(name: String, value: String?) {
+    if (value == null) putNull(name) else put(name, value)
+}
+
+private fun ObjectNode.putNullable(name: String, value: Long?) {
+    if (value == null) putNull(name) else put(name, value)
+}
+
+private fun ObjectNode.putNullable(name: String, value: Int?) {
+    if (value == null) putNull(name) else put(name, value)
+}
+
+private fun ObjectNode.putNullable(name: String, value: Double?) {
+    if (value == null) putNull(name) else put(name, value)
+}
 
 internal fun parseProcMemInfo(content: String): HostMemorySnapshot? {
     val values = parseProcKilobytes(content)

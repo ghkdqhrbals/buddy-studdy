@@ -7,13 +7,17 @@ import {
   buildRequestRateQuery,
   counterDeltaPoints,
   counterRatePoints,
+  customMetricRange,
   formatBytes,
   formatMilliseconds,
+  hasUnrecoveredRuntimeFailure,
   parseLokiMetricValues,
   parseRuntimeMetrics,
   percentagePoints,
   readLokiJson,
+  relativeMetricRange,
   ratioPoints,
+  toDateTimeLocalValue,
 } from "../public/metrics.js";
 
 test("parseRuntimeMetrics extracts the flat runtime payload", () => {
@@ -136,5 +140,42 @@ test("percentagePoints calculates resource saturation", () => {
       "dbPoolMaxAllocated",
     ),
     [{ ms: 1, value: 80 }],
+  );
+});
+
+test("metric ranges support relative and explicit local date-time values", () => {
+  assert.deepEqual(relativeMetricRange(60_000, 120_000), {
+    startMs: 60_000,
+    endMs: 120_000,
+  });
+
+  const start = new Date(2026, 6, 25, 10, 30, 0);
+  const end = new Date(2026, 6, 25, 11, 45, 30);
+  assert.deepEqual(
+    customMetricRange(toDateTimeLocalValue(start), toDateTimeLocalValue(end)),
+    { startMs: start.getTime(), endMs: end.getTime() },
+  );
+});
+
+test("custom metric range rejects missing and reversed values", () => {
+  assert.throws(() => customMetricRange("", ""), /Select both/);
+  assert.throws(
+    () => customMetricRange("2026-07-25T11:00:00", "2026-07-25T10:00:00"),
+    /earlier/,
+  );
+});
+
+test("runtime collection failure is recovered by a newer sample", () => {
+  assert.equal(
+    hasUnrecoveredRuntimeFailure([{ ms: 200 }], [{ ms: 100 }]),
+    false,
+  );
+  assert.equal(
+    hasUnrecoveredRuntimeFailure([{ ms: 100 }], [{ ms: 200 }]),
+    true,
+  );
+  assert.equal(
+    hasUnrecoveredRuntimeFailure([], [{ ms: 200 }]),
+    true,
   );
 });
