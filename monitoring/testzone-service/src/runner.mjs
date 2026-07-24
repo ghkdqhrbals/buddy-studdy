@@ -9,6 +9,19 @@ function tail(lines, maximum = 200) {
   return lines.slice(Math.max(0, lines.length - maximum));
 }
 
+export function projectForRun(store, run) {
+  const project = store.state.projects.find((entry) => entry.id === run.projectId);
+  if (!project) throw new Error(`Project ${run.projectId} was not found for run ${run.id}.`);
+  return project;
+}
+
+export function appendUniqueLiveWarning(logs, error, previousMessage) {
+  const message = String(error?.message || error);
+  if (message === previousMessage) return previousMessage;
+  logs.push(`Live metrics warning: ${message}`);
+  return message;
+}
+
 export class RunManager {
   constructor({ store, influx, config, spawnImpl = spawn }) {
     this.store = store;
@@ -27,6 +40,7 @@ export class RunManager {
       maxTargetRps: this.config.maxTargetRps,
       maxDurationSeconds: this.config.maxDurationSeconds,
     });
+    const project = projectForRun(this.store, run);
 
     const runDirectory = this.store.runPath(run.id);
     const scriptPath = path.join(runDirectory, "script.js");
@@ -62,6 +76,7 @@ export class RunManager {
 
     const liveReader = new K6LiveMetricsReader(metricsPath);
     let liveReadPending = false;
+    let lastLiveWarning = null;
     const collectLive = async (final = false) => {
       if (liveReadPending) return;
       liveReadPending = true;
@@ -79,9 +94,13 @@ export class RunManager {
           await this.store.patchRun(run.id, { live: snapshot });
           await this.influx.writeLiveSnapshot(run, project, script, snapshot);
         }
+        if (points.length) lastLiveWarning = null;
       } catch (error) {
-        logs.push(`Live metrics warning: ${error.message}`);
-        await this.store.patchRun(run.id, { logTail: tail(logs) });
+        const previousWarning = lastLiveWarning;
+        lastLiveWarning = appendUniqueLiveWarning(logs, error, lastLiveWarning);
+        if (lastLiveWarning !== previousWarning) {
+          await this.store.patchRun(run.id, { logTail: tail(logs) });
+        }
       } finally {
         liveReadPending = false;
       }
