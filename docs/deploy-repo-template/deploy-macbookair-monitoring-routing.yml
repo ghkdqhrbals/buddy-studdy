@@ -21,8 +21,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! command -v routingflare >/dev/null 2>&1; then
-            echo "routingflare is required on the MacBook Air runner." >&2
+          routingflare_bin="$(command -v routingflare || true)"
+          for candidate in \
+            "/Applications/routingflare.app/Contents/MacOS/routingflare" \
+            "${HOME}/Applications/routingflare.app/Contents/MacOS/routingflare"; do
+            if [ -z "${routingflare_bin}" ] && [ -x "${candidate}" ]; then
+              routingflare_bin="${candidate}"
+            fi
+          done
+          if [ -z "${routingflare_bin}" ]; then
+            echo "Routingflare CLI was not found in PATH or an Applications directory." >&2
             exit 1
           fi
 
@@ -30,12 +38,12 @@ jobs:
             local hostname="$1"
             local port="$2"
             local expected="${hostname} -> 127.0.0.1:${port}"
-            if routingflare list | grep -Fq "${expected}"; then
+            if "${routingflare_bin}" list | grep -Fq "${expected}"; then
               return
             fi
 
             local index
-            index="$(routingflare list | awk -v host="${hostname}" '
+            index="$("${routingflare_bin}" list | awk -v host="${hostname}" '
               $0 ~ host {
                 value=$1
                 gsub(/\./, "", value)
@@ -44,15 +52,15 @@ jobs:
               }
             ')"
             if [ -n "${index}" ]; then
-              routingflare remove dns "${index}"
+              "${routingflare_bin}" remove dns "${index}"
             fi
-            routingflare add dns --host "${hostname}" --port "${port}" --path /
+            "${routingflare_bin}" add dns --host "${hostname}" --port "${port}" --path /
           }
 
           configure_route monitoring.lowfidev.cloud "${API_DASHBOARD_PORT}"
           configure_route grafana.lowfidev.cloud "${GRAFANA_PORT}"
-          routingflare stop
-          routingflare start
+          "${routingflare_bin}" stop
+          "${routingflare_bin}" start
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
           echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${GRAFANA_PORT}"
