@@ -154,7 +154,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "max": 100,
           "min": 0,
@@ -215,7 +216,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "bytes"
         },
@@ -284,7 +286,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "short"
         },
@@ -353,7 +356,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "short"
         },
@@ -412,7 +416,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "short"
         },
@@ -471,7 +476,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "short"
         },
@@ -530,7 +536,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "bytes"
         },
@@ -588,7 +595,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "bytes"
         },

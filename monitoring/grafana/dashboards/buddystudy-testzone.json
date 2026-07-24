@@ -36,7 +36,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "reqps"
         },
@@ -93,7 +94,8 @@
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 4,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "ms"
         },
@@ -148,7 +150,8 @@
             "drawStyle": "line",
             "fillOpacity": 15,
             "lineWidth": 2,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "thresholds": {
             "mode": "absolute",
@@ -218,7 +221,8 @@
             "drawStyle": "line",
             "fillOpacity": 12,
             "lineWidth": 2,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           },
           "unit": "short"
         },
@@ -275,6 +279,7 @@
             "lineWidth": 2,
             "pointSize": 4,
             "showPoints": "never",
+            "spanNulls": true,
             "axisLabel": "CPU"
           },
           "unit": "percent"
@@ -328,6 +333,7 @@
             "lineWidth": 2,
             "pointSize": 4,
             "showPoints": "never",
+            "spanNulls": true,
             "axisLabel": "memory"
           },
           "unit": "decmbytes"
