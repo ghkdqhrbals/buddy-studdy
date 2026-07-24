@@ -34,11 +34,31 @@ jobs:
             exit 1
           fi
 
+          cloudflared_bin="$(command -v cloudflared || true)"
+          for candidate in \
+            "/opt/homebrew/bin/cloudflared" \
+            "/usr/local/bin/cloudflared"; do
+            if [ -z "${cloudflared_bin}" ] && [ -x "${candidate}" ]; then
+              cloudflared_bin="${candidate}"
+            fi
+          done
+          if [ -z "${cloudflared_bin}" ]; then
+            echo "cloudflared was not found in PATH or a Homebrew directory." >&2
+            exit 1
+          fi
+
+          tunnel_id="$("${routingflare_bin}" settings get | awk -F': ' '/dns tunnel id:/ { print $2; exit }')"
+          if [ -z "${tunnel_id}" ] || [ "${tunnel_id}" = "-" ]; then
+            echo "Routingflare does not have a named tunnel ID configured." >&2
+            exit 1
+          fi
+
           configure_route() {
             local hostname="$1"
             local port="$2"
             local expected="${hostname} -> 127.0.0.1:${port}"
             if "${routingflare_bin}" list | grep -Fq "${expected}"; then
+              "${cloudflared_bin}" tunnel route dns --overwrite-dns "${tunnel_id}" "${hostname}"
               return
             fi
 
@@ -55,12 +75,17 @@ jobs:
               "${routingflare_bin}" remove dns "${index}"
             fi
             "${routingflare_bin}" add dns --host "${hostname}" --port "${port}" --path /
+            "${cloudflared_bin}" tunnel route dns --overwrite-dns "${tunnel_id}" "${hostname}"
           }
 
           configure_route monitoring.lowfidev.cloud "${API_DASHBOARD_PORT}"
           configure_route grafana.lowfidev.cloud "${GRAFANA_PORT}"
+          "${routingflare_bin}" autostart on
           "${routingflare_bin}" stop
           RUNNER_TRACKING_ID="" "${routingflare_bin}" start
+          sleep 2
+          RUNNER_TRACKING_ID="" "${routingflare_bin}" start
+          "${routingflare_bin}" list
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
           echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${GRAFANA_PORT}"
