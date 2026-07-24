@@ -15,6 +15,8 @@ import {
 
 const API_BASE = "/testzone/api";
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
+const MAX_RUN_CHART_WIDTH = 1200;
+const RUN_CHART_VISIBLE_SAMPLES = 120;
 const state = {
   status: null,
   projects: [],
@@ -36,6 +38,11 @@ const state = {
     overview: null,
     detail: null,
   },
+  runChartRanges: {
+    overview: null,
+    detail: null,
+  },
+  runSeriesId: null,
   chartResizeTimer: null,
 };
 
@@ -571,14 +578,22 @@ async function loadSelectedRunSeries() {
   const run = selectedRun();
   if (!run) {
     state.runSeries = [];
+    state.runSeriesId = null;
+    state.runChartRanges.overview = null;
+    state.runChartRanges.detail = null;
     renderSelectedRun();
     return;
+  }
+  if (state.runSeriesId !== run.id) {
+    state.runChartRanges.overview = null;
+    state.runChartRanges.detail = null;
   }
   try {
     state.runSeries = (await api(`/runs/${run.id}/series`)).series;
   } catch {
     state.runSeries = [];
   }
+  state.runSeriesId = run.id;
   renderSelectedRun();
 }
 
@@ -685,11 +700,84 @@ function runChartData() {
   ];
 }
 
-function runChartOptions(width) {
+function runChartRange(key, timestamps) {
+  if (timestamps.length < 2) return null;
+  const dataMinimum = timestamps[0];
+  const dataMaximum = timestamps.at(-1);
+  const stored = state.runChartRanges[key];
+  const defaultMinimum = timestamps[Math.max(0, timestamps.length - RUN_CHART_VISIBLE_SAMPLES)];
+  const requestedMinimum = stored?.min ?? defaultMinimum;
+  const requestedMaximum = stored?.max ?? dataMaximum;
+  const span = Math.min(
+    Math.max(requestedMaximum - requestedMinimum, 1),
+    dataMaximum - dataMinimum,
+  );
+  const minimum = Math.max(dataMinimum, Math.min(requestedMinimum, dataMaximum - span));
+  return { min: minimum, max: minimum + span };
+}
+
+function runChartPanPlugin(host, key) {
+  return {
+    hooks: {
+      ready: [(plot) => {
+        const timestamps = plot.data[0];
+        if (timestamps.length <= RUN_CHART_VISIBLE_SAMPLES) return;
+        const overlay = plot.over;
+        let pointerId = null;
+        let pointerStartX = 0;
+        let rangeStart = null;
+        let moved = false;
+
+        overlay.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          pointerId = event.pointerId;
+          pointerStartX = event.clientX;
+          rangeStart = { min: plot.scales.x.min, max: plot.scales.x.max };
+          moved = false;
+          overlay.setPointerCapture(pointerId);
+          host.classList.add("is-panning");
+        });
+
+        overlay.addEventListener("pointermove", (event) => {
+          if (event.pointerId !== pointerId || !rangeStart) return;
+          const delta = pointerStartX - event.clientX;
+          if (Math.abs(delta) >= 4) moved = true;
+          if (!moved) return;
+          event.preventDefault();
+          const dataMinimum = timestamps[0];
+          const dataMaximum = timestamps.at(-1);
+          const span = rangeStart.max - rangeStart.min;
+          const shift = (delta / Math.max(1, overlay.clientWidth)) * span;
+          const minimum = Math.max(
+            dataMinimum,
+            Math.min(rangeStart.min + shift, dataMaximum - span),
+          );
+          const range = { min: minimum, max: minimum + span };
+          state.runChartRanges[key] = range;
+          plot.setScale("x", range);
+        });
+
+        const finishPan = (event) => {
+          if (event.pointerId !== pointerId) return;
+          if (overlay.hasPointerCapture(pointerId)) overlay.releasePointerCapture(pointerId);
+          pointerId = null;
+          rangeStart = null;
+          host.classList.remove("is-panning");
+        };
+
+        overlay.addEventListener("pointerup", finishPan);
+        overlay.addEventListener("pointercancel", finishPan);
+      }],
+    },
+  };
+}
+
+function runChartOptions(width, host, key, range) {
   return {
     width,
     height: 270,
     padding: [12, 10, 0, 0],
+    plugins: [runChartPanPlugin(host, key)],
     cursor: {
       show: true,
       drag: { x: false, y: false },
@@ -700,7 +788,9 @@ function runChartOptions(width) {
       live: true,
     },
     scales: {
-      x: { time: true },
+      x: range
+        ? { time: true, range: () => [range.min, range.max] }
+        : { time: true },
       rps: { auto: true, range: positiveScaleRange },
       latency: { auto: true, range: positiveScaleRange },
       error: { auto: true, range: errorScaleRange },
@@ -773,8 +863,17 @@ function disposeRunChart(key) {
   state.runCharts[key] = null;
 }
 
+function runChartViewportWidth(host) {
+  return Math.max(320, Math.floor(host.clientWidth || host.parentElement?.clientWidth || 0));
+}
+
+function runChartWidth(host) {
+  return Math.min(MAX_RUN_CHART_WIDTH, runChartViewportWidth(host));
+}
+
 function renderRunChart(host, emptyState, key) {
   disposeRunChart(key);
+  host.classList.remove("is-pannable", "is-panning");
   const hasPoints = state.runSeries.length > 0;
   emptyState.hidden = hasPoints;
   host.hidden = !hasPoints;
@@ -785,8 +884,12 @@ function renderRunChart(host, emptyState, key) {
     host.textContent = "Chart library unavailable.";
     return;
   }
-  const width = Math.max(320, Math.floor(host.getBoundingClientRect().width || host.parentElement?.clientWidth || 0));
-  state.runCharts[key] = new window.uPlot(runChartOptions(width), runChartData(), host);
+  const width = runChartWidth(host);
+  const data = runChartData();
+  const range = runChartRange(key, data[0]);
+  state.runChartRanges[key] = range;
+  host.classList.toggle("is-pannable", data[0].length > RUN_CHART_VISIBLE_SAMPLES);
+  state.runCharts[key] = new window.uPlot(runChartOptions(width, host, key, range), data, host);
 }
 
 function drawRunChart() {
@@ -801,7 +904,7 @@ function resizeRunCharts() {
   ]) {
     const chart = state.runCharts[key];
     if (!chart || host.hidden) continue;
-    const width = Math.max(320, Math.floor(host.getBoundingClientRect().width || host.parentElement?.clientWidth || 0));
+    const width = runChartWidth(host);
     chart.setSize({ width, height: 270 });
   }
 }

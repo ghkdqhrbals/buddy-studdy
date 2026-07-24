@@ -41,6 +41,18 @@ test("run charts use vendored uPlot with unit-specific live series", () => {
   assert.doesNotMatch(html, /runChartTooltip/);
 });
 
+test("run charts cap their content width and support horizontal drag inspection", () => {
+  const chartCode = javascript.match(/const MAX_RUN_CHART_WIDTH[\s\S]+?function applyProfile/)?.[0] ?? "";
+  assert.match(chartCode, /MAX_RUN_CHART_WIDTH\s*=\s*1200/);
+  assert.match(chartCode, /RUN_CHART_VISIBLE_SAMPLES\s*=\s*120/);
+  assert.match(chartCode, /Math\.min\(MAX_RUN_CHART_WIDTH,\s*runChartViewportWidth\(host\)\)/);
+  assert.match(chartCode, /function runChartPanPlugin/);
+  assert.match(chartCode, /plot\.setScale\("x", range\)/);
+  assert.match(chartCode, /overlay\.setPointerCapture\(pointerId\)/);
+  assert.match(css, /\.run-history-chart\s*\{[\s\S]+?max-width:\s*1200px/);
+  assert.match(css, /\.run-history-chart\.is-pannable \.u-over\s*\{[\s\S]+?cursor:\s*grab/);
+});
+
 test("selected history run renders its time-series inside the detail panel", () => {
   const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
   assert.match(detail, /id="runDetailChart"/);

@@ -372,8 +372,24 @@ body {
 }
 
 .run-history-chart {
+  width: 100%;
+  max-width: 1200px;
   min-height: 270px;
+  margin-inline: auto;
   overflow: hidden;
+}
+
+.run-history-chart.is-pannable .u-over {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.run-history-chart.is-panning .u-over {
+  cursor: grabbing;
+}
+
+.run-history-chart.is-panning {
+  user-select: none;
 }
 
 .run-history-chart .uplot {
