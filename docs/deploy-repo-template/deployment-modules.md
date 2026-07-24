@@ -53,7 +53,10 @@ one workflow run just because they share a host.
   Docker volume; dashboards and provisioning files remain read-only bind
   mounts from the monitoring release. The deploy records a bounded Grafana
   and monitoring gateway startup log for incident diagnosis without using
-  either log as a health gate.
+  either log as a health gate. Anonymous Grafana access stays disabled, and
+  the deployment does not force a protected file dashboard as the anonymous
+  home page. Unauthenticated visits therefore reach Grafana's login screen
+  instead of rendering a dashboard shell that fails with `Unauthorized`.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns

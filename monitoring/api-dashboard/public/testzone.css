@@ -1364,8 +1364,10 @@ body {
   grid-column: 2;
   grid-row: 1;
   color: transparent;
+  -webkit-text-fill-color: transparent;
   caret-color: #7fb4ff;
   background: transparent;
+  text-shadow: none;
 }
 
 .editor-pane {
@@ -1374,6 +1376,7 @@ body {
 
 .code-editor #scriptEditor::selection {
   color: transparent;
+  -webkit-text-fill-color: transparent;
   background: rgba(68, 132, 222, 0.42);
 }
 

@@ -22,7 +22,9 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
 ```
 
-- Loki and Grafana container ports are bound to `127.0.0.1` only. External access should go through the API dashboard reverse proxy.
+- Loki and Grafana container ports are bound to `127.0.0.1` only. Routingflare
+  exposes the authenticated monitoring gateway and Grafana on separate
+  hostnames and local ports.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
 - k6 can target only hosts in `TESTZONE_ALLOWED_TARGET_HOSTS`.
@@ -31,7 +33,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
 
 ## Dashboards
 
-- `https://grafana.lowfidev.cloud`
+- `https://monitoring.lowfidev.cloud`
   - Custom API log dashboard served by `monitoring/api-dashboard`.
   - API rows expand inline to show request, response, optional stack trace, and related logs.
   - `/performance.html` shows p50, p90, p95, and p99 latency grouped by API endpoint.
@@ -44,6 +46,10 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   - Runtime metric snapshots are emitted every 30 seconds by the backend and retained according to Loki retention.
   - Production runs as a GraalVM Native Image. Runtime collectors are isolated so an unsupported MXBean produces a partial sample instead of dropping every host and pool metric. See `docs/observability/runtime-metrics.md`.
   - Timestamps are rendered in KST with millisecond precision.
+- `https://grafana.lowfidev.cloud`
+  - Grafana login and provisioned BuddyStudy dashboards.
+  - Anonymous access is disabled; unauthenticated users see the login screen
+    instead of a protected default dashboard.
 - Slack/Codex log investigations use `monitoring/api-dashboard/scripts/codex-log-search.mjs`.
   - See `docs/observability/slack-codex-log-search.md`.
 - `monitoring/grafana/dashboards/buddystudy-logs.json`
@@ -71,6 +77,6 @@ See [TestZone Operations](../docs/performance/TESTZONE_OPERATIONS.md).
 
 ## External URLs
 
-- API Logs: `https://grafana.lowfidev.cloud`
-- Grafana: `https://grafana.lowfidev.cloud/grafana/`
-- TestZone: `https://grafana.lowfidev.cloud/testzone.html`
+- API Logs: `https://monitoring.lowfidev.cloud`
+- Grafana: `https://grafana.lowfidev.cloud`
+- TestZone: `https://monitoring.lowfidev.cloud/testzone.html`
