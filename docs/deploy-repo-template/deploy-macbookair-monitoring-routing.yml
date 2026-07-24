@@ -103,6 +103,11 @@ jobs:
           "${routingflare_bin}" list
           "${cloudflared_bin}" tunnel info "${tunnel_id}"
           /bin/ps -axo pid,ppid,command | grep -E "[${routingflare_process:0:1}]${routingflare_process:1}|[c]loudflared.*${tunnel_id}" || true
+          routingflare_pid="$(/usr/bin/pgrep -x "${routingflare_process}" | head -1 || true)"
+          echo "Routingflare listeners:"
+          if [ -n "${routingflare_pid}" ]; then
+            /usr/sbin/lsof -nP -a -p "${routingflare_pid}" -iTCP -sTCP:LISTEN || true
+          fi
           echo "Monitoring listener:"
           /usr/sbin/lsof -nP -iTCP:"${API_DASHBOARD_PORT}" -sTCP:LISTEN || true
           echo "Monitoring gateway container:"
