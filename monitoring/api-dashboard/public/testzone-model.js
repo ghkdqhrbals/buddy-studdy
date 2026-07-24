@@ -71,6 +71,12 @@ export function selectLatestRun(runs = []) {
   return [...runs].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0] || null;
 }
 
+export function runScriptName(run, scripts = []) {
+  return run.scriptName
+    || scripts.find((entry) => entry.id === run.scriptId)?.name
+    || "Deleted script";
+}
+
 export function buildChartPoints(runs = []) {
   return [...runs]
     .filter((run) => run.status === "completed" && run.summary)

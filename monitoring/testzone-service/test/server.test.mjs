@@ -98,7 +98,38 @@ test("run API starts a saved script instead of returning a copied command", asyn
   assert.equal(response.status, 202);
   const body = await response.json();
   assert.equal(body.run.status, "running");
+  assert.equal(body.run.scriptName, script.name);
   assert.deepEqual(body.environmentKeys, ["HEADERS_JSON"]);
+});
+
+test("run history preserves the script name after the script is deleted", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+  const script = app.store.state.scripts[0];
+
+  const createResponse = await fetch(`${app.baseUrl}/api/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId: project.id,
+      scriptId: script.id,
+      profile: "custom",
+      options: { duration: "10s", vus: 1, maxVus: 1, targetRps: 1 },
+    }),
+  });
+  assert.equal(createResponse.status, 202);
+  const created = await createResponse.json();
+  await app.store.patchRun(created.run.id, { status: "completed" });
+
+  const deleteResponse = await fetch(`${app.baseUrl}/api/scripts/${script.id}`, {
+    method: "DELETE",
+  });
+  assert.equal(deleteResponse.status, 200);
+
+  const history = await fetch(`${app.baseUrl}/api/runs?projectId=${project.id}`)
+    .then((response) => response.json());
+  assert.equal(history.runs[0].scriptName, script.name);
 });
 
 test("script validation rejects unsafe requests with actionable details", async (context) => {
@@ -130,4 +161,21 @@ test("store migration repairs the legacy maxVUs template typo", async (context) 
 
   assert.match(migratedScript.code, /maxVUs: maxVus/);
   assert.doesNotMatch(migratedScript.code, /^\s+maxVUs,$/m);
+});
+
+test("store migration backfills names for legacy run metadata", async (context) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-run-migration-"));
+  context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const initialStore = await new TestZoneStore(dataDir).init();
+  const script = initialStore.state.scripts[0];
+  const run = await initialStore.createRun({
+    projectId: script.projectId,
+    scriptId: script.id,
+    profile: "smoke",
+    options: {},
+  });
+  assert.equal(run.scriptName, undefined);
+
+  const migratedStore = await new TestZoneStore(dataDir).init();
+  assert.equal(migratedStore.state.runs[0].scriptName, script.name);
 });

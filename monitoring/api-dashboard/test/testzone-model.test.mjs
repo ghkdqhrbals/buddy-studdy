@@ -10,6 +10,7 @@ import {
   formatRate,
   lineNumbersFor,
   parseObjectJson,
+  runScriptName,
   selectLatestRun,
 } from "../public/testzone-model.js";
 
@@ -56,6 +57,15 @@ test("latest run and chart points use execution timestamps without runtime label
     { id: "newer", rps: 995.4, p95: 57.1 },
   ]);
   assert.match(buildChartPoints(runs)[0].label, /^\d{2}\/\d{2} \d{2}:\d{2}$/);
+});
+
+test("run history keeps the execution-time script name and supports legacy runs", () => {
+  assert.equal(runScriptName({ scriptName: "saved-name.js", scriptId: "old" }, []), "saved-name.js");
+  assert.equal(
+    runScriptName({ scriptId: "legacy" }, [{ id: "legacy", name: "legacy-name.js" }]),
+    "legacy-name.js",
+  );
+  assert.equal(runScriptName({ scriptId: "missing" }, []), "Deleted script");
 });
 
 test("chart labels remain compact and unambiguous", () => {

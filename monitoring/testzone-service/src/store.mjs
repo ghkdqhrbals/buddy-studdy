@@ -97,6 +97,7 @@ export class TestZoneStore {
       await this.persist();
     }
     await this.migrateScripts();
+    await this.migrateRunMetadata();
     return this;
   }
 
@@ -114,6 +115,18 @@ export class TestZoneStore {
       script.updatedAt = now();
       changed = true;
     }));
+    if (changed) await this.persist();
+  }
+
+  async migrateRunMetadata() {
+    let changed = false;
+    for (const run of this.state.runs) {
+      if (run.scriptName) continue;
+      const script = this.state.scripts.find((entry) => entry.id === run.scriptId);
+      if (!script) continue;
+      run.scriptName = script.name;
+      changed = true;
+    }
     if (changed) await this.persist();
   }
 
@@ -223,6 +236,7 @@ export class TestZoneStore {
       id: crypto.randomUUID(),
       projectId: input.projectId,
       scriptId: input.scriptId,
+      scriptName: input.scriptName,
       profile: input.profile,
       options: input.options,
       status: "queued",

@@ -8,8 +8,9 @@ import {
   formatRate,
   lineNumbersFor,
   parseObjectJson,
+  runScriptName,
   selectLatestRun,
-} from "./testzone-model.js?v=2026072402";
+} from "./testzone-model.js?v=2026072403";
 
 const API_BASE = "/testzone/api";
 const state = {
@@ -133,6 +134,7 @@ async function loadProjects() {
     : state.projects[0]?.id ?? null;
   renderProjects();
   await Promise.all([loadScripts(), loadRuns()]);
+  renderRuns();
 }
 
 function renderProjects() {
@@ -393,10 +395,9 @@ function renderRuns() {
   elements.runEmptyState.hidden = state.runs.length > 0;
   elements.runRows.replaceChildren(...state.runs.map((run) => {
     const row = document.createElement("tr");
-    const selectedScript = state.scripts.find((entry) => entry.id === run.scriptId);
     const cells = [
       formatDate(run.startedAt || run.createdAt),
-      selectedScript?.name || "Deleted script",
+      runScriptName(run, state.scripts),
       run.profile,
     ].map((value) => {
       const cell = document.createElement("td");
@@ -722,6 +723,7 @@ function bindEvents() {
     localStorage.setItem("testzone.projectId", state.projectId);
     renderProjects();
     await Promise.all([loadScripts(), loadRuns()]);
+    renderRuns();
   });
   elements.saveProjectButton.addEventListener("click", saveProject);
   elements.headerRunButton.addEventListener("click", () => openRunDialog());

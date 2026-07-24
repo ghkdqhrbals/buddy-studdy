@@ -234,6 +234,7 @@ export async function createTestZoneServer(dependencies = {}) {
         const run = await store.createRun({
           projectId: project.id,
           scriptId: script.id,
+          scriptName: script.name,
           profile: String(body.profile || "custom").slice(0, 40),
           options,
         });
