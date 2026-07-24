@@ -31,6 +31,9 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
 test("workspace exposes one new run action and keeps target URL in the run form", () => {
   assert.equal((html.match(/id="overviewRunButton"/g) || []).length, 1);
   assert.doesNotMatch(html, /id="headerRunButton"|>Run test</);
+  assert.match(html, /id="overviewRunButton" class="run-launch-button"/);
+  assert.match(html, /class="run-launch-icon" aria-hidden="true">\+<\/span>/);
+  assert.match(css, /\.run-launch-button:focus-visible/);
   assert.doesNotMatch(html, /id="projectBaseUrl"|id="saveProjectButton"|id="newProjectBaseUrl"/);
   assert.match(html, /<input[\s\S]+?id="runTargetUrl"[\s\S]+?required/);
   assert.match(javascript, /targetUrl:\s*elements\.runTargetUrl\.value/);
