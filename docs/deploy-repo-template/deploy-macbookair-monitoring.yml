@@ -53,6 +53,8 @@ jobs:
             "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
+            "${monitoring_root}/grafana/provisioning/plugins" \
+            "${monitoring_root}/grafana/provisioning/alerting" \
             "${monitoring_root}/grafana/dashboards" \
             "${monitoring_root}/grafana/data" \
             "${monitoring_root}/loki/data" \
@@ -144,7 +146,7 @@ jobs:
             --user 0 \
             -v "${grafana_volume}:/var/lib/grafana" \
             nginx:1.27-alpine \
-            chown -R 472:0 /var/lib/grafana
+            sh -c 'chown -R 472:0 /var/lib/grafana && if [ -f /var/lib/grafana/grafana.db ]; then chmod 0640 /var/lib/grafana/grafana.db; fi'
 
           docker rm -f \
             buddystudy-api-dashboard \
