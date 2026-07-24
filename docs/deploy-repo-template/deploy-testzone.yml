@@ -31,20 +31,22 @@ jobs:
       TESTZONE_ALLOWED_TARGET_HOSTS: ${{ vars.TESTZONE_ALLOWED_TARGET_HOSTS || 'api.ghkdqhrbals.org,host.docker.internal' }}
       TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
       TESTZONE_INFLUX_BUCKET: ${{ vars.TESTZONE_INFLUX_BUCKET || 'testzone' }}
+      APP_SECRET_ID: ${{ vars.APP_SECRET_ID || 'buddystudy/prod' }}
+      AWS_DEFAULT_REGION: ap-northeast-2
+      AWS_REGION: ap-northeast-2
 
     steps:
       - name: Deploy TestZone execution service
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          TESTZONE_INFLUX_PASSWORD: ${{ secrets.TESTZONE_INFLUX_PASSWORD }}
-          TESTZONE_INFLUX_TOKEN: ${{ secrets.TESTZONE_INFLUX_TOKEN }}
-          TESTZONE_COMPONENT_PASSWORD: ${{ secrets.TESTZONE_COMPONENT_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
         run: |
           set -euo pipefail
 
-          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN TESTZONE_INFLUX_PASSWORD TESTZONE_INFLUX_TOKEN TESTZONE_COMPONENT_PASSWORD OPENAI_API_KEY; do
+          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             if [ -z "${!required:-}" ]; then
               echo "Missing TestZone deployment value: ${required}" >&2
               exit 1
@@ -53,6 +55,28 @@ jobs:
 
           testzone_root="$(eval echo "${TESTZONE_ROOT}")"
           mkdir -p "${testzone_root}/data" "${testzone_root}/influxdb"
+          umask 077
+          for secret_file in influx_password influx_token component_password; do
+            path="${testzone_root}/.${secret_file}"
+            if [ ! -s "${path}" ]; then
+              openssl rand -hex 32 > "${path}"
+            fi
+          done
+          TESTZONE_INFLUX_PASSWORD="$(cat "${testzone_root}/.influx_password")"
+          TESTZONE_INFLUX_TOKEN="$(cat "${testzone_root}/.influx_token")"
+          TESTZONE_COMPONENT_PASSWORD="$(cat "${testzone_root}/.component_password")"
+
+          APP_SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --region "${AWS_REGION}" \
+            --secret-id "${APP_SECRET_ID}" \
+            --query SecretString \
+            --output text)"
+          OPENAI_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c \
+            'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY") or "")')"
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "Missing OPENAI_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+            exit 1
+          fi
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           docker pull "${IMAGE_REF}"

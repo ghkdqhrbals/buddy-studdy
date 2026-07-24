@@ -49,16 +49,20 @@ MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
 - `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
-- `TESTZONE_INFLUX_TOKEN`
 
 MacBook Air TestZone deploy:
 
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
-- `TESTZONE_INFLUX_PASSWORD`
-- `TESTZONE_INFLUX_TOKEN`
-- `TESTZONE_COMPONENT_PASSWORD`
-- `OPENAI_API_KEY`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN` (only for temporary AWS credentials)
+
+The TestZone deploy reads `OPENAI_API_KEY` from the existing
+`buddystudy/prod` AWS Secrets Manager document. InfluxDB and component
+credentials are generated once on the MacBook Air with mode `0600`, under
+`MACBOOKAIR_TESTZONE_ROOT`, and are reused by later TestZone and monitoring
+deploys.
 
 Repository variables:
 
@@ -70,6 +74,8 @@ Repository variables:
 - `TESTZONE_ALLOWED_TARGET_HOSTS`: comma-separated host allowlist for k6.
 - `TESTZONE_INFLUX_ORG` and `TESTZONE_INFLUX_BUCKET`: Grafana and runner
   storage coordinates.
+- `APP_SECRET_ID`: AWS Secrets Manager document containing `OPENAI_API_KEY`;
+  defaults to `buddystudy/prod`.
 
 ## Runtime Layout
 
