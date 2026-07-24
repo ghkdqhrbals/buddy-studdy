@@ -3,6 +3,7 @@ type ChartSeries = {
   values: number[];
   color: string;
   dashed?: boolean;
+  showValues?: boolean;
 };
 
 type PerformanceChartProps = {
@@ -134,17 +135,34 @@ export function PerformanceChart({
               strokeLinejoin="round"
               strokeWidth="3"
             />
-            {item.values.map((value, index) => (
-              <circle
-                key={`${item.label}-${index}`}
-                cx={positionX(index, item.values.length)}
-                cy={positionY(value, minimum, maximum, scale)}
-                fill="#ffffff"
-                r="3.5"
-                stroke={item.color}
-                strokeWidth="2"
-              />
-            ))}
+            {item.values.map((value, index) => {
+              const x = positionX(index, item.values.length);
+              const y = positionY(value, minimum, maximum, scale);
+              const first = index === 0;
+              const last = index === item.values.length - 1;
+              return (
+                <g key={`${item.label}-${index}`}>
+                  <circle
+                    cx={x}
+                    cy={y}
+                    fill="#ffffff"
+                    r="3.5"
+                    stroke={item.color}
+                    strokeWidth="2"
+                  />
+                  {item.showValues ? (
+                    <text
+                      className="chart-value-label"
+                      x={first ? x + 8 : last ? x - 8 : x}
+                      y={y + 18}
+                      textAnchor={first ? "start" : last ? "end" : "middle"}
+                    >
+                      {formatY(value)}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
           </g>
         ))}
       </svg>

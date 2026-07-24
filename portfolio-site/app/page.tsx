@@ -62,7 +62,7 @@ const interviewQuestions = [
   {
     question: "왜 WebFlux를 선택했고, 실제로 더 빨랐나요?",
     answer:
-      "OpenAI·APNs·Redis·DB처럼 I/O가 이어지는 경로를 coroutine과 non-blocking client로 통일하려는 선택이었습니다. 하지만 2026-07-22 동일 조건 측정에서 health는 양쪽 모두 3,000 RPS를 처리한 반면, studies는 WebFlux/R2DBC의 큰 row mapping과 DB pool 대기가 먼저 포화됐습니다. 선택의 의도와 현재 구현의 성능 결과를 분리해 설명합니다.",
+      "OpenAI·APNs·Redis·DB처럼 I/O가 이어지는 경로를 coroutine과 non-blocking client로 통일하려는 선택이었습니다. 하지만 2026-07-22 실제 API별 동일 조건 측정에서 studies는 WebFlux/R2DBC의 큰 row mapping과 DB pool 대기가 먼저 포화됐습니다. synthetic health 수치는 용량 결론에서 제외하고, public questions와 studies를 각각 측정해 선택의 의도와 현재 구현의 결과를 분리합니다.",
   },
   {
     question: "왜 Kafka가 아니라 Redis Streams인가요?",
@@ -470,8 +470,8 @@ GitHub-hosted build → GHCR → EC2 deploy-only runner`}</code>
                   </tr>
                   <tr>
                     <td><strong>nGrinder {ngrinderSmoke.version}</strong></td>
-                    <td>VUser closed-loop</td>
-                    <td>지속 부하 TPS, response time, 오류와 회복</td>
+                    <td>25~1,000 VUser closed-loop</td>
+                    <td>동시 사용자별 지속 TPS, response time, 오류와 회복</td>
                   </tr>
                   <tr>
                     <td><strong>JFR / NMT</strong></td>
@@ -504,13 +504,18 @@ GitHub-hosted build → GHCR → EC2 deploy-only runner`}</code>
               xValues={targetRps}
               xLabel="target requests per second"
               yLabel="successful requests per second"
-              yTicks={[0, 1000, 2000, 3000]}
+              yTicks={[0, 500, 1000, 1500, 2000, 2500, 3000]}
               formatX={(value) => value.toLocaleString("en-US")}
-              formatY={(value) => value.toLocaleString("en-US")}
+              formatY={(value) => value.toLocaleString("en-US", { maximumFractionDigits: 1 })}
               series={[
                 { label: "Target", values: targetRps, color: "#8c959f", dashed: true },
                 { label: "MVC / JDBC", values: studiesSweep.mvc.successfulRps, color: "#cf222e" },
-                { label: "WebFlux / R2DBC", values: studiesSweep.webflux.successfulRps, color: "#0969da" },
+                {
+                  label: "WebFlux / R2DBC",
+                  values: studiesSweep.webflux.successfulRps,
+                  color: "#0969da",
+                  showValues: true,
+                },
               ]}
             />
 
@@ -568,7 +573,9 @@ GitHub-hosted build → GHCR → EC2 deploy-only runner`}</code>
                 현재 보존된 {ngrinderSmoke.version} 결과는 1 VUser smoke입니다. MVC{" "}
                 {ngrinderSmoke.mvc.tps} TPS, WebFlux {ngrinderSmoke.webflux.tps} TPS였지만
                 controller·agent·등록·실행·수집 자동화 확인용이므로 용량 결론에는 사용하지
-                않습니다. 표준 VUser 반복 실행 전까지 k6 결과와 동급 근거로 포장하지 않습니다.
+                않습니다. 표준 프로필은 25·50·100·200·400·600·800·1,000 동시
+                사용자로 구성했으며, 이 반복 실행 전까지 smoke를 k6 결과와 동급 근거로
+                포장하지 않습니다.
               </p>
             </blockquote>
 

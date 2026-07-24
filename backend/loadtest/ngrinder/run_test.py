@@ -25,6 +25,22 @@ FINISHED_STATUSES = {
 }
 
 
+def execution_shape(vusers: int, max_processes: int, max_threads_per_process: int) -> tuple[int, int]:
+    if vusers <= 0 or max_processes <= 0 or max_threads_per_process <= 0:
+        raise ValueError("nGrinder execution limits must be positive")
+    if vusers <= max_threads_per_process:
+        return 1, vusers
+
+    minimum_processes = (vusers + max_threads_per_process - 1) // max_threads_per_process
+    for processes in range(min(max_processes, vusers), minimum_processes - 1, -1):
+        if vusers % processes == 0:
+            return processes, vusers // processes
+    raise ValueError(
+        f"{vusers} VUsers cannot be split exactly across at most {max_processes} processes "
+        f"with at most {max_threads_per_process} threads each"
+    )
+
+
 class NGrinderClient:
     def __init__(self, base_url: str, username: str, password: str):
         self.base_url = base_url.rstrip("/")
@@ -204,6 +220,8 @@ def main() -> None:
     parser.add_argument("--access-token-file", type=Path)
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--vusers", type=int, required=True)
+    parser.add_argument("--max-processes", type=int, default=4)
+    parser.add_argument("--max-threads-per-process", type=int, default=250)
     parser.add_argument("--ramp-seconds", type=int, default=30)
     parser.add_argument("--hold-seconds", type=int, default=180)
     parser.add_argument("--timeout-ms", type=int, default=5000)
@@ -219,6 +237,14 @@ def main() -> None:
         raise SystemExit(f"unknown scenario: {args.scenario}")
     if args.vusers <= 0:
         raise SystemExit("vusers must be positive")
+    try:
+        process_count, threads_per_process = execution_shape(
+            args.vusers,
+            args.max_processes,
+            args.max_threads_per_process,
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     requires_auth = any(
         request["authenticated"] for request in manifest["scenarios"][args.scenario]["requests"]
     )
@@ -250,8 +276,8 @@ def main() -> None:
         "duration": (args.ramp_seconds + args.hold_seconds) * 1000,
         "agentCount": 1,
         "vuserPerAgent": args.vusers,
-        "processes": 1,
-        "threads": args.vusers,
+        "processes": process_count,
+        "threads": threads_per_process,
         "useRampUp": args.ramp_seconds > 0,
         "rampUpType": "THREAD",
         "rampUpInitCount": 1,
@@ -316,6 +342,11 @@ def main() -> None:
         "testId": test_id,
         "scenario": args.scenario,
         "vusers": args.vusers,
+        "executionShape": {
+            "agentCount": 1,
+            "processes": process_count,
+            "threadsPerProcess": threads_per_process,
+        },
         "rampSeconds": args.ramp_seconds,
         "holdSeconds": args.hold_seconds,
         "startedAt": started_at.isoformat(),

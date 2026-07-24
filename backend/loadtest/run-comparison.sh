@@ -9,7 +9,7 @@ TOOL="${TOOL:-all}"
 PROFILE="${PROFILE:-standard}"
 MVC_REF="${MVC_REF:-eca7e320}"
 WEBFLUX_REF="${WEBFLUX_REF:-HEAD}"
-SCENARIO_LIST="${SCENARIOS:-${SCENARIO_LIST:-health,public-questions,studies,mobile-read-mix}}"
+SCENARIO_LIST="${SCENARIOS:-${SCENARIO_LIST:-public-questions,studies}}"
 TARGET_HOST="${TARGET_HOST:-}"
 LOAD_GENERATOR_SSH="${LOAD_GENERATOR_SSH:-}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-5s}"
@@ -31,6 +31,9 @@ MIN_FREE_DISK_MB="${MIN_FREE_DISK_MB:-4096}"
 MAX_CLOCK_SKEW_MS="${MAX_CLOCK_SKEW_MS:-2000}"
 AUTO_FINE_SWEEP="${AUTO_FINE_SWEEP:-true}"
 KEEP_NGRINDER="${KEEP_NGRINDER:-false}"
+MAX_CONCURRENT_USERS="${MAX_CONCURRENT_USERS:-1000}"
+NGRINDER_MAX_PROCESSES="${NGRINDER_MAX_PROCESSES:-4}"
+NGRINDER_MAX_THREADS_PER_PROCESS="${NGRINDER_MAX_THREADS_PER_PROCESS:-250}"
 
 case "$PROFILE" in
   smoke)
@@ -51,7 +54,7 @@ case "$PROFILE" in
     TARGET_RPS_LIST="${TARGET_RPS_LIST:-1000,1500,2000,2500,3000}"
     DURATION="${DURATION:-60s}"
     WARMUP_DURATION="${WARMUP_DURATION:-10s}"
-    NGRINDER_VUS_LIST="${NGRINDER_VUS_LIST:-25,50,100,200,400}"
+    NGRINDER_VUS_LIST="${NGRINDER_VUS_LIST:-25,50,100,200,400,600,800,1000}"
     NGRINDER_RAMP_SECONDS="${NGRINDER_RAMP_SECONDS:-30}"
     NGRINDER_HOLD_SECONDS="${NGRINDER_HOLD_SECONDS:-180}"
     STAGE_COOLDOWN_SECONDS="${STAGE_COOLDOWN_SECONDS:-60}"
@@ -158,6 +161,18 @@ validate_inputs() {
     echo "ROUNDS and STUDIES_LIMIT must be positive integers." >&2
     exit 1
   fi
+  for value in "$MAX_CONCURRENT_USERS" "$NGRINDER_MAX_PROCESSES" "$NGRINDER_MAX_THREADS_PER_PROCESS"; do
+    if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+      echo "nGrinder concurrency limits must be positive integers: $value" >&2
+      exit 1
+    fi
+  done
+  for value in "${NGRINDER_VUS[@]}"; do
+    if (( value > MAX_CONCURRENT_USERS )); then
+      echo "nGrinder VUser stage $value exceeds MAX_CONCURRENT_USERS=$MAX_CONCURRENT_USERS." >&2
+      exit 1
+    fi
+  done
   python3 "$SCRIPT_DIR/validate_scenarios.py" "$SCRIPT_DIR/scenarios.json" \
     --only "$SCENARIO_LIST"
   case "$TARGET_BASE_URL" in
@@ -567,6 +582,8 @@ run_ngrinder_stage() {
       SCENARIO='$scenario' VUS='$vusers' REQUEST_TIMEOUT_MS='$REQUEST_TIMEOUT_MS' \
       STUDIES_LIMIT='$STUDIES_LIMIT' NGRINDER_RAMP_SECONDS='$NGRINDER_RAMP_SECONDS' \
       NGRINDER_HOLD_SECONDS='$NGRINDER_HOLD_SECONDS' \
+      NGRINDER_MAX_PROCESSES='$NGRINDER_MAX_PROCESSES' \
+      NGRINDER_MAX_THREADS_PER_PROCESS='$NGRINDER_MAX_THREADS_PER_PROCESS' \
       GENERATOR_TELEMETRY_INTERVAL='$GENERATOR_TELEMETRY_INTERVAL' \
       SUMMARY_PATH='$remote_stage/raw/ngrinder-$base.json' \
       TIMESERIES_PATH='$remote_stage/timeseries/ngrinder-$base.json' \
@@ -579,6 +596,8 @@ run_ngrinder_stage() {
       SCENARIO="$scenario" VUS="$vusers" REQUEST_TIMEOUT_MS="$REQUEST_TIMEOUT_MS" \
       STUDIES_LIMIT="$STUDIES_LIMIT" NGRINDER_RAMP_SECONDS="$NGRINDER_RAMP_SECONDS" \
       NGRINDER_HOLD_SECONDS="$NGRINDER_HOLD_SECONDS" \
+      NGRINDER_MAX_PROCESSES="$NGRINDER_MAX_PROCESSES" \
+      NGRINDER_MAX_THREADS_PER_PROCESS="$NGRINDER_MAX_THREADS_PER_PROCESS" \
       GENERATOR_TELEMETRY_INTERVAL="$GENERATOR_TELEMETRY_INTERVAL" \
       SUMMARY_PATH="$summary" TIMESERIES_PATH="$timeseries" \
       TELEMETRY_PATH="$generator_telemetry" LOG_PATH="$log" \
@@ -671,6 +690,9 @@ write_metadata() {
     --mvc-ref "$MVC_COMMIT" --webflux-ref "$WEBFLUX_COMMIT" \
     --target-host "$TARGET_BASE_URL" --load-generator "${LOAD_GENERATOR_SSH:-local}" \
     --rounds "$ROUNDS" --target-rps "$TARGET_RPS_LIST" --vusers "$NGRINDER_VUS_LIST" \
+    --max-concurrent-users "$MAX_CONCURRENT_USERS" \
+    --ngrinder-max-processes "$NGRINDER_MAX_PROCESSES" \
+    --ngrinder-max-threads-per-process "$NGRINDER_MAX_THREADS_PER_PROCESS" \
     --scenarios "$SCENARIO_LIST" --duration "$DURATION" \
     --heap "$JVM_HEAP" --cpu "$JVM_CPU_COUNT" --db-pool "$DB_POOL_MAX" \
     --jfr "$ENABLE_JFR" --nmt "$ENABLE_NMT" \

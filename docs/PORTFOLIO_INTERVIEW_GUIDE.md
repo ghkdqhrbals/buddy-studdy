@@ -39,13 +39,14 @@ operation.
 
 For performance, I compared MVC/JDBC and WebFlux/R2DBC under the same CPU, heap,
 database fixture, and 10-connection pool at 1,000-3,000 requested RPS. The
-no-database health route reached 3,000 RPS in both implementations. The current
-reactive database path did not: it admitted thousands of requests into a
-10-connection pool and paid high row-materialization and allocation costs. A
-controlled `limit=100` versus `limit=1` experiment reduced p95 by 97.9% and
-allocation by 73.2%, identifying response materialization as the primary
-bottleneck. The result is an optimization plan based on evidence, not a claim
-that one framework is universally faster.
+public-questions and authenticated-studies APIs are measured independently so
+one endpoint cannot hide another endpoint's saturation. The current reactive
+studies path admitted thousands of requests into a 10-connection pool and paid
+high row-materialization and allocation costs. A controlled `limit=100` versus
+`limit=1` experiment reduced p95 by 97.9% and allocation by 73.2%, identifying
+response materialization as the primary bottleneck. The result is an
+optimization plan based on evidence, not a claim that one framework is
+universally faster.
 
 ## Product Capabilities
 
@@ -211,7 +212,12 @@ must not be attributed to Redis 8.2.
 ### Test Method
 
 - k6 constant-arrival-rate open-loop workload.
-- nGrinder 3.5.9-p1 closed-loop VUser workload and recovery automation.
+- nGrinder 3.5.9-p1 closed-loop workload from 25 to 1,000 simultaneous
+  VUsers, with the 1,000-client stage split into four processes and 250
+  threads per process.
+- Public questions and authenticated studies are measured as separate API
+  scenarios. The mobile read mix is optional secondary evidence, and the
+  health endpoint is excluded from capacity conclusions.
 - 1,000, 1,500, 2,000, 2,500, and 3,000 requested RPS.
 - Three alternating-order rounds, median reported.
 - Same PostgreSQL fixture, Redis, 4 visible CPUs, 512 MiB heap, and 10 DB
@@ -225,14 +231,14 @@ The reusable harness keeps scenario definitions, fixtures, credentials,
 normalization, and report metadata shared across both tools. The preserved
 nGrinder result is currently a one-VUser wiring smoke, so it validates
 controller/agent/script/result automation but is not used as a capacity result.
-Only repeated standard runs may support an MVC/WebFlux sustained-load
-conclusion.
+The standard profile is defined at 25, 50, 100, 200, 400, 600, 800, and 1,000
+simultaneous VUsers. Only repeated standard runs may support an MVC/WebFlux
+sustained-load conclusion.
 
 ### Defensible Results
 
 | Observation | Result |
 | --- | --- |
-| No-DB health endpoint | MVC and WebFlux both sustained about 3,000 RPS |
 | MVC authenticated studies | 2,478 successful RPS at a 2,500 RPS target |
 | Current WebFlux authenticated studies | Saturation started below 1,000 RPS in the initial sweep |
 | WebFlux studies at 1,000 target RPS | 328.0 successful RPS, p95 5,000.36 ms, 37.322% failure |
@@ -243,8 +249,8 @@ conclusion.
 
 ### What The Experiment Proved
 
-- Reactor Netty was not the primary bottleneck because the health route reached
-  the full target.
+- The isolated studies result attributes saturation to that API rather than a
+  synthetic route or a mixed workload.
 - Non-blocking waiting did not increase PostgreSQL capacity.
 - Unbounded admission converted a small pool into thousands of in-process
   waiters and five-second timeouts.

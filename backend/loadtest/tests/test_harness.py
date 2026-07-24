@@ -9,7 +9,7 @@ LOADTEST = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LOADTEST))
 
 from normalize_results import normalize_k6
-from ngrinder.run_test import graph_points
+from ngrinder.run_test import execution_shape, graph_points
 from report_results import common_direction
 from validate_scenarios import validate_manifest
 
@@ -17,6 +17,11 @@ from validate_scenarios import validate_manifest
 class HarnessTests(unittest.TestCase):
     def test_manifest_has_expected_weighted_mix(self):
         manifest = validate_manifest(LOADTEST / "scenarios.json")
+        self.assertNotIn("health", manifest["scenarios"])
+        self.assertEqual(
+            set(manifest["scenarios"]),
+            {"public-questions", "studies", "mobile-read-mix"},
+        )
         mix = manifest["scenarios"]["mobile-read-mix"]["requests"]
         self.assertEqual([request["weight"] for request in mix], [70, 30])
         self.assertEqual(sum(request["weight"] for request in mix), 100)
@@ -26,7 +31,7 @@ class HarnessTests(unittest.TestCase):
             root = Path(directory)
             for child in ("raw", "telemetry", "generator-telemetry"):
                 (root / child).mkdir()
-            raw = root / "raw" / "mvc-round1-health-rps1000.json"
+            raw = root / "raw" / "mvc-round1-studies-rps1000.json"
             raw.write_text(
                 json.dumps(
                     {
@@ -47,7 +52,7 @@ class HarnessTests(unittest.TestCase):
                     }
                 )
             )
-            (root / "telemetry" / "k6-mvc-round1-health-rps1000.jsonl").write_text(
+            (root / "telemetry" / "k6-mvc-round1-studies-rps1000.jsonl").write_text(
                 json.dumps(
                     {
                         "process": {"cpu_percent": 50, "rss_bytes": 100, "os_threads": 20},
@@ -62,7 +67,7 @@ class HarnessTests(unittest.TestCase):
             (
                 root
                 / "generator-telemetry"
-                / "mvc-round1-health-rps1000.jsonl"
+                / "mvc-round1-studies-rps1000.jsonl"
             ).write_text(
                 json.dumps(
                     {
@@ -111,7 +116,7 @@ class HarnessTests(unittest.TestCase):
                             "tool": tool,
                             "runtime": runtime,
                             "round": round_number,
-                            "scenario": "health",
+                            "scenario": "studies",
                             "load": {
                                 "type": "rps" if tool == "k6" else "vusers",
                                 "value": 1,
@@ -139,6 +144,15 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(points[1]["requests"], 22.0)
         self.assertEqual(points[1]["errors"], 1.0)
         self.assertEqual(points[1]["meanMs"], 4.0)
+
+    def test_ngrinder_splits_one_thousand_vusers_without_oversubscription(self):
+        self.assertEqual(execution_shape(1000, 4, 250), (4, 250))
+        self.assertEqual(execution_shape(800, 4, 250), (4, 200))
+        self.assertEqual(execution_shape(200, 4, 250), (1, 200))
+
+    def test_ngrinder_rejects_an_unrepresentable_execution_shape(self):
+        with self.assertRaisesRegex(ValueError, "cannot be split exactly"):
+            execution_shape(997, 4, 250)
 
 
 if __name__ == "__main__":

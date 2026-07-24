@@ -38,17 +38,21 @@ remain fixed.
 2. Build both Git refs.
 3. Start disposable PostgreSQL and Redis and seed the fixed fixture.
 4. Run body-validating smoke checks.
-5. Run three alternating k6 rounds from 1,000 through 3,000 RPS.
+5. Run three alternating k6 rounds from 1,000 through 3,000 RPS for each
+   isolated API: public questions, then authenticated studies.
 6. Re-run the first saturation region at 100 RPS increments.
-7. Run three alternating nGrinder rounds at 25 through 400 VUsers.
+7. Run three alternating nGrinder rounds for each isolated API at 25, 50, 100,
+   200, 400, 600, 800, and 1,000 simultaneous VUsers.
 8. Re-run the knee with JFR/NMT.
 9. Run 15 minutes at approximately 70% of sustainable capacity.
 10. Normalize raw results, invalidate generator-limited samples, and render the
     report and dashboard.
 
-Every cooldown probes `/health` once per second and preserves time to first
-healthy response, failures, mean latency, and p95 latency. Cooldown is therefore
-measured recovery time rather than an unobserved sleep.
+`/health` is not a load-test scenario. The harness only uses it internally to
+confirm local candidate startup and cooldown recovery, and excludes those
+samples from API throughput and framework verdicts. The optional
+`mobile-read-mix` workload is secondary evidence after the isolated endpoint
+runs; it does not replace them.
 
 The generated dashboard separates the load-level capacity curve from original
 per-second samples. This keeps a median across rounds from being mistaken for
@@ -66,6 +70,12 @@ later run can reproduce or invalidate the environment.
 Interface errors and dropped packets invalidate a run. When
 `GENERATOR_NETWORK_CAPACITY_MBPS` is provided, average utilization above 95%
 also invalidates it.
+
+Each API's 1,000-VUser stage uses one isolated nGrinder agent with four worker
+processes and 250 threads per process. This preserves an exact 1,000-client
+population while avoiding a single 1,000-thread worker process. Host CPU p95
+above 80%, memory use above 95%, or NIC errors/drops still invalidate the
+sample: a generator-limited result is not reported as API saturation.
 
 ## Interpretation
 

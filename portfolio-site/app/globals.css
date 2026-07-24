@@ -619,6 +619,17 @@ pre {
   font-weight: 650;
 }
 
+.chart-value-label {
+  fill: var(--ink);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
 .compact-table th,
 .compact-table td {
   min-width: 112px;

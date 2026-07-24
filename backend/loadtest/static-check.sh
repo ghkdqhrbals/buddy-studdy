@@ -11,7 +11,7 @@ bash -n \
   "$SCRIPT_DIR/ngrinder/native/run-agent.sh"
 
 python3 "$SCRIPT_DIR/validate_scenarios.py" "$SCRIPT_DIR/scenarios.json" \
-  --only health,public-questions,studies,mobile-read-mix
+  --only public-questions,studies,mobile-read-mix
 python3 -m py_compile \
   "$SCRIPT_DIR/validate_scenarios.py" \
   "$SCRIPT_DIR/find_saturation.py" \

@@ -58,6 +58,9 @@ def main():
     parser.add_argument("--rounds", type=int, required=True)
     parser.add_argument("--target-rps", required=True)
     parser.add_argument("--vusers", required=True)
+    parser.add_argument("--max-concurrent-users", type=int, required=True)
+    parser.add_argument("--ngrinder-max-processes", type=int, required=True)
+    parser.add_argument("--ngrinder-max-threads-per-process", type=int, required=True)
     parser.add_argument("--scenarios", required=True)
     parser.add_argument("--duration", required=True)
     parser.add_argument("--heap", required=True)
@@ -83,6 +86,12 @@ def main():
             "rounds": args.rounds,
             "targetRps": [int(value) for value in args.target_rps.split(",")],
             "vusers": [int(value) for value in args.vusers.split(",")],
+            "maxConcurrentUsers": args.max_concurrent_users,
+            "ngrinderExecution": {
+                "agentCount": 1,
+                "maxProcesses": args.ngrinder_max_processes,
+                "maxThreadsPerProcess": args.ngrinder_max_threads_per_process,
+            },
             "scenarios": [value for value in args.scenarios.split(",") if value],
             "duration": args.duration,
         },

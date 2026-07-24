@@ -4,7 +4,7 @@ import { Rate } from "k6/metrics";
 
 const manifest = JSON.parse(open("../scenarios.json"));
 const baseUrl = __ENV.BASE_URL || "http://127.0.0.1:18080";
-const scenario = __ENV.SCENARIO || "health";
+const scenario = __ENV.SCENARIO || "public-questions";
 const vus = Number(__ENV.VUS || 50);
 const targetRps = Number(__ENV.TARGET_RPS || 0);
 const duration = __ENV.DURATION || "30s";

@@ -1,22 +1,6 @@
 {
   "schemaVersion": 1,
   "scenarios": {
-    "health": {
-      "description": "HTTP runtime, routing, and JSON serialization without persistence.",
-      "requests": [
-        {
-          "name": "health",
-          "method": "GET",
-          "path": "/health",
-          "weight": 100,
-          "authenticated": false,
-          "expectedStatus": 200,
-          "requiredJsonPaths": [
-            "ok"
-          ]
-        }
-      ]
-    },
     "public-questions": {
       "description": "Public question database reads, mapping, and a 20-row response.",
       "requests": [
@@ -60,7 +44,7 @@
       ]
     },
     "mobile-read-mix": {
-      "description": "Read-only mobile traffic mix without the synthetic health endpoint.",
+      "description": "Optional secondary traffic mix: 70% public questions and 30% authenticated studies.",
       "requests": [
         {
           "name": "public-questions",

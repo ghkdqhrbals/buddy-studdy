@@ -48,9 +48,14 @@ test("server-renders the BuddyStudy engineering document", async () => {
   assert.match(html, /16\.53/);
   assert.match(html, /5000\.36/);
   assert.match(html, /nGrinder[\s\S]{0,80}3\.5\.9-p1/);
+  assert.match(html, /25~1,000 VUser closed-loop/);
+  assert.match(html, /25·50·100·200·400·600·800·1,000/);
   assert.match(html, /XADD IDMP/);
   assert.match(html, /Redis 8\.6/);
   assert.match(html, /Studies API p95 latency by target RPS/);
+  assert.match(html, />328</);
+  assert.match(html, />336\.5</);
+  assert.match(html, />367\.2</);
   assert.match(html, /Studies API successful throughput/);
   assert.match(html, /3,000 RPS run: p95 over measurement time/);
   assert.match(html, /WARP/);

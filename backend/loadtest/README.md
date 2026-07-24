@@ -28,15 +28,20 @@ tools.
 
 | Scenario | Traffic |
 | --- | --- |
-| `health` | `GET /health` |
 | `public-questions` | 20 public questions |
 | `studies` | Authenticated studies with `limit=100` |
-| `mobile-read-mix` | 70% public questions, 30% authenticated studies |
+| `mobile-read-mix` | Optional secondary run: 70% public questions, 30% authenticated studies |
 
 Every measured response is checked for its expected status, required JSON
 paths, and non-empty fixture collections. Warm-up uses the same checks as a
 strict fail-fast contract gate. The disposable fixture contains one user, 100
 studies, and 500 graded public questions.
+
+The default run executes `public-questions` and `studies` independently. This
+keeps endpoint capacity, latency, and saturation attributable to one API. The
+mixed workload is opt-in and is reported separately; it is not used to replace
+the per-API result. `/health` is used only to detect that a locally started
+candidate is ready and is never a benchmark scenario or report series.
 
 ## Execution Interface
 
@@ -45,7 +50,7 @@ TOOL=k6|ngrinder|all
 PROFILE=smoke|standard|diagnostic|soak
 MVC_REF=eca7e320
 WEBFLUX_REF=HEAD
-SCENARIOS=health,public-questions,studies,mobile-read-mix
+SCENARIOS=public-questions,studies
 TARGET_HOST=http://<macbook-pro-private-address>:18080
 LOAD_GENERATOR_SSH=<macbook-air-ssh-host>
 GENERATOR_NETWORK_CAPACITY_MBPS=<measured-link-capacity>
@@ -84,12 +89,18 @@ the generator competes with the target.
 | Profile | k6 | nGrinder | Diagnostics |
 | --- | --- | --- | --- |
 | `smoke` | 5 RPS, 5 seconds, one round | 1 VUser, 5 seconds | Off |
-| `standard` | 1,000/1,500/2,000/2,500/3,000 RPS, 60 seconds, three rounds | 25/50/100/200/400 VUsers, 30-second ramp and 3-minute hold | Off |
+| `standard` | 1,000/1,500/2,000/2,500/3,000 RPS, 60 seconds, three rounds | 25/50/100/200/400/600/800/1,000 VUsers, 30-second ramp and 3-minute hold | Off |
 | `diagnostic` | Selected saturation load, 60 seconds | Selected VUser load | JFR and NMT on |
 | `soak` | 70% of `SUSTAINABLE_RPS`, 15 minutes | `SOAK_VUS`, 15 minutes | Off |
 
 Standard rounds alternate runtime order. When k6 detects its first saturation
 stage, `AUTO_FINE_SWEEP=true` fills the preceding region at 100 RPS intervals.
+The closed-loop standard profile reaches 1,000 simultaneously active clients.
+The single nGrinder agent divides that stage into four worker processes with
+250 threads each instead of putting 1,000 threads in one JVM process. Override
+`NGRINDER_MAX_PROCESSES` or `NGRINDER_MAX_THREADS_PER_PROCESS` only when the
+generator host has been requalified. `MAX_CONCURRENT_USERS=1000` is also an
+explicit guard against accidentally running a larger population.
 
 Primary throughput runs keep JFR and NMT disabled. Re-run the observed knee:
 
@@ -135,7 +146,8 @@ Each run creates:
 - `telemetry/`: target JVM, PostgreSQL, and Redis JSONL
 - `generator-telemetry/`: load-generator JSONL
 - `diagnostics/` and `jfr/`: diagnostic-profile artifacts
-- `recovery/`: one-second `/health` samples collected during every cooldown
+- `recovery/`: internal readiness samples collected during cooldown; excluded
+  from endpoint capacity conclusions
 - `metadata.json`: refs, versions, machine, fixture, and resource limits
 - `normalized-results.json` and `.jsonl`: common schema
 - `REPORT.md`: repeated-run medians and verdict

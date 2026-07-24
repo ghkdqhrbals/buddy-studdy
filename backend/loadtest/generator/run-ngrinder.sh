@@ -18,6 +18,8 @@ python3 "$SCRIPT_DIR/ngrinder/run_test.py" \
   --access-token-file "${ACCESS_TOKEN_FILE:-/dev/null}" \
   --scenario "$SCENARIO" \
   --vusers "$VUS" \
+  --max-processes "${NGRINDER_MAX_PROCESSES:-4}" \
+  --max-threads-per-process "${NGRINDER_MAX_THREADS_PER_PROCESS:-250}" \
   --ramp-seconds "${NGRINDER_RAMP_SECONDS:-30}" \
   --hold-seconds "${NGRINDER_HOLD_SECONDS:-180}" \
   --timeout-ms "${REQUEST_TIMEOUT_MS:-5000}" \

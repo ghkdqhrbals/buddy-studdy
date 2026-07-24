@@ -1717,68 +1717,25 @@ struct HomeProfileAvatar: View {
     var avatarCatalog: AvatarCatalogResponse? = nil
 
     var body: some View {
-        Group {
-            #if os(iOS)
-            if let imageData,
-               let uiImage = UIImage(data: imageData) {
-                avatarPhoto(uiImage)
-            } else {
-                defaultGlyph
+        Circle()
+            .fill(Color.secondary.opacity(0.10))
+            .overlay {
+                Image(BuddyStudyAvatar.assetName)
+                    .resizable()
+                    .interpolation(.none)
+                    .antialiased(false)
+                    .scaledToFit()
+                    .padding(size * 0.06)
             }
-            #else
-            defaultGlyph
-            #endif
-        }
         .frame(width: size, height: size)
+        .clipShape(Circle())
         .contentShape(Circle())
     }
+}
 
-    @ViewBuilder
-    private var defaultGlyph: some View {
-        if let avatarConfig,
-           let avatarCatalog {
-            AvatarBuilderSprite(
-                config: avatarConfig,
-                catalog: avatarCatalog,
-                fallbackSymbolName: symbolName,
-                colorSeed: defaultColorSeed,
-                usesNeutralColor: usesNeutralColor,
-                size: size
-            )
-        } else {
-            ProfileAvatarSprite(
-                symbolName: symbolName,
-                colorSeed: defaultColorSeed,
-                usesNeutralColor: usesNeutralColor,
-                size: size
-            )
-        }
-    }
-
-    private var defaultColorSeed: String {
-        let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let trimmedColorSeed = colorSeed?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if !trimmedColorSeed.isEmpty {
-            return trimmedColorSeed
-        }
-
-        if !trimmedDisplayName.isEmpty {
-            return trimmedDisplayName
-        }
-
-        return symbolName
-    }
-
-    #if os(iOS)
-    private func avatarPhoto(_ uiImage: UIImage) -> some View {
-        Image(uiImage: uiImage)
-            .resizable()
-            .scaledToFill()
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-    }
-    #endif
+enum BuddyStudyAvatar {
+    static let assetName = "BuddyStudyBrandLogo"
+    static let symbolName = "pixel-fox"
 }
 
 struct ProfileAvatarSprite: View {
@@ -2908,14 +2865,12 @@ private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
-    @State private var draftAvatarSymbolName = ProfileAvatarOption.defaultSymbolName
+    @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
     @State private var draftAvatarColorSeed = ""
     @State private var draftAvatarConfig: [String: String] = [:]
     @State private var selectedAvatarCategoryKey: String?
     @State private var allowPublicQuestionsAccess = true
     @State private var isShowingEmailSignIn = false
-    @State private var isShowingCustomColorEditor = false
-    @State private var isShowingAvatarCustomization = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
     @State private var legalWebRoute: MobileLegalWebRoute?
@@ -2936,16 +2891,9 @@ private struct MobileProfileSettingsSheet: View {
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
-        let currentAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
-        let currentAvatarColorSeed = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
-        let storedAvatarConfig = profile?.avatarConfig ?? appState.profileAvatarConfig ?? [:]
-        let currentAvatarConfig = appState.avatarCatalog?.defaultConfig.merging(storedAvatarConfig) { _, current in current } ?? storedAvatarConfig
 
         return trimmedProfileDisplayName != currentDisplayName
             || allowPublicQuestionsAccess != currentPublicQuestions
-            || draftAvatarSymbolName != currentAvatarSymbolName
-            || draftAvatarColorSeed != currentAvatarColorSeed
-            || draftAvatarConfig != currentAvatarConfig
     }
 
     private var canSaveProfile: Bool {
@@ -3036,14 +2984,12 @@ private struct MobileProfileSettingsSheet: View {
                     Section {
                         VStack(alignment: .center, spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: draftAvatarSymbolName,
+                                symbolName: BuddyStudyAvatar.symbolName,
                                 displayName: profileDisplayName,
                                 imageData: nil,
-                                colorSeed: draftAvatarColorSeed,
+                                colorSeed: nil,
                                 usesNeutralColor: appState.communityProfile == nil,
-                                size: 94,
-                                avatarConfig: draftAvatarConfig,
-                                avatarCatalog: appState.avatarCatalog
+                                size: 94
                             )
                             .padding(.top, 4)
 
@@ -3081,62 +3027,6 @@ private struct MobileProfileSettingsSheet: View {
                         .padding(.vertical, 12)
                     }
                     .listRowBackground(Color.clear)
-
-                    Section {
-                        DisclosureGroup(isExpanded: $isShowingAvatarCustomization) {
-                            VStack(alignment: .leading, spacing: 18) {
-                                avatarBuilderSection(strings: strings)
-
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(strings.profileColor)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 12) {
-                                            ForEach(ProfileAvatarColorOption.all) { option in
-                                                Button {
-                                                    draftAvatarColorSeed = option.id
-                                                } label: {
-                                                    colorChoice(
-                                                        color: option.color,
-                                                        isSelected: draftAvatarColorSeed == option.id
-                                                    )
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-
-                                            Button {
-                                                isShowingCustomColorEditor = true
-                                            } label: {
-                                                customColorChoice(isSelected: ProfileAvatarCustomColor(seed: draftAvatarColorSeed) != nil)
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                        .padding(.vertical, 2)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                            .padding(.top, 12)
-                        } label: {
-                            HStack(spacing: 12) {
-                                HomeProfileAvatar(
-                                    symbolName: draftAvatarSymbolName,
-                                    displayName: profileDisplayName,
-                                    imageData: nil,
-                                    colorSeed: draftAvatarColorSeed,
-                                    usesNeutralColor: false,
-                                    size: 40,
-                                    avatarConfig: draftAvatarConfig,
-                                    avatarCatalog: appState.avatarCatalog
-                                )
-                                Text(strings.profileAvatar)
-                                    .font(.body.weight(.semibold))
-                                Spacer(minLength: 0)
-                            }
-                        }
-                    }
 
                     Section {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
@@ -3225,11 +3115,7 @@ private struct MobileProfileSettingsSheet: View {
 
                         Task {
                             await appState.updateCommunityProfile(
-                                displayName: trimmedProfileDisplayName,
-                                avatarSymbolName: draftAvatarSymbolName,
-                                avatarColorSeed: draftAvatarColorSeed,
-                                avatarMode: appState.avatarCatalog == nil ? nil : "BUILDER",
-                                avatarConfig: appState.avatarCatalog == nil ? nil : draftAvatarConfig
+                                displayName: trimmedProfileDisplayName
                             )
                             dismiss()
                         }
@@ -3256,7 +3142,6 @@ private struct MobileProfileSettingsSheet: View {
                 Task {
                     isLoadingProfileDraft = true
                     await appState.loadCommunityProfile()
-                    await appState.loadAvatarCatalog()
                     await appState.refreshTermsAndNotificationPreferences(reason: "profile-settings")
                     resetDraftProfile()
                     isLoadingProfileDraft = false
@@ -3279,10 +3164,6 @@ private struct MobileProfileSettingsSheet: View {
                 }
 
                 profileDisplayName = profile.displayName
-                draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
-                draftAvatarColorSeed = profile.avatarColorSeed
-                draftAvatarConfig = resolvedAvatarConfig()
-                selectedAvatarCategoryKey = selectedAvatarCategoryKey ?? appState.avatarCatalog?.categories.first?.key
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
@@ -3303,14 +3184,6 @@ private struct MobileProfileSettingsSheet: View {
                 }
                 .environmentObject(appState)
             }
-            .sheet(isPresented: $isShowingCustomColorEditor) {
-                ProfileAvatarColorEditorSheet(
-                    initialColor: ProfileAvatarCustomColor.from(seed: draftAvatarColorSeed)
-                ) { color in
-                    draftAvatarColorSeed = color.seed
-                }
-                .environmentObject(appState)
-            }
             .sheet(item: $legalWebRoute) { route in
                 #if os(iOS)
                 MobileLegalWebView(url: route.url)
@@ -3325,19 +3198,7 @@ private struct MobileProfileSettingsSheet: View {
 
     private func resetDraftProfile() {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
-        draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName)
-        draftAvatarColorSeed = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
-        draftAvatarConfig = resolvedAvatarConfig()
-        selectedAvatarCategoryKey = selectedAvatarCategoryKey ?? appState.avatarCatalog?.categories.first?.key
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
-    }
-
-    private func resolvedAvatarConfig() -> [String: String] {
-        guard let catalog = appState.avatarCatalog else {
-            return appState.communityProfile?.avatarConfig ?? appState.profileAvatarConfig ?? [:]
-        }
-        let currentConfig = appState.communityProfile?.avatarConfig ?? appState.profileAvatarConfig ?? catalog.currentConfig
-        return catalog.defaultConfig.merging(currentConfig) { _, current in current }
     }
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
@@ -4075,7 +3936,7 @@ private struct EmailSignInSheet: View {
 }
 
 enum ProfileAvatarOption {
-    static let defaultSymbolName = "pixel-fox-scholar"
+    static let defaultSymbolName = BuddyStudyAvatar.symbolName
 
     static let all = [
         defaultSymbolName,
@@ -4100,46 +3961,7 @@ enum ProfileAvatarOption {
     ]
 
     static func assetName(for symbolName: String) -> String {
-        switch canonicalName(for: symbolName) {
-        case "pixel-fox-scholar":
-            return "ProfileAvatarFoxScholar"
-        case "pixel-fox-arctic-coder":
-            return "ProfileAvatarFoxArcticCoder"
-        case "pixel-fox-detective":
-            return "ProfileAvatarFoxDetective"
-        case "pixel-fox-headset":
-            return "ProfileAvatarFoxHeadset"
-        case "pixel-cat-laptop":
-            return "ProfileAvatarCatLaptop"
-        case "pixel-cat-geek":
-            return "ProfileAvatarCatGeek"
-        case "pixel-cat-student":
-            return "ProfileAvatarCatStudent"
-        case "pixel-cat-wizard":
-            return "ProfileAvatarCatWizard"
-        case "pixel-cat-gamer":
-            return "ProfileAvatarCatGamer"
-        case "pixel-cat-robot":
-            return "ProfileAvatarCatRobot"
-        case "pixel-rabbit-pencil":
-            return "ProfileAvatarRabbitPencil"
-        case "pixel-rabbit-hacker":
-            return "ProfileAvatarRabbitHacker"
-        case "pixel-rabbit-wizard":
-            return "ProfileAvatarRabbitWizard"
-        case "pixel-rabbit-gamer":
-            return "ProfileAvatarRabbitGamer"
-        case "pixel-dog-dachshund-student":
-            return "ProfileAvatarDogDachshundStudent"
-        case "pixel-dog-corgi-reader":
-            return "ProfileAvatarDogCorgiReader"
-        case "pixel-dog-shiba-geek":
-            return "ProfileAvatarDogShibaGeek"
-        case "pixel-dog-robot-puppy":
-            return "ProfileAvatarDogRobotPuppy"
-        default:
-            return "ProfileAvatarCatLaptop"
-        }
+        BuddyStudyAvatar.assetName
     }
 
     static func glyphName(for symbolName: String) -> String {
@@ -4147,20 +3969,7 @@ enum ProfileAvatarOption {
     }
 
     static func canonicalName(for symbolName: String) -> String {
-        switch symbolName {
-        case "person.fill", "person.crop.circle.fill", "pencil.tip", "pixel-buddy":
-            return defaultSymbolName
-        case "pixel-fox", "pixel-fox-student", "pixel-book-pup", "pixel-dachshund", "pixel-pencil-pup", "pixel-sleepy-pup":
-            return defaultSymbolName
-        case "pixel-cat":
-            return "pixel-cat-laptop"
-        case "pixel-rabbit":
-            return "pixel-rabbit-pencil"
-        case "pixel-dog":
-            return "pixel-dog-dachshund-student"
-        default:
-            return all.contains(symbolName) ? symbolName : defaultSymbolName
-        }
+        defaultSymbolName
     }
 }
 
