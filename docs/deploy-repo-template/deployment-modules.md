@@ -61,10 +61,10 @@ one workflow run just because they share a host.
   `MACBOOKAIR_TESTZONE_ROOT`.
 - Monitoring hostname or port changes: run the monitoring routing workflow
   after the monitoring deploy. Routingflare maps
-  both `monitoring.lowfidev.cloud` and `grafana.lowfidev.cloud` to the
-  monitoring nginx gateway. The gateway serves the dashboard directly and
-  proxies the Grafana hostname to the Grafana container over the private
-  Docker network.
+  `monitoring.lowfidev.cloud` to the monitoring nginx gateway and
+  `grafana.lowfidev.cloud` directly to Grafana's dedicated host port. These
+  targets must stay separate because Routingflare's filtering proxy consumes
+  the original `Host` header before forwarding to a local origin.
   The routing job also provisions both Cloudflare Tunnel CNAME records,
   enables Routingflare autostart, removes orphaned local connectors for the
   named tunnel, clears their stale Cloudflare connection records, and

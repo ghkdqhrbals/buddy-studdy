@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 5
     env:
       API_DASHBOARD_PORT: ${{ vars.API_DASHBOARD_PORT || '3000' }}
+      GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
 
     steps:
       - name: Configure Routingflare routes
@@ -85,7 +86,7 @@ jobs:
           }
 
           configure_route monitoring.lowfidev.cloud "${API_DASHBOARD_PORT}"
-          configure_route grafana.lowfidev.cloud "${API_DASHBOARD_PORT}"
+          configure_route grafana.lowfidev.cloud "${GRAFANA_PORT}"
           "${routingflare_bin}" autostart on
           "${routingflare_bin}" stop
           /usr/bin/pkill -f "cloudflared.*${tunnel_id}" >/dev/null 2>&1 || true
@@ -113,6 +114,8 @@ jobs:
           fi
           echo "Monitoring listener:"
           /usr/sbin/lsof -nP -iTCP:"${API_DASHBOARD_PORT}" -sTCP:LISTEN || true
+          echo "Grafana listener:"
+          /usr/sbin/lsof -nP -iTCP:"${GRAFANA_PORT}" -sTCP:LISTEN || true
           echo "Monitoring gateway container:"
           docker ps \
             --filter name=buddystudy-api-dashboard \
@@ -125,4 +128,4 @@ jobs:
             | /usr/bin/xargs -0 grep -HE '^(tunnel:|  - hostname:|    service:)' || true
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
-          echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
+          echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${GRAFANA_PORT}"
