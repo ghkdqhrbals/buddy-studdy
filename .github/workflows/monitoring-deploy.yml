@@ -17,9 +17,12 @@ jobs:
     name: Dispatch Monitoring Module
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      dispatched_at: ${{ steps.dispatch.outputs.dispatched_at }}
 
     steps:
       - name: Dispatch personal-deploy
+        id: dispatch
         env:
           DEPLOY_REPO_DISPATCH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
         run: |
@@ -29,6 +32,7 @@ jobs:
             exit 1
           fi
 
+          dispatched_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           payload="$(jq -n \
             --arg sha "${GITHUB_SHA}" \
             --arg source_repo "${GITHUB_REPOSITORY}" \
@@ -60,6 +64,8 @@ jobs:
             exit 1
           fi
 
+          echo "dispatched_at=${dispatched_at}" >> "${GITHUB_OUTPUT}"
+
       - name: Summary
         run: |
           {
@@ -67,5 +73,80 @@ jobs:
             echo ""
             echo "- Target: \`${DEPLOY_REPO}\`"
             echo "- Event: \`monitoring-source-published\`"
+            echo "- Source SHA: \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  watch:
+    name: Watch Monitoring Deploy Result
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: dispatch
+
+    steps:
+      - name: Wait for deploy workflow run
+        id: deploy_run
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          DISPATCHED_AT: ${{ needs.dispatch.outputs.dispatched_at }}
+          DEPLOY_WORKFLOW_NAME: Deploy BuddyStudy Monitoring on MacBook Air
+        run: |
+          set -euo pipefail
+
+          run_id=""
+          run_url=""
+          for attempt in $(seq 1 60); do
+            runs="$(
+              gh run list \
+                -R "${DEPLOY_REPO}" \
+                --workflow "${DEPLOY_WORKFLOW_NAME}" \
+                --event repository_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt,status,conclusion,url
+            )"
+            match="$(
+              echo "${runs}" | jq -r \
+                --arg dispatched_at "${DISPATCHED_AT}" \
+                '[
+                  .[]
+                  | select(.createdAt >= $dispatched_at)
+                ]
+                | sort_by(.createdAt)
+                | reverse
+                | first // empty'
+            )"
+
+            if [ -n "${match}" ] && [ "${match}" != "null" ]; then
+              run_id="$(echo "${match}" | jq -r '.databaseId')"
+              run_url="$(echo "${match}" | jq -r '.url')"
+              break
+            fi
+
+            echo "Monitoring deploy run not visible yet. attempt=${attempt}/60"
+            sleep 5
+          done
+
+          if [ -z "${run_id}" ]; then
+            echo "Could not find monitoring deploy workflow run after dispatch." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_url=${run_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Watch deploy workflow
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+          DEPLOY_RUN_ID: ${{ steps.deploy_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run watch -R "${DEPLOY_REPO}" "${DEPLOY_RUN_ID}" --exit-status
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Monitoring Deploy Result"
+            echo ""
+            echo "- Deploy run: ${{ steps.deploy_run.outputs.run_url || '<not found>' }}"
             echo "- Source SHA: \`${GITHUB_SHA}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
