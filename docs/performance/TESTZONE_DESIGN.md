@@ -119,10 +119,12 @@ TestZone provides:
   diagnostics, file management, and focused editing mode
 - direct execution, cancellation, and run deletion
 - user-defined test names and immutable script snapshots attached to history
-- live one-second RPS, p95, error, VU, and dropped-iteration samples while k6
-  is running
+- live one-second request rate, error rate, median, p90, p95, average,
+  minimum, maximum, VU, and dropped-iteration samples while k6 is running
 - a selectable per-run time-series detail view, with the same run linked into
   Grafana before and after completion
+- separate traffic/error and latency-percentile charts, plus an end-of-run
+  response-time summary for average, minimum, median, maximum, p90, and p95
 - a hard 1,000-VUser and 3,000-RPS ceiling
 - fixed-catalog PostgreSQL and Redis component configuration, deploy, restart,
   destructive reset, credential retrieval, and return/delete controls
@@ -138,10 +140,11 @@ container environment variables cannot mutate an already initialized volume.
 Kafka is intentionally excluded until a concrete test requires it.
 
 Live metrics are read from k6's append-only JSON output once per second. A
-completed second is normalized into `requestRate`, `p95Ms`, `errorRate`,
-`vus`, and `droppedIterations`, then written to both the run artifact and
-InfluxDB. This adds observability without changing the load script or waiting
-for k6's final summary.
+completed second is normalized into request rate, error rate, latency
+statistics, VUs, and dropped iterations, then written to both the run artifact
+and InfluxDB. The completed k6 summary preserves average, minimum, median,
+maximum, p90, p95, and p99 latency. This adds observability without changing
+the load script or waiting for k6's final summary.
 
 While TestZone is running, the component manager samples Docker CPU, memory,
 process, network-I/O, and block-I/O values every five seconds and writes

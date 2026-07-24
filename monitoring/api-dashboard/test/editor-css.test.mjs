@@ -47,15 +47,19 @@ test("workspace runs tests only from the saved script editor", () => {
   assert.match(javascript, /formatRunLoadPlan\(run\.options\)/);
 });
 
-test("run charts use vendored uPlot with unit-specific live series", () => {
+test("run charts use vendored uPlot with separate RED and latency percentile views", () => {
   const chartCode = javascript.match(/function runChartData\(\)[\s\S]+?function formatRunLoadPlan/)?.[0] ?? "";
   assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);
   assert.match(html, /vendor\/uplot\/uPlot\.min\.css\?v=1\.6\.32/);
   assert.match(css, /\.run-history-chart \.u-legend/);
   assert.match(chartCode, /new window\.uPlot/);
   assert.match(chartCode, /label:\s*"RPS"/);
+  assert.match(chartCode, /label:\s*"Median"/);
+  assert.match(chartCode, /label:\s*"p90"/);
   assert.match(chartCode, /label:\s*"p95"/);
   assert.match(chartCode, /label:\s*"Error"/);
+  assert.match(html, /id="runTrafficChart"/);
+  assert.match(html, /id="runLatencyChart"/);
   assert.doesNotMatch(chartCode, /VUs|point\.vus/);
   assert.doesNotMatch(html, /runChartTooltip/);
 });
@@ -66,7 +70,7 @@ test("run charts cap their content width and support horizontal drag inspection"
   assert.match(chartCode, /RUN_CHART_VISIBLE_SAMPLES\s*=\s*120/);
   assert.match(chartCode, /Math\.min\(MAX_RUN_CHART_WIDTH,\s*runChartViewportWidth\(host\)\)/);
   assert.match(chartCode, /function runChartPanPlugin/);
-  assert.match(chartCode, /plot\.setScale\("x", range\)/);
+  assert.match(chartCode, /chart\?\.setScale\("x", range\)/);
   assert.match(chartCode, /overlay\.setPointerCapture\(pointerId\)/);
   assert.match(css, /\.run-history-chart\s*\{[\s\S]+?max-width:\s*1200px/);
   assert.match(css, /\.run-history-chart\.is-pannable \.u-over\s*\{[\s\S]+?cursor:\s*grab/);
@@ -74,12 +78,13 @@ test("run charts cap their content width and support horizontal drag inspection"
 
 test("selected history run renders its time-series inside the detail panel", () => {
   const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
-  assert.match(detail, /id="runDetailChart"/);
+  assert.match(detail, /id="runDetailTrafficChart"/);
+  assert.match(detail, /id="runDetailLatencyChart"/);
   assert.match(detail, /id="runDetailChartEmpty"/);
   assert.match(css, /\.run-detail-timeline/);
   assert.match(
     javascript,
-    /renderRunChart\(elements\.runDetailChart,\s*elements\.runDetailChartEmpty,\s*"detail"\)/,
+    /renderRunCharts\("detail",\s*\{[\s\S]+?traffic:\s*elements\.runDetailTrafficChart,[\s\S]+?latency:\s*elements\.runDetailLatencyChart/,
   );
   assert.doesNotMatch(detail, /runDetailChartTooltip/);
 });
@@ -119,4 +124,29 @@ test("file names update immediately and save shortcuts work across the editor to
   assert.match(javascript, /elements\.scriptNameInput\.addEventListener\("input",[\s\S]+?renderEditorFileName\(\)/);
   assert.match(javascript, /detail\.textContent = "Unsaved"/);
   assert.doesNotMatch(javascript, /elements\.scriptEditor\.addEventListener\("keydown",\s*handleEditorKeydown\)/);
+});
+
+test("save failures stay visible beside the editor and clear only after a successful save", () => {
+  assert.match(html, /id="editorProblemPanel"[\s\S]+?role="alert"/);
+  assert.match(html, /id="editorProblemTitle"/);
+  assert.match(html, /id="editorProblemMessage"/);
+  assert.match(css, /\.editor-problem-panel\s*\{/);
+  assert.match(javascript, /title:\s*"Save failed"/);
+  assert.match(javascript, /message:\s*"Changes were not saved\./);
+  assert.match(javascript, /state\.dirty\s*=\s*false;[\s\S]+?clearEditorProblem\(\);[\s\S]+?"Saved"/);
+});
+
+test("overview keeps run creation in the script editor and exposes six latency summary values", () => {
+  assert.doesNotMatch(html, /id="overviewRunButton"|>New run</i);
+  for (const id of [
+    "summaryAverage",
+    "summaryMinimum",
+    "summaryMedian",
+    "summaryMaximum",
+    "summaryP90",
+    "summaryLatencyP95",
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(javascript, /function renderLatencySummary/);
 });

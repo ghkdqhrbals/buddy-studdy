@@ -22,6 +22,8 @@ The browser can:
 
 - create, edit, validate, and delete k6 JavaScript files
 - start, cancel, and delete executions
+- compare request rate and errors separately from median, p90, and p95 latency
+- inspect average, minimum, median, maximum, p90, and p95 response-time values
 - deploy, restart, and delete fixed-catalog PostgreSQL and Redis test
   components
 - open an execution in Grafana using its `run_id`
@@ -35,7 +37,9 @@ file. The browser never receives the InfluxDB token.
 New projects intentionally start without scripts. In the Scripts tab, `+`
 opens a blank unsaved file directly in the editor. The file is created and
 validated by the TestZone API only when the user selects `Save`; existing
-script contents are never copied into a new file implicitly.
+script contents are never copied into a new file implicitly. Failed saves keep
+the unsaved indicator and show actionable diagnostics directly above the
+editor; the indicator clears only after the API confirms a successful save.
 
 Limits are enforced by the TestZone API:
 

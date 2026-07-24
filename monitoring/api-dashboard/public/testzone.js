@@ -34,8 +34,8 @@ const state = {
   lintTimer: null,
   componentId: null,
   runCharts: {
-    overview: null,
-    detail: null,
+    overview: { traffic: null, latency: null },
+    detail: { traffic: null, latency: null },
   },
   runChartRanges: {
     overview: null,
@@ -49,16 +49,21 @@ const elementIds = [
   "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
   "newProjectName", "createProjectButton",
-  "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
+  "summaryStatus", "summaryRps", "summaryP95", "summaryError",
+  "summaryAverage", "summaryMinimum", "summaryMedian", "summaryMaximum",
+  "summaryP90", "summaryLatencyP95", "latencySummaryRun",
+  "runTrafficChart", "runLatencyChart",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
   "cancelSelectedRunButton", "viewRunScriptButton",
   "runRows", "runEmptyState", "runCount", "refreshRunsButton",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
-  "runDetailScriptButton", "runDetailStatus", "runDetailChart",
+  "runDetailScriptButton", "runDetailStatus", "runDetailTrafficChart", "runDetailLatencyChart",
+  "detailAverage", "detailMinimum", "detailMedian", "detailMaximum", "detailP90", "detailP95",
   "runDetailChartEmpty", "runLogTail", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
-  "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback", "lintPanel",
+  "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback",
+  "editorProblemPanel", "editorProblemTitle", "editorProblemMessage", "lintPanel",
   "toggleFilesButton", "focusEditorButton", "validateScriptButton",
   "saveScriptButton", "editorRunButton", "deleteScriptButton",
   "componentGrid", "refreshComponentsButton",
@@ -287,7 +292,7 @@ function loadScriptIntoEditor() {
     state.dirty = true;
     renderDirtyState();
     syncEditorMetrics();
-    renderDiagnostics([]);
+    clearEditorProblem();
     setFeedback(elements.editorFeedback, "New file");
     updateEditorControls();
     window.setTimeout(() => elements.scriptEditor.focus(), 0);
@@ -299,7 +304,7 @@ function loadScriptIntoEditor() {
   state.dirty = false;
   renderDirtyState();
   syncEditorMetrics();
-  renderDiagnostics([]);
+  clearEditorProblem();
   setFeedback(elements.editorFeedback, selected ? "" : "No files yet. Use + to create a script.");
   updateEditorControls();
 }
@@ -352,9 +357,24 @@ function syncEditorMetrics() {
   elements.editorPosition.textContent = `Ln ${position.line}, Col ${position.column}`;
 }
 
-function renderDiagnostics(diagnostics = []) {
-  elements.lintPanel.hidden = diagnostics.length === 0;
-  elements.lintPanel.replaceChildren(...diagnostics.map((diagnostic) => {
+function clearEditorProblem() {
+  elements.editorProblemPanel.hidden = true;
+  elements.lintPanel.replaceChildren();
+}
+
+function renderDiagnostics(
+  diagnostics = [],
+  {
+    title = "Script needs attention",
+    message = "Fix the highlighted problems, then save again.",
+    focus = false,
+  } = {},
+) {
+  const values = diagnostics.length ? diagnostics : [{ message }];
+  elements.editorProblemTitle.textContent = title;
+  elements.editorProblemMessage.textContent = message;
+  elements.editorProblemPanel.hidden = false;
+  elements.lintPanel.replaceChildren(...values.map((diagnostic) => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = diagnosticMessage(diagnostic);
@@ -369,6 +389,12 @@ function renderDiagnostics(diagnostics = []) {
     });
     return button;
   }));
+  if (focus) {
+    window.requestAnimationFrame(() => {
+      elements.editorProblemPanel.focus({ preventScroll: true });
+      elements.editorProblemPanel.scrollIntoView({ block: "nearest" });
+    });
+  }
 }
 
 async function saveScript() {
@@ -398,11 +424,16 @@ async function saveScript() {
     state.dirty = false;
     renderDirtyState();
     renderScripts();
+    clearEditorProblem();
     setFeedback(elements.editorFeedback, "Saved", "success");
     return true;
   } catch (error) {
-    renderDiagnostics(error.details);
-    setFeedback(elements.editorFeedback, diagnosticMessage(error.details?.[0]) || error.message, "error");
+    renderDiagnostics(error.details || [], {
+      title: "Save failed",
+      message: "Changes were not saved. Fix the script errors and try again.",
+      focus: true,
+    });
+    setFeedback(elements.editorFeedback, "Save failed", "error");
     return false;
   } finally {
     setButtonBusy(elements.saveScriptButton, false);
@@ -420,14 +451,18 @@ async function validateCurrentScript(quiet = false) {
         code: elements.scriptEditor.value,
       }),
     })).validation;
-    renderDiagnostics([]);
+    clearEditorProblem();
     setFeedback(elements.editorFeedback, `Valid · ${validation.bytes.toLocaleString()} bytes`, "success");
     if (!quiet) toast("Script validation passed.");
     return true;
   } catch (error) {
-    renderDiagnostics(error.details);
-    setFeedback(elements.editorFeedback, diagnosticMessage(error.details?.[0]) || error.message, "error");
-    if (!quiet) toast(error.details.map(diagnosticMessage).join(" ") || error.message, "error");
+    renderDiagnostics(error.details || [], {
+      title: "Validation failed",
+      message: "The script cannot run until these problems are fixed.",
+      focus: !quiet,
+    });
+    setFeedback(elements.editorFeedback, "Validation failed", "error");
+    if (!quiet) toast((error.details || []).map(diagnosticMessage).join(" ") || error.message, "error");
     return false;
   } finally {
     if (!quiet) setButtonBusy(elements.validateScriptButton, false);
@@ -481,16 +516,43 @@ async function loadRuns() {
 
 function runMetric(run, key) {
   if (run.summary?.[key] !== null && run.summary?.[key] !== undefined) return run.summary[key];
-  const map = { requestRate: "requestRate", p95Ms: "p95Ms", errorRate: "errorRate" };
+  const map = {
+    requestRate: "requestRate",
+    averageMs: "averageMs",
+    minimumMs: "minimumMs",
+    medianMs: "medianMs",
+    maximumMs: "maximumMs",
+    p90Ms: "p90Ms",
+    p95Ms: "p95Ms",
+    errorRate: "errorRate",
+  };
   return run.live?.[map[key]];
+}
+
+function renderLatencySummary(run, targets) {
+  for (const [key, element] of Object.entries(targets)) {
+    element.textContent = formatMilliseconds(run ? runMetric(run, key) : null);
+  }
 }
 
 function renderRuns() {
   const latest = selectLatestRun(state.runs);
-  elements.summaryStatus.textContent = latest?.status || "No runs";
-  elements.summaryRps.textContent = formatRate(latest ? runMetric(latest, "requestRate") : null);
-  elements.summaryP95.textContent = formatMilliseconds(latest ? runMetric(latest, "p95Ms") : null);
-  elements.summaryError.textContent = formatPercent(latest ? runMetric(latest, "errorRate") : null);
+  const summaryRun = selectedRun() || latest;
+  elements.summaryStatus.textContent = summaryRun?.status || "No runs";
+  elements.summaryRps.textContent = formatRate(summaryRun ? runMetric(summaryRun, "requestRate") : null);
+  elements.summaryP95.textContent = formatMilliseconds(summaryRun ? runMetric(summaryRun, "p95Ms") : null);
+  elements.summaryError.textContent = formatPercent(summaryRun ? runMetric(summaryRun, "errorRate") : null);
+  elements.latencySummaryRun.textContent = summaryRun
+    ? `${summaryRun.name || summaryRun.scriptName} · ${formatDate(summaryRun.startedAt || summaryRun.createdAt)}`
+    : "Select a run to inspect its completed-request latency.";
+  renderLatencySummary(summaryRun, {
+    averageMs: elements.summaryAverage,
+    minimumMs: elements.summaryMinimum,
+    medianMs: elements.summaryMedian,
+    maximumMs: elements.summaryMaximum,
+    p90Ms: elements.summaryP90,
+    p95Ms: elements.summaryLatencyP95,
+  });
   elements.runCount.textContent = `${state.runs.length.toLocaleString()} runs`;
   elements.runEmptyState.hidden = state.runs.length > 0;
 
@@ -634,6 +696,14 @@ function renderSelectedRun() {
   elements.runDetailConfig.textContent = formatRunLoadPlan(run.options);
   elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
   elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
+  renderLatencySummary(run, {
+    averageMs: elements.detailAverage,
+    minimumMs: elements.detailMinimum,
+    medianMs: elements.detailMedian,
+    maximumMs: elements.detailMaximum,
+    p90Ms: elements.detailP90,
+    p95Ms: elements.detailP95,
+  });
   elements.runLogTail.textContent = (run.logTail || []).join("\n") || "No k6 log output.";
   drawRunChart();
 }
@@ -703,12 +773,26 @@ function runChartData() {
   const points = [...state.runSeries].sort(
     (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
   );
-  return [
-    points.map((point) => new Date(point.timestamp).getTime() / 1000),
-    points.map((point) => Number(point.requestRate) || 0),
-    points.map((point) => Number(point.p95Ms) || 0),
-    points.map((point) => (Number(point.errorRate) || 0) * 100),
-  ];
+  const metric = (point, key, fallback = null) => {
+    const value = point[key] ?? (fallback ? point[fallback] : null);
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const timestamps = points.map((point) => new Date(point.timestamp).getTime() / 1000);
+  return {
+    timestamps,
+    traffic: [
+      timestamps,
+      points.map((point) => metric(point, "requestRate") ?? 0),
+      points.map((point) => (metric(point, "errorRate") ?? 0) * 100),
+    ],
+    latency: [
+      timestamps,
+      points.map((point) => metric(point, "medianMs", "p50Ms")),
+      points.map((point) => metric(point, "p90Ms")),
+      points.map((point) => metric(point, "p95Ms")),
+    ],
+  };
 }
 
 function runChartRange(key, timestamps) {
@@ -727,7 +811,7 @@ function runChartRange(key, timestamps) {
   return { min: minimum, max: minimum + span };
 }
 
-function runChartPanPlugin(host, key) {
+function runChartPanPlugin(host, scope) {
   return {
     hooks: {
       ready: [(plot) => {
@@ -764,8 +848,10 @@ function runChartPanPlugin(host, key) {
             Math.min(rangeStart.min + shift, dataMaximum - span),
           );
           const range = { min: minimum, max: minimum + span };
-          state.runChartRanges[key] = range;
-          plot.setScale("x", range);
+          state.runChartRanges[scope] = range;
+          for (const chart of Object.values(state.runCharts[scope])) {
+            chart?.setScale("x", range);
+          }
         });
 
         const finishPan = (event) => {
@@ -783,12 +869,12 @@ function runChartPanPlugin(host, key) {
   };
 }
 
-function runChartOptions(width, host, key, range) {
+function baseRunChartOptions(width, host, scope, range) {
   return {
     width,
-    height: 270,
+    height: 240,
     padding: [12, 10, 0, 0],
-    plugins: [runChartPanPlugin(host, key)],
+    plugins: [runChartPanPlugin(host, scope)],
     cursor: {
       show: true,
       drag: { x: false, y: false },
@@ -803,9 +889,14 @@ function runChartOptions(width, host, key, range) {
         ? { time: true, range: () => [range.min, range.max] }
         : { time: true },
       rps: { auto: true, range: positiveScaleRange },
-      latency: { auto: true, range: positiveScaleRange },
       error: { auto: true, range: errorScaleRange },
     },
+  };
+}
+
+function trafficChartOptions(width, host, scope, range) {
+  return {
+    ...baseRunChartOptions(width, host, scope, range),
     series: [
       {
         label: "Time",
@@ -818,14 +909,6 @@ function runChartOptions(width, host, key, range) {
         width: 2.5,
         points: { show: false },
         value: (_plot, value) => value === null ? "-" : formatRate(value),
-      },
-      {
-        label: "p95",
-        scale: "latency",
-        stroke: "#e4982b",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
       },
       {
         label: "Error",
@@ -852,13 +935,6 @@ function runChartOptions(width, host, key, range) {
         grid: { stroke: "#e4e9ef", width: 1 },
       },
       {
-        scale: "latency",
-        side: 1,
-        label: "p95 (ms)",
-        stroke: "#b56c06",
-        grid: { show: false },
-      },
-      {
         scale: "error",
         side: 1,
         label: "Error (%)",
@@ -869,9 +945,68 @@ function runChartOptions(width, host, key, range) {
   };
 }
 
-function disposeRunChart(key) {
-  state.runCharts[key]?.destroy();
-  state.runCharts[key] = null;
+function latencyChartOptions(width, host, scope, range) {
+  const options = baseRunChartOptions(width, host, scope, range);
+  options.scales = {
+    x: options.scales.x,
+    latency: { auto: true, range: positiveScaleRange },
+  };
+  return {
+    ...options,
+    series: [
+      {
+        label: "Time",
+        value: (_plot, value) => chartTime(value),
+      },
+      {
+        label: "Median",
+        scale: "latency",
+        stroke: "#2166d1",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      },
+      {
+        label: "p90",
+        scale: "latency",
+        stroke: "#8a5bc7",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      },
+      {
+        label: "p95",
+        scale: "latency",
+        stroke: "#e4982b",
+        width: 2.5,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      },
+    ],
+    axes: [
+      {
+        scale: "x",
+        stroke: "#64748b",
+        grid: { stroke: "#e4e9ef", width: 1 },
+        ticks: { stroke: "#cbd5e1", width: 1 },
+        values: (_plot, values) => values.map(chartTime),
+      },
+      {
+        scale: "latency",
+        side: 3,
+        label: "Latency (ms)",
+        stroke: "#b56c06",
+        grid: { stroke: "#e4e9ef", width: 1 },
+      },
+    ],
+  };
+}
+
+function disposeRunCharts(scope) {
+  for (const kind of ["traffic", "latency"]) {
+    state.runCharts[scope][kind]?.destroy();
+    state.runCharts[scope][kind] = null;
+  }
 }
 
 function runChartViewportWidth(host) {
@@ -882,41 +1017,67 @@ function runChartWidth(host) {
   return Math.min(MAX_RUN_CHART_WIDTH, runChartViewportWidth(host));
 }
 
-function renderRunChart(host, emptyState, key) {
-  disposeRunChart(key);
-  host.classList.remove("is-pannable", "is-panning");
+function renderRunCharts(scope, hosts, emptyState) {
+  disposeRunCharts(scope);
+  for (const host of Object.values(hosts)) host.classList.remove("is-pannable", "is-panning");
   const hasPoints = state.runSeries.length > 0;
   emptyState.hidden = hasPoints;
-  host.hidden = !hasPoints;
-  host.replaceChildren();
+  for (const host of Object.values(hosts)) {
+    host.hidden = !hasPoints;
+    host.replaceChildren();
+  }
   if (!hasPoints) return;
   if (!window.uPlot) {
-    host.hidden = false;
-    host.textContent = "Chart library unavailable.";
+    hosts.traffic.hidden = false;
+    hosts.traffic.textContent = "Chart library unavailable.";
+    hosts.latency.hidden = true;
     return;
   }
-  const width = runChartWidth(host);
   const data = runChartData();
-  const range = runChartRange(key, data[0]);
-  state.runChartRanges[key] = range;
-  host.classList.toggle("is-pannable", data[0].length > RUN_CHART_VISIBLE_SAMPLES);
-  state.runCharts[key] = new window.uPlot(runChartOptions(width, host, key, range), data, host);
+  const range = runChartRange(scope, data.timestamps);
+  state.runChartRanges[scope] = range;
+  for (const host of Object.values(hosts)) {
+    host.classList.toggle("is-pannable", data.timestamps.length > RUN_CHART_VISIBLE_SAMPLES);
+  }
+  state.runCharts[scope].traffic = new window.uPlot(
+    trafficChartOptions(runChartWidth(hosts.traffic), hosts.traffic, scope, range),
+    data.traffic,
+    hosts.traffic,
+  );
+  state.runCharts[scope].latency = new window.uPlot(
+    latencyChartOptions(runChartWidth(hosts.latency), hosts.latency, scope, range),
+    data.latency,
+    hosts.latency,
+  );
 }
 
 function drawRunChart() {
-  renderRunChart(elements.runHistoryChart, elements.timelineEmptyState, "overview");
-  renderRunChart(elements.runDetailChart, elements.runDetailChartEmpty, "detail");
+  renderRunCharts("overview", {
+    traffic: elements.runTrafficChart,
+    latency: elements.runLatencyChart,
+  }, elements.timelineEmptyState);
+  renderRunCharts("detail", {
+    traffic: elements.runDetailTrafficChart,
+    latency: elements.runDetailLatencyChart,
+  }, elements.runDetailChartEmpty);
 }
 
 function resizeRunCharts() {
-  for (const [key, host] of [
-    ["overview", elements.runHistoryChart],
-    ["detail", elements.runDetailChart],
-  ]) {
-    const chart = state.runCharts[key];
-    if (!chart || host.hidden) continue;
-    const width = runChartWidth(host);
-    chart.setSize({ width, height: 270 });
+  for (const [scope, hosts] of Object.entries({
+    overview: {
+      traffic: elements.runTrafficChart,
+      latency: elements.runLatencyChart,
+    },
+    detail: {
+      traffic: elements.runDetailTrafficChart,
+      latency: elements.runDetailLatencyChart,
+    },
+  })) {
+    for (const [kind, host] of Object.entries(hosts)) {
+      const chart = state.runCharts[scope][kind];
+      if (!chart || host.hidden) continue;
+      chart.setSize({ width: runChartWidth(host), height: 240 });
+    }
   }
 }
 

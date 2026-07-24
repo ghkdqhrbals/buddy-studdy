@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { summarizeLatencySamples } from "./statistics.mjs";
 
 const TRACKED_METRICS = new Set([
   "dropped_iterations",
@@ -8,13 +9,6 @@ const TRACKED_METRICS = new Set([
   "vus",
   "vus_max",
 ]);
-
-function percentile(values, quantile) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * quantile) - 1);
-  return sorted[Math.max(0, index)];
-}
 
 function emptyBucket(timestamp) {
   return {
@@ -31,10 +25,11 @@ export function summarizeLiveBucket(bucket) {
   const failures = bucket.failures.length
     ? bucket.failures.reduce((sum, value) => sum + value, 0) / bucket.failures.length
     : 0;
+  const latency = summarizeLatencySamples(bucket.durations);
   return {
     timestamp: new Date(bucket.timestamp).toISOString(),
     requestRate: bucket.requests,
-    p95Ms: percentile(bucket.durations, 0.95),
+    ...latency,
     errorRate: failures,
     vus: bucket.vus.length ? Math.max(...bucket.vus) : 0,
     droppedIterations: bucket.droppedIterations,

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import readline from "node:readline";
+import { percentile } from "./statistics.mjs";
 
 const TRACKED_K6_METRICS = new Set([
   "checks",
@@ -57,6 +58,10 @@ export function summarizeK6(summary = {}) {
   return {
     requestRate: requests.rate ?? null,
     iterationRate: iterations.rate ?? null,
+    averageMs: duration.avg ?? null,
+    minimumMs: duration.min ?? null,
+    medianMs: duration.med ?? duration["p(50)"] ?? null,
+    maximumMs: duration.max ?? null,
     p50Ms: duration["p(50)"] ?? duration.med ?? null,
     p90Ms: duration["p(90)"] ?? null,
     p95Ms: duration["p(95)"] ?? null,
@@ -68,13 +73,6 @@ export function summarizeK6(summary = {}) {
     iterations: iterations.count ?? null,
     droppedIterations: dropped.count ?? 0,
   };
-}
-
-function percentile(values, quantile) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * quantile) - 1);
-  return sorted[Math.max(0, index)];
 }
 
 function aggregateValue(metric, values) {
@@ -143,6 +141,11 @@ export class InfluxWriter {
         profile: run.profile,
       }, {
         requestRate: snapshot.requestRate,
+        averageMs: snapshot.averageMs,
+        minimumMs: snapshot.minimumMs,
+        medianMs: snapshot.medianMs,
+        maximumMs: snapshot.maximumMs,
+        p90Ms: snapshot.p90Ms,
         p95Ms: snapshot.p95Ms,
         errorRate: snapshot.errorRate,
         vus: snapshot.vus,

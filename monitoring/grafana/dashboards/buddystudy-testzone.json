@@ -118,21 +118,25 @@
           "placement": "bottom"
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_req_duration\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 10s, fn: (column, tables=<-) => tables |> quantile(q: 0.95, column: column, method: \"estimate_tdigest\"), createEmpty: false)\n  |> set(key: \"_field\", value: \"p95_latency\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"medianMs\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"median\")",
           "refId": "A"
         },
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"p95Ms\" and r.run_id == \"${run_id}\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"p90Ms\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"p90\")",
           "refId": "B"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"p95Ms\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"p95\")",
+          "refId": "C"
         }
       ],
-      "title": "p95 latency",
+      "title": "Latency percentiles",
       "type": "timeseries"
     },
     {
@@ -270,6 +274,82 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"averageMs\")\n  |> last()\n  |> set(key: \"_field\", value: \"Average\")",
+          "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"minimumMs\")\n  |> last()\n  |> set(key: \"_field\", value: \"Minimum\")",
+          "refId": "B"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"medianMs\")\n  |> last()\n  |> set(key: \"_field\", value: \"Median\")",
+          "refId": "C"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"maximumMs\")\n  |> last()\n  |> set(key: \"_field\", value: \"Maximum\")",
+          "refId": "D"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"p90Ms\")\n  |> last()\n  |> set(key: \"_field\", value: \"p90\")",
+          "refId": "E"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_summary\" and r.run_id == \"${run_id}\" and r._field == \"p95Ms\")\n  |> last()\n  |> set(key: \"_field\", value: \"p95\")",
+          "refId": "F"
+        }
+      ],
+      "title": "Response time summary",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -290,7 +370,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 22
       },
       "id": 5,
       "options": {
@@ -344,7 +424,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 22
       },
       "id": 6,
       "options": {
@@ -455,5 +535,5 @@
   "timezone": "browser",
   "title": "BuddyStudy TestZone Runs",
   "uid": "testzone-runs",
-  "version": 2
+  "version": 3
 }

@@ -27,6 +27,11 @@ test("k6 point stream is aggregated into one live sample per second", () => {
   const sample = summarizeLiveBucket(bucket);
 
   assert.equal(sample.requestRate, 2);
+  assert.equal(sample.averageMs, 250);
+  assert.equal(sample.minimumMs, 100);
+  assert.equal(sample.medianMs, 100);
+  assert.equal(sample.maximumMs, 400);
+  assert.equal(sample.p90Ms, 400);
   assert.equal(sample.p95Ms, 400);
   assert.equal(sample.errorRate, 0.5);
   assert.equal(sample.vus, 1000);

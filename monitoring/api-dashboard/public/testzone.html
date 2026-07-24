@@ -71,12 +71,29 @@
               <article><span>Error rate</span><strong id="summaryError">-</strong></article>
             </section>
 
+            <section class="latency-summary-section" aria-labelledby="latencySummaryTitle">
+              <header>
+                <div>
+                  <h3 id="latencySummaryTitle">Response time summary</h3>
+                  <p id="latencySummaryRun">Select a run to inspect its completed-request latency.</p>
+                </div>
+              </header>
+              <div class="latency-summary" aria-label="Selected run response time statistics">
+                <article title="Mean response time"><span>Average</span><strong id="summaryAverage">-</strong></article>
+                <article title="Fastest response time"><span>Minimum</span><strong id="summaryMinimum">-</strong></article>
+                <article title="Half of requests completed within this time"><span>Median</span><strong id="summaryMedian">-</strong></article>
+                <article title="Slowest response time"><span>Maximum</span><strong id="summaryMaximum">-</strong></article>
+                <article title="90% of requests completed within this time"><span>p90</span><strong id="summaryP90">-</strong></article>
+                <article title="95% of requests completed within this time"><span>p95</span><strong id="summaryLatencyP95">-</strong></article>
+              </div>
+            </section>
+
             <section class="overview-grid">
               <article class="workspace-section chart-section">
                 <header>
                   <div>
                     <h3 id="timelineTitle">Run time-series</h3>
-                    <p id="timelineDescription">실행 중 RPS, p95와 오류율을 초 단위로 확인합니다.</p>
+                    <p id="timelineDescription">요청량·오류와 지연시간 백분위를 초 단위로 비교합니다.</p>
                   </div>
                   <div class="timeline-controls">
                     <select id="recentRunSelect" aria-label="Select test run"></select>
@@ -89,13 +106,35 @@
                   <span id="liveProgress">Preparing run</span>
                   <button id="cancelSelectedRunButton" class="row-action danger" type="button">Cancel</button>
                 </div>
-                <div class="run-chart-wrap">
-                  <div
-                    id="runHistoryChart"
-                    class="run-history-chart"
-                    role="img"
-                    aria-label="Selected run RPS, p95 latency, and error rate time-series chart."
-                  ></div>
+                <div class="metric-chart-grid">
+                  <section class="metric-chart" aria-labelledby="trafficChartTitle">
+                    <header>
+                      <h4 id="trafficChartTitle">Traffic &amp; errors</h4>
+                      <span>RPS / error rate</span>
+                    </header>
+                    <div class="run-chart-wrap">
+                      <div
+                        id="runTrafficChart"
+                        class="run-history-chart"
+                        role="img"
+                        aria-label="Selected run request rate and error rate time-series chart."
+                      ></div>
+                    </div>
+                  </section>
+                  <section class="metric-chart" aria-labelledby="latencyChartTitle">
+                    <header>
+                      <h4 id="latencyChartTitle">Latency percentiles</h4>
+                      <span>Median / p90 / p95</span>
+                    </header>
+                    <div class="run-chart-wrap">
+                      <div
+                        id="runLatencyChart"
+                        class="run-history-chart"
+                        role="img"
+                        aria-label="Selected run median, p90, and p95 response time chart."
+                      ></div>
+                    </div>
+                  </section>
                 </div>
                 <div id="timelineEmptyState" class="chart-empty" hidden>
                   <strong>No time-series data yet</strong>
@@ -153,20 +192,44 @@
                 <div><span>Script</span><button id="runDetailScriptButton" class="text-link" type="button">-</button></div>
                 <div><span>Status</span><strong id="runDetailStatus">-</strong></div>
               </div>
+              <div class="latency-summary compact" aria-label="Run detail response time statistics">
+                <article><span>Average</span><strong id="detailAverage">-</strong></article>
+                <article><span>Minimum</span><strong id="detailMinimum">-</strong></article>
+                <article><span>Median</span><strong id="detailMedian">-</strong></article>
+                <article><span>Maximum</span><strong id="detailMaximum">-</strong></article>
+                <article><span>p90</span><strong id="detailP90">-</strong></article>
+                <article><span>p95</span><strong id="detailP95">-</strong></article>
+              </div>
               <section class="run-detail-timeline" aria-labelledby="runDetailTimelineTitle">
                 <header>
                   <div>
                     <h4 id="runDetailTimelineTitle">Run time-series</h4>
-                    <p>선택한 실행의 RPS, p95와 오류율 추이를 확인합니다.</p>
+                    <p>선택한 실행의 요청량·오류와 지연시간 백분위를 확인합니다.</p>
                   </div>
                 </header>
-                <div class="run-chart-wrap">
-                  <div
-                    id="runDetailChart"
-                    class="run-history-chart"
-                    role="img"
-                    aria-label="Selected history run RPS, p95 latency, and error rate time-series chart."
-                  ></div>
+                <div class="metric-chart-grid">
+                  <section class="metric-chart">
+                    <header><h4>Traffic &amp; errors</h4><span>RPS / error rate</span></header>
+                    <div class="run-chart-wrap">
+                      <div
+                        id="runDetailTrafficChart"
+                        class="run-history-chart"
+                        role="img"
+                        aria-label="Selected history run request rate and error rate chart."
+                      ></div>
+                    </div>
+                  </section>
+                  <section class="metric-chart">
+                    <header><h4>Latency percentiles</h4><span>Median / p90 / p95</span></header>
+                    <div class="run-chart-wrap">
+                      <div
+                        id="runDetailLatencyChart"
+                        class="run-history-chart"
+                        role="img"
+                        aria-label="Selected history run median, p90, and p95 response time chart."
+                      ></div>
+                    </div>
+                  </section>
                 </div>
                 <div id="runDetailChartEmpty" class="chart-empty" hidden>
                   <strong>No time-series data</strong>
@@ -206,12 +269,28 @@
                     <button id="deleteScriptButton" class="icon-button danger" type="button" title="Delete script" aria-label="Delete script">×</button>
                   </div>
                 </header>
+                <section
+                  id="editorProblemPanel"
+                  class="editor-problem-panel"
+                  role="alert"
+                  aria-live="assertive"
+                  tabindex="-1"
+                  hidden
+                >
+                  <div class="editor-problem-heading">
+                    <span class="editor-problem-icon" aria-hidden="true">!</span>
+                    <div>
+                      <strong id="editorProblemTitle">Save failed</strong>
+                      <span id="editorProblemMessage">Changes were not saved.</span>
+                    </div>
+                  </div>
+                  <div id="lintPanel" class="lint-panel"></div>
+                </section>
                 <div class="code-editor">
                   <div id="editorLineNumbers" class="line-numbers" aria-hidden="true"></div>
                   <pre id="scriptHighlight" class="script-highlight" aria-hidden="true"></pre>
                   <textarea id="scriptEditor" aria-label="k6 JavaScript editor" spellcheck="false" wrap="off"></textarea>
                 </div>
-                <div id="lintPanel" class="lint-panel" hidden></div>
                 <footer class="editor-statusbar">
                   <span>JavaScript · k6</span>
                   <span id="editorPosition">Ln 1, Col 1</span>

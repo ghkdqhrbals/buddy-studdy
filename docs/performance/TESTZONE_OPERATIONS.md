@@ -38,10 +38,11 @@ InfluxDB is not the source of truth for scripts or run lifecycle. It is the
 time-series analysis store.
 
 The per-run k6 JSONL remains available for troubleshooting, while InfluxDB
-receives only one-second API aggregates for request count, p95 latency,
-failure ratio, checks, iterations, dropped iterations, and virtual users.
-This keeps a 1,000-VU run from turning every request sample into a
-long-lived time-series point.
+receives only one-second API aggregates for request count, error ratio,
+latency statistics, checks, iterations, dropped iterations, and virtual users.
+The final run summary stores average, minimum, median, maximum, p90, p95, and
+p99 latency. This keeps a 1,000-VU run from turning every request sample into
+a long-lived time-series point.
 
 ## Deployment Modules
 

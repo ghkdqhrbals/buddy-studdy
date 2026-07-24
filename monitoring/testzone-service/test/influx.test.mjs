@@ -19,12 +19,27 @@ test("summarizeK6 extracts stable report fields", () => {
   const summary = summarizeK6({
     metrics: {
       http_reqs: { values: { rate: 123.4, count: 1000 } },
-      http_req_duration: { values: { "p(50)": 10, "p(90)": 20, "p(95)": 30, "p(99)": 50 } },
+      http_req_duration: {
+        values: {
+          avg: 14,
+          min: 4,
+          med: 10,
+          max: 80,
+          "p(90)": 20,
+          "p(95)": 30,
+          "p(99)": 50,
+        },
+      },
       http_req_failed: { values: { rate: 0.01 } },
       vus_max: { values: { max: 100 } },
     },
   });
   assert.equal(summary.requestRate, 123.4);
+  assert.equal(summary.averageMs, 14);
+  assert.equal(summary.minimumMs, 4);
+  assert.equal(summary.medianMs, 10);
+  assert.equal(summary.maximumMs, 80);
+  assert.equal(summary.p90Ms, 20);
   assert.equal(summary.p95Ms, 30);
   assert.equal(summary.errorRate, 0.01);
   assert.equal(summary.maxVus, 100);
@@ -35,7 +50,14 @@ test("summarizeK6 reads the flat k6 0.54 summary export", () => {
     metrics: {
       http_reqs: { rate: 5.03, count: 51 },
       iterations: { rate: 5.03, count: 51 },
-      http_req_duration: { med: 13.8, "p(90)": 17.1, "p(95)": 18.1 },
+      http_req_duration: {
+        avg: 14.2,
+        min: 8.1,
+        med: 13.8,
+        max: 31.4,
+        "p(90)": 17.1,
+        "p(95)": 18.1,
+      },
       http_req_failed: { value: 0 },
       checks: { value: 1 },
       vus_max: { value: 1, max: 1 },
@@ -43,7 +65,12 @@ test("summarizeK6 reads the flat k6 0.54 summary export", () => {
   });
   assert.equal(summary.requestRate, 5.03);
   assert.equal(summary.requests, 51);
+  assert.equal(summary.averageMs, 14.2);
+  assert.equal(summary.minimumMs, 8.1);
+  assert.equal(summary.medianMs, 13.8);
+  assert.equal(summary.maximumMs, 31.4);
   assert.equal(summary.p50Ms, 13.8);
+  assert.equal(summary.p90Ms, 17.1);
   assert.equal(summary.p95Ms, 18.1);
   assert.equal(summary.errorRate, 0);
   assert.equal(summary.checkRate, 1);
