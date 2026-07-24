@@ -27,3 +27,11 @@ test("script workspace contains only files, editor, and Run Plan controls", () =
   assert.match(html, /id="editorRunButton"/);
   assert.match(html, /id="runDialog"/);
 });
+
+test("run chart exposes hover details and keyboard navigation", () => {
+  assert.match(html, /id="runChartTooltip"/);
+  assert.match(html, /tabindex="0"/);
+  assert.match(css, /\.run-chart-tooltip/);
+  assert.match(javascript, /pointermove/);
+  assert.match(javascript, /handleRunChartKeydown/);
+});

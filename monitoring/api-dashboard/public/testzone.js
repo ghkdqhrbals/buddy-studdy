@@ -1,5 +1,6 @@
 import {
   RUN_PROFILES,
+  chartSampleIndex,
   diagnosticMessage,
   editorPosition,
   formatDate,
@@ -11,7 +12,7 @@ import {
   parseObjectJson,
   runScriptName,
   selectLatestRun,
-} from "./testzone-model.js?v=2026072405";
+} from "./testzone-model.js?v=2026072406";
 
 const API_BASE = "/testzone/api";
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
@@ -32,12 +33,14 @@ const state = {
   activeTab: "overview",
   lintTimer: null,
   componentId: null,
+  runChartHoverIndex: null,
 };
 
 const elementIds = [
   "serviceStatus", "projectSelect", "projectBaseUrl", "saveProjectButton", "projectFeedback",
   "headerRunButton", "overviewRunButton", "quickScriptSelect", "profileShortcuts",
   "summaryStatus", "summaryRps", "summaryP95", "summaryError", "runHistoryChart",
+  "runChartTooltip",
   "recentRunSelect", "timelineGrafanaLink", "timelineTitle", "timelineDescription",
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
   "cancelSelectedRunButton", "viewRunScriptButton",
@@ -473,6 +476,8 @@ async function selectRun(id) {
 
 async function loadSelectedRunSeries() {
   const run = selectedRun();
+  state.runChartHoverIndex = null;
+  elements.runChartTooltip.hidden = true;
   if (!run) {
     state.runSeries = [];
     renderSelectedRun();
@@ -563,7 +568,11 @@ function drawRunChart() {
   const points = state.runSeries;
   elements.timelineEmptyState.hidden = points.length > 0;
   canvas.hidden = points.length === 0;
-  if (!points.length) return;
+  if (!points.length) {
+    state.runChartHoverIndex = null;
+    elements.runChartTooltip.hidden = true;
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(320, Math.round(rect.width));
   const height = 260;
@@ -617,6 +626,96 @@ function drawRunChart() {
   context.fillText(first.toLocaleTimeString("ko-KR"), padding.left, height - 8);
   context.textAlign = "right";
   context.fillText(last.toLocaleTimeString("ko-KR"), width - padding.right, height - 8);
+
+  if (state.runChartHoverIndex === null || state.runChartHoverIndex >= points.length) {
+    elements.runChartTooltip.hidden = true;
+    return;
+  }
+  const hoverIndex = state.runChartHoverIndex;
+  const hoverPoint = points[hoverIndex];
+  const hoverX = xAt(hoverIndex);
+  context.save();
+  context.strokeStyle = "#64748b";
+  context.lineWidth = 1;
+  context.setLineDash([3, 3]);
+  context.beginPath();
+  context.moveTo(hoverX, padding.top);
+  context.lineTo(hoverX, padding.top + chartHeight);
+  context.stroke();
+  context.setLineDash([]);
+  for (const series of [
+    { value: hoverPoint.requestRate, maximum: maxRps, color: "#2166d1" },
+    { value: hoverPoint.p95Ms, maximum: maxP95, color: "#e4982b" },
+    { value: hoverPoint.errorRate, maximum: 1, color: "#c63a3a" },
+    { value: hoverPoint.vus, maximum: maxVus, color: "#16825d" },
+  ]) {
+    const y = padding.top + chartHeight - ((Number(series.value) || 0) / series.maximum) * chartHeight;
+    context.fillStyle = "#fff";
+    context.strokeStyle = series.color;
+    context.lineWidth = 2;
+    context.beginPath();
+    context.arc(hoverX, y, 4, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+  renderRunChartTooltip(hoverPoint, hoverX, width);
+}
+
+function renderRunChartTooltip(point, x, chartWidth) {
+  const title = document.createElement("strong");
+  title.textContent = formatDate(point.timestamp);
+  const metrics = document.createElement("dl");
+  for (const [label, value] of [
+    ["RPS", formatRate(point.requestRate)],
+    ["p95", formatMilliseconds(point.p95Ms)],
+    ["Error", formatPercent(point.errorRate)],
+    ["VUs", String(Number(point.vus) || 0)],
+  ]) {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    metrics.append(term, description);
+  }
+  elements.runChartTooltip.replaceChildren(title, metrics);
+  elements.runChartTooltip.hidden = false;
+  const halfWidth = elements.runChartTooltip.offsetWidth / 2;
+  const safeX = Math.min(Math.max(x, halfWidth + 8), chartWidth - halfWidth - 8);
+  elements.runChartTooltip.style.left = `${safeX}px`;
+}
+
+function setRunChartHoverFromClientX(clientX) {
+  const canvas = elements.runHistoryChart;
+  const rect = canvas.getBoundingClientRect();
+  const index = chartSampleIndex(clientX - rect.left, state.runSeries.length, 48, rect.width - 44);
+  if (index === state.runChartHoverIndex) return;
+  state.runChartHoverIndex = index;
+  drawRunChart();
+}
+
+function clearRunChartHover() {
+  if (state.runChartHoverIndex === null) return;
+  state.runChartHoverIndex = null;
+  elements.runChartTooltip.hidden = true;
+  drawRunChart();
+}
+
+function handleRunChartKeydown(event) {
+  if (!state.runSeries.length) return;
+  const current = state.runChartHoverIndex ?? state.runSeries.length - 1;
+  let next = current;
+  if (event.key === "ArrowLeft") next = Math.max(0, current - 1);
+  else if (event.key === "ArrowRight") next = Math.min(state.runSeries.length - 1, current + 1);
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = state.runSeries.length - 1;
+  else if (event.key === "Escape") {
+    clearRunChartHover();
+    return;
+  } else return;
+  event.preventDefault();
+  state.runChartHoverIndex = next;
+  drawRunChart();
 }
 
 function applyProfile(name) {
@@ -994,6 +1093,17 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
+  elements.runHistoryChart.addEventListener("pointermove", (event) => setRunChartHoverFromClientX(event.clientX));
+  elements.runHistoryChart.addEventListener("pointerdown", (event) => setRunChartHoverFromClientX(event.clientX));
+  elements.runHistoryChart.addEventListener("pointerleave", clearRunChartHover);
+  elements.runHistoryChart.addEventListener("focus", () => {
+    if (state.runSeries.length && state.runChartHoverIndex === null) {
+      state.runChartHoverIndex = state.runSeries.length - 1;
+      drawRunChart();
+    }
+  });
+  elements.runHistoryChart.addEventListener("blur", clearRunChartHover);
+  elements.runHistoryChart.addEventListener("keydown", handleRunChartKeydown);
   elements.runProfileControl.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");
     if (button) applyProfile(button.dataset.profile);

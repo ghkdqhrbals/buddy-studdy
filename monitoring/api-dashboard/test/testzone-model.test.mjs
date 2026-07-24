@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   RUN_PROFILES,
   buildChartPoints,
+  chartSampleIndex,
   diagnosticMessage,
   editorPosition,
   formatChartLabel,
@@ -72,6 +73,15 @@ test("run history keeps the execution-time script name and supports legacy runs"
 
 test("chart labels remain compact and unambiguous", () => {
   assert.equal(formatChartLabel("2026-07-24T01:58:00Z"), "07/24 10:58");
+});
+
+test("chart hover selects the nearest sample and clamps to the plot", () => {
+  assert.equal(chartSampleIndex(50, 5, 50, 450), 0);
+  assert.equal(chartSampleIndex(250, 5, 50, 450), 2);
+  assert.equal(chartSampleIndex(450, 5, 50, 450), 4);
+  assert.equal(chartSampleIndex(-100, 5, 50, 450), 0);
+  assert.equal(chartSampleIndex(900, 5, 50, 450), 4);
+  assert.equal(chartSampleIndex(250, 0, 50, 450), -1);
 });
 
 test("formatters preserve missing values and display operational units", () => {

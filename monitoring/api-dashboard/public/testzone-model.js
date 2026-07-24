@@ -90,6 +90,13 @@ export function buildChartPoints(runs = []) {
     }));
 }
 
+export function chartSampleIndex(pointerX, sampleCount, plotStart, plotEnd) {
+  if (sampleCount <= 0) return -1;
+  if (sampleCount === 1 || plotEnd <= plotStart) return 0;
+  const normalized = Math.min(1, Math.max(0, (pointerX - plotStart) / (plotEnd - plotStart)));
+  return Math.round(normalized * (sampleCount - 1));
+}
+
 export function lineNumbersFor(code) {
   const count = Math.max(1, String(code ?? "").split("\n").length);
   return Array.from({ length: count }, (_, index) => index + 1).join("\n");

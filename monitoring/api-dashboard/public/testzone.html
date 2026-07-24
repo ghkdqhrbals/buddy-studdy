@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072408" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072409" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -96,7 +96,16 @@
                   <span id="liveProgress">Preparing run</span>
                   <button id="cancelSelectedRunButton" class="row-action danger" type="button">Cancel</button>
                 </div>
-                <canvas id="runHistoryChart" height="260" aria-label="Selected run time-series chart"></canvas>
+                <div class="run-chart-wrap">
+                  <canvas
+                    id="runHistoryChart"
+                    height="260"
+                    tabindex="0"
+                    aria-label="Selected run time-series chart. Use arrow keys to inspect samples."
+                    aria-describedby="runChartTooltip"
+                  ></canvas>
+                  <div id="runChartTooltip" class="run-chart-tooltip" role="status" aria-live="polite" hidden></div>
+                </div>
                 <div id="timelineEmptyState" class="chart-empty" hidden>
                   <strong>No time-series data yet</strong>
                   <span>실행이 시작되면 초 단위 지표가 여기에 표시됩니다.</span>
@@ -354,6 +363,6 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script type="module" src="/testzone.js?v=2026072408"></script>
+    <script type="module" src="/testzone.js?v=2026072409"></script>
   </body>
 </html>
