@@ -36,6 +36,9 @@ jobs:
             echo "Routingflare app or CLI was not found in an Applications directory." >&2
             exit 1
           fi
+          echo "Routingflare version before update: $(/usr/bin/defaults read "${routingflare_app}/Contents/Info" CFBundleShortVersionString)"
+          "${routingflare_bin}" update
+          echo "Routingflare version after update: $(/usr/bin/defaults read "${routingflare_app}/Contents/Info" CFBundleShortVersionString)"
 
           cloudflared_bin="$(command -v cloudflared || true)"
           for candidate in \

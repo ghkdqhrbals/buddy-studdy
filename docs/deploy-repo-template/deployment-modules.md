@@ -68,10 +68,12 @@ one workflow run just because they share a host.
   The routing job also provisions both Cloudflare Tunnel CNAME records,
   enables Routingflare autostart, removes orphaned local connectors for the
   named tunnel, clears their stale Cloudflare connection records, and
-  relaunches the menu-bar app through macOS Launch Services before starting
-  one connector. The app and its tunnel therefore outlive GitHub Actions
-  orphan-process cleanup. This prevents both post-deploy 502 responses and
-  requests alternating between current and obsolete ingress configurations.
+  updates Routingflare before relaunching the menu-bar app through macOS
+  Launch Services and starting one connector. Keeping the proxy current avoids
+  invalid hop-by-hop response headers, while the clean process context lets the
+  app and its tunnel outlive GitHub Actions orphan-process cleanup. This
+  prevents both post-deploy 502 responses and requests alternating between
+  current and obsolete ingress configurations.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The

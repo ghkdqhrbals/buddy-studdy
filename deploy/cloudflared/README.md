@@ -65,10 +65,12 @@ routes. Apply them with the dedicated
 `Deploy BuddyStudy Monitoring Routes on MacBook Air` workflow; do not attach
 route changes to backend or TestZone deployment jobs.
 
-The routing workflow restarts the Routingflare menu-bar app through macOS
-Launch Services before starting the named-tunnel connector. This keeps the
-app and its `cloudflared` child independent from the GitHub Actions runner, so
-the runner's orphan-process cleanup cannot take the public routes offline.
+The routing workflow updates Routingflare, then restarts the menu-bar app
+through macOS Launch Services before starting the named-tunnel connector. The
+current proxy filters invalid hop-by-hop response headers such as
+`Transfer-Encoding: Identity`. Launch Services also keeps the app and its
+`cloudflared` child independent from the GitHub Actions runner, so the runner's
+orphan-process cleanup cannot take the public routes offline.
 
 ## Compatibility TCP Commands
 
