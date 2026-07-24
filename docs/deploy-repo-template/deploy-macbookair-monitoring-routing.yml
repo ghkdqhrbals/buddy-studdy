@@ -103,6 +103,16 @@ jobs:
           "${routingflare_bin}" list
           "${cloudflared_bin}" tunnel info "${tunnel_id}"
           /bin/ps -axo pid,ppid,command | grep -E "[${routingflare_process:0:1}]${routingflare_process:1}|[c]loudflared.*${tunnel_id}" || true
+          echo "Monitoring listener:"
+          /usr/sbin/lsof -nP -iTCP:"${API_DASHBOARD_PORT}" -sTCP:LISTEN || true
+          echo "Monitoring gateway container:"
+          docker ps \
+            --filter name=buddystudy-api-dashboard \
+            --format 'name={{.Names}} status={{.Status}} ports={{.Ports}}' || true
+          echo "Routingflare ingress:"
+          /usr/bin/find "${HOME}/Library/Application Support/TunnelBar" \
+            -maxdepth 1 -type f -name 'cloudflared-*.yml' -print0 2>/dev/null \
+            | /usr/bin/xargs -0 grep -HE '^(tunnel:|  - hostname:|    service:)' || true
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
           echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
