@@ -54,11 +54,10 @@ MacBook Air TestZone deploy:
 
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
+- `OPENAI_API_KEY`
 
-The TestZone deploy reads `OPENAI_API_KEY` from the existing
-`buddystudy/prod` AWS Secrets Manager document through the deploy runner's
-local AWS credential chain. InfluxDB and component
-credentials are generated once on the MacBook Air with mode `0600`, under
+InfluxDB and component credentials are generated once on the MacBook Air with
+mode `0600`, under
 `MACBOOKAIR_TESTZONE_ROOT`, and are reused by later TestZone and monitoring
 deploys.
 
@@ -72,8 +71,6 @@ Repository variables:
 - `TESTZONE_ALLOWED_TARGET_HOSTS`: comma-separated host allowlist for k6.
 - `TESTZONE_INFLUX_ORG` and `TESTZONE_INFLUX_BUCKET`: Grafana and runner
   storage coordinates.
-- `APP_SECRET_ID`: AWS Secrets Manager document containing `OPENAI_API_KEY`;
-  defaults to `buddystudy/prod`.
 
 ## Runtime Layout
 

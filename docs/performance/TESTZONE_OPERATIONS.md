@@ -75,14 +75,14 @@ infrastructure.
 
 - `GHCR_USERNAME`
 - `GHCR_TOKEN`
+- `OPENAI_API_KEY`
 - `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
 - `GRAFANA_ADMIN_PASSWORD`
 
-The TestZone workflow reads `OPENAI_API_KEY` from `APP_SECRET_ID` in AWS
-Secrets Manager through the MacBook Air runner's local AWS credential chain.
-It creates the InfluxDB password, InfluxDB token, and component password once
-under `MACBOOKAIR_TESTZONE_ROOT` using `umask 077`. The monitoring workflow
-reads the same local InfluxDB token after TestZone has been deployed.
+The TestZone workflow creates the InfluxDB password, InfluxDB token, and
+component password once under `MACBOOKAIR_TESTZONE_ROOT` using `umask 077`.
+The monitoring workflow reads the same local InfluxDB token after TestZone has
+been deployed.
 
 Secret values must not be placed in scripts, Git, browser storage, run
 metadata, or workflow summaries.

@@ -50,10 +50,9 @@ one workflow run just because they share a host.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
-  The deploy retrieves `OPENAI_API_KEY` from the backend AWS Secrets Manager
-  document and owns persistent local InfluxDB/component credentials under
-  `MACBOOKAIR_TESTZONE_ROOT`; those values are not duplicated as GitHub
-  repository secrets.
+  The deploy receives `OPENAI_API_KEY` as a GitHub Actions secret and owns
+  persistent local InfluxDB/component credentials under
+  `MACBOOKAIR_TESTZONE_ROOT`.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The
