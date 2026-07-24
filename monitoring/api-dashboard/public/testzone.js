@@ -34,6 +34,7 @@ const state = {
   lintTimer: null,
   componentId: null,
   runChartHoverIndex: null,
+  runDetailChartHoverIndex: null,
 };
 
 const elementIds = [
@@ -46,7 +47,8 @@ const elementIds = [
   "cancelSelectedRunButton", "viewRunScriptButton",
   "runRows", "runEmptyState", "runCount", "refreshRunsButton",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
-  "runDetailScriptButton", "runDetailStatus", "runLogTail", "closeRunDetailButton",
+  "runDetailScriptButton", "runDetailStatus", "runDetailChart", "runDetailChartTooltip",
+  "runDetailChartEmpty", "runLogTail", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
   "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback", "lintPanel",
   "toggleFilesButton", "focusEditorButton", "validateScriptButton",
@@ -477,7 +479,9 @@ async function selectRun(id) {
 async function loadSelectedRunSeries() {
   const run = selectedRun();
   state.runChartHoverIndex = null;
+  state.runDetailChartHoverIndex = null;
   elements.runChartTooltip.hidden = true;
+  elements.runDetailChartTooltip.hidden = true;
   if (!run) {
     state.runSeries = [];
     renderSelectedRun();
@@ -563,14 +567,12 @@ async function openRunScript(run) {
   }
 }
 
-function drawRunChart() {
-  const canvas = elements.runHistoryChart;
+function drawRunChartCanvas(canvas, tooltip, emptyState, hoverIndex) {
   const points = state.runSeries;
-  elements.timelineEmptyState.hidden = points.length > 0;
+  emptyState.hidden = points.length > 0;
   canvas.hidden = points.length === 0;
   if (!points.length) {
-    state.runChartHoverIndex = null;
-    elements.runChartTooltip.hidden = true;
+    tooltip.hidden = true;
     return;
   }
   const rect = canvas.getBoundingClientRect();
@@ -627,11 +629,10 @@ function drawRunChart() {
   context.textAlign = "right";
   context.fillText(last.toLocaleTimeString("ko-KR"), width - padding.right, height - 8);
 
-  if (state.runChartHoverIndex === null || state.runChartHoverIndex >= points.length) {
-    elements.runChartTooltip.hidden = true;
+  if (hoverIndex === null || hoverIndex >= points.length) {
+    tooltip.hidden = true;
     return;
   }
-  const hoverIndex = state.runChartHoverIndex;
   const hoverPoint = points[hoverIndex];
   const hoverX = xAt(hoverIndex);
   context.save();
@@ -659,10 +660,25 @@ function drawRunChart() {
     context.stroke();
   }
   context.restore();
-  renderRunChartTooltip(hoverPoint, hoverX, width);
+  renderRunChartTooltip(tooltip, hoverPoint, hoverX, width);
 }
 
-function renderRunChartTooltip(point, x, chartWidth) {
+function drawRunChart() {
+  drawRunChartCanvas(
+    elements.runHistoryChart,
+    elements.runChartTooltip,
+    elements.timelineEmptyState,
+    state.runChartHoverIndex,
+  );
+  drawRunChartCanvas(
+    elements.runDetailChart,
+    elements.runDetailChartTooltip,
+    elements.runDetailChartEmpty,
+    state.runDetailChartHoverIndex,
+  );
+}
+
+function renderRunChartTooltip(tooltip, point, x, chartWidth) {
   const title = document.createElement("strong");
   title.textContent = formatDate(point.timestamp);
   const metrics = document.createElement("dl");
@@ -678,44 +694,57 @@ function renderRunChartTooltip(point, x, chartWidth) {
     description.textContent = value;
     metrics.append(term, description);
   }
-  elements.runChartTooltip.replaceChildren(title, metrics);
-  elements.runChartTooltip.hidden = false;
-  const halfWidth = elements.runChartTooltip.offsetWidth / 2;
+  tooltip.replaceChildren(title, metrics);
+  tooltip.hidden = false;
+  const halfWidth = tooltip.offsetWidth / 2;
   const safeX = Math.min(Math.max(x, halfWidth + 8), chartWidth - halfWidth - 8);
-  elements.runChartTooltip.style.left = `${safeX}px`;
+  tooltip.style.left = `${safeX}px`;
 }
 
-function setRunChartHoverFromClientX(clientX) {
-  const canvas = elements.runHistoryChart;
+function setRunChartHoverFromClientX(canvas, stateKey, clientX) {
   const rect = canvas.getBoundingClientRect();
   const index = chartSampleIndex(clientX - rect.left, state.runSeries.length, 48, rect.width - 44);
-  if (index === state.runChartHoverIndex) return;
-  state.runChartHoverIndex = index;
+  if (index === state[stateKey]) return;
+  state[stateKey] = index;
   drawRunChart();
 }
 
-function clearRunChartHover() {
-  if (state.runChartHoverIndex === null) return;
-  state.runChartHoverIndex = null;
-  elements.runChartTooltip.hidden = true;
+function clearRunChartHover(stateKey, tooltip) {
+  if (state[stateKey] === null) return;
+  state[stateKey] = null;
+  tooltip.hidden = true;
   drawRunChart();
 }
 
-function handleRunChartKeydown(event) {
+function handleRunChartKeydown(event, stateKey, tooltip) {
   if (!state.runSeries.length) return;
-  const current = state.runChartHoverIndex ?? state.runSeries.length - 1;
+  const current = state[stateKey] ?? state.runSeries.length - 1;
   let next = current;
   if (event.key === "ArrowLeft") next = Math.max(0, current - 1);
   else if (event.key === "ArrowRight") next = Math.min(state.runSeries.length - 1, current + 1);
   else if (event.key === "Home") next = 0;
   else if (event.key === "End") next = state.runSeries.length - 1;
   else if (event.key === "Escape") {
-    clearRunChartHover();
+    clearRunChartHover(stateKey, tooltip);
     return;
   } else return;
   event.preventDefault();
-  state.runChartHoverIndex = next;
+  state[stateKey] = next;
   drawRunChart();
+}
+
+function bindRunChartInteractions(canvas, tooltip, stateKey) {
+  canvas.addEventListener("pointermove", (event) => setRunChartHoverFromClientX(canvas, stateKey, event.clientX));
+  canvas.addEventListener("pointerdown", (event) => setRunChartHoverFromClientX(canvas, stateKey, event.clientX));
+  canvas.addEventListener("pointerleave", () => clearRunChartHover(stateKey, tooltip));
+  canvas.addEventListener("focus", () => {
+    if (state[stateKey] === null && state.runSeries.length) {
+      state[stateKey] = state.runSeries.length - 1;
+      drawRunChart();
+    }
+  });
+  canvas.addEventListener("blur", () => clearRunChartHover(stateKey, tooltip));
+  canvas.addEventListener("keydown", (event) => handleRunChartKeydown(event, stateKey, tooltip));
 }
 
 function applyProfile(name) {
@@ -1093,17 +1122,8 @@ function bindEvents() {
       String(document.querySelector(".ide-shell").classList.contains("focus-mode")),
     );
   });
-  elements.runHistoryChart.addEventListener("pointermove", (event) => setRunChartHoverFromClientX(event.clientX));
-  elements.runHistoryChart.addEventListener("pointerdown", (event) => setRunChartHoverFromClientX(event.clientX));
-  elements.runHistoryChart.addEventListener("pointerleave", clearRunChartHover);
-  elements.runHistoryChart.addEventListener("focus", () => {
-    if (state.runSeries.length && state.runChartHoverIndex === null) {
-      state.runChartHoverIndex = state.runSeries.length - 1;
-      drawRunChart();
-    }
-  });
-  elements.runHistoryChart.addEventListener("blur", clearRunChartHover);
-  elements.runHistoryChart.addEventListener("keydown", handleRunChartKeydown);
+  bindRunChartInteractions(elements.runHistoryChart, elements.runChartTooltip, "runChartHoverIndex");
+  bindRunChartInteractions(elements.runDetailChart, elements.runDetailChartTooltip, "runDetailChartHoverIndex");
   elements.runProfileControl.addEventListener("click", (event) => {
     const button = event.target.closest("[data-profile]");
     if (button) applyProfile(button.dataset.profile);

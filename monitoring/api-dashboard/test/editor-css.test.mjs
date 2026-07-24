@@ -35,3 +35,16 @@ test("run chart exposes hover details and keyboard navigation", () => {
   assert.match(javascript, /pointermove/);
   assert.match(javascript, /handleRunChartKeydown/);
 });
+
+test("selected history run renders its time-series inside the detail panel", () => {
+  const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
+  assert.match(detail, /id="runDetailChart"/);
+  assert.match(detail, /id="runDetailChartTooltip"/);
+  assert.match(detail, /id="runDetailChartEmpty"/);
+  assert.match(css, /\.run-detail-timeline/);
+  assert.match(javascript, /runDetailChartHoverIndex/);
+  assert.match(
+    javascript,
+    /drawRunChartCanvas\(\s*elements\.runDetailChart,\s*elements\.runDetailChartTooltip,\s*elements\.runDetailChartEmpty/,
+  );
+});

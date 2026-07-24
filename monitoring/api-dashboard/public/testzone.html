@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072409" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072410" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -181,6 +181,34 @@
                 <div><span>Script</span><button id="runDetailScriptButton" class="text-link" type="button">-</button></div>
                 <div><span>Status</span><strong id="runDetailStatus">-</strong></div>
               </div>
+              <section class="run-detail-timeline" aria-labelledby="runDetailTimelineTitle">
+                <header>
+                  <div>
+                    <h4 id="runDetailTimelineTitle">Run time-series</h4>
+                    <p>선택한 실행의 RPS, p95, 오류율과 VUser 추이를 확인합니다.</p>
+                  </div>
+                  <div class="chart-key" aria-label="Chart legend">
+                    <span><i class="key-rps"></i>RPS</span>
+                    <span><i class="key-p95"></i>p95</span>
+                    <span><i class="key-error"></i>Error</span>
+                    <span><i class="key-vus"></i>VUs</span>
+                  </div>
+                </header>
+                <div class="run-chart-wrap">
+                  <canvas
+                    id="runDetailChart"
+                    height="260"
+                    tabindex="0"
+                    aria-label="Selected history run time-series chart. Use arrow keys to inspect samples."
+                    aria-describedby="runDetailChartTooltip"
+                  ></canvas>
+                  <div id="runDetailChartTooltip" class="run-chart-tooltip" role="status" aria-live="polite" hidden></div>
+                </div>
+                <div id="runDetailChartEmpty" class="chart-empty" hidden>
+                  <strong>No time-series data</strong>
+                  <span>이 실행에서 수집된 초 단위 지표가 없습니다.</span>
+                </div>
+              </section>
               <pre id="runLogTail" class="run-log-tail" aria-label="Run log output"></pre>
             </section>
           </section>
@@ -363,6 +391,6 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
-    <script type="module" src="/testzone.js?v=2026072409"></script>
+    <script type="module" src="/testzone.js?v=2026072410"></script>
   </body>
 </html>
