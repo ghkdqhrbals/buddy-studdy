@@ -82,10 +82,13 @@ jobs:
           configure_route grafana.lowfidev.cloud "${GRAFANA_PORT}"
           "${routingflare_bin}" autostart on
           "${routingflare_bin}" stop
-          RUNNER_TRACKING_ID="" "${routingflare_bin}" start
+          /usr/bin/pkill -f "cloudflared.*${tunnel_id}" >/dev/null 2>&1 || true
           sleep 2
+          "${cloudflared_bin}" tunnel cleanup "${tunnel_id}" || true
           RUNNER_TRACKING_ID="" "${routingflare_bin}" start
+          sleep 4
           "${routingflare_bin}" list
+          "${cloudflared_bin}" tunnel info "${tunnel_id}"
 
           echo "Monitoring route: https://monitoring.lowfidev.cloud -> 127.0.0.1:${API_DASHBOARD_PORT}"
           echo "Grafana route: https://grafana.lowfidev.cloud -> 127.0.0.1:${GRAFANA_PORT}"

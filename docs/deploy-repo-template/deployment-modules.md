@@ -59,8 +59,10 @@ one workflow run just because they share a host.
   `monitoring.lowfidev.cloud` to the dashboard and
   `grafana.lowfidev.cloud` to the standalone Grafana origin.
   The routing job also provisions both Cloudflare Tunnel CNAME records,
-  enables Routingflare autostart, and restarts the named tunnel after route
-  changes.
+  enables Routingflare autostart, removes orphaned local connectors for the
+  named tunnel, clears their stale Cloudflare connection records, and starts
+  one connector after route changes. This prevents requests from alternating
+  between current and obsolete ingress configurations.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The
