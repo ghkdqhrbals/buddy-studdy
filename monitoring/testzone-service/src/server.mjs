@@ -11,6 +11,7 @@ import {
 } from "./validation.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
+const RUN_HISTORY_PAGE_SIZE = 10;
 
 function sendJson(response, status, body) {
   const payload = JSON.stringify(body);
@@ -70,6 +71,30 @@ export async function createTestZoneServer(dependencies = {}) {
   }).init();
   const runs = dependencies.runs || new RunManager({ store, influx, config });
   const componentSampleIntervalMs = Number(dependencies.componentSampleIntervalMs ?? 5_000);
+
+  async function startScriptRun(project, script) {
+    const validation = validateScript(script.code, {
+      maxVus: config.maxVus,
+      maxTargetRps: config.maxTargetRps,
+      maxDurationSeconds: config.maxDurationSeconds,
+    });
+    const {
+      targetUrl,
+      name,
+      ...executionOptions
+    } = validation.execution;
+    const run = await store.createRun({
+      projectId: project.id,
+      scriptId: script.id,
+      scriptName: script.name,
+      targetUrl,
+      name: name || script.name.replace(/\.js$/i, ""),
+      profile: "script",
+      options: executionOptions,
+    });
+    await runs.start(run, script);
+    return publicRun({ ...run, status: "running" }, config);
+  }
 
   for (const run of store.state.runs) {
     if (["queued", "running", "cancelling"].includes(run.status)) {
@@ -204,7 +229,20 @@ export async function createTestZoneServer(dependencies = {}) {
         const values = store.state.runs
           .filter((run) => !projectId || run.projectId === projectId)
           .map((run) => publicRun(run, config));
-        return sendJson(response, 200, { runs: values });
+        const requestedPage = Math.max(1, Number.parseInt(requestUrl.searchParams.get("page") || "1", 10) || 1);
+        const total = values.length;
+        const totalPages = Math.max(1, Math.ceil(total / RUN_HISTORY_PAGE_SIZE));
+        const page = Math.min(requestedPage, totalPages);
+        const offset = (page - 1) * RUN_HISTORY_PAGE_SIZE;
+        return sendJson(response, 200, {
+          runs: values.slice(offset, offset + RUN_HISTORY_PAGE_SIZE),
+          pagination: {
+            page,
+            pageSize: RUN_HISTORY_PAGE_SIZE,
+            total,
+            totalPages,
+          },
+        });
       }
       if (request.method === "POST" && pathname === "/api/runs") {
         const body = await readJson(request);
@@ -219,29 +257,7 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!project || !script || script.projectId !== project.id) {
           return sendJson(response, 404, { error: "Project or script not found." });
         }
-        const validation = validateScript(script.code, {
-          maxVus: config.maxVus,
-          maxTargetRps: config.maxTargetRps,
-          maxDurationSeconds: config.maxDurationSeconds,
-        });
-        const {
-          targetUrl,
-          name,
-          ...executionOptions
-        } = validation.execution;
-        const run = await store.createRun({
-          projectId: project.id,
-          scriptId: script.id,
-          scriptName: script.name,
-          targetUrl,
-          name: name || script.name.replace(/\.js$/i, ""),
-          profile: "script",
-          options: executionOptions,
-        });
-        await runs.start(run, script);
-        return sendJson(response, 202, {
-          run: publicRun({ ...run, status: "running" }, config),
-        });
+        return sendJson(response, 202, { run: await startScriptRun(project, script) });
       }
       match = routeMatch(pathname, /^\/api\/runs\/([^/]+)$/);
       if (match && request.method === "GET") {
@@ -257,6 +273,26 @@ export async function createTestZoneServer(dependencies = {}) {
         await influx.deleteRun(run.id);
         await store.deleteRun(run.id);
         return sendJson(response, 200, { deleted: true });
+      }
+      match = routeMatch(pathname, /^\/api\/runs\/([^/]+)\/rerun$/);
+      if (match && request.method === "POST") {
+        const sourceRun = store.state.runs.find((entry) => entry.id === match[0]);
+        if (!sourceRun) return sendJson(response, 404, { error: "Run not found." });
+        if (["queued", "running", "cancelling"].includes(sourceRun.status)) {
+          return sendJson(response, 409, { error: "An active run cannot be rerun." });
+        }
+        const project = store.state.projects.find((entry) => entry.id === sourceRun.projectId);
+        const code = await store.readRunScript(sourceRun.id);
+        if (!project || code === null) {
+          return sendJson(response, 404, { error: "Project or run script snapshot not found." });
+        }
+        const script = {
+          id: sourceRun.scriptId,
+          projectId: sourceRun.projectId,
+          name: sourceRun.scriptName || `${sourceRun.name || "test"}.js`,
+          code,
+        };
+        return sendJson(response, 202, { run: await startScriptRun(project, script) });
       }
       match = routeMatch(pathname, /^\/api\/runs\/([^/]+)\/cancel$/);
       if (match && request.method === "POST") {

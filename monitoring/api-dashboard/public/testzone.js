@@ -25,6 +25,10 @@ const state = {
   scriptId: null,
   creatingScript: false,
   selectedRunId: null,
+  runPage: 1,
+  runPageSize: 10,
+  runTotal: 0,
+  runTotalPages: 1,
   runSeries: [],
   dirty: false,
   confirmAction: null,
@@ -57,10 +61,11 @@ const elementIds = [
   "timelineEmptyState", "timelineRunMeta", "liveRunStrip", "liveRps", "liveProgress",
   "cancelSelectedRunButton", "viewRunScriptButton",
   "runRows", "runEmptyState", "runCount", "refreshRunsButton",
+  "runPagination", "runPreviousPageButton", "runPageLabel", "runNextPageButton",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
   "runDetailScriptButton", "runDetailStatus", "runDetailTrafficChart", "runDetailLatencyChart",
   "detailAverage", "detailMinimum", "detailMedian", "detailMaximum", "detailP90", "detailP95",
-  "runDetailChartEmpty", "runLogTail", "closeRunDetailButton",
+  "runDetailChartEmpty", "runLogTail", "rerunSelectedRunButton", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
   "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback",
   "editorProblemPanel", "editorProblemTitle", "editorProblemMessage", "lintPanel",
@@ -195,6 +200,7 @@ async function createProject(event) {
     state.projectId = created.id;
     state.scriptId = null;
     state.selectedRunId = null;
+    state.runPage = 1;
     localStorage.setItem("testzone.projectId", created.id);
     elements.newProjectDialog.close();
     renderProjects();
@@ -212,7 +218,7 @@ async function deleteProject() {
   const selected = project();
   if (!selected) return;
   const scriptCount = state.scripts.length;
-  const runCount = state.runs.length;
+  const runCount = state.runTotal;
   const message = `${scriptCount} scripts and ${runCount} runs, including their stored time-series, will be deleted. Active runs must be cancelled first.`;
   if (!await confirmAction(`Delete ${selected.name}?`, message, "Delete project")) return;
   setButtonBusy(elements.deleteProjectButton, true, "Deleting");
@@ -222,6 +228,7 @@ async function deleteProject() {
     state.projectId = state.projects[0]?.id ?? null;
     state.scriptId = null;
     state.selectedRunId = null;
+    state.runPage = 1;
     if (state.projectId) localStorage.setItem("testzone.projectId", state.projectId);
     else localStorage.removeItem("testzone.projectId");
     renderProjects();
@@ -500,12 +507,22 @@ async function loadRuns() {
   if (!state.projectId) {
     state.runs = [];
     state.selectedRunId = null;
+    state.runPage = 1;
+    state.runTotal = 0;
+    state.runTotalPages = 1;
     state.runSeries = [];
     renderRuns();
     renderSelectedRun();
     return;
   }
-  state.runs = (await api(`/runs?projectId=${encodeURIComponent(state.projectId)}`)).runs;
+  const payload = await api(
+    `/runs?projectId=${encodeURIComponent(state.projectId)}&page=${state.runPage}`,
+  );
+  state.runs = payload.runs;
+  state.runPage = payload.pagination?.page ?? 1;
+  state.runPageSize = payload.pagination?.pageSize ?? 10;
+  state.runTotal = payload.pagination?.total ?? state.runs.length;
+  state.runTotalPages = payload.pagination?.totalPages ?? 1;
   if (!state.runs.some((run) => run.id === state.selectedRunId)) {
     state.selectedRunId = selectLatestRun(state.runs)?.id || null;
   }
@@ -553,8 +570,14 @@ function renderRuns() {
     p90Ms: elements.summaryP90,
     p95Ms: elements.summaryLatencyP95,
   });
-  elements.runCount.textContent = `${state.runs.length.toLocaleString()} runs`;
+  elements.runCount.textContent = state.runTotalPages > 1
+    ? `${state.runTotal.toLocaleString()} runs · page ${state.runPage} of ${state.runTotalPages}`
+    : `${state.runTotal.toLocaleString()} runs`;
   elements.runEmptyState.hidden = state.runs.length > 0;
+  elements.runPagination.hidden = state.runTotalPages <= 1;
+  elements.runPageLabel.textContent = `Page ${state.runPage} of ${state.runTotalPages}`;
+  elements.runPreviousPageButton.disabled = state.runPage <= 1;
+  elements.runNextPageButton.disabled = state.runPage >= state.runTotalPages;
 
   elements.recentRunSelect.replaceChildren(...state.runs.map((run) => {
     const option = document.createElement("option");
@@ -621,6 +644,7 @@ function renderRuns() {
     if (ACTIVE_STATUSES.has(run.status)) {
       actions.append(actionButton("Cancel", () => cancelRun(run.id), true));
     } else {
+      actions.append(actionButton("Rerun", (button) => rerunRun(run, button)));
       actions.append(actionButton("Delete", () => deleteRun(run), true));
     }
     row.append(started, name, scriptCell, loadPlan, statusCell, ...metrics, actions);
@@ -636,7 +660,7 @@ function actionButton(label, handler, danger = false) {
   button.textContent = label;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    void handler();
+    void handler(button);
   });
   return button;
 }
@@ -675,6 +699,8 @@ function renderSelectedRun() {
   elements.runDetail.hidden = !run;
   elements.liveRunStrip.hidden = !run || !ACTIVE_STATUSES.has(run.status);
   elements.cancelSelectedRunButton.disabled = !run || !ACTIVE_STATUSES.has(run.status);
+  elements.rerunSelectedRunButton.hidden = !run || ACTIVE_STATUSES.has(run.status);
+  elements.rerunSelectedRunButton.disabled = !run || ACTIVE_STATUSES.has(run.status);
   elements.viewRunScriptButton.disabled = !run;
   if (!run) {
     elements.timelineTitle.textContent = "Run time-series";
@@ -729,13 +755,28 @@ async function deleteRun(run) {
   if (!await confirmAction("Delete run?", `${run.name || run.scriptName} 실행과 InfluxDB 시계열을 삭제합니다.`, "Delete run")) return;
   try {
     await api(`/runs/${run.id}`, { method: "DELETE" });
-    state.runs = state.runs.filter((entry) => entry.id !== run.id);
-    state.selectedRunId = selectLatestRun(state.runs)?.id || null;
-    renderRuns();
-    await loadSelectedRunSeries();
+    if (state.selectedRunId === run.id) state.selectedRunId = null;
+    await loadRuns();
     toast("Run and time-series data deleted.");
   } catch (error) {
     toast(error.message, "error");
+  }
+}
+
+async function rerunRun(run, button = elements.rerunSelectedRunButton) {
+  if (!run || ACTIVE_STATUSES.has(run.status)) return;
+  setButtonBusy(button, true, "Starting");
+  try {
+    const payload = await api(`/runs/${run.id}/rerun`, { method: "POST" });
+    state.runPage = 1;
+    state.selectedRunId = payload.run.id;
+    switchTab("overview");
+    toast(`${run.name || run.scriptName} rerun started.`);
+    await loadRuns();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setButtonBusy(button, false);
   }
 }
 
@@ -1116,12 +1157,13 @@ async function startRun(scriptId = state.scriptId, button = elements.editorRunBu
         scriptId: selectedScript.id,
       }),
     });
+    state.runPage = 1;
     state.selectedRunId = payload.run.id;
     switchTab("overview");
     toast("Performance test started.");
     await loadRuns();
   } catch (error) {
-    toast([error.message, ...error.details.map(diagnosticMessage)].join(" "), "error");
+    toast([error.message, ...(error.details || []).map(diagnosticMessage)].join(" "), "error");
   } finally {
     button.disabled = false;
     button.removeAttribute("aria-busy");
@@ -1389,6 +1431,7 @@ function bindEvents() {
     state.scriptId = null;
     state.creatingScript = false;
     state.selectedRunId = null;
+    state.runPage = 1;
     localStorage.setItem("testzone.projectId", state.projectId);
     renderProjects();
     await Promise.all([loadScripts(), loadRuns()]);
@@ -1397,6 +1440,18 @@ function bindEvents() {
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
   elements.refreshRunsButton.addEventListener("click", loadRuns);
+  elements.runPreviousPageButton.addEventListener("click", async () => {
+    if (state.runPage <= 1) return;
+    state.runPage -= 1;
+    state.selectedRunId = null;
+    await loadRuns();
+  });
+  elements.runNextPageButton.addEventListener("click", async () => {
+    if (state.runPage >= state.runTotalPages) return;
+    state.runPage += 1;
+    state.selectedRunId = null;
+    await loadRuns();
+  });
   elements.recentRunSelect.addEventListener("change", () => void selectRun(elements.recentRunSelect.value));
   elements.cancelSelectedRunButton.addEventListener("click", () => {
     if (state.selectedRunId) void cancelRun(state.selectedRunId);
@@ -1406,6 +1461,9 @@ function bindEvents() {
   });
   elements.runDetailScriptButton.addEventListener("click", () => {
     if (selectedRun()) void openRunScript(selectedRun());
+  });
+  elements.rerunSelectedRunButton.addEventListener("click", () => {
+    if (selectedRun()) void rerunRun(selectedRun(), elements.rerunSelectedRunButton);
   });
   elements.closeRunDetailButton.addEventListener("click", () => {
     elements.runDetail.hidden = true;

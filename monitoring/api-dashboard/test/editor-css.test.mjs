@@ -89,6 +89,25 @@ test("selected history run renders its time-series inside the detail panel", () 
   assert.doesNotMatch(detail, /runDetailChartTooltip/);
 });
 
+test("run history paginates by ten and can rerun immutable script snapshots", () => {
+  assert.match(html, /id="runPreviousPageButton"/);
+  assert.match(html, /id="runPageLabel"/);
+  assert.match(html, /id="runNextPageButton"/);
+  assert.match(html, /id="rerunSelectedRunButton"/);
+  assert.match(javascript, /&page=\$\{state\.runPage\}/);
+  assert.match(javascript, /payload\.pagination\?\.pageSize\s*\?\?\s*10/);
+  assert.match(javascript, /api\(`\/runs\/\$\{run\.id\}\/rerun`,\s*\{\s*method:\s*"POST"\s*\}\)/);
+  assert.match(javascript, /actionButton\("Rerun"/);
+});
+
+test("TestZone chart cards do not inherit the global fixed metric chart height", () => {
+  assert.match(html, /class="run-metric-grid"/);
+  assert.match(html, /class="run-metric-card"/);
+  assert.doesNotMatch(html, /class="metric-chart"/);
+  assert.match(css, /\.run-metric-card\s*\{[\s\S]+?height:\s*auto;/);
+  assert.match(css, /\.run-metric-card\s*\{[\s\S]+?overflow:\s*hidden;/);
+});
+
 test("workspace manages projects and components expose restart without apply", () => {
   assert.match(html, /id="newProjectButton"/);
   assert.match(html, /id="deleteProjectButton"/);

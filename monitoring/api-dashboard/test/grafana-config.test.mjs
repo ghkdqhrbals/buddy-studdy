@@ -70,3 +70,18 @@ test("server runtime dashboard emits bounded Loki metric series", async () => {
     assert.doesNotMatch(expression, /\| json \| unwrap/);
   }
 });
+
+test("server runtime dashboard separates server, database, and Redis signals", async () => {
+  const dashboard = JSON.parse(
+    await fs.readFile(serverRuntimeDashboardPath, "utf8"),
+  );
+  const rows = dashboard.panels
+    .filter((panel) => panel.type === "row")
+    .map((panel) => panel.title);
+  const panels = new Map(dashboard.panels.map((panel) => [panel.title, panel]));
+
+  assert.deepEqual(rows, ["Server", "Database", "Redis"]);
+  assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
+  assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
+  assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
+});

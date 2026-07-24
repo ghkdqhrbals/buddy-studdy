@@ -20,6 +20,19 @@
   ],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Server",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "loki",
         "uid": "buddystudy-loki"
@@ -46,7 +59,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -109,7 +122,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -167,7 +180,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -227,7 +240,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 4,
       "options": {
@@ -266,77 +279,7 @@
           "refId": "D"
         }
       ],
-      "title": "Application memory",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "connections",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "showPoints": "never",
-            "spanNulls": true
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAllocated=\"dbPoolAllocated\" | unwrap dbPoolAllocated | __error__=\"\" [1m])",
-          "legendFormat": "allocated",
-          "refId": "A"
-        },
-        {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAcquired=\"dbPoolAcquired\" | unwrap dbPoolAcquired | __error__=\"\" [1m])",
-          "legendFormat": "acquired",
-          "refId": "B"
-        },
-        {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolIdle=\"dbPoolIdle\" | unwrap dbPoolIdle | __error__=\"\" [1m])",
-          "legendFormat": "idle",
-          "refId": "C"
-        },
-        {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m])",
-          "legendFormat": "pending",
-          "refId": "D"
-        }
-      ],
-      "title": "Database connection pool",
+      "title": "JVM and process memory",
       "type": "timeseries"
     },
     {
@@ -365,9 +308,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 16
+        "w": 6,
+        "x": 12,
+        "y": 9
       },
       "id": 6,
       "options": {
@@ -425,9 +368,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 16
+        "w": 6,
+        "x": 18,
+        "y": 9
       },
       "id": 7,
       "options": {
@@ -486,8 +429,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 16
+        "x": 0,
+        "y": 17
       },
       "id": 8,
       "options": {
@@ -545,9 +488,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 24
+        "w": 8,
+        "x": 8,
+        "y": 17
       },
       "id": 9,
       "options": {
@@ -604,9 +547,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 24
+        "w": 8,
+        "x": 16,
+        "y": 17
       },
       "id": 10,
       "options": {
@@ -636,6 +579,219 @@
       ],
       "title": "Network counters",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Database",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "connections",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAllocated=\"dbPoolAllocated\" | unwrap dbPoolAllocated | __error__=\"\" [1m])",
+          "legendFormat": "allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAcquired=\"dbPoolAcquired\" | unwrap dbPoolAcquired | __error__=\"\" [1m])",
+          "legendFormat": "acquired",
+          "refId": "B"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolIdle=\"dbPoolIdle\" | unwrap dbPoolIdle | __error__=\"\" [1m])",
+          "legendFormat": "idle",
+          "refId": "C"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m])",
+          "legendFormat": "pending",
+          "refId": "D"
+        }
+      ],
+      "title": "R2DBC connection pool",
+      "type": "timeseries",
+      "description": "Application-observed database connection allocation, acquisition, idle capacity, and pending demand."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Redis",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Successful Redis stream publish and consume operations observed in backend logs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixedColor"
+          },
+          "custom": {
+            "axisLabel": "operations / sec",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate({container=~\"buddystudy-backend.*\"} |~ \"redis_(stream_(publish|consume)_succeeded|outbox_published)\" [1m]))",
+          "legendFormat": "successful operations",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Redis publish, consume, and retry failures observed in backend logs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixedColor"
+          },
+          "custom": {
+            "axisLabel": "operations / sec",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate({container=~\"buddystudy-backend.*\"} |~ \"redis_.*(failed|retry_scheduled)\" [1m]))",
+          "legendFormat": "failures",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis failures",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -654,7 +810,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "BuddyStudy Server Runtime",
+  "title": "BuddyStudy Runtime",
   "uid": "buddystudy-server-runtime",
-  "version": 1
+  "version": 2
 }

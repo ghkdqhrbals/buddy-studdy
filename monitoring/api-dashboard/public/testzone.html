@@ -6,7 +6,7 @@
     <title>BuddyStudy TestZone</title>
     <link rel="stylesheet" href="/styles.css?v=2026072401" />
     <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css?v=1.6.32" />
-    <link rel="stylesheet" href="/testzone.css?v=2026072506" />
+    <link rel="stylesheet" href="/testzone.css?v=2026072507" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
@@ -106,8 +106,8 @@
                   <span id="liveProgress">Preparing run</span>
                   <button id="cancelSelectedRunButton" class="row-action danger" type="button">Cancel</button>
                 </div>
-                <div class="metric-chart-grid">
-                  <section class="metric-chart" aria-labelledby="trafficChartTitle">
+                <div class="run-metric-grid">
+                  <section class="run-metric-card" aria-labelledby="trafficChartTitle">
                     <header>
                       <h4 id="trafficChartTitle">Traffic &amp; errors</h4>
                       <span>RPS / error rate</span>
@@ -121,7 +121,7 @@
                       ></div>
                     </div>
                   </section>
-                  <section class="metric-chart" aria-labelledby="latencyChartTitle">
+                  <section class="run-metric-card" aria-labelledby="latencyChartTitle">
                     <header>
                       <h4 id="latencyChartTitle">Latency percentiles</h4>
                       <span>Median / p90 / p95</span>
@@ -177,6 +177,11 @@
                   <span>스크립트를 선택하고 첫 성능 테스트를 실행하세요.</span>
                 </div>
               </div>
+              <footer id="runPagination" class="run-pagination" hidden>
+                <button id="runPreviousPageButton" class="row-action" type="button">Previous</button>
+                <span id="runPageLabel">Page 1 of 1</span>
+                <button id="runNextPageButton" class="row-action" type="button">Next</button>
+              </footer>
             </section>
             <section id="runDetail" class="workspace-section run-detail" hidden>
               <header>
@@ -184,7 +189,10 @@
                   <h3 id="runDetailTitle">Run details</h3>
                   <p id="runDetailMeta"></p>
                 </div>
-                <button id="closeRunDetailButton" class="icon-button" type="button" aria-label="Close run details">×</button>
+                <div class="run-detail-actions">
+                  <button id="rerunSelectedRunButton" class="row-action" type="button">Rerun</button>
+                  <button id="closeRunDetailButton" class="icon-button" type="button" aria-label="Close run details">×</button>
+                </div>
               </header>
               <div class="run-detail-grid">
                 <div><span>Target</span><strong id="runDetailTarget">-</strong></div>
@@ -207,8 +215,8 @@
                     <p>선택한 실행의 요청량·오류와 지연시간 백분위를 확인합니다.</p>
                   </div>
                 </header>
-                <div class="metric-chart-grid">
-                  <section class="metric-chart">
+                <div class="run-metric-grid">
+                  <section class="run-metric-card">
                     <header><h4>Traffic &amp; errors</h4><span>RPS / error rate</span></header>
                     <div class="run-chart-wrap">
                       <div
@@ -219,7 +227,7 @@
                       ></div>
                     </div>
                   </section>
-                  <section class="metric-chart">
+                  <section class="run-metric-card">
                     <header><h4>Latency percentiles</h4><span>Median / p90 / p95</span></header>
                     <div class="run-chart-wrap">
                       <div
@@ -381,6 +389,6 @@
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
     <script src="/vendor/uplot/uPlot.iife.min.js?v=1.6.32"></script>
-    <script type="module" src="/testzone.js?v=2026072506"></script>
+    <script type="module" src="/testzone.js?v=2026072507"></script>
   </body>
 </html>

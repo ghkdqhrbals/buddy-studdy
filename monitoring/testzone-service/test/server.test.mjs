@@ -12,6 +12,7 @@ async function fixture() {
   const calls = {
     components: [],
     influxDeletes: [],
+    startedScripts: [],
   };
   const config = {
     port: 0,
@@ -26,7 +27,8 @@ async function fixture() {
   };
   const runs = {
     active: new Map(),
-    async start(run) {
+    async start(run, script) {
+      calls.startedScripts.push({ runId: run.id, script: structuredClone(script) });
       await store.patchRun(run.id, { status: "running", startedAt: new Date().toISOString() });
     },
     async cancel() {
@@ -279,6 +281,39 @@ test("run history preserves the script name after the script is deleted", async 
   assert.equal(history.runs[0].scriptName, script.name);
 });
 
+test("run history is paginated in fixed pages of ten", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+  const script = app.store.state.scripts[0];
+  for (let index = 0; index < 14; index += 1) {
+    await app.store.createRun({
+      projectId: project.id,
+      scriptId: script.id,
+      scriptName: script.name,
+      name: `Run ${index + 1}`,
+      profile: "script",
+      options: {},
+    });
+  }
+
+  const first = await fetch(`${app.baseUrl}/api/runs?projectId=${project.id}&page=1`)
+    .then((response) => response.json());
+  const second = await fetch(`${app.baseUrl}/api/runs?projectId=${project.id}&page=2`)
+    .then((response) => response.json());
+
+  assert.equal(first.runs.length, 10);
+  assert.deepEqual(first.pagination, {
+    page: 1,
+    pageSize: 10,
+    total: 14,
+    totalPages: 2,
+  });
+  assert.equal(second.runs.length, 4);
+  assert.equal(second.pagination.page, 2);
+  assert.equal(second.runs[0].name, "Run 4");
+});
+
 test("run detail exposes live series and its immutable script snapshot", async (context) => {
   const app = await fixture();
   context.after(() => app.close());
@@ -311,6 +346,37 @@ test("run detail exposes live series and its immutable script snapshot", async (
   assert.equal(snapshot.script.name, script.name);
   assert.equal(snapshot.script.code, script.code);
   assert.equal(snapshot.script.readonly, true);
+});
+
+test("completed runs can be rerun from their immutable script snapshot", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+  const script = await app.store.getScript(app.store.state.scripts[0].id);
+  const run = await app.store.createRun({
+    projectId: project.id,
+    scriptId: script.id,
+    scriptName: script.name,
+    name: "Original run",
+    profile: "script",
+    options: {},
+  });
+  await app.store.patchRun(run.id, { status: "completed" });
+  await fs.mkdir(app.store.runPath(run.id), { recursive: true });
+  await fs.writeFile(path.join(app.store.runPath(run.id), "script.js"), script.code);
+  await app.store.deleteScript(script.id);
+
+  const response = await fetch(`${app.baseUrl}/api/runs/${run.id}/rerun`, {
+    method: "POST",
+  });
+  assert.equal(response.status, 202);
+  const rerun = (await response.json()).run;
+
+  assert.notEqual(rerun.id, run.id);
+  assert.equal(rerun.status, "running");
+  assert.equal(rerun.name, "Public questions");
+  assert.equal(app.calls.startedScripts.at(-1).script.code, script.code);
+  assert.equal(app.calls.startedScripts.at(-1).script.name, script.name);
 });
 
 test("run deletion removes metadata, artifacts, and matching InfluxDB series", async (context) => {
