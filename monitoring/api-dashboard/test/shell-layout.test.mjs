@@ -26,9 +26,12 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
   assert.match(css, /\.side-nav\s*\{[\s\S]*background:\s*var\(--nav\)/);
   assert.match(css, /\.side-nav-group summary\s*\{[\s\S]*background:\s*var\(--nav-2\)/);
   assert.match(css, /body\.nav-collapsed \.side-nav/);
+  assert.match(css, /body\.nav-collapsed \.side-nav-link-label/);
+  assert.match(css, /--side-nav-rail-width:\s*64px/);
   assert.match(css, /\.side-nav-footer\s*\{[\s\S]*margin-top:\s*auto/);
-  assert.match(shell, /toggle\.textContent = "×"/);
-  assert.match(shell, /reopen\.textContent = "☰"/);
+  assert.match(shell, /createIcon\("menu"/);
+  assert.match(shell, /setCollapsed\(!document\.body\.classList\.contains\("nav-collapsed"\)\)/);
+  assert.doesNotMatch(shell, /reopen\.textContent/);
 });
 
 test("server charts expose hover tooltips and JVM pressure summaries", async () => {
