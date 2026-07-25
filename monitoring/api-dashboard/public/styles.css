@@ -1648,8 +1648,21 @@ pre {
 }
 
 .settings-row select {
+  height: 38px;
   width: 220px;
   flex: 0 0 220px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+
+.settings-row select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
 }
 
 .settings-actions {
@@ -1661,6 +1674,16 @@ pre {
 
 .settings-actions .status-message {
   margin-right: auto;
+}
+
+.settings-actions .status-message:empty {
+  display: none;
+}
+
+.settings-actions .status-message[data-tone="ready"] {
+  border-color: #b9e4cf;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .settings-actions button {

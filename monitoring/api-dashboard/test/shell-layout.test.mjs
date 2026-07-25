@@ -54,6 +54,9 @@ test("settings control navigation and access journal browser preferences", async
   assert.match(html, /id="auditDefaultRange"/);
   assert.match(html, /id="auditRefreshSeconds"/);
   assert.match(html, /id="auditPageSize"/);
+  const css = await text("styles.css");
+  assert.match(css, /\.settings-row select\s*\{[\s\S]*height:\s*38px/);
+  assert.match(css, /\.settings-actions \.status-message:empty\s*\{[\s\S]*display:\s*none/);
   assert.match(js, /buddystudy\.monitoring\.nav\.mode/);
   assert.match(js, /buddystudy\.monitoring\.audit\.range/);
   assert.match(js, /monitoring:nav-mode-change/);
