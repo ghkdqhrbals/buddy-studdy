@@ -117,6 +117,10 @@ test("run details expose a multi-scenario plan and metric filter", () => {
   assert.match(javascript, /function runScenarios\(run\)/);
   assert.match(javascript, /function renderScenarioPlan\(run\)/);
   assert.match(javascript, /function renderScenarioFilter\(run\)/);
+  assert.match(html, /<th>Target RPS<\/th>[\s\S]+?<th>VUsers<\/th>/);
+  assert.match(javascript, /Measured RPS/);
+  assert.match(javascript, /formatScenarioVUsers\(scenario\)/);
+  assert.doesNotMatch(javascript, /iter\/s|pre \//);
   assert.match(javascript, /point\.scenarios\?\.\[state\.selectedRunScenario\]/);
   assert.match(css, /\.run-scenario-table/);
   assert.match(css, /\.run-scenario-filter button\[aria-pressed="true"\]/);

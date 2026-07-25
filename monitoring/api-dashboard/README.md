@@ -36,7 +36,7 @@ The browser can:
 - compare per-second HTTP success/error counts, average/p90/p95 latency, and
   RPS/average latency/error count
 - preserve every k6 `options.scenarios` entry in run metadata, summarize the
-  combined iteration rate and VU capacity in history, and switch run-detail
+  target RPS and VUser capacity in history, and switch run-detail
   KPIs and time-series between all scenarios and one scenario
 - inspect TPS, mean time to first byte (MTTFB), mean total HTTP time (MTT),
   HTTP success/error counts, and average/minimum/median/maximum/p90/p95 latency

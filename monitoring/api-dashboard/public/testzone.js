@@ -621,10 +621,16 @@ function formatScenarioSchedule(scenario) {
   const start = scenario.startTime && scenario.startTime !== "0s"
     ? `${scenario.startTime} start · `
     : "";
-  if (Number(scenario.rate) > 0) {
-    return `${start}${Number(scenario.rate).toLocaleString()} iter/${scenario.timeUnit || "1s"} · ${scenario.duration || "-"}`;
+  return `${start}${scenario.duration || "-"}`;
+}
+
+function formatScenarioVUsers(scenario) {
+  const initial = Number(scenario.preAllocatedVUs || scenario.vus || 0);
+  const maximum = Number(scenario.maxVus || scenario.vus || initial);
+  if (initial > 0 && maximum > initial) {
+    return `${initial.toLocaleString()}–${maximum.toLocaleString()} VUsers`;
   }
-  return `${start}${scenario.vus || scenario.preAllocatedVUs || 0} VUs · ${scenario.duration || "-"}`;
+  return `${Math.max(initial, maximum).toLocaleString()} VUsers`;
 }
 
 function renderScenarioPlan(run) {
@@ -645,12 +651,10 @@ function renderScenarioPlan(run) {
     schedule.textContent = formatScenarioSchedule(scenario);
     const rate = document.createElement("td");
     rate.textContent = Number(scenario.targetRps) > 0
-      ? `${Number(scenario.targetRps).toLocaleString()} iter/s`
-      : `${Number(scenario.vus || 0).toLocaleString()} VUs`;
+      ? `${Number(scenario.targetRps).toLocaleString()} RPS`
+      : "Measured RPS";
     const capacity = document.createElement("td");
-    capacity.textContent = Number(scenario.rate) > 0
-      ? `${Number(scenario.preAllocatedVUs || 0).toLocaleString()} pre / ${Number(scenario.maxVus || 0).toLocaleString()} max`
-      : `${Number(scenario.maxVus || scenario.vus || 0).toLocaleString()} max`;
+    capacity.textContent = formatScenarioVUsers(scenario);
     row.append(name, executor, exec, schedule, rate, capacity);
     return row;
   }));
@@ -1494,12 +1498,12 @@ function formatRunLoadPlan(options = {}) {
   const scenarioCount = Array.isArray(options.scenarios) ? options.scenarios.length : 0;
   if (scenarioCount > 1) {
     return rate > 0
-      ? `${scenarioCount} scenarios · ${rate.toLocaleString()} iter/s · ${maxVus.toLocaleString()} max VUs`
-      : `${scenarioCount} scenarios · ${duration} · ${maxVus.toLocaleString()} max VUs`;
+      ? `${scenarioCount} scenarios · ${rate.toLocaleString()} RPS · ${maxVus.toLocaleString()} VUsers`
+      : `${scenarioCount} scenarios · Measured RPS · ${maxVus.toLocaleString()} VUsers`;
   }
   return rate > 0
-    ? `${duration} · ${rate.toLocaleString()} ${scenarioCount ? "iter/s" : "RPS"} · ${maxVus.toLocaleString()} max VUs`
-    : `${duration} · ${maxVus.toLocaleString()} VUs`;
+    ? `${duration} · ${rate.toLocaleString()} RPS · ${maxVus.toLocaleString()} VUsers`
+    : `${duration} · Measured RPS · ${maxVus.toLocaleString()} VUsers`;
 }
 
 async function startRun(scriptId = state.scriptId, button = elements.editorRunButton) {
