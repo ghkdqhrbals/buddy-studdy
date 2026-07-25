@@ -48,119 +48,57 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
-      "description": "Current backend API request throughput calculated from structured api_exchange logs over the latest minute.",
+      "description": "Per-endpoint requests per second calculated from structured api_exchange logs. The chart shows the 20 busiest METHOD + path combinations.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
+          "custom": {
+            "axisLabel": "requests / second",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
           },
+          "min": 0,
           "unit": "reqps"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 6,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 1
       },
       "id": 1,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
+        "legend": {
           "calcs": [
-            "lastNotNull"
+            "lastNotNull",
+            "max"
           ],
-          "fields": "",
-          "values": false
+          "displayMode": "table",
+          "placement": "bottom"
         },
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "expr": "sum(rate(({container=~\"buddystudy-backend.*\"} |= \"api_exchange \")[1m])) or (sum(rate(({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \")[1m])) * 0)",
-          "legendFormat": "requests",
-          "queryType": "instant",
+          "expr": "topk(20, sum by (method, path) (rate({container=~\"buddystudy-backend.*\"} |= \"api_exchange \" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\"` [1m])))",
+          "legendFormat": "{{method}} {{path}}",
           "refId": "A"
         }
       ],
-      "title": "Request rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "buddystudy-loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 1
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processCpuPercent=\"processCpuPercent\" | unwrap processCpuPercent | __error__=\"\" [$__range])",
-          "legendFormat": "process CPU",
-          "queryType": "instant",
-          "refId": "A"
-        }
-      ],
-      "title": "Process CPU",
-      "type": "stat"
+      "title": "API RPS by endpoint",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -824,5 +762,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 4
+  "version": 5
 }

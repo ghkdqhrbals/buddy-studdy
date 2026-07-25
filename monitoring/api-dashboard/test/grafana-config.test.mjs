@@ -86,10 +86,10 @@ test("server runtime dashboard separates server, database, and Redis signals", a
 
   assert.equal(dashboard.title, "BuddyStudy Server Dashboard");
   assert.match(dashboard.description, /JVM.*Reactor Netty.*R2DBC.*Redis/);
-  assert.ok(dashboard.panels.length >= 15);
+  assert.ok(dashboard.panels.length >= 14);
   assert.deepEqual(rows, ["Server", "Database", "Redis"]);
   for (const title of [
-    "Request rate",
+    "API RPS by endpoint",
     "CPU utilization",
     "JVM and process memory",
     "Runtime threads",
@@ -104,12 +104,13 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     assert.ok(panels.has(title), `${title} panel must be provisioned`);
   }
   assert.ok(!panels.has("Runtime samples"));
-  assert.equal(panels.get("Request rate")?.fieldConfig.defaults.unit, "reqps");
-  assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /api_exchange/);
-  assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /sum\(rate\(/);
-  assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /runtime_metrics/);
-  assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /\* 0\)/);
-  assert.doesNotMatch(panels.get("Request rate")?.targets[0].expr ?? "", /vector\(0\)/);
+  assert.ok(!panels.has("Request rate"));
+  assert.ok(!panels.has("Process CPU"));
+  assert.equal(panels.get("API RPS by endpoint")?.fieldConfig.defaults.unit, "reqps");
+  assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /api_exchange/);
+  assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /topk\(20/);
+  assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /sum by \(method, path\)/);
+  assert.equal(panels.get("API RPS by endpoint")?.targets[0].legendFormat, "{{method}} {{path}}");
   assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
