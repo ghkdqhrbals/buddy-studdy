@@ -655,10 +655,11 @@ function configureChartTooltip(canvas, series, model) {
   tooltip.hidden = true;
   panel.append(cursor, tooltip);
 
-  canvas.addEventListener("pointermove", (event) => {
+  const handleChartHover = (event) => {
     const current = canvas._metricTooltipModel;
+    if (!current) return;
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
+    const x = Number.isFinite(event.offsetX) ? event.offsetX : event.clientX - rect.left;
     const plotStart = current.padding.left;
     const plotEnd = plotStart + current.plotWidth;
     if (x < plotStart || x > plotEnd) {
@@ -700,11 +701,13 @@ function configureChartTooltip(canvas, series, model) {
       Math.max(8, panel.clientWidth - tooltipWidth - 8),
     )}px`;
     tooltip.style.top = `${canvas.offsetTop + 8}px`;
-  });
-  canvas.addEventListener("pointerleave", () => {
+  };
+  canvas.addEventListener("mousemove", handleChartHover);
+  const hideChartTooltip = () => {
     tooltip.hidden = true;
     cursor.hidden = true;
-  });
+  };
+  canvas.addEventListener("mouseleave", hideChartTooltip);
 }
 
 function nearestPoint(points, timestamp) {
@@ -816,4 +819,5 @@ window.addEventListener("resize", () => {
 
 initializeCustomRange();
 updateCustomRangeVisibility();
+render();
 loadMetrics().catch((error) => setStatus(error.message, "error"));

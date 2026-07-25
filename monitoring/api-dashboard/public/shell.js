@@ -1,6 +1,6 @@
 const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
-const UI_VERSION = "2026.07.25.3";
+const UI_VERSION = "2026.07.25.4";
 
 const groups = [
   {
@@ -109,7 +109,7 @@ function buildNavigation() {
   toggle.title = "Close navigation";
   toggle.setAttribute("aria-label", "Close navigation");
   toggle.setAttribute("aria-expanded", "true");
-  toggle.textContent = "‹";
+  toggle.textContent = "×";
   toggle.addEventListener("click", () => setCollapsed(true));
   brand.append(brandCopy, toggle);
 
@@ -131,7 +131,7 @@ function buildNavigation() {
     reopen.type = "button";
     reopen.title = "Open navigation";
     reopen.setAttribute("aria-label", "Open navigation");
-    reopen.textContent = "›";
+    reopen.textContent = "☰";
     reopen.addEventListener("click", () => setCollapsed(false));
     document.body.append(reopen);
   }

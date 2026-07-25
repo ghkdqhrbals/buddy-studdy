@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   --page: #f6f8fb;
-  --nav: #101722;
-  --nav-2: #172132;
+  --nav: #eef1f5;
+  --nav-2: #e2e6ec;
   --surface: #ffffff;
   --surface-soft: #f8fafc;
   --line: #d9e1ec;
@@ -64,11 +64,11 @@ button {
   width: var(--side-nav-width);
   min-height: 0;
   flex-direction: column;
-  border: 1px solid #172234;
+  border: 1px solid #d4dae3;
   border-radius: 12px;
   background: var(--nav);
-  color: #f8fafc;
-  box-shadow: var(--shadow);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(19, 31, 49, 0.09);
   overflow: hidden;
   transition: transform 180ms ease;
 }
@@ -79,7 +79,7 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 18px 16px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #d7dde6;
 }
 
 .side-nav-brand span,
@@ -88,7 +88,7 @@ button {
 }
 
 .side-nav-brand span {
-  color: #91a2bb;
+  color: #758297;
   font-size: 12px;
   font-weight: 760;
   text-transform: uppercase;
@@ -96,6 +96,7 @@ button {
 
 .side-nav-brand strong {
   margin-top: 4px;
+  color: #1f2b3d;
   font-size: 18px;
   line-height: 1.2;
 }
@@ -116,8 +117,11 @@ button {
   min-height: 34px;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 3px;
+  border-radius: 5px;
   padding: 0 9px;
-  color: #8191a9;
+  background: var(--nav-2);
+  color: #59677a;
   font-size: 10px;
   font-weight: 780;
   text-transform: uppercase;
@@ -149,7 +153,7 @@ button {
   min-height: 38px;
   border-radius: 6px;
   padding: 0 10px 0 16px;
-  color: #c8d3e2;
+  color: #445268;
   text-decoration: none;
   font-size: 13px;
   font-weight: 690;
@@ -158,12 +162,13 @@ button {
 
 .side-nav a[aria-current="page"] {
   background: #ffffff;
-  color: var(--nav);
+  color: #1d4ed8;
+  box-shadow: inset 3px 0 0 var(--blue), 0 1px 2px rgba(19, 31, 49, 0.06);
 }
 
 .side-nav a:hover:not([aria-current="page"]) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background: #e2e7ee;
+  color: #1f2b3d;
 }
 
 .side-nav-toggle,
@@ -173,18 +178,20 @@ button {
   height: 30px;
   flex: 0 0 30px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.13);
+  border: 1px solid #c9d1dc;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #dce5f1;
-  font-size: 22px;
+  background: #ffffff;
+  color: #435168;
+  font-size: 20px;
+  font-weight: 500;
   line-height: 1;
 }
 
 .side-nav-toggle:hover,
 .side-nav-reopen:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.1);
+  border-color: #9ba8ba;
+  background: #f8fafc;
+  color: #172033;
 }
 
 .side-nav-footer {
@@ -193,13 +200,13 @@ button {
   justify-content: space-between;
   margin-top: auto;
   padding: 13px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: #8292aa;
+  border-top: 1px solid #d7dde6;
+  color: #758297;
   font-size: 10px;
 }
 
 .side-nav-footer strong {
-  color: #c7d2e1;
+  color: #536177;
   font-size: 10px;
 }
 
@@ -209,8 +216,8 @@ button {
   top: 18px;
   left: 16px;
   display: none;
-  border-color: #27364b;
-  background: var(--nav);
+  border-color: #c9d1dc;
+  background: #ffffff;
   box-shadow: var(--shadow);
 }
 
@@ -636,6 +643,7 @@ body.nav-collapsed .side-nav-reopen {
   width: 100%;
   height: 230px;
   background: #fff;
+  cursor: crosshair;
 }
 
 .metric-chart-primary {
