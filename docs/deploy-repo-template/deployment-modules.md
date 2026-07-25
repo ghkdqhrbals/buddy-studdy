@@ -66,6 +66,11 @@ deployment.
   `/app/db/migration-mysql`. Both normal deployment and the one-time cutover
   bootstrap use `filesystem:/app/db/migration-mysql` so schema discovery does
   not depend on native-image classpath resource scanning.
+- The one-time PostgreSQL cutover preserves every question row. Legacy
+  questions may reference a study, user, or concept that was already deleted
+  before foreign keys existed; only those missing nullable references are
+  normalized to `NULL`. The migration summary records each normalization count,
+  while source and destination table counts must still match exactly.
 - The backend deploy runs `buddystudy-db-metrics`, a port-free Docker CLI
   observer that logs MySQL container CPU, total/active connections, and
   the live `max_connections` setting every 30 seconds. Promtail forwards these

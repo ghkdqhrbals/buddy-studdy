@@ -52,6 +52,12 @@ COLUMN_ALIASES = {
     ("user_monthly_question_usage", "usage_month"): "year_month",
 }
 
+NULLABLE_REFERENCE_NORMALIZATIONS = {
+    ("questions", "user_id"): ("users", "id"),
+    ("questions", "study_id"): ("studies", "id"),
+    ("questions", "concept_id"): ("study_question_concepts", "id"),
+}
+
 NULL_MARKER = f"__BUDDYSTUDY_NULL_{uuid.uuid4().hex}__"
 
 
@@ -202,6 +208,7 @@ mysql_query(
 )
 
 counts: dict[str, int] = {}
+normalized_references: dict[str, int] = {}
 for table in migration_tables:
     source_column_rows = parse_tsv(
         pg_query(
@@ -230,6 +237,10 @@ for table in migration_tables:
         )
     )
     destination_columns = [row[0] for row in destination_column_rows]
+    destination_column_metadata = {
+        name: {"nullable": nullable, "default": default, "extra": extra}
+        for name, nullable, default, extra in destination_column_rows
+    }
     common_columns = [
         column
         for column in destination_columns
@@ -255,25 +266,60 @@ for table in migration_tables:
     for column in common_columns:
         source_column = source_column_name(table, column)
         quoted = quote_pg(source_column)
+        qualified = f"source.{quoted}"
         data_type = source_columns[source_column]["data_type"]
-        if data_type == "timestamp with time zone":
+        normalization = NULLABLE_REFERENCE_NORMALIZATIONS.get((table, column))
+        if normalization:
+            if destination_column_metadata[column]["nullable"] != "YES":
+                raise RuntimeError(
+                    f"{table}.{column} must be nullable before orphan normalization."
+                )
+            parent_table, parent_column = normalization
+            parent_table_quoted = quote_pg(parent_table)
+            parent_column_quoted = quote_pg(parent_column)
             expression = (
-                f"case when {quoted} is null then null "
-                f"else to_char({quoted} at time zone 'UTC', "
+                f"case when {qualified} is null or exists ("
+                f"select 1 from public.{parent_table_quoted} parent "
+                f"where parent.{parent_column_quoted} = {qualified}"
+                f") then {qualified} else null end"
+            )
+            orphan_count = int(
+                pg_query(
+                    f"""
+                    select count(*)
+                      from public.{quote_pg(table)} source
+                      left join public.{parent_table_quoted} parent
+                        on parent.{parent_column_quoted} = {qualified}
+                     where {qualified} is not null
+                       and parent.{parent_column_quoted} is null
+                    """
+                )
+                or "0"
+            )
+            label = f"{table}.{column}"
+            normalized_references[label] = orphan_count
+            if orphan_count:
+                print(
+                    f"{label}: normalizing {orphan_count} orphan reference(s) to NULL"
+                )
+        elif data_type == "timestamp with time zone":
+            expression = (
+                f"case when {qualified} is null then null "
+                f"else to_char({qualified} at time zone 'UTC', "
                 "'YYYY-MM-DD HH24:MI:SS.US') end"
             )
         elif data_type == "timestamp without time zone":
             expression = (
-                f"case when {quoted} is null then null "
-                f"else to_char({quoted}, 'YYYY-MM-DD HH24:MI:SS.US') end"
+                f"case when {qualified} is null then null "
+                f"else to_char({qualified}, 'YYYY-MM-DD HH24:MI:SS.US') end"
             )
         elif data_type == "boolean":
             expression = (
-                f"case when {quoted} is null then null "
-                f"when {quoted} then '1' else '0' end"
+                f"case when {qualified} is null then null "
+                f"when {qualified} then '1' else '0' end"
             )
         else:
-            expression = quoted
+            expression = qualified
         select_expressions.append(expression)
 
     order_columns = [
@@ -282,13 +328,14 @@ for table in migration_tables:
         if column in common_columns
     ]
     order_clause = (
-        " order by " + ", ".join(quote_pg(column) for column in order_columns)
+        " order by "
+        + ", ".join(f"source.{quote_pg(column)}" for column in order_columns)
         if order_columns
         else ""
     )
     select_sql = (
         f"select {', '.join(select_expressions)} "
-        f"from public.{quote_pg(table)}{order_clause}"
+        f"from public.{quote_pg(table)} source{order_clause}"
     )
     copy_sql = (
         f"copy ({select_sql}) to stdout "
@@ -406,6 +453,7 @@ summary_path.write_text(
             "destination": "MySQL",
             "tables": counts,
             "totalRows": sum(counts.values()),
+            "normalizedReferences": normalized_references,
         },
         ensure_ascii=False,
         indent=2,
