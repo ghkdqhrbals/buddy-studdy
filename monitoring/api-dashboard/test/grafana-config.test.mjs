@@ -150,17 +150,19 @@ test("server runtime dashboard separates server, database, and Redis signals", a
 
   assert.equal(dashboard.title, "BuddyStudy Server Dashboard");
   assert.match(dashboard.description, /JVM.*Reactor Netty.*R2DBC.*Redis/);
-  assert.ok(dashboard.panels.length >= 14);
+  assert.ok(dashboard.panels.length >= 16);
   assert.deepEqual(rows, ["Server", "Database", "Redis"]);
   for (const title of [
     "API RPS by endpoint",
-    "CPU utilization",
+    "Node and process CPU utilization",
     "JVM and process memory",
     "Runtime threads",
     "Garbage collection",
     "Server event loop",
     "Root disk",
     "Network counters",
+    "Node capacity",
+    "Node memory",
     "R2DBC connection pool",
     "MySQL CPU",
     "MySQL connections",
@@ -177,7 +179,24 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /topk\(20/);
   assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /sum by \(method, path\)/);
   assert.equal(panels.get("API RPS by endpoint")?.targets[0].legendFormat, "{{method}} {{path}}");
-  assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
+  assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 34);
+  assert.equal(panels.get("Node capacity")?.type, "stat");
+  assert.match(
+    panels.get("Node capacity")?.targets[0].expr ?? "",
+    /availableProcessors/,
+  );
+  assert.match(
+    panels.get("Node capacity")?.targets[1].expr ?? "",
+    /hostMemoryTotalBytes/,
+  );
+  assert.deepEqual(
+    panels.get("Node memory")?.targets.map((target) => target.legendFormat),
+    ["used", "available", "maximum"],
+  );
+  assert.match(
+    panels.get("Node memory")?.targets[0].expr ?? "",
+    /hostMemoryUsedBytes/,
+  );
   assert.match(
     panels.get("R2DBC connection pool")?.targets.at(-1)?.expr ?? "",
     /dbPoolMaxAllocated/,

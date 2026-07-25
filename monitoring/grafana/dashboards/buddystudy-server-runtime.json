@@ -159,7 +159,7 @@
           "refId": "B"
         }
       ],
-      "title": "CPU utilization",
+      "title": "Node and process CPU utilization",
       "type": "timeseries"
     },
     {
@@ -531,12 +531,150 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Maximum CPU and memory capacity visible to the backend runtime. CPU cores reflect the runtime allocation; memory maximum reflects the node total reported by Linux.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "memory maximum"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json availableProcessors=\"availableProcessors\" | unwrap availableProcessors | __error__=\"\" [1m])",
+          "legendFormat": "CPU cores",
+          "refId": "A"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m])",
+          "legendFormat": "memory maximum",
+          "refId": "B"
+        }
+      ],
+      "title": "Node capacity",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "Node memory currently used and available compared with the maximum physical memory visible to the backend container.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "bytes",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 25
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryUsedBytes=\"hostMemoryUsedBytes\" | unwrap hostMemoryUsedBytes | __error__=\"\" [1m])",
+          "legendFormat": "used",
+          "refId": "A"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryAvailableBytes=\"hostMemoryAvailableBytes\" | unwrap hostMemoryAvailableBytes | __error__=\"\" [1m])",
+          "legendFormat": "available",
+          "refId": "B"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m])",
+          "legendFormat": "maximum",
+          "refId": "C"
+        }
+      ],
+      "title": "Node memory",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 33
       },
       "id": 101,
       "panels": [],
@@ -571,7 +709,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 34
       },
       "id": 5,
       "options": {
@@ -650,7 +788,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 34
       },
       "id": 13,
       "options": {
@@ -708,7 +846,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "id": 14,
       "options": {
@@ -751,7 +889,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 50
       },
       "id": 102,
       "panels": [],
@@ -789,7 +927,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "id": 11,
       "options": {
@@ -847,7 +985,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 43
+        "y": 51
       },
       "id": 12,
       "options": {
@@ -893,5 +1031,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 6
+  "version": 7
 }
