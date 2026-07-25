@@ -80,9 +80,19 @@ jobs:
             exit 1
           fi
 
-          mkdir -p /opt/buddystudy-backend
+          DEPLOY_ROOT="/opt/buddystudy-backend"
+          if mkdir -p "${DEPLOY_ROOT}" 2>/dev/null; then
+            :
+          elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            sudo mkdir -p "${DEPLOY_ROOT}"
+            sudo chown "$USER":"$USER" "${DEPLOY_ROOT}"
+          else
+            DEPLOY_ROOT="${HOME}/buddystudy-backend"
+            mkdir -p "${DEPLOY_ROOT}"
+          fi
+          echo "Using backend deploy root: ${DEPLOY_ROOT}"
 
-          cd /opt/buddystudy-backend
+          cd "${DEPLOY_ROOT}"
 
           mkdir -p nginx/certs letsencrypt
 
