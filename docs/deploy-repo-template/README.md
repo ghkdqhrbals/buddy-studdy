@@ -31,7 +31,6 @@ Backend deploy:
 - `GHCR_TOKEN`
 - `BACKEND_MASTER_KEY`
 - `BACKEND_API_TOKEN`
-- `REDIS_STREAM_COORDINATOR_PASSWORD`
 - `APNS_AUTH_KEY_BASE64`
 - `APNS_KEY_ID`
 - `APNS_TEAM_ID`
@@ -75,15 +74,12 @@ Repository variables:
 - `buddystudy-nginx`: public HTTPS proxy on host port `443`.
 - `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
 - `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
-- `rsc-coordinator`: Redis Stream Coordinator on Docker network port `8080`, deployed from a GHCR native-image artifact.
 - `buddystudy-db`: private MySQL container on Docker network port `3306`.
 - `buddystudy-mysql-data`: persistent Docker volume for MySQL data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
 - `buddystudy-mysql-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
-- If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
-- If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStudy backend logs.
 - Other paths return 404 at Nginx.
 
 ## EC2 Runner Bootstrap
@@ -111,11 +107,11 @@ backend code or Docker images.
 The backend workflow expects the EC2 runner to match:
 
 ```yaml
-runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+runs-on: [self-hosted, Linux, ARM64, ec2]
 ```
 
-Use an ARM instance such as `t4g.medium` when backend, MySQL, Redis,
-coordinator, nginx, and promtail share the host.
+Use an ARM instance such as `t4g.medium` when backend, MySQL, Redis, Nginx, and
+Promtail share the host.
 
 ## Admin Frontend Deploy
 
@@ -193,20 +189,9 @@ for example:
 ghcr.io/ghkdqhrbals/buddystudy-backend:latest
 ```
 
-Optionally override the Redis Stream Coordinator native image ref:
-
-```text
-ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest
-```
-
-Backend and coordinator container images must be built on GitHub-hosted
-runners and pushed to GHCR before this workflow runs. The self-hosted EC2
-runner must only pull those images and run containers; it must not compile
-backend code or build Docker images.
-
-`coordinator.ghkdqhrbals.org` must resolve to the same EC2 host before
-deployment so Let's Encrypt can issue a certificate that includes both API and
-coordinator hostnames.
+The backend image must be built on a GitHub-hosted runner and pushed to GHCR
+before this workflow runs. The self-hosted EC2 runner only pulls the image and
+runs containers; it must not compile backend code or build Docker images.
 
 The deploy process uses a blue/green rolling pattern:
 
@@ -239,14 +224,6 @@ defaults to `300`. The template also passes `MONITORING_SLACK_TIMEOUT_MS`,
 use the same scheduler readiness policy as Kubernetes. The Cloudflare Worker uses
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
 checker.
-
-The Docker backend template also passes the internal Redis Stream Coordinator
-URL to the backend as `REACTION_STREAM_COORDINATOR_BASE_URL` and enables
-coordinator readiness with `MONITORING_COORDINATOR_READINESS_ENABLED=true`.
-By default both backend traffic and readiness use `http://rsc-coordinator:8080`;
-override `REACTION_STREAM_COORDINATOR_BASE_URL` or
-`MONITORING_COORDINATOR_BASE_URL` only when the coordinator runs under a
-different internal name.
 
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 

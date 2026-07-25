@@ -1,0 +1,219 @@
+name: Migrate BuddyStudy PostgreSQL To MySQL
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "MySQL-compatible backend image used to initialize Flyway."
+        required: true
+        type: string
+
+concurrency:
+  group: migrate-backend-database
+  cancel-in-progress: false
+
+jobs:
+  migrate_database:
+    name: Migrate database
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 30
+    env:
+      IMAGE_REF: ${{ inputs.image }}
+      MYSQL_SECRET_ID: buddystudy/prod/mysql
+
+    steps:
+      - name: Checkout migration tooling
+        uses: actions/checkout@v4
+
+      - name: Cut over PostgreSQL to MySQL
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          DEPLOY_ROOT="/opt/buddystudy-backend"
+          if mkdir -p "${DEPLOY_ROOT}" 2>/dev/null; then
+            :
+          elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            sudo mkdir -p "${DEPLOY_ROOT}"
+            sudo chown "$USER":"$USER" "${DEPLOY_ROOT}"
+          else
+            DEPLOY_ROOT="${HOME}/buddystudy-backend"
+            mkdir -p "${DEPLOY_ROOT}"
+          fi
+          cd "${DEPLOY_ROOT}"
+
+          if [ ! -s .env ]; then
+            echo "Backend .env is missing. Run the backend deploy once to prepare secrets." >&2
+            exit 1
+          fi
+          DATABASE_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-db 2>/dev/null || true)"
+          case "${DATABASE_IMAGE}" in
+            postgres:16|postgres:16-*)
+              ;;
+            mysql:8.4|mysql:8.4.*)
+              echo "Production database is already MySQL; no migration is required."
+              exit 0
+              ;;
+            *)
+              echo "Unsupported production database image: ${DATABASE_IMAGE:-missing}" >&2
+              exit 1
+              ;;
+          esac
+
+          MYSQL_SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --region ap-northeast-2 \
+            --secret-id "${MYSQL_SECRET_ID}" \
+            --query SecretString \
+            --output text)"
+          MYSQL_DATABASE="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')"
+          MYSQL_USER="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')"
+          MYSQL_PASSWORD="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
+
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          docker pull "${IMAGE_REF}"
+          docker pull mysql:8.4
+          docker network create buddystudy-net >/dev/null 2>&1 || true
+          docker volume create buddystudy-mysql-data >/dev/null
+
+          CUTOVER_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+          POSTGRES_ROLLBACK="buddystudy-db-postgres-rollback-${CUTOVER_ID}"
+          FAILED_MYSQL="buddystudy-db-mysql-failed-${CUTOVER_ID}"
+          MIGRATION_DIR="${DEPLOY_ROOT}/migrations/${CUTOVER_ID}"
+          mkdir -p "${MIGRATION_DIR}"
+          RUNNING_BACKENDS="$(
+            docker ps --format '{{.Names}}' |
+              grep -E '^buddystudy-backend(-[ab])?$' || true
+          )"
+          printf '%s\n' "${RUNNING_BACKENDS}" > "${MIGRATION_DIR}/running-backends.txt"
+
+          rollback() {
+            status="$?"
+            if [ "${status}" -eq 0 ]; then
+              return
+            fi
+            echo "Migration failed; restoring PostgreSQL runtime." >&2
+            docker rm -f buddystudy-mysql-schema-bootstrap >/dev/null 2>&1 || true
+            if docker inspect buddystudy-db >/dev/null 2>&1; then
+              docker stop buddystudy-db >/dev/null 2>&1 || true
+              docker rename buddystudy-db "${FAILED_MYSQL}" >/dev/null 2>&1 || true
+            fi
+            if docker inspect "${POSTGRES_ROLLBACK}" >/dev/null 2>&1; then
+              docker rename "${POSTGRES_ROLLBACK}" buddystudy-db
+              docker start buddystudy-db >/dev/null
+              docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
+            fi
+            while IFS= read -r backend; do
+              [ -n "${backend}" ] && docker start "${backend}" >/dev/null 2>&1 || true
+            done < "${MIGRATION_DIR}/running-backends.txt"
+            exit "${status}"
+          }
+          trap rollback EXIT
+
+          while IFS= read -r backend; do
+            [ -n "${backend}" ] && docker stop --time 30 "${backend}" >/dev/null
+          done < "${MIGRATION_DIR}/running-backends.txt"
+
+          POSTGRES_USER="$(
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db |
+              sed -n 's/^POSTGRES_USER=//p' | head -1
+          )"
+          POSTGRES_DB="$(
+            docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db |
+              sed -n 's/^POSTGRES_DB=//p' | head -1
+          )"
+          POSTGRES_USER="${POSTGRES_USER:-buddystudy}"
+          POSTGRES_DB="${POSTGRES_DB:-buddystudy}"
+          docker exec buddystudy-db pg_dump \
+            -U "${POSTGRES_USER}" \
+            -d "${POSTGRES_DB}" \
+            --format=custom \
+            --no-owner \
+            --no-privileges > "${MIGRATION_DIR}/postgresql.dump"
+          test -s "${MIGRATION_DIR}/postgresql.dump"
+
+          docker stop buddystudy-db >/dev/null
+          docker rename buddystudy-db "${POSTGRES_ROLLBACK}"
+          docker network disconnect buddystudy-net "${POSTGRES_ROLLBACK}" >/dev/null 2>&1 || true
+          docker start "${POSTGRES_ROLLBACK}" >/dev/null
+
+          cat > "${MIGRATION_DIR}/mysql.env" <<ENV
+          MYSQL_DATABASE=${MYSQL_DATABASE}
+          MYSQL_USER=${MYSQL_USER}
+          MYSQL_PASSWORD=${MYSQL_PASSWORD}
+          MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
+          ENV
+          chmod 600 "${MIGRATION_DIR}/mysql.env"
+          docker run -d \
+            --name buddystudy-db \
+            --network buddystudy-net \
+            --restart unless-stopped \
+            --env-file "${MIGRATION_DIR}/mysql.env" \
+            -v buddystudy-mysql-data:/var/lib/mysql \
+            mysql:8.4 \
+            --local-infile=1
+
+          for attempt in $(seq 1 60); do
+            if docker exec -e MYSQL_PWD="${MYSQL_PASSWORD}" buddystudy-db \
+              mysql --batch --skip-column-names \
+                -h 127.0.0.1 -u "${MYSQL_USER}" "${MYSQL_DATABASE}" \
+                -e "select 1" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "${attempt}" -eq 60 ]; then
+              echo "MySQL did not become ready." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker run -d \
+            --name buddystudy-mysql-schema-bootstrap \
+            --network buddystudy-net \
+            --env-file .env \
+            -e SCHEDULER_ENABLED=false \
+            "${IMAGE_REF}"
+          for attempt in $(seq 1 60); do
+            MIGRATION_COUNT="$(
+              docker exec -e MYSQL_PWD="${MYSQL_PASSWORD}" buddystudy-db \
+                mysql --batch --skip-column-names \
+                -u "${MYSQL_USER}" "${MYSQL_DATABASE}" \
+                -e "select count(*) from flyway_schema_history where success = 1" \
+                2>/dev/null || true
+            )"
+            if [ "${MIGRATION_COUNT:-0}" -ge 2 ]; then
+              break
+            fi
+            if [ "${attempt}" -eq 60 ]; then
+              echo "MySQL Flyway bootstrap did not complete." >&2
+              docker logs buddystudy-mysql-schema-bootstrap || true
+              exit 1
+            fi
+            sleep 2
+          done
+          docker rm -f buddystudy-mysql-schema-bootstrap >/dev/null 2>&1 || true
+
+          POSTGRES_CONTAINER="${POSTGRES_ROLLBACK}" \
+          MYSQL_CONTAINER=buddystudy-db \
+          MYSQL_DATABASE="${MYSQL_DATABASE}" \
+          MYSQL_USER="${MYSQL_USER}" \
+          MYSQL_PASSWORD="${MYSQL_PASSWORD}" \
+          MIGRATION_WORK_DIR="${MIGRATION_DIR}/data" \
+            python3 "${GITHUB_WORKSPACE}/deploy/backend/postgresql_to_mysql.py"
+
+          docker stop "${POSTGRES_ROLLBACK}" >/dev/null
+          chmod -R go-rwx "${MIGRATION_DIR}"
+          trap - EXIT
+          echo "PostgreSQL preserved as ${POSTGRES_ROLLBACK}; MySQL cutover is ready."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## PostgreSQL To MySQL Migration"
+            echo ""
+            echo "- Target: \`ec2\`"
+            echo "- Backend image: \`${IMAGE_REF}\`"
+            echo "- Result: \`${{ job.status }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

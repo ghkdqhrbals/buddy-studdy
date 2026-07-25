@@ -18,7 +18,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy
-    runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+    runs-on: [self-hosted, Linux, ARM64, ec2]
     timeout-minutes: 20
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
@@ -294,7 +294,9 @@ jobs:
 
           for attempt in $(seq 1 60); do
             if docker exec -e MYSQL_PWD="${MYSQL_PASSWORD}" buddystudy-db \
-              mysqladmin ping -h 127.0.0.1 -u "${MYSQL_USER}" --silent >/dev/null 2>&1; then
+              mysql --batch --skip-column-names \
+                -h 127.0.0.1 -u "${MYSQL_USER}" "${MYSQL_DATABASE}" \
+                -e "select 1" >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 60 ]; then
