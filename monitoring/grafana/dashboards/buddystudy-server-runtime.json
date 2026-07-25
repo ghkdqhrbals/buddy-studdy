@@ -48,6 +48,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
+      "description": "Current backend API request throughput calculated from structured api_exchange logs over the latest minute.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -62,7 +63,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -89,13 +90,13 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" [$__range]))",
-          "legendFormat": "samples",
+          "expr": "sum(rate(({container=~\"buddystudy-backend.*\"} |= \"api_exchange \")[1m]))",
+          "legendFormat": "requests",
           "queryType": "instant",
           "refId": "A"
         }
       ],
-      "title": "Runtime samples",
+      "title": "Request rate",
       "type": "stat"
     },
     {
@@ -823,5 +824,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 3
+  "version": 4
 }
