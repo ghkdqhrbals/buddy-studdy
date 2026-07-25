@@ -9,7 +9,7 @@ async function text(file) {
 }
 
 test("all monitoring pages load the shared navigation shell", async () => {
-  for (const page of ["index.html", "performance.html", "system.html", "testzone.html", "audit.html", "settings.html"]) {
+  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html"]) {
     const html = await text(page);
     assert.match(html, /src="\/shell\.js\?/);
     assert.match(html, /src="\/nav-bootstrap\.js\?/);
@@ -69,15 +69,13 @@ test("access audit reads the monitoring gateway journal instead of backend API l
   assert.doesNotMatch(js, /parseApiExchange/);
 });
 
-test("server charts expose hover tooltips and JVM pressure summaries", async () => {
+test("server dashboard navigation and legacy URL open the detailed Grafana dashboard", async () => {
   const html = await text("system.html");
-  const js = await text("system.js");
-  assert.match(html, /id="heapSummary"/);
-  assert.match(html, /id="gcPauseSummary"/);
-  assert.match(html, /id="heapPressureChart"/);
-  assert.match(html, /id="gcCountChart"/);
-  assert.match(js, /configureChartTooltip/);
-  assert.match(js, /mousemove/);
-  assert.match(js, /metric-chart-tooltip/);
-  assert.match(js, /updateCustomRangeVisibility\(\);\s*render\(\);\s*loadMetrics/);
+  const shell = await text("shell.js");
+  assert.match(shell, /SERVER_DASHBOARD_URL/);
+  assert.match(shell, /buddystudy-server-runtime\/buddystudy-server-dashboard/);
+  assert.match(html, /http-equiv="refresh"/);
+  assert.match(html, /window\.location\.replace/);
+  assert.match(html, /buddystudy-server-runtime\/buddystudy-server-dashboard/);
+  assert.doesNotMatch(html, /system\.js/);
 });

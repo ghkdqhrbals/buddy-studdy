@@ -1,7 +1,8 @@
 const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
-const UI_VERSION = "2026.07.25.7";
+const SERVER_DASHBOARD_URL = "https://grafana.lowfidev.cloud/d/buddystudy-server-runtime/buddystudy-server-dashboard?orgId=1&from=now-1h&to=now&timezone=browser&refresh=10s";
+const UI_VERSION = "2026.07.25.9";
 const root = document.documentElement;
 
 const groups = [
@@ -11,7 +12,7 @@ const groups = [
     items: [
       { href: "/", label: "API Logs", icon: "logs" },
       { href: "/performance.html", label: "API Performance", icon: "performance" },
-      { href: "/system.html", label: "Server Dashboard", icon: "server" },
+      { href: SERVER_DASHBOARD_URL, label: "Server Dashboard", icon: "server" },
       { href: "/audit.html", label: "Access & Audit", icon: "audit" },
     ],
   },

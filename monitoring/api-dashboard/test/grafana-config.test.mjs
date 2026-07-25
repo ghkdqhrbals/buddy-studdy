@@ -84,7 +84,24 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     .map((panel) => panel.title);
   const panels = new Map(dashboard.panels.map((panel) => [panel.title, panel]));
 
+  assert.equal(dashboard.title, "BuddyStudy Server Dashboard");
+  assert.match(dashboard.description, /JVM.*Reactor Netty.*R2DBC.*Redis/);
+  assert.ok(dashboard.panels.length >= 15);
   assert.deepEqual(rows, ["Server", "Database", "Redis"]);
+  for (const title of [
+    "CPU utilization",
+    "JVM and process memory",
+    "Runtime threads",
+    "Garbage collection",
+    "Server event loop",
+    "Root disk",
+    "Network counters",
+    "R2DBC connection pool",
+    "Redis activity",
+    "Redis failures",
+  ]) {
+    assert.ok(panels.has(title), `${title} panel must be provisioned`);
+  }
   assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);

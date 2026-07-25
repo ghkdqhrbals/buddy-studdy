@@ -3,6 +3,7 @@
     "list": []
   },
   "editable": false,
+  "description": "Detailed BuddyStudy server, JVM, Reactor Netty, host, R2DBC connection pool, and Redis runtime signals.",
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
@@ -13,9 +14,19 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": true,
-      "title": "Custom monitoring",
+      "title": "API logs",
       "type": "link",
-      "url": "https://monitoring.lowfidev.cloud/system.html"
+      "url": "https://monitoring.lowfidev.cloud/"
+    },
+    {
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "API performance",
+      "type": "link",
+      "url": "https://monitoring.lowfidev.cloud/performance.html"
     }
   ],
   "panels": [
@@ -810,7 +821,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "BuddyStudy Runtime",
+  "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 2
+  "version": 3
 }

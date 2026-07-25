@@ -89,7 +89,7 @@ jobs:
             "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
             -o "${monitoring_root}/loki/config/loki.yml"
           for file in \
-            index.html app.js logs.js shell.js \
+            index.html app.js logs.js shell.js nav-bootstrap.js \
             audit.html audit.js audit-model.js \
             settings.html settings.js \
             performance.html performance.js \
