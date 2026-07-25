@@ -10,11 +10,6 @@ on:
         description: "Image ref to deploy."
         required: true
         type: string
-      coordinator_image:
-        description: "Redis Stream Coordinator image ref to deploy. Leave empty to keep the current default."
-        required: false
-        default: "ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest"
-        type: string
 
 concurrency:
   group: deploy-backend
@@ -27,7 +22,6 @@ jobs:
     timeout-minutes: 20
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
-      COORDINATOR_IMAGE_REF: ${{ github.event.client_payload.coordinator_image || inputs.coordinator_image || 'ghcr.io/ghkdqhrbals/redis-stream-coordinator/coordinator:native-latest' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
       COORDINATOR_DOMAIN: coordinator.ghkdqhrbals.org
 
@@ -202,7 +196,6 @@ jobs:
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           docker pull "${IMAGE_REF}"
-          docker pull "${COORDINATOR_IMAGE_REF}"
           docker pull nginx:1.27-alpine
           docker pull mysql:8.4
           docker pull certbot/certbot:v2.11.0
@@ -289,18 +282,11 @@ jobs:
             docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
           fi
 
-          docker rm -f rsc-coordinator >/dev/null 2>&1 || true
-          docker run -d \
-            --name rsc-coordinator \
-            --network redis-stream-coordinator-net \
-            --restart unless-stopped \
-            -e SPRING_PROFILES_ACTIVE=prod \
-            -e AWS_REGION=ap-northeast-2 \
-            -e AWS_SECRET_ID=${APP_SECRET_ID} \
-            -e REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD} \
-            -p 18080:8080 \
-            "${COORDINATOR_IMAGE_REF}"
-
+          if ! docker inspect -f '{{.State.Running}}' rsc-coordinator 2>/dev/null | grep -qx true; then
+            echo "The separately managed rsc-coordinator container is not running." >&2
+            exit 1
+          fi
+          docker network connect redis-stream-coordinator-net rsc-coordinator >/dev/null 2>&1 || true
           docker network connect buddystudy-net rsc-coordinator >/dev/null 2>&1 || true
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
@@ -685,7 +671,7 @@ jobs:
             echo ""
             echo "- Target: \`ec2\`"
             echo "- Image: \`${IMAGE_REF}\`"
-            echo "- Coordinator image: \`${COORDINATOR_IMAGE_REF}\`"
+            echo "- Coordinator: \`existing separately managed runtime\`"
             echo "- Result: \`${{ job.status }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
