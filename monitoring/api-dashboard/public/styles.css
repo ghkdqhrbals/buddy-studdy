@@ -276,27 +276,37 @@ button {
   font-size: 10px;
 }
 
-body.nav-collapsed .app-shell {
+html:not(.nav-motion-ready) .app-shell,
+html:not(.nav-motion-ready) .side-nav,
+html:not(.nav-motion-ready) .side-nav-brand-copy,
+html:not(.nav-motion-ready) .side-nav-group summary,
+html:not(.nav-motion-ready) .side-nav-group-indicator,
+html:not(.nav-motion-ready) .side-nav-link-label,
+html:not(.nav-motion-ready) .side-nav-footer {
+  transition: none !important;
+}
+
+html.nav-collapsed .app-shell {
   padding-left: calc(var(--side-nav-rail-width) + 36px);
 }
 
-body.nav-collapsed .side-nav {
+html.nav-collapsed .side-nav {
   width: var(--side-nav-rail-width);
 }
 
-body.nav-collapsed .side-nav-brand {
+html.nav-collapsed .side-nav-brand {
   justify-content: center;
   padding-inline: 12px;
 }
 
-body.nav-collapsed .side-nav-link-label {
+html.nav-collapsed .side-nav-link-label {
   max-width: 0;
   opacity: 0;
   transform: translateX(-4px);
   transition-delay: 0ms;
 }
 
-body.nav-collapsed .side-nav-group summary {
+html.nav-collapsed .side-nav-group summary {
   min-height: 0;
   height: 0;
   margin: 0;
@@ -306,7 +316,7 @@ body.nav-collapsed .side-nav-group summary {
   transition-delay: 0ms;
 }
 
-body.nav-collapsed .side-nav-brand-copy {
+html.nav-collapsed .side-nav-brand-copy {
   max-width: 0;
   min-width: 0;
   opacity: 0;
@@ -314,7 +324,7 @@ body.nav-collapsed .side-nav-brand-copy {
   transition-delay: 0ms;
 }
 
-body.nav-collapsed .side-nav-footer {
+html.nav-collapsed .side-nav-footer {
   max-height: 0;
   padding-block: 0;
   border-top-color: transparent;
@@ -322,22 +332,22 @@ body.nav-collapsed .side-nav-footer {
   transition-delay: 0ms;
 }
 
-body.nav-collapsed .side-nav nav {
+html.nav-collapsed .side-nav nav {
   gap: 10px;
   padding-inline: 8px;
 }
 
-body.nav-collapsed .side-nav-group:not([open]) > .side-nav-links {
+html.nav-collapsed .side-nav-group:not([open]) > .side-nav-links {
   display: grid !important;
 }
 
-body.nav-collapsed .side-nav a {
+html.nav-collapsed .side-nav a {
   justify-content: center;
   gap: 0;
   padding: 0;
 }
 
-body.nav-collapsed .side-nav-group + .side-nav-group {
+html.nav-collapsed .side-nav-group + .side-nav-group {
   padding-top: 10px;
 }
 
@@ -1691,7 +1701,7 @@ pre {
     width: min(280px, calc(100vw - 24px));
   }
 
-  body:not(.nav-collapsed) .side-nav {
+  html:not(.nav-collapsed) .side-nav {
     box-shadow: 12px 0 40px rgba(19, 31, 49, 0.24);
   }
 

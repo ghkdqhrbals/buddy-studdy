@@ -10,7 +10,13 @@ async function text(file) {
 
 test("all monitoring pages load the shared navigation shell", async () => {
   for (const page of ["index.html", "performance.html", "system.html", "testzone.html", "audit.html", "settings.html"]) {
-    assert.match(await text(page), /src="\/shell\.js\?/);
+    const html = await text(page);
+    assert.match(html, /src="\/shell\.js\?/);
+    assert.match(html, /src="\/nav-bootstrap\.js\?/);
+    assert.ok(
+      html.indexOf("/nav-bootstrap.js") < html.indexOf("/styles.css"),
+      `${page} must restore navigation state before styles load`,
+    );
   }
   const shell = await text("shell.js");
   assert.match(shell, /Access & Audit/);
@@ -26,12 +32,14 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
   assert.match(css, /\.side-nav\s*\{[\s\S]*position:\s*fixed/);
   assert.match(css, /\.side-nav\s*\{[\s\S]*background:\s*var\(--nav\)/);
   assert.match(css, /\.side-nav-group summary\s*\{[\s\S]*background:\s*var\(--nav-2\)/);
-  assert.match(css, /body\.nav-collapsed \.side-nav/);
-  assert.match(css, /body\.nav-collapsed \.side-nav-link-label/);
+  assert.match(css, /html\.nav-collapsed \.side-nav/);
+  assert.match(css, /html\.nav-collapsed \.side-nav-link-label/);
+  assert.match(css, /html:not\(\.nav-motion-ready\)[\s\S]*transition:\s*none !important/);
   assert.match(css, /--side-nav-rail-width:\s*64px/);
   assert.match(css, /\.side-nav-footer\s*\{[\s\S]*margin-top:\s*auto/);
   assert.match(shell, /createIcon\("menu"/);
-  assert.match(shell, /setCollapsed\(!document\.body\.classList\.contains\("nav-collapsed"\)\)/);
+  assert.match(shell, /setCollapsed\(!root\.classList\.contains\("nav-collapsed"\)\)/);
+  assert.match(shell, /root\.classList\.add\("nav-motion-ready"\)/);
   assert.match(shell, /group\.dataset\.expandedOpen/);
   assert.match(shell, /group\.open = true/);
   assert.match(shell, /monitoring:nav-mode-change/);

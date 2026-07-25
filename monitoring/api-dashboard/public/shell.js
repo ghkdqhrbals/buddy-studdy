@@ -1,7 +1,8 @@
 const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
-const UI_VERSION = "2026.07.25.6";
+const UI_VERSION = "2026.07.25.7";
+const root = document.documentElement;
 
 const groups = [
   {
@@ -136,7 +137,7 @@ function createGroup(group, savedState) {
 
   details.append(summary, links);
   details.addEventListener("toggle", () => {
-    if (document.body.classList.contains("nav-collapsed")) return;
+    if (root.classList.contains("nav-collapsed")) return;
     const nextState = readGroupState();
     nextState[group.id] = details.open;
     window.localStorage.setItem(NAV_GROUP_KEY, JSON.stringify(nextState));
@@ -147,7 +148,7 @@ function createGroup(group, savedState) {
 function setCollapsed(collapsed) {
   const groupElements = [...document.querySelectorAll(".side-nav-group")];
   if (collapsed) {
-    document.body.classList.add("nav-collapsed");
+    root.classList.add("nav-collapsed");
     for (const group of groupElements) {
       if (group.dataset.expandedOpen == null) {
         group.dataset.expandedOpen = String(group.open);
@@ -161,7 +162,7 @@ function setCollapsed(collapsed) {
         delete group.dataset.expandedOpen;
       }
     }
-    document.body.classList.remove("nav-collapsed");
+    root.classList.remove("nav-collapsed");
   }
   window.localStorage.setItem(NAV_COLLAPSED_KEY, String(collapsed));
   const toggle = document.querySelector(".side-nav-toggle");
@@ -187,7 +188,7 @@ function buildNavigation() {
   toggle.setAttribute("aria-expanded", "true");
   toggle.append(createIcon("menu", "side-nav-menu-icon"));
   toggle.addEventListener("click", () => {
-    setCollapsed(!document.body.classList.contains("nav-collapsed"));
+    setCollapsed(!root.classList.contains("nav-collapsed"));
   });
   brand.append(toggle, brandCopy);
 
@@ -208,6 +209,10 @@ function buildNavigation() {
   const initiallyCollapsed = navMode === "compact"
     || (navMode === "remember" && window.localStorage.getItem(NAV_COLLAPSED_KEY) === "true");
   setCollapsed(initiallyCollapsed);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => root.classList.add("nav-motion-ready"));
+  });
 }
 
 window.addEventListener("monitoring:nav-mode-change", (event) => {
