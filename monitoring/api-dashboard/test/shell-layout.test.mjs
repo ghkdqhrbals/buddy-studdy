@@ -9,11 +9,12 @@ async function text(file) {
 }
 
 test("all monitoring pages load the shared navigation shell", async () => {
-  for (const page of ["index.html", "performance.html", "system.html", "testzone.html", "audit.html"]) {
+  for (const page of ["index.html", "performance.html", "system.html", "testzone.html", "audit.html", "settings.html"]) {
     assert.match(await text(page), /src="\/shell\.js\?/);
   }
   const shell = await text("shell.js");
   assert.match(shell, /Access & Audit/);
+  assert.match(shell, /Settings/);
   assert.match(shell, /Load testing/);
   assert.match(shell, /side-nav-footer/);
   assert.match(shell, /NAV_COLLAPSED_KEY/);
@@ -31,7 +32,33 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
   assert.match(css, /\.side-nav-footer\s*\{[\s\S]*margin-top:\s*auto/);
   assert.match(shell, /createIcon\("menu"/);
   assert.match(shell, /setCollapsed\(!document\.body\.classList\.contains\("nav-collapsed"\)\)/);
+  assert.match(shell, /group\.dataset\.expandedOpen/);
+  assert.match(shell, /group\.open = true/);
+  assert.match(shell, /monitoring:nav-mode-change/);
   assert.doesNotMatch(shell, /reopen\.textContent/);
+});
+
+test("settings control navigation and access journal browser preferences", async () => {
+  const html = await text("settings.html");
+  const js = await text("settings.js");
+  assert.match(html, /id="navigationMode"/);
+  assert.match(html, /id="auditDefaultRange"/);
+  assert.match(html, /id="auditRefreshSeconds"/);
+  assert.match(html, /id="auditPageSize"/);
+  assert.match(js, /buddystudy\.monitoring\.nav\.mode/);
+  assert.match(js, /buddystudy\.monitoring\.audit\.range/);
+  assert.match(js, /monitoring:nav-mode-change/);
+});
+
+test("access audit reads the monitoring gateway journal instead of backend API logs", async () => {
+  const html = await text("audit.html");
+  const js = await text("audit.js");
+  assert.match(html, /Monitoring access journal/);
+  assert.match(html, /passwords and request bodies are never recorded/);
+  assert.match(js, /\{job="monitoring-access"\}/);
+  assert.match(js, /parseMonitoringAccessLog/);
+  assert.doesNotMatch(js, /api_exchange/);
+  assert.doesNotMatch(js, /parseApiExchange/);
 });
 
 test("server charts expose hover tooltips and JVM pressure summaries", async () => {

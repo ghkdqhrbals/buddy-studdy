@@ -1,18 +1,21 @@
-import { durationLabel, parseApiExchange, statusTone } from "./logs.js?v=2026070711";
+import { durationLabel, statusTone } from "./logs.js?v=2026070711";
 import {
-  classifyAuditEvent,
   filterAuditEntries,
   paginateAuditEntries,
+  parseMonitoringAccessLog,
   summarizeAuditEntries,
-} from "./audit-model.js?v=2026072501";
+} from "./audit-model.js?v=2026072502";
 
-const PAGE_SIZE = 50;
-const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange "';
+const ACCESS_QUERY = '{job="monitoring-access"} |= "monitoring_access"';
+const RANGE_KEY = "buddystudy.monitoring.audit.range";
+const REFRESH_KEY = "buddystudy.monitoring.audit.refreshSeconds";
+const PAGE_SIZE_KEY = "buddystudy.monitoring.audit.pageSize";
 
 const state = {
   entries: [],
   filtered: [],
   page: 1,
+  refreshTimer: null,
 };
 
 const els = {
@@ -24,8 +27,8 @@ const els = {
   status: document.querySelector("#auditStatus"),
   total: document.querySelector("#auditTotal"),
   uniqueIps: document.querySelector("#auditUniqueIps"),
-  mutations: document.querySelector("#auditMutations"),
-  failures: document.querySelector("#auditFailures"),
+  pageViews: document.querySelector("#auditPageViews"),
+  denied: document.querySelector("#auditDenied"),
   resultCount: document.querySelector("#auditResultCount"),
   rows: document.querySelector("#auditRows"),
   empty: document.querySelector("#auditEmpty"),
@@ -43,13 +46,40 @@ function setStatus(message, tone) {
   els.status.dataset.tone = tone;
 }
 
+function pageSize() {
+  return Number(window.localStorage.getItem(PAGE_SIZE_KEY)) || 50;
+}
+
+function scheduleRefresh() {
+  window.clearTimeout(state.refreshTimer);
+  const seconds = Number(window.localStorage.getItem(REFRESH_KEY)) || 0;
+  if (seconds > 0) {
+    state.refreshTimer = window.setTimeout(loadAuditEntries, seconds * 1000);
+  }
+}
+
+function formatTimestamp(timestampMs) {
+  if (!timestampMs) return "-";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(timestampMs));
+}
+
 async function loadAuditEntries() {
+  window.clearTimeout(state.refreshTimer);
   els.refresh.disabled = true;
   setStatus("Loading...", "loading");
   const end = Date.now();
   const start = end - Number(els.range.value);
   const params = new URLSearchParams({
-    query: API_EXCHANGE_QUERY,
+    query: ACCESS_QUERY,
     start: nanoseconds(start),
     end: nanoseconds(end),
     limit: "2000",
@@ -63,10 +93,9 @@ async function loadAuditEntries() {
       .flatMap((stream) => stream.values ?? [])
       .map((value) => {
         try {
-          const entry = parseApiExchange(value);
-          return entry ? { ...entry, eventType: classifyAuditEvent(entry) } : null;
+          return parseMonitoringAccessLog(value);
         } catch (error) {
-          console.warn("Failed to parse audit event", error);
+          console.warn("Failed to parse monitoring access event", error);
           return null;
         }
       })
@@ -78,9 +107,10 @@ async function loadAuditEntries() {
   } catch (error) {
     state.entries = [];
     applyFilters();
-    setStatus(error.message || "Failed to load audit events", "error");
+    setStatus(error.message || "Failed to load monitoring access events", "error");
   } finally {
     els.refresh.disabled = false;
+    scheduleRefresh();
   }
 }
 
@@ -93,18 +123,17 @@ function applyFilters() {
   const summary = summarizeAuditEntries(state.filtered);
   els.total.textContent = summary.total.toLocaleString();
   els.uniqueIps.textContent = summary.uniqueIps.toLocaleString();
-  els.mutations.textContent = summary.mutations.toLocaleString();
-  els.failures.textContent = summary.failures.toLocaleString();
+  els.pageViews.textContent = summary.pageViews.toLocaleString();
+  els.denied.textContent = summary.denied.toLocaleString();
   renderRows();
 }
 
 function eventLabel(type) {
   return {
-    access: "Access",
-    authentication: "Auth",
-    mutation: "Mutation",
-    failure: "Failure",
-  }[type] || "Access";
+    page: "Page",
+    action: "Action",
+    denied: "Denied",
+  }[type] || "Page";
 }
 
 function createCell(text, className = "") {
@@ -116,7 +145,7 @@ function createCell(text, className = "") {
 }
 
 function renderRows() {
-  const page = paginateAuditEntries(state.filtered, state.page, PAGE_SIZE);
+  const page = paginateAuditEntries(state.filtered, state.page, pageSize());
   state.page = page.page;
   els.resultCount.textContent = `${state.filtered.length.toLocaleString()} matching events`;
   els.pageLabel.textContent = `Page ${page.page} of ${page.totalPages}`;
@@ -138,8 +167,9 @@ function renderRows() {
     status.textContent = entry.status || "-";
     statusCell.append(status);
     row.append(
-      createCell(entry.time, "audit-time"),
+      createCell(formatTimestamp(entry.timestampMs), "audit-time"),
       eventCell,
+      createCell(entry.user || "-", "audit-user"),
       createCell(entry.method, "audit-method"),
       createCell(entry.path, "audit-path"),
       statusCell,
@@ -152,7 +182,10 @@ function renderRows() {
 }
 
 els.refresh.addEventListener("click", loadAuditEntries);
-els.range.addEventListener("change", loadAuditEntries);
+els.range.addEventListener("change", () => {
+  window.localStorage.setItem(RANGE_KEY, els.range.value);
+  void loadAuditEntries();
+});
 for (const element of [els.event, els.ip, els.search]) {
   element.addEventListener(element.tagName === "SELECT" ? "change" : "input", () => {
     state.page = 1;
@@ -167,5 +200,10 @@ els.next.addEventListener("click", () => {
   state.page += 1;
   renderRows();
 });
+
+const savedRange = window.localStorage.getItem(RANGE_KEY);
+if (savedRange && [...els.range.options].some((option) => option.value === savedRange)) {
+  els.range.value = savedRange;
+}
 
 void loadAuditEntries();

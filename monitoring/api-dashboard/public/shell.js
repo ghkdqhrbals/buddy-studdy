@@ -1,6 +1,7 @@
 const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
-const UI_VERSION = "2026.07.25.5";
+const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
+const UI_VERSION = "2026.07.25.6";
 
 const groups = [
   {
@@ -30,6 +31,7 @@ const groups = [
         icon: "external",
         external: true,
       },
+      { href: "/settings.html", label: "Settings", icon: "settings" },
     ],
   },
 ];
@@ -67,6 +69,10 @@ const iconPaths = {
     '<path d="M15 3h6v6"/>',
     '<path d="M10 14 21 3"/>',
     '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  ],
+  settings: [
+    '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>',
+    '<circle cx="12" cy="12" r="3"/>',
   ],
   chevron: ['<path d="m6 9 6 6 6-6"/>'],
 };
@@ -130,6 +136,7 @@ function createGroup(group, savedState) {
 
   details.append(summary, links);
   details.addEventListener("toggle", () => {
+    if (document.body.classList.contains("nav-collapsed")) return;
     const nextState = readGroupState();
     nextState[group.id] = details.open;
     window.localStorage.setItem(NAV_GROUP_KEY, JSON.stringify(nextState));
@@ -138,7 +145,24 @@ function createGroup(group, savedState) {
 }
 
 function setCollapsed(collapsed) {
-  document.body.classList.toggle("nav-collapsed", collapsed);
+  const groupElements = [...document.querySelectorAll(".side-nav-group")];
+  if (collapsed) {
+    document.body.classList.add("nav-collapsed");
+    for (const group of groupElements) {
+      if (group.dataset.expandedOpen == null) {
+        group.dataset.expandedOpen = String(group.open);
+      }
+      group.open = true;
+    }
+  } else {
+    for (const group of groupElements) {
+      if (group.dataset.expandedOpen != null) {
+        group.open = group.dataset.expandedOpen === "true";
+        delete group.dataset.expandedOpen;
+      }
+    }
+    document.body.classList.remove("nav-collapsed");
+  }
   window.localStorage.setItem(NAV_COLLAPSED_KEY, String(collapsed));
   const toggle = document.querySelector(".side-nav-toggle");
   toggle?.setAttribute("aria-expanded", String(!collapsed));
@@ -180,7 +204,16 @@ function buildNavigation() {
 
   document.querySelector(".side-nav-reopen")?.remove();
 
-  setCollapsed(window.localStorage.getItem(NAV_COLLAPSED_KEY) === "true");
+  const navMode = window.localStorage.getItem(NAV_MODE_KEY) || "remember";
+  const initiallyCollapsed = navMode === "compact"
+    || (navMode === "remember" && window.localStorage.getItem(NAV_COLLAPSED_KEY) === "true");
+  setCollapsed(initiallyCollapsed);
 }
+
+window.addEventListener("monitoring:nav-mode-change", (event) => {
+  const mode = event.detail?.mode;
+  if (mode === "compact") setCollapsed(true);
+  if (mode === "expanded") setCollapsed(false);
+});
 
 buildNavigation();

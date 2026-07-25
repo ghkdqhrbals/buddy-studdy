@@ -18,3 +18,14 @@ test("monitoring gateway preserves the public scheme from its upstream proxy", (
   assert.match(config, /proxy_set_header X-Forwarded-Proto \$public_forwarded_proto;/);
   assert.doesNotMatch(config, /proxy_set_header X-Forwarded-Proto \$scheme;/);
 });
+
+test("monitoring gateway records a bounded access audit without request bodies", () => {
+  assert.match(config, /log_format monitoring_access escape=json/);
+  assert.match(config, /"event":"monitoring_access"/);
+  assert.match(config, /"user":"\$remote_user"/);
+  assert.match(config, /access_log \/var\/log\/nginx\/monitoring-access\.log monitoring_access/);
+  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\)/);
+  assert.match(config, /testzone\/api/);
+  assert.doesNotMatch(config, /requestBody/);
+  assert.doesNotMatch(config, /\$http_authorization/);
+});

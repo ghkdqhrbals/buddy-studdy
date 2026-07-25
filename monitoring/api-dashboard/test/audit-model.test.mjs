@@ -5,44 +5,81 @@ import {
   classifyAuditEvent,
   filterAuditEntries,
   paginateAuditEntries,
+  parseMonitoringAccessLog,
   summarizeAuditEntries,
 } from "../public/audit-model.js";
 
 const entries = [
-  { method: "GET", path: "/api/v1/studies", status: 200, clientIp: "10.0.0.1", requestId: "a" },
-  { method: "POST", path: "/api/v1/studies", status: 201, clientIp: "10.0.0.1", requestId: "b" },
-  { method: "POST", path: "/api/v1/auth/google", status: 200, clientIp: "10.0.0.2", requestId: "c" },
-  { method: "GET", path: "/api/v1/profile", status: 500, clientIp: "10.0.0.3", requestId: "d" },
-];
+  { method: "GET", path: "/system.html", status: 200, clientIp: "10.0.0.1", requestId: "a", user: "admin" },
+  { method: "POST", path: "/testzone/api/runs", status: 201, clientIp: "10.0.0.1", requestId: "b", user: "admin" },
+  { method: "GET", path: "/audit.html", status: 401, clientIp: "10.0.0.2", requestId: "c", user: "" },
+  { method: "GET", path: "/settings.html", status: 403, clientIp: "10.0.0.3", requestId: "d", user: "viewer" },
+].map((entry) => ({ ...entry, eventType: classifyAuditEvent(entry) }));
 
-test("audit events prioritize failures, then auth and mutations", () => {
-  assert.deepEqual(entries.map(classifyAuditEvent), [
-    "access",
-    "mutation",
-    "authentication",
-    "failure",
+test("monitoring audit classifies pages, actions, and denied access", () => {
+  assert.deepEqual(entries.map((entry) => entry.eventType), [
+    "page",
+    "action",
+    "denied",
+    "denied",
   ]);
 });
 
-test("audit filters match event, IP, path, and request ID", () => {
+test("monitoring access JSON is parsed without flattening sensitive data", () => {
+  const value = [
+    "1784952000123000000",
+    JSON.stringify({
+      event: "monitoring_access",
+      requestId: "request-1",
+      clientIp: "203.0.113.9",
+      forwardedFor: "203.0.113.9",
+      user: "operator",
+      method: "GET",
+      path: "/system.html",
+      query: "from=now-1h",
+      status: 200,
+      durationSeconds: 0.125,
+      userAgent: "Browser",
+      referer: "https://monitoring.lowfidev.cloud/",
+    }),
+  ];
+
+  assert.deepEqual(parseMonitoringAccessLog(value), {
+    nanoseconds: value[0],
+    timestampMs: 1784952000123,
+    requestId: "request-1",
+    clientIp: "203.0.113.9",
+    forwardedFor: "203.0.113.9",
+    user: "operator",
+    method: "GET",
+    path: "/system.html?from=now-1h",
+    status: 200,
+    durationMs: 125,
+    userAgent: "Browser",
+    referer: "https://monitoring.lowfidev.cloud/",
+    eventType: "page",
+  });
+});
+
+test("audit filters match event, IP, page, request ID, and user", () => {
   assert.deepEqual(
-    filterAuditEntries(entries, { eventType: "mutation" }).map((entry) => entry.requestId),
+    filterAuditEntries(entries, { eventType: "action" }).map((entry) => entry.requestId),
     ["b"],
   );
   assert.deepEqual(
     filterAuditEntries(entries, { ip: "10.0.0.1" }).map((entry) => entry.requestId),
     ["a", "b"],
   );
-  assert.equal(filterAuditEntries(entries, { search: "auth/google" }).length, 1);
-  assert.equal(filterAuditEntries(entries, { search: "/profile" }).length, 1);
+  assert.equal(filterAuditEntries(entries, { search: "settings" }).length, 1);
+  assert.equal(filterAuditEntries(entries, { search: "viewer" }).length, 1);
 });
 
 test("audit summary and pagination remain deterministic", () => {
   assert.deepEqual(summarizeAuditEntries(entries), {
     total: 4,
     uniqueIps: 3,
-    mutations: 1,
-    failures: 1,
+    pageViews: 1,
+    denied: 2,
   });
   assert.deepEqual(paginateAuditEntries(entries, 2, 2), {
     items: entries.slice(2),

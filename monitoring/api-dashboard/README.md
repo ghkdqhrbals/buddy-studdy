@@ -8,8 +8,19 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/`: paginated API request logs and request/response/trace details
 - `/performance.html`: endpoint latency and throughput grouped by API
 - `/system.html`: application, database, Redis, host, and runtime metrics
+- `/audit.html`: monitoring workspace page, authentication, and action history
 - `/testzone.html`: live k6 script workspace, execution history, disposable
   test components, and Grafana links
+- `/settings.html`: browser-local navigation and access-history preferences
+
+## Access Audit
+
+The monitoring Nginx gateway records page views, denied Basic Auth attempts,
+and mutating TestZone actions in a dedicated JSON access log. A local Promtail
+instance forwards that file to Loki with only stable `job`, `service`, and
+`event` labels. Client IP, authenticated username, path, user agent, status,
+duration, and request ID remain JSON fields. Passwords, authorization values,
+request bodies, and TestZone configuration values are not recorded.
 
 ## TestZone Behavior
 

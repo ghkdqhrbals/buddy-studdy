@@ -9,7 +9,7 @@ one workflow run just because they share a host.
 | --- | --- | --- | --- | --- |
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
-| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth |
+| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
@@ -83,9 +83,12 @@ deployment.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,
-  collapsible monitoring navigation and the Access & Audit request journal,
-  which classifies structured `api_exchange` records without exposing
-  credentials or request bodies.
+  collapsible monitoring navigation and Settings. Access & Audit records access
+  to the monitoring workspace itself, not application API traffic. Monitoring
+  Nginx writes a bounded structured log for page views, denied authentication,
+  and TestZone mutations; a module-local Promtail forwards it to Loki. Passwords
+  and request bodies are never logged, and high-cardinality values such as IP,
+  username, and path remain JSON fields instead of Loki labels.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy owns persistent local InfluxDB/component credentials under

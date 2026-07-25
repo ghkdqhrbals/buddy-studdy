@@ -51,6 +51,7 @@ jobs:
 
           mkdir -p \
             "${monitoring_root}/api-dashboard/public" \
+            "${monitoring_root}/api-dashboard/logs" \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
             "${monitoring_root}/grafana/provisioning/plugins" \
@@ -59,6 +60,8 @@ jobs:
             "${monitoring_root}/grafana/data" \
             "${monitoring_root}/loki/data" \
             "${monitoring_root}/loki/config" \
+            "${monitoring_root}/promtail/config" \
+            "${monitoring_root}/promtail/data" \
             "${monitoring_root}/gateway"
 
           curl -fsSL \
@@ -88,6 +91,7 @@ jobs:
           for file in \
             index.html app.js logs.js shell.js \
             audit.html audit.js audit-model.js \
+            settings.html settings.js \
             performance.html performance.js \
             system.html system.js metrics.js \
             testzone.html testzone.css testzone.js testzone-model.js testzone-data.json \
@@ -100,6 +104,9 @@ jobs:
             "${MONITORING_SOURCE_BASE}/api-dashboard/nginx.conf" \
             -o "${monitoring_root}/api-dashboard/nginx.conf"
           curl -fsSL \
+            "${MONITORING_SOURCE_BASE}/promtail/config/promtail.yml" \
+            -o "${monitoring_root}/promtail/config/promtail.yml"
+          curl -fsSL \
             "${MONITORING_SOURCE_BASE}/grafana-gateway/nginx.conf" \
             -o "${monitoring_root}/gateway/grafana-nginx.conf"
 
@@ -109,6 +116,10 @@ jobs:
             "${monitoring_root}/gateway/grafana-nginx.conf"
           grep -q 'proxy_set_header X-Forwarded-Proto https;' \
             "${monitoring_root}/gateway/grafana-nginx.conf"
+          grep -q 'monitoring_access' \
+            "${monitoring_root}/api-dashboard/nginx.conf"
+          grep -q 'job: monitoring-access' \
+            "${monitoring_root}/promtail/config/promtail.yml"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 
@@ -127,6 +138,7 @@ jobs:
           fi
           docker pull nginx:1.27-alpine
           docker pull grafana/loki:3.3.2
+          docker pull grafana/promtail:3.3.2
           docker pull grafana/grafana:12.3.0
           if [ -n "${docker_config_backup}" ]; then
             cp "${docker_config_backup}" "${HOME}/.docker/config.json"
@@ -153,6 +165,7 @@ jobs:
 
           docker rm -f \
             buddystudy-api-dashboard \
+            buddystudy-monitoring-promtail \
             buddystudy-grafana-gateway \
             buddystudy-loki \
             buddystudy-grafana >/dev/null 2>&1 || true
@@ -218,8 +231,19 @@ jobs:
             -e API_DASHBOARD_BASIC_AUTH_HTPASSWD="${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" \
             -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
             -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
             nginx:1.27-alpine \
             /bin/sh -c 'printf "%s\n" "$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
+
+          docker run -d \
+            --name buddystudy-monitoring-promtail \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/monitoring:ro" \
+            -v "${monitoring_root}/promtail/config/promtail.yml:/etc/promtail/config.yml:ro" \
+            -v "${monitoring_root}/promtail/data:/var/lib/promtail" \
+            grafana/promtail:3.3.2 \
+            -config.file=/etc/promtail/config.yml
 
           sleep 2
           echo "Grafana startup log:"
@@ -228,6 +252,8 @@ jobs:
           docker logs --tail 80 buddystudy-grafana-gateway || true
           echo "Monitoring gateway startup log:"
           docker logs --tail 80 buddystudy-api-dashboard || true
+          echo "Monitoring access collector startup log:"
+          docker logs --tail 80 buddystudy-monitoring-promtail || true
 
           echo "MacBook Air monitoring module is running."
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"

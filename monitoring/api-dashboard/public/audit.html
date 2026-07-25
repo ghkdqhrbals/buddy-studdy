@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Access & Audit</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072505" />
+    <link rel="stylesheet" href="/styles.css?v=2026072506" />
   </head>
   <body>
     <div class="app-shell">
@@ -14,7 +14,7 @@
         <header class="topbar">
           <div>
             <h1>Access & Audit</h1>
-            <p>API access journal derived from structured request logs</p>
+            <p>Access history for the BuddyStudy monitoring workspace</p>
           </div>
         </header>
 
@@ -32,10 +32,9 @@
             Event
             <select id="auditEventSelect">
               <option value="all">All events</option>
-              <option value="access">Access</option>
-              <option value="authentication">Authentication</option>
-              <option value="mutation">Mutation</option>
-              <option value="failure">Failure</option>
+              <option value="page">Page view</option>
+              <option value="action">Action</option>
+              <option value="denied">Denied</option>
             </select>
           </label>
           <label>
@@ -44,26 +43,26 @@
           </label>
           <label>
             Request search
-            <input id="auditSearchInput" type="search" placeholder="Path or request ID" autocomplete="off" />
+            <input id="auditSearchInput" type="search" placeholder="Page, user, or request ID" autocomplete="off" />
           </label>
           <button id="auditRefreshButton" type="button">Refresh</button>
           <span id="auditStatus" class="status-message" data-tone="loading">Loading...</span>
         </section>
 
         <section class="summary-grid audit-summary-grid" aria-label="Audit summary">
-          <article><span>Events</span><strong id="auditTotal">-</strong><small>visible API events</small></article>
-          <article><span>Unique IPs</span><strong id="auditUniqueIps">-</strong><small>distinct client addresses</small></article>
-          <article><span>Mutations</span><strong id="auditMutations">-</strong><small>successful writes</small></article>
-          <article><span>Failures</span><strong id="auditFailures">-</strong><small>4xx and 5xx requests</small></article>
+          <article><span>Access events</span><strong id="auditTotal">-</strong><small>matching monitoring events</small></article>
+          <article><span>Unique visitors</span><strong id="auditUniqueIps">-</strong><small>distinct client addresses</small></article>
+          <article><span>Page views</span><strong id="auditPageViews">-</strong><small>monitoring pages opened</small></article>
+          <article><span>Denied</span><strong id="auditDenied">-</strong><small>401 and 403 responses</small></article>
         </section>
 
         <section class="audit-journal">
           <header class="audit-journal-header">
             <div>
-              <h2>Request journal</h2>
+              <h2>Monitoring access journal</h2>
               <p id="auditResultCount">0 matching events</p>
             </div>
-            <span class="audit-retention-note">Loki retention applies · credentials and bodies are not shown</span>
+            <span class="audit-retention-note">Loki retention applies · passwords and request bodies are never recorded</span>
           </header>
           <div class="audit-table-wrap">
             <table class="audit-table">
@@ -71,8 +70,9 @@
                 <tr>
                   <th>Time</th>
                   <th>Event</th>
+                  <th>User</th>
                   <th>Method</th>
-                  <th>Path</th>
+                  <th>Monitoring page</th>
                   <th>Status</th>
                   <th>Duration</th>
                   <th>Client IP</th>
@@ -95,7 +95,7 @@
       </div>
     </div>
 
-    <script type="module" src="/shell.js?v=2026072505"></script>
-    <script type="module" src="/audit.js?v=2026072501"></script>
+    <script type="module" src="/shell.js?v=2026072506"></script>
+    <script type="module" src="/audit.js?v=2026072502"></script>
   </body>
 </html>
