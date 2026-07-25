@@ -33,6 +33,7 @@ const state = {
   dirty: false,
   confirmAction: null,
   pollTimer: null,
+  loadingRuns: false,
   componentPollTimer: null,
   activeTab: "overview",
   lintTimer: null,
@@ -51,7 +52,7 @@ const elementIds = [
   "serviceStatus", "projectSelect",
   "newProjectButton", "deleteProjectButton", "newProjectDialog", "newProjectForm",
   "newProjectName", "createProjectButton",
-  "runRows", "runEmptyState", "runCount", "refreshRunsButton",
+  "runRows", "runEmptyState", "runCount", "refreshRunsButton", "runAutoRefreshStatus",
   "runPagination", "runPaginationTotal", "runPreviousPageButton", "runPageNumbers",
   "runNextPageButton", "runPageJumpDialog", "runPageJumpForm",
   "runPageJumpTitle", "runPageJumpSelect",
@@ -498,6 +499,7 @@ async function deleteCurrentScript() {
 }
 
 async function loadRuns() {
+  if (state.loadingRuns) return;
   if (!state.projectId) {
     state.runs = [];
     state.selectedRunId = null;
@@ -507,22 +509,30 @@ async function loadRuns() {
     state.runSeries = [];
     renderRuns();
     renderSelectedRun();
+    updateRunAutoRefreshStatus(false);
     return;
   }
-  const payload = await api(
-    `/runs?projectId=${encodeURIComponent(state.projectId)}&page=${state.runPage}`,
-  );
-  state.runs = payload.runs;
-  state.runPage = payload.pagination?.page ?? 1;
-  state.runPageSize = payload.pagination?.pageSize ?? 10;
-  state.runTotal = payload.pagination?.total ?? state.runs.length;
-  state.runTotalPages = payload.pagination?.totalPages ?? 1;
-  if (!state.runs.some((run) => run.id === state.selectedRunId)) {
-    state.selectedRunId = null;
+  state.loadingRuns = true;
+  elements.refreshRunsButton.disabled = true;
+  try {
+    const payload = await api(
+      `/runs?projectId=${encodeURIComponent(state.projectId)}&page=${state.runPage}`,
+    );
+    state.runs = payload.runs;
+    state.runPage = payload.pagination?.page ?? 1;
+    state.runPageSize = payload.pagination?.pageSize ?? 10;
+    state.runTotal = payload.pagination?.total ?? state.runs.length;
+    state.runTotalPages = payload.pagination?.totalPages ?? 1;
+    if (!state.runs.some((run) => run.id === state.selectedRunId)) {
+      state.selectedRunId = null;
+    }
+    renderRuns();
+    await loadSelectedRunSeries();
+  } finally {
+    state.loadingRuns = false;
+    elements.refreshRunsButton.disabled = false;
+    scheduleRunPolling();
   }
-  renderRuns();
-  await loadSelectedRunSeries();
-  scheduleRunPolling();
 }
 
 function runMetric(run, key) {
@@ -621,8 +631,10 @@ function renderRuns() {
     row.classList.toggle("is-selected", run.id === state.selectedRunId);
     row.addEventListener("click", () => void selectRun(run.id));
     const started = document.createElement("td");
+    started.className = "run-started-cell";
     started.textContent = formatDate(run.startedAt || run.createdAt);
     const name = document.createElement("td");
+    name.className = "run-name-cell";
     const nameButton = document.createElement("button");
     nameButton.type = "button";
     nameButton.className = "table-link";
@@ -633,6 +645,7 @@ function renderRuns() {
     });
     name.append(nameButton);
     const scriptCell = document.createElement("td");
+    scriptCell.className = "run-script-cell";
     const scriptButton = document.createElement("button");
     scriptButton.type = "button";
     scriptButton.className = "table-link";
@@ -643,7 +656,9 @@ function renderRuns() {
     });
     scriptCell.append(scriptButton);
     const loadPlan = document.createElement("td");
+    loadPlan.className = "run-plan-cell";
     loadPlan.textContent = formatRunLoadPlan(run.options);
+    loadPlan.title = loadPlan.textContent;
     const statusCell = document.createElement("td");
     const status = document.createElement("span");
     status.className = "status-pill";
@@ -757,9 +772,16 @@ function renderSelectedRun() {
 
 function scheduleRunPolling() {
   window.clearTimeout(state.pollTimer);
-  if (state.runs.some((run) => ACTIVE_STATUSES.has(run.status))) {
-    state.pollTimer = window.setTimeout(() => void loadRuns(), 1500);
+  const active = state.runs.some((run) => ACTIVE_STATUSES.has(run.status));
+  updateRunAutoRefreshStatus(active);
+  if (active && !document.hidden) {
+    state.pollTimer = window.setTimeout(() => void loadRuns(), 2000);
   }
+}
+
+function updateRunAutoRefreshStatus(active) {
+  elements.runAutoRefreshStatus.textContent = active ? "Live · 2s" : "Manual";
+  elements.runAutoRefreshStatus.classList.toggle("is-live", active);
 }
 
 async function cancelRun(id) {
@@ -1720,6 +1742,13 @@ function bindEvents() {
   elements.newProjectForm.addEventListener("submit", createProject);
   elements.deleteProjectButton.addEventListener("click", deleteProject);
   elements.refreshRunsButton.addEventListener("click", loadRuns);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      window.clearTimeout(state.pollTimer);
+      return;
+    }
+    scheduleRunPolling();
+  });
   elements.runPreviousPageButton.addEventListener("click", () => {
     if (state.runPage > 1) void goToRunPage(state.runPage - 1);
   });

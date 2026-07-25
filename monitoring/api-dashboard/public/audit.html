@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BuddyStudy Access & Audit</title>
+    <link rel="stylesheet" href="/styles.css?v=2026072503" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-nav" aria-label="Monitoring navigation"></aside>
+
+      <div class="content-shell">
+        <header class="topbar">
+          <div>
+            <h1>Access & Audit</h1>
+            <p>API access journal derived from structured request logs</p>
+          </div>
+        </header>
+
+        <section class="filters audit-filters" aria-label="Audit filters">
+          <label>
+            Time range
+            <select id="auditRangeSelect">
+              <option value="900000">Last 15 minutes</option>
+              <option value="3600000" selected>Last 1 hour</option>
+              <option value="21600000">Last 6 hours</option>
+              <option value="86400000">Last 24 hours</option>
+            </select>
+          </label>
+          <label>
+            Event
+            <select id="auditEventSelect">
+              <option value="all">All events</option>
+              <option value="access">Access</option>
+              <option value="authentication">Authentication</option>
+              <option value="mutation">Mutation</option>
+              <option value="failure">Failure</option>
+            </select>
+          </label>
+          <label>
+            Client IP
+            <input id="auditIpInput" type="search" placeholder="IP contains..." autocomplete="off" />
+          </label>
+          <label>
+            Request search
+            <input id="auditSearchInput" type="search" placeholder="Path or request ID" autocomplete="off" />
+          </label>
+          <button id="auditRefreshButton" type="button">Refresh</button>
+          <span id="auditStatus" class="status-message" data-tone="loading">Loading...</span>
+        </section>
+
+        <section class="summary-grid audit-summary-grid" aria-label="Audit summary">
+          <article><span>Events</span><strong id="auditTotal">-</strong><small>visible API events</small></article>
+          <article><span>Unique IPs</span><strong id="auditUniqueIps">-</strong><small>distinct client addresses</small></article>
+          <article><span>Mutations</span><strong id="auditMutations">-</strong><small>successful writes</small></article>
+          <article><span>Failures</span><strong id="auditFailures">-</strong><small>4xx and 5xx requests</small></article>
+        </section>
+
+        <section class="audit-journal">
+          <header class="audit-journal-header">
+            <div>
+              <h2>Request journal</h2>
+              <p id="auditResultCount">0 matching events</p>
+            </div>
+            <span class="audit-retention-note">Loki retention applies · credentials and bodies are not shown</span>
+          </header>
+          <div class="audit-table-wrap">
+            <table class="audit-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Event</th>
+                  <th>Method</th>
+                  <th>Path</th>
+                  <th>Status</th>
+                  <th>Duration</th>
+                  <th>Client IP</th>
+                  <th>Request ID</th>
+                </tr>
+              </thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+            <div id="auditEmpty" class="empty-state" hidden>
+              <h3>No matching audit events</h3>
+              <p>Widen the time range or clear the filters.</p>
+            </div>
+          </div>
+          <footer class="audit-pagination">
+            <button id="auditPreviousButton" type="button">Previous</button>
+            <strong id="auditPageLabel">Page 1 of 1</strong>
+            <button id="auditNextButton" type="button">Next</button>
+          </footer>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="/shell.js?v=2026072503"></script>
+    <script type="module" src="/audit.js?v=2026072501"></script>
+  </body>
+</html>

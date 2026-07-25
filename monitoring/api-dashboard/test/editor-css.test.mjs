@@ -126,6 +126,15 @@ test("run history paginates by ten and can rerun immutable script snapshots", ()
   assert.match(javascript, /actionButton\("Rerun"/);
 });
 
+test("active runs auto-refresh their graph and history rows never wrap", () => {
+  assert.match(html, /id="runAutoRefreshStatus"/);
+  assert.match(javascript, /Live · 2s/);
+  assert.match(javascript, /visibilitychange/);
+  assert.match(javascript, /state\.loadingRuns/);
+  assert.match(css, /\.testzone-table th,[\s\S]*white-space:\s*nowrap/);
+  assert.match(css, /\.row-actions\s*\{[\s\S]*flex-wrap:\s*nowrap/);
+});
+
 test("TestZone chart cards do not inherit the global fixed metric chart height", () => {
   assert.match(html, /class="run-metric-grid"/);
   assert.match(html, /class="run-metric-card"/);

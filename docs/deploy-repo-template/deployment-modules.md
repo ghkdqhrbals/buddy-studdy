@@ -82,7 +82,10 @@ deployment.
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
-  Grafana Server Runtime dashboard.
+  Grafana Server Runtime dashboard. The same module publishes the fixed,
+  collapsible monitoring navigation and the Access & Audit request journal,
+  which classifies structured `api_exchange` records without exposing
+  credentials or request bodies.
 - TestZone runner, InfluxDB integration, k6 validation, or component catalog
   changes: build `buddystudy-testzone`, then run the TestZone deploy.
   The deploy owns persistent local InfluxDB/component credentials under

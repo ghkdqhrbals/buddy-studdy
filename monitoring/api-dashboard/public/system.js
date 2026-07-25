@@ -64,6 +64,10 @@ const els = {
   processCpuSummary: document.querySelector("#processCpuSummary"),
   dbSummary: document.querySelector("#dbSummary"),
   dbSummaryDetail: document.querySelector("#dbSummaryDetail"),
+  heapSummary: document.querySelector("#heapSummary"),
+  gcPauseSummary: document.querySelector("#gcPauseSummary"),
+  blockedThreadsSummary: document.querySelector("#blockedThreadsSummary"),
+  eventLoopSummary: document.querySelector("#eventLoopSummary"),
   diagnosisList: document.querySelector("#diagnosisList"),
   snapshotTimestamp: document.querySelector("#snapshotTimestamp"),
   runtimeDetails: document.querySelector("#runtimeDetails"),
@@ -161,6 +165,19 @@ const chartDefinitions = [
     ],
   },
   {
+    canvas: document.querySelector("#heapPressureChart"),
+    legend: document.querySelector("#heapPressureLegend"),
+    unit: "percent",
+    max: 100,
+    series: () => [
+      {
+        name: "Heap used",
+        color: COLORS.red,
+        points: percentagePoints(state.snapshots, "heapUsedBytes", "heapMaxBytes"),
+      },
+    ],
+  },
+  {
     canvas: document.querySelector("#hostMemoryChart"),
     legend: document.querySelector("#hostMemoryLegend"),
     unit: "bytes",
@@ -189,6 +206,18 @@ const chartDefinitions = [
         name: "GC time",
         color: COLORS.red,
         points: counterDeltaPoints(state.snapshots, "gcCollectionTimeMsTotal"),
+      },
+    ],
+  },
+  {
+    canvas: document.querySelector("#gcCountChart"),
+    legend: document.querySelector("#gcCountLegend"),
+    unit: "count",
+    series: () => [
+      {
+        name: "Collections",
+        color: COLORS.purple,
+        points: counterDeltaPoints(state.snapshots, "gcCollectionsTotal"),
       },
     ],
   },
@@ -373,6 +402,14 @@ function renderSummary() {
   els.dbSummaryDetail.textContent = latest?.dbPoolAcquired == null
     ? "connection pool unavailable"
     : `${formatCount(latest.dbPoolAcquired)} / ${formatCount(latest.dbPoolMaxAllocated)} acquired, ${formatCount(latest.dbPoolPending)} pending`;
+  els.heapSummary.textContent = formatPercent(
+    latest ? percentage(latest.heapUsedBytes, latest.heapMaxBytes) : null,
+  );
+  els.gcPauseSummary.textContent = formatMilliseconds(
+    counterDeltaPoints(state.snapshots, "gcCollectionTimeMsTotal").at(-1)?.value,
+  );
+  els.blockedThreadsSummary.textContent = formatCount(latest?.threadsBlocked);
+  els.eventLoopSummary.textContent = formatCount(latest?.reactorNettyEventLoopMaxPendingTasks);
 }
 
 function renderDiagnosis() {
@@ -504,7 +541,7 @@ function renderLegend(element, series, unit) {
   for (const item of series) {
     const latest = item.points.at(-1)?.value;
     const entry = document.createElement("span");
-    entry.innerHTML = `<i style="background:${item.color}"></i>${escapeHtml(item.name)} <strong>${escapeHtml(formatAxisValue(latest, unit))}</strong>`;
+    entry.innerHTML = `<i class="${colorClass(item.color)}"></i>${escapeHtml(item.name)} <strong>${escapeHtml(formatAxisValue(latest, unit))}</strong>`;
     element.append(entry);
   }
 }
@@ -525,6 +562,13 @@ function drawChart(canvas, series, range, options) {
   const maxValue = options.max ?? Math.max(1, ...values);
   const startMs = range?.startMs ?? Date.now() - 3_600_000;
   const endMs = range?.endMs ?? Date.now();
+  configureChartTooltip(canvas, series, {
+    ...options,
+    startMs,
+    endMs,
+    padding,
+    plotWidth: width,
+  });
 
   context.strokeStyle = "#e1e7f0";
   context.lineWidth = 1;
@@ -595,6 +639,91 @@ function drawChart(canvas, series, range, options) {
     context.textAlign = index === 0 ? "left" : index === 4 ? "right" : "center";
     context.fillText(formatKstAxis(timestamp), x, padding.top + height + 9);
   }
+}
+
+function configureChartTooltip(canvas, series, model) {
+  canvas._metricTooltipModel = { series, ...model };
+  if (canvas.dataset.tooltipReady === "true") return;
+  canvas.dataset.tooltipReady = "true";
+  const panel = canvas.closest(".metric-chart-panel");
+  if (!panel) return;
+  const cursor = document.createElement("div");
+  cursor.className = "metric-chart-cursor";
+  cursor.hidden = true;
+  const tooltip = document.createElement("div");
+  tooltip.className = "metric-chart-tooltip";
+  tooltip.hidden = true;
+  panel.append(cursor, tooltip);
+
+  canvas.addEventListener("pointermove", (event) => {
+    const current = canvas._metricTooltipModel;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const plotStart = current.padding.left;
+    const plotEnd = plotStart + current.plotWidth;
+    if (x < plotStart || x > plotEnd) {
+      tooltip.hidden = true;
+      cursor.hidden = true;
+      return;
+    }
+    const timestamp = current.startMs
+      + ((x - plotStart) / Math.max(1, current.plotWidth)) * (current.endMs - current.startMs);
+    const values = current.series
+      .map((item) => ({ item, point: nearestPoint(item.points, timestamp) }))
+      .filter(({ point }) => point && Number.isFinite(point.value));
+    if (!values.length) {
+      tooltip.hidden = true;
+      cursor.hidden = true;
+      return;
+    }
+
+    const heading = document.createElement("strong");
+    heading.textContent = formatKst(timestamp);
+    const rows = values.map(({ item, point }) => {
+      const row = document.createElement("span");
+      const swatch = document.createElement("i");
+      swatch.className = colorClass(item.color);
+      const label = document.createElement("em");
+      label.textContent = item.name;
+      const value = document.createElement("b");
+      value.textContent = formatAxisValue(point.value, current.unit);
+      row.append(swatch, label, value);
+      return row;
+    });
+    tooltip.replaceChildren(heading, ...rows);
+    tooltip.hidden = false;
+    cursor.hidden = false;
+    cursor.style.left = `${x}px`;
+    const tooltipWidth = 220;
+    tooltip.style.left = `${Math.min(
+      Math.max(8, x + 12),
+      Math.max(8, panel.clientWidth - tooltipWidth - 8),
+    )}px`;
+    tooltip.style.top = `${canvas.offsetTop + 8}px`;
+  });
+  canvas.addEventListener("pointerleave", () => {
+    tooltip.hidden = true;
+    cursor.hidden = true;
+  });
+}
+
+function nearestPoint(points, timestamp) {
+  let nearest = null;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const point of points) {
+    const nextDistance = Math.abs(point.ms - timestamp);
+    if (nextDistance < distance) {
+      nearest = point;
+      distance = nextDistance;
+    }
+  }
+  return nearest;
+}
+
+function colorClass(color) {
+  const match = Object.entries(COLORS)
+    .find(([, value]) => value.toLowerCase() === String(color).toLowerCase());
+  return `metric-color-${match?.[0] || "gray"}`;
 }
 
 function traceSeriesPath(context, coordinates, curved) {

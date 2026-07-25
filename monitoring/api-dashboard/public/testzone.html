@@ -4,25 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy TestZone</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072401" />
+    <link rel="stylesheet" href="/styles.css?v=2026072503" />
     <link rel="stylesheet" href="/vendor/uplot/uPlot.min.css?v=1.6.32" />
     <link rel="stylesheet" href="/testzone.css?v=2026072511" />
   </head>
   <body>
     <div class="app-shell testzone-shell">
-      <aside class="side-nav" aria-label="Monitoring navigation">
-        <div class="side-nav-brand">
-          <span>BuddyStudy</span>
-          <strong>Monitoring</strong>
-        </div>
-        <nav>
-          <a href="/">API Logs</a>
-          <a href="/performance.html">API Performance</a>
-          <a href="/system.html">Server Dashboard</a>
-          <a href="/testzone.html" aria-current="page">TestZone</a>
-          <a href="https://grafana.lowfidev.cloud/" target="_blank" rel="noreferrer">Grafana</a>
-        </nav>
-      </aside>
+      <aside class="side-nav" aria-label="Monitoring navigation"></aside>
 
       <div class="content-shell testzone-content">
         <header class="testzone-header">
@@ -63,10 +51,24 @@
                   <h2>Run history</h2>
                   <p id="runCount">0 runs</p>
                 </div>
-                <button id="refreshRunsButton" class="icon-button" type="button" title="Refresh runs" aria-label="Refresh runs">↻</button>
+                <div class="run-refresh-control">
+                  <span id="runAutoRefreshStatus" class="run-auto-refresh-status">Manual</span>
+                  <button id="refreshRunsButton" class="icon-button" type="button" title="Refresh runs" aria-label="Refresh runs">↻</button>
+                </div>
               </header>
               <div class="table-wrap">
                 <table class="testzone-table">
+                  <colgroup>
+                    <col class="run-column-started" />
+                    <col class="run-column-name" />
+                    <col class="run-column-script" />
+                    <col class="run-column-plan" />
+                    <col class="run-column-status" />
+                    <col class="run-column-metric" />
+                    <col class="run-column-metric" />
+                    <col class="run-column-metric" />
+                    <col class="run-column-actions" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Started</th>
@@ -335,7 +337,8 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+    <script type="module" src="/shell.js?v=2026072503"></script>
     <script src="/vendor/uplot/uPlot.iife.min.js?v=1.6.32"></script>
-    <script type="module" src="/testzone.js?v=2026072510"></script>
+    <script type="module" src="/testzone.js?v=2026072512"></script>
   </body>
 </html>

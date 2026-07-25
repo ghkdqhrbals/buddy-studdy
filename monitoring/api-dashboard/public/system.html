@@ -4,23 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Server Dashboard</title>
-    <link rel="stylesheet" href="/styles.css?v=2026072501" />
+    <link rel="stylesheet" href="/styles.css?v=2026072503" />
   </head>
   <body>
     <div id="app" class="app-shell">
-      <aside class="side-nav" aria-label="Monitoring navigation">
-        <div class="side-nav-brand">
-          <span>BuddyStudy</span>
-          <strong>Monitoring</strong>
-        </div>
-        <nav>
-          <a href="/">API Logs</a>
-          <a href="/performance.html">API Performance</a>
-          <a href="/system.html" aria-current="page">Server Dashboard</a>
-          <a href="/testzone.html">TestZone</a>
-          <a href="https://grafana.lowfidev.cloud/" target="_blank" rel="noreferrer">Grafana</a>
-        </nav>
-      </aside>
+      <aside class="side-nav" aria-label="Monitoring navigation"></aside>
 
       <div class="content-shell">
         <header class="topbar">
@@ -59,35 +47,55 @@
         </section>
 
         <section class="summary-grid metrics-summary-grid" aria-label="Current server summary">
-          <article>
+          <article title="Requests per second measured from structured API exchange logs">
             <span>Traffic</span>
             <strong id="rpsSummary">-</strong>
             <small>requests per second</small>
           </article>
-          <article>
+          <article title="95% of requests completed within this duration">
             <span>Latency p95</span>
             <strong id="p95Summary">-</strong>
             <small>tail response time</small>
           </article>
-          <article>
+          <article title="99% of requests completed within this duration">
             <span>Latency p99</span>
             <strong id="p99Summary">-</strong>
             <small>worst one percent</small>
           </article>
-          <article>
+          <article title="Share of requests that returned a 5xx response">
             <span>Server Errors</span>
             <strong id="errorSummary">-</strong>
             <small>5xx request ratio</small>
           </article>
-          <article>
+          <article title="CPU consumed by the backend process">
             <span>Process CPU</span>
             <strong id="processCpuSummary">-</strong>
             <small>backend process</small>
           </article>
-          <article>
+          <article title="Acquired database connections divided by the configured pool maximum">
             <span>DB Saturation</span>
             <strong id="dbSummary">-</strong>
             <small id="dbSummaryDetail">connection pool</small>
+          </article>
+          <article title="Current JVM heap usage divided by maximum heap">
+            <span>Heap Pressure</span>
+            <strong id="heapSummary">-</strong>
+            <small>used / maximum</small>
+          </article>
+          <article title="Garbage collection pause time added during the latest sample interval">
+            <span>GC Pause</span>
+            <strong id="gcPauseSummary">-</strong>
+            <small>latest sample interval</small>
+          </article>
+          <article title="Threads in the JVM BLOCKED state">
+            <span>Blocked Threads</span>
+            <strong id="blockedThreadsSummary">-</strong>
+            <small>monitor contention</small>
+          </article>
+          <article title="Pending tasks on the busiest Reactor Netty event loop">
+            <span>Event-loop Queue</span>
+            <strong id="eventLoopSummary">-</strong>
+            <small>maximum pending tasks</small>
           </article>
         </section>
 
@@ -211,6 +219,17 @@
           <section class="metric-chart-panel">
             <div class="metric-chart-header">
               <div>
+                <h2>Heap Pressure</h2>
+                <p>Used heap as a percentage of the configured maximum</p>
+              </div>
+              <div id="heapPressureLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="heapPressureChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <section class="metric-chart-panel">
+            <div class="metric-chart-header">
+              <div>
                 <h2>Host Memory</h2>
                 <p>Physical memory used and available</p>
               </div>
@@ -239,6 +258,17 @@
               <div id="gcLegend" class="chart-legend"></div>
             </div>
             <canvas id="gcChart" class="metric-chart" height="230"></canvas>
+          </section>
+
+          <section class="metric-chart-panel">
+            <div class="metric-chart-header">
+              <div>
+                <h2>GC Collections</h2>
+                <p>Collection count added during each sample interval</p>
+              </div>
+              <div id="gcCountLegend" class="chart-legend"></div>
+            </div>
+            <canvas id="gcCountChart" class="metric-chart" height="230"></canvas>
           </section>
 
           <section class="metric-chart-panel">
@@ -276,6 +306,7 @@
       </div>
     </div>
 
-    <script type="module" src="/system.js?v=2026072501"></script>
+    <script type="module" src="/shell.js?v=2026072503"></script>
+    <script type="module" src="/system.js?v=2026072503"></script>
   </body>
 </html>
