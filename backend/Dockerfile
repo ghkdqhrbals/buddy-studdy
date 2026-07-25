@@ -13,7 +13,7 @@ RUN ./gradlew --no-daemon clean :tutor:nativeCompile
 FROM oraclelinux:9-slim
 
 ENV APP_PORT=8080
-ENV FLYWAY_LOCATIONS=classpath:db/migration,filesystem:/app/db/migration
+ENV FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql
 WORKDIR /app
 
 RUN microdnf install -y shadow-utils && \
@@ -21,7 +21,7 @@ RUN microdnf install -y shadow-utils && \
     groupadd --system app && \
     useradd --system --gid app --home-dir /app --shell /sbin/nologin app
 COPY --from=build /workspace/tutor/build/native/nativeCompile/buddystudy-backend /app/buddystudy-backend
-COPY --from=build /workspace/tutor/src/main/resources/db/migration /app/db/migration
+COPY --from=build /workspace/tutor/src/main/resources/db/migration-mysql /app/db/migration-mysql
 RUN chown -R app:app /app
 
 USER app

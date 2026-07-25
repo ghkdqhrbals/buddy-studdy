@@ -180,8 +180,8 @@ jobs:
             --network buddystudy-net \
             --env-file .env \
             -e SCHEDULER_ENABLED=false \
-            -e FLYWAY_LOCATIONS=classpath:db/migration-mysql \
-            -e SPRING_FLYWAY_LOCATIONS=classpath:db/migration-mysql \
+            -e FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql \
+            -e SPRING_FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql \
             "${IMAGE_REF}"
           for attempt in $(seq 1 60); do
             MIGRATION_COUNT="$(

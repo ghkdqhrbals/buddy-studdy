@@ -62,6 +62,10 @@ deployment.
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC
   and R2DBC settings from that secret. A legacy host password file is migrated
   into the secret once and is not the continuing configuration source.
+- The native backend image ships MySQL Flyway scripts at
+  `/app/db/migration-mysql`. Both normal deployment and the one-time cutover
+  bootstrap use `filesystem:/app/db/migration-mysql` so schema discovery does
+  not depend on native-image classpath resource scanning.
 - The backend deploy runs `buddystudy-db-metrics`, a port-free Docker CLI
   observer that logs MySQL container CPU, total/active connections, and
   the live `max_connections` setting every 30 seconds. Promtail forwards these

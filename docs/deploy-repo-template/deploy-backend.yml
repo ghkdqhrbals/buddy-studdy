@@ -141,6 +141,7 @@ jobs:
           cat > .env <<ENV
           SPRING_PROFILES_ACTIVE=prod
           FLYWAY_ENABLED=true
+          FLYWAY_LOCATIONS=filesystem:/app/db/migration-mysql
           DATABASE_URL=${DATABASE_URL}
           DATABASE_USERNAME=${MYSQL_USER}
           DATABASE_PASSWORD=${MYSQL_PASSWORD}
