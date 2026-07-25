@@ -75,6 +75,13 @@ jobs:
           docker pull "${IMAGE_REF}"
           docker pull mysql:8.4
           docker network create buddystudy-net >/dev/null 2>&1 || true
+          while IFS= read -r failed_mysql; do
+            [ -n "${failed_mysql}" ] && docker rm -f "${failed_mysql}" >/dev/null
+          done < <(
+            docker ps -a --format '{{.Names}}' |
+              grep -E '^buddystudy-db-mysql-failed-' || true
+          )
+          docker volume rm buddystudy-mysql-data >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
 
           CUTOVER_ID="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -173,6 +180,8 @@ jobs:
             --network buddystudy-net \
             --env-file .env \
             -e SCHEDULER_ENABLED=false \
+            -e FLYWAY_LOCATIONS=classpath:db/migration-mysql \
+            -e SPRING_FLYWAY_LOCATIONS=classpath:db/migration-mysql \
             "${IMAGE_REF}"
           for attempt in $(seq 1 60); do
             MIGRATION_COUNT="$(
