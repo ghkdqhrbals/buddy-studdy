@@ -40,7 +40,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - `Records/RecordsUseCase.swift` centralizes backend record operations such as fetch, grading, draft saving, skipping, deletion, publicity, and full clear.
   - `Settings/SettingsUseCase.swift` centralizes backend settings, model option, API validation, and schedule sync requests.
   - `Stats/StatsUseCase.swift` centralizes backend topic statistics and activity requests.
-  - `StudyRoom/StudyRoomUseCase.swift` centralizes study room backend operations such as study fetch/create/delete and backend question creation.
+  - `StudyRoom/StudyRoomUseCase.swift` centralizes study room backend operations such as study fetch/create/update/delete, quota lookup, and backend question creation.
   - `Community/CommunityUseCase.swift` centralizes public question, sign-in, profile, like, report, and comment backend operations.
   - `AppState` may still orchestrate state application and recovery, but it should not grow new direct backend action logic when a use-case boundary exists.
 
@@ -82,6 +82,11 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Redis delivery is at-least-once. `(event_type, event_id)` is the producer idempotency key, and consumers must keep their existing event-id deduplication because a crash can occur after Redis accepts an event but before the outbox row is marked published.
   - Outbox SQL uses jOOQ classes generated from the ordered Flyway migration history, so table and column changes fail at compile/code-generation time instead of relying on untyped row maps.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
+  - Stores studies as a MySQL adjacency list through `studies.parent_study_id`. Root studies use `NULL`; child depth is not capped by the schema or API.
+  - Uses `sort_order` plus `id` for stable sibling ordering. A self-referencing foreign key cascades subtree deletion at the study layer, while question soft deletion resolves the same subtree with a recursive CTE before deleting the studies.
+  - Keeps study identity on record responses so the iOS cache can remove only records owned by a deleted subtree, even when two branches use the same topic label.
+  - Resolves monthly question allowance from the active membership tier and an optional per-user override. `GET /api/v1/questions/quota` returns usage, allowance, remaining count, and the next UTC reset instant.
+  - Provides authenticated admin APIs for paginated user search, tier allowance updates, and per-user tier/override assignment. Payment-plan metadata is never returned by the consumer quota endpoint.
 
 - `Views`
   - `StudyView`: active question and pending question workflow.
@@ -112,6 +117,25 @@ User answer
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records
 -> backend stats are refreshed from MySQL records
+```
+
+```text
+My Studies root
+-> GET /api/v1/studies
+-> app builds parentStudyId adjacency map
+-> recursive tree layout renders one branch at a time
+-> selecting a node opens that study's question page
+-> adding or editing a child sends its parentStudyId and sortOrder
+-> deleting a node soft-deletes questions for the resolved subtree, then cascades the study subtree
+```
+
+```text
+Question page appears or quota-related request fails
+-> GET /api/v1/questions/quota
+-> active membership tier + optional user override determine monthlyLimit
+-> monthly usage determines remainingCount
+-> app renders remaining/monthly/reset without exposing the internal plan
+-> QUOTA_EXCEEDED routes through the shared app error policy and shows reset time inline
 ```
 
 ## Sync Model
@@ -154,6 +178,13 @@ User answer
 - Refresh claims dirty rows with `FOR UPDATE SKIP LOCKED`; if the process crashes before commit, the transaction rolls back and the dirty rows remain for the next run.
 - Refresh deletes a dirty row only when its `updated_at` still matches the claimed value. If a new answer/delete updates the same bucket during refresh, the dirty row is kept and retried in a later batch.
 - H2/test environments fall back to a full rebuild path; production MySQL uses incremental dirty-key refresh.
+
+## Internal Membership Administration
+
+- `user_membership_tiers` is the operator-managed plan catalog and owns the default monthly limit.
+- `user_memberships.monthly_question_limit_override` is nullable. `NULL` inherits the tier value; a non-negative value overrides it for that user.
+- The monitoring Users & Quotas page proxies admin APIs through the authenticated monitoring origin. It does not persist backend admin tokens outside the browser session.
+- User search is bounded to 100 rows per API call and the UI uses 20-row pages.
 
 ## Build And Verification
 

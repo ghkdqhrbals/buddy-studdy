@@ -2,7 +2,9 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
@@ -23,7 +25,26 @@ class QuestionMembershipPersistenceAdapter(
             membership == null || membership.startedAt.isAfter(now) || membership.expiresAt?.isAfter(now) == false
         ) DEFAULT_TIER else membership.tier
         val tier = tiers.findByTierCode(tierCode) ?: tiers.findByTierCode(DEFAULT_TIER) ?: return null
-        return QuestionMembershipPlan(tier.tierCode, tier.monthlyQuestionLimit)
+        return QuestionMembershipPlan(
+            tierCode = tier.tierCode,
+            monthlyQuestionLimit = membership?.monthlyQuestionLimitOverride ?: tier.monthlyQuestionLimit,
+        )
+    }
+
+    override suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus? {
+        val plan = activePlanForUser(userId) ?: return null
+        val used = template.databaseClient.sql(
+            """
+            select system_question_count
+            from user_monthly_question_usage
+            where user_id = :userId and usage_month = :yearMonth
+            """.trimIndent(),
+        ).bind("userId", userId).bind("yearMonth", yearMonth.toString())
+            .map { row, _ -> row.get("system_question_count", java.lang.Integer::class.java)?.toInt() ?: 0 }
+            .one()
+            .awaitSingleOrNull()
+            ?: 0
+        return QuestionQuotaStatus(plan.tierCode, used, plan.monthlyQuestionLimit)
     }
 
     @Transactional

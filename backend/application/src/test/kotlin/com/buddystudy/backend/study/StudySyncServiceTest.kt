@@ -3,6 +3,8 @@ package com.buddystudy.backend.study
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -11,6 +13,7 @@ import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -107,13 +110,65 @@ class StudySyncServiceTest {
     }
 
     @Test
-    fun `deleting study also removes same-topic records`(): Unit = runBlocking {
+    fun `child studies keep their parent and sibling order`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Redis")
+
+        val response = service.createStudy(
+            principal,
+            CreateStudyCommand(
+                topic = "Streams",
+                parentStudyId = 11,
+                sortOrder = 3,
+                difficultyLevel = 7,
+            ),
+        )
+
+        assertThat(response.parentStudyId).isEqualTo(11)
+        assertThat(response.sortOrder).isEqualTo(3)
+        assertThat(response.difficultyLevel).isEqualTo(7)
+        assertThat(studies.rows.last().parentStudyId).isEqualTo(11)
+    }
+
+    @Test
+    fun `same child topic can exist below different parents`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Redis")
+        studies.rows += study(id = 12, topic = "Kafka")
+
+        val redisStream = service.createStudy(
+            principal,
+            CreateStudyCommand(topic = "Streams", parentStudyId = 11),
+        )
+        val kafkaStream = service.createStudy(
+            principal,
+            CreateStudyCommand(topic = "Streams", parentStudyId = 12),
+        )
+
+        assertThat(redisStream.id).isNotEqualTo(kafkaStream.id)
+        assertThat(studies.rows.count { it.topic == "Streams" }).isEqualTo(2)
+    }
+
+    @Test
+    fun `child study rejects a parent owned by another user`() {
+        studies.rows += study(id = 11, topic = "Redis").apply { userId = 99 }
+
+        assertThatThrownBy {
+            runBlocking {
+                service.createStudy(
+                    principal,
+                    CreateStudyCommand(topic = "Streams", parentStudyId = 11),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
+    fun `deleting study removes records in that study subtree without using topic matching`(): Unit = runBlocking {
         studies.rows += study(id = 8, topic = "Redis")
 
         service.deleteStudy(principal, studyId = 8)
 
-        assertThat(questions.softDeletedStudyIds).containsExactly(8)
-        assertThat(questions.softDeletedTopics).containsExactly("Redis")
+        assertThat(questions.softDeletedSubtreeIds).containsExactly(8)
+        assertThat(questions.softDeletedTopics).isEmpty()
     }
 
     private fun study(id: Long, topic: String) = StudyEntity(
@@ -143,10 +198,23 @@ class StudySyncServiceTest {
 
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
-        override suspend fun save(entity: StudyEntity): StudyEntity = entity
+        override suspend fun save(entity: StudyEntity): StudyEntity {
+            if (entity.id == 0L) {
+                entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
+                rows += entity
+            }
+            return entity
+        }
         override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long = rows.removeAll { it.id == id && it.userId == userId }.let { if (it) 1 else 0 }
         override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findByUserIdAndParentStudyIdAndTopic(
+            userId: Long,
+            parentStudyId: Long?,
+            topic: String,
+        ): StudyEntity? = rows.firstOrNull {
+            it.userId == userId && it.parentStudyId == parentStudyId && it.topic == topic
+        }
         override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = rows.firstOrNull { it.userId == userId && it.topic == topic }
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
@@ -160,6 +228,7 @@ class StudySyncServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val pendingRows = mutableListOf<QuestionEntity>()
         val softDeletedStudyIds = mutableListOf<Long>()
+        val softDeletedSubtreeIds = mutableListOf<Long>()
         val softDeletedTopics = mutableListOf<String>()
         var findPendingByStudyIdCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
@@ -203,6 +272,10 @@ class StudySyncServiceTest {
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
             softDeletedStudyIds += studyId
+            return 0
+        }
+        override suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int {
+            softDeletedSubtreeIds += rootStudyId
             return 0
         }
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {

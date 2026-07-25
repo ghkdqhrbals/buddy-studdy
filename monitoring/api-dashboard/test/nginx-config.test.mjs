@@ -24,8 +24,16 @@ test("monitoring gateway records a bounded access audit without request bodies",
   assert.match(config, /"event":"monitoring_access"/);
   assert.match(config, /"user":"\$remote_user"/);
   assert.match(config, /access_log \/var\/log\/nginx\/monitoring-access\.log monitoring_access/);
-  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\)/);
+  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\)/);
   assert.match(config, /testzone\/api/);
+  assert.match(config, /backend\/api/);
   assert.doesNotMatch(config, /requestBody/);
   assert.doesNotMatch(config, /\$http_authorization/);
+});
+
+test("monitoring proxies admin APIs through the same authenticated origin", () => {
+  const backendLocation = config.match(/location \/backend\/api\/ \{([\s\S]*?)\n  \}/)?.[1];
+  assert.ok(backendLocation, "Backend admin proxy location must exist");
+  assert.match(backendLocation, /proxy_pass https:\/\/api\.ghkdqhrbals\.org\/api\//);
+  assert.match(backendLocation, /proxy_ssl_server_name on/);
 });

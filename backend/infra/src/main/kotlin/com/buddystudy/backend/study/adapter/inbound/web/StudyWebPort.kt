@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.QuestionQuotaResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import java.time.Instant
@@ -27,6 +28,7 @@ interface StudyWebPort {
     suspend fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication): StatsResponse
     suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
     suspend fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
+    suspend fun questionQuota(authentication: Authentication): QuestionQuotaResponse
     suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
     suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
 }

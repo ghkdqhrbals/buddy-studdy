@@ -25,10 +25,28 @@ struct StudyRoomUseCase {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings
+        settings: StudySettings,
+        parentStudyID: Int? = nil,
+        sortOrder: Int = 0
     ) async throws -> BackendStudyRoom {
         try await repository.createStudy(
             registration: registration,
+            category: category,
+            settings: settings,
+            parentStudyID: parentStudyID,
+            sortOrder: sortOrder
+        )
+    }
+
+    func updateStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws {
+        try await repository.updateStudy(
+            registration: registration,
+            studyID: studyID,
             category: category,
             settings: settings
         )
@@ -39,6 +57,12 @@ struct StudyRoomUseCase {
         studyID: Int
     ) async throws {
         try await repository.deleteStudy(registration: registration, studyID: studyID)
+    }
+
+    func fetchQuestionQuota(
+        registration: RemotePushRegistration
+    ) async throws -> BackendQuestionQuota {
+        try await repository.fetchQuestionQuota(registration: registration)
     }
 
     func createQuestion(

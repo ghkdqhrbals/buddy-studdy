@@ -243,4 +243,12 @@ class StudyController(
         @PathVariable studyId: Long,
         authentication: Authentication,
     ): StudyRecordResponse = study.createQuestion(studyId, authentication)
+
+    @Operation(
+        summary = "Fetch my monthly question quota",
+        description = "Returns only the current usage, monthly allowance, remaining count, and next reset time. Membership tier details are intentionally not exposed to the app.",
+    )
+    @GetMapping("/questions/quota")
+    suspend fun questionQuota(authentication: Authentication) =
+        study.questionQuota(authentication)
 }

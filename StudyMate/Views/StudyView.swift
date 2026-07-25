@@ -21,6 +21,14 @@ struct StudyView: View {
                     strings: strings
                 )
 
+                if let quota = appState.questionQuota {
+                    questionQuotaView(quota, strings: strings)
+                }
+
+                if let notice = appState.questionQuotaNotice {
+                    questionQuotaNoticeView(notice, strings: strings)
+                }
+
                 Divider()
 
                 if selectedStudyRecord != nil,
@@ -79,7 +87,9 @@ struct StudyView: View {
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
         }
         .task(id: preferredCategoryID) {
-            await appState.prepareStudyRoom(categoryID: preferredCategoryID)
+            async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: preferredCategoryID)
+            async let quotaRefresh: Void = appState.refreshQuestionQuota()
+            _ = await (roomPreparation, quotaRefresh)
         }
         .onDisappear {
             appState.flushPendingAnswerDraftSave()
@@ -249,6 +259,54 @@ struct StudyView: View {
 
     private var hasReachedPendingQuestionLimit: Bool {
         appState.hasReachedPendingQuestionLimit(for: selectedCategory)
+    }
+
+    private func questionQuotaView(_ quota: BackendQuestionQuota, strings: AppStrings) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(strings.monthlyQuestionQuota)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(strings.monthlyQuotaUsage(remaining: quota.remainingCount, limit: quota.monthlyLimit))
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+            }
+
+            ProgressView(
+                value: Double(quota.usedCount),
+                total: Double(max(quota.monthlyLimit, 1))
+            )
+            .tint(quota.remainingCount > 0 ? .accentColor : .orange)
+
+            Text(strings.monthlyQuotaReset(quota.resetAt))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func questionQuotaNoticeView(_ message: String, strings: AppStrings) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.monthlyQuotaReached)
+                    .font(.subheadline.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(strings.done) {
+                appState.clearQuestionQuotaNotice()
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func notificationLandingInlineView(message: String, strings: AppStrings) -> some View {

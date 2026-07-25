@@ -9,7 +9,7 @@ async function text(file) {
 }
 
 test("all monitoring pages load the shared navigation shell", async () => {
-  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html"]) {
+  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html", "users.html"]) {
     const html = await text(page);
     assert.match(html, /src="\/shell\.js\?/);
     assert.match(html, /src="\/nav-bootstrap\.js\?/);
@@ -21,9 +21,24 @@ test("all monitoring pages load the shared navigation shell", async () => {
   const shell = await text("shell.js");
   assert.match(shell, /Access & Audit/);
   assert.match(shell, /Settings/);
+  assert.match(shell, /Users & Quotas/);
   assert.match(shell, /Load testing/);
   assert.match(shell, /side-nav-footer/);
   assert.match(shell, /NAV_COLLAPSED_KEY/);
+});
+
+test("user administration is searchable, paginated, and keeps plans internal", async () => {
+  const html = await text("users.html");
+  const js = await text("users.js");
+  assert.match(html, /id="adminUserSearch"/);
+  assert.match(html, /id="adminPreviousButton"/);
+  assert.match(html, /id="adminNextButton"/);
+  assert.match(html, /Plan limits/);
+  assert.match(js, /const PAGE_SIZE = 20/);
+  assert.match(js, /monthlyQuestionLimitOverride/);
+  assert.match(js, /sessionStorage/);
+  assert.match(js, /function escapeHTML/);
+  assert.doesNotMatch(html, /payment|billing/i);
 });
 
 test("navigation is fixed, collapsible, and keeps its version at the bottom", async () => {

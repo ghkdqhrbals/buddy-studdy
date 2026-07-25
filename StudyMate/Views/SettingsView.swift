@@ -587,7 +587,7 @@ private struct StudySettingsSection: View {
                     }
                 }
             } label: {
-                Label(strings.recommendedPrompt, systemImage: "sparkles")
+                Text(strings.recommendedPrompt)
             }
 
             VStack(alignment: .leading, spacing: 8) {

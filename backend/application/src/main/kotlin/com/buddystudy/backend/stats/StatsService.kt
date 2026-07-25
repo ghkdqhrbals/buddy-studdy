@@ -164,6 +164,7 @@ class StatsService(
             difficultyLevel = difficultyLevel,
             answeredAt = answeredAt,
             publicQuestion = publicQuestion,
+            studyId = studyId,
         ),
         statsEntity?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )

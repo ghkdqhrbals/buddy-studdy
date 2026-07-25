@@ -7,6 +7,7 @@ struct AppErrorHandlingResolution: Equatable {
     var isPageAccessDenied: Bool
     var requiresEmailVerification: Bool
     var requiresTermsAgreement: Bool
+    var isQuotaExceeded: Bool
     var shouldResetBackendIdentity: Bool
     var shouldClearFeatureMessage: Bool
 }
@@ -36,6 +37,7 @@ enum AppErrorHandlingPolicy {
             isPageAccessDenied: presentation.isPageAccessDenied,
             requiresEmailVerification: presentation.requiresEmailVerification,
             requiresTermsAgreement: presentation.requiresTermsAgreement,
+            isQuotaExceeded: presentation.isQuotaExceeded,
             shouldResetBackendIdentity: presentation.shouldResetBackendIdentity,
             shouldClearFeatureMessage: shouldClearFeatureMessage
         )

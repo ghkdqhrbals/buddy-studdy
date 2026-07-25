@@ -13,6 +13,7 @@ interface StudyPort {
     suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long
     suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
     suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
+    suspend fun findByUserIdAndParentStudyIdAndTopic(userId: Long, parentStudyId: Long?, topic: String): StudyEntity?
     suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
     suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity>
     suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
@@ -47,6 +48,8 @@ interface QuestionPort {
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     suspend fun softDelete(id: Long, userId: Long, now: Instant): Int
     suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int
+    suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int =
+        softDeleteByStudyId(rootStudyId, userId, now)
     suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int
 }
 
@@ -114,8 +117,15 @@ data class QuestionMembershipPlan(
     val monthlyQuestionLimit: Int,
 )
 
+data class QuestionQuotaStatus(
+    val tierCode: String,
+    val usedCount: Int,
+    val monthlyQuestionLimit: Int,
+)
+
 interface QuestionMembershipPort {
     suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan?
+    suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus?
     suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
     suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
 }

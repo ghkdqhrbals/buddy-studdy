@@ -41,6 +41,9 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 4. User submits for grading.
 5. Grading result, feedback, and explanation are stored in records.
 6. Ungraded pending questions are capped at 3.
+7. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
+8. Every tree node owns its own question page, difficulty level, prompt, and child categories. Level is communicated with restrained color instead of decorative icons.
+9. The app shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
 
 ### Records
 
@@ -59,6 +62,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 4. Topic browser supports search, sort, pagination, selected topic detail, and trend chart.
 5. Similar topic aliases are visible in the selected topic detail when multiple labels were merged.
 6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
+7. Growth-topic labels wrap to show their full value instead of being truncated with an ellipsis.
 
 ### Settings
 
@@ -67,6 +71,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Notification permission opens system settings; no in-app test notification button is shown.
 4. Question visibility is explicit and defaults to private.
 5. User-facing debugging logs are not provided.
+6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 
 ### Sync And Push
 
@@ -78,6 +83,13 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Server-scheduled APNs delivery is handled by the Spring Boot Kotlin backend. It generates each due question, stores it before push delivery, publishes a Redis stream push job, then sends the APNs alert from an `@StreamListener` consumer.
 7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
+
+### Internal Operations
+
+1. The monitoring workspace includes an authenticated Users & Quotas page for operators only.
+2. Operators can search users by ID, email, or display name. User lists are paginated by default.
+3. Membership tiers define the default monthly question allowance. An operator can assign a tier and optionally set a per-user allowance override.
+4. Payment-plan names and controls remain internal. The consumer app exposes only allowance, remaining count, and reset time.
 
 ### Community
 

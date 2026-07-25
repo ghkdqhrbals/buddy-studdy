@@ -4569,6 +4569,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var scheduledModels: [String] = []
     var callEvents: [String] = []
     var createdStudyTopics: [String] = []
+    var updatedStudyIDs: [Int] = []
     var deletedStudyIDs: [Int] = []
     var fetchedStudyPage = BackendStudyPage(studies: [], totalCount: 0, limit: 100, offset: 0, serverTime: Date())
     var fetchStudyCallCount = 0
@@ -4766,7 +4767,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings
+        settings: StudySettings,
+        parentStudyID: Int?,
+        sortOrder: Int
     ) async throws -> BackendStudyRoom {
         createdStudyTopics.append(category.normalizedTitle)
         callEvents.append("createStudy:\(category.normalizedTitle)")
@@ -4774,6 +4777,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         return BackendStudyRoom(
             id: createdStudyTopics.count,
             topic: category.normalizedTitle,
+            parentStudyId: parentStudyID,
+            sortOrder: sortOrder,
             difficultyLevel: category.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
@@ -4790,12 +4795,33 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func updateStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws {
+        updatedStudyIDs.append(studyID)
+        callEvents.append("updateStudy:\(studyID):\(category.normalizedTitle)")
+    }
+
     func deleteStudy(
         registration: RemotePushRegistration,
         studyID: Int
     ) async throws {
         deletedStudyIDs.append(studyID)
         callEvents.append("deleteStudy:\(studyID)")
+    }
+
+    func fetchQuestionQuota(
+        registration: RemotePushRegistration
+    ) async throws -> BackendQuestionQuota {
+        BackendQuestionQuota(
+            usedCount: 0,
+            monthlyLimit: 30,
+            remainingCount: 30,
+            resetAt: Date().addingTimeInterval(30 * 24 * 60 * 60)
+        )
     }
 
     func fetchStudy(

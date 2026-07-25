@@ -291,13 +291,26 @@ protocol RemotePushBackendClientProtocol {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings
+        settings: StudySettings,
+        parentStudyID: Int?,
+        sortOrder: Int
     ) async throws -> BackendStudyRoom
+
+    func updateStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws
 
     func deleteStudy(
         registration: RemotePushRegistration,
         studyID: Int
     ) async throws
+
+    func fetchQuestionQuota(
+        registration: RemotePushRegistration
+    ) async throws -> BackendQuestionQuota
 
     func fetchRecords(
         registration: RemotePushRegistration,
@@ -706,7 +719,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings
+        settings: StudySettings,
+        parentStudyID: Int? = nil,
+        sortOrder: Int = 0
     ) async throws -> BackendStudyRoom {
         let body = CreateStudyRequest(
             topic: category.normalizedTitle,
@@ -716,7 +731,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             notificationSound: settings.notificationSound.backendSoundName,
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            parentStudyId: parentStudyID,
+            sortOrder: sortOrder
         )
         var request = authenticatedRequest(
             registration: registration,
@@ -728,6 +745,44 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
         let data = try await perform(request)
         return try decoder.decode(BackendStudyRoom.self, from: data)
+    }
+
+    func updateStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        category: StudyCategory,
+        settings: StudySettings
+    ) async throws {
+        let requestBody = ScheduleRequest(
+            topic: category.normalizedTitle,
+            difficultyLevel: category.difficulty.level,
+            intervalMinutes: settings.sanitizedIntervalMinutes,
+            enabled: true,
+            openAIAPIKey: nil,
+            notificationSound: settings.notificationSound.backendSoundName,
+            customPrompt: category.normalizedCustomPrompt,
+            appLanguage: settings.appLanguage.backendCode,
+            openAIModel: category.sanitizedOpenAIModel,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            schedules: []
+        )
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "studies", String(studyID), "settings")
+        )
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(requestBody)
+        _ = try await perform(request)
+    }
+
+    func fetchQuestionQuota(
+        registration: RemotePushRegistration
+    ) async throws -> BackendQuestionQuota {
+        let url = endpoint("api", "v1", "questions", "quota")
+        let request = authenticatedRequest(registration: registration, url: url)
+        let data = try await perform(request)
+        return try decoder.decode(BackendQuestionQuota.self, from: data)
     }
 
     func deleteStudy(
@@ -1650,6 +1705,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var customPrompt: String
         var openAIModel: String
         var maxHistoryCount: Int
+        var parentStudyId: Int?
+        var sortOrder: Int
 
         enum CodingKeys: String, CodingKey {
             case topic
@@ -1660,6 +1717,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case customPrompt
             case openAIModel = "openaiModel"
             case maxHistoryCount
+            case parentStudyId
+            case sortOrder
         }
     }
 
@@ -1774,6 +1833,8 @@ struct BackendStudyPage: Decodable, Equatable {
 struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var id: Int
     var topic: String
+    var parentStudyId: Int?
+    var sortOrder: Int
     var difficultyLevel: Int
     var intervalMinutes: Int
     var enabled: Bool
@@ -1788,9 +1849,49 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var createdAt: Date
     var updatedAt: Date
 
+    init(
+        id: Int,
+        topic: String,
+        parentStudyId: Int? = nil,
+        sortOrder: Int = 0,
+        difficultyLevel: Int,
+        intervalMinutes: Int,
+        enabled: Bool,
+        notificationSound: String?,
+        customPrompt: String,
+        openAIModel: String,
+        maxHistoryCount: Int,
+        nextDueAt: Date?,
+        lastSentAt: Date?,
+        lastError: String?,
+        pendingQuestion: StudyRecord?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.topic = topic
+        self.parentStudyId = parentStudyId
+        self.sortOrder = sortOrder
+        self.difficultyLevel = difficultyLevel
+        self.intervalMinutes = intervalMinutes
+        self.enabled = enabled
+        self.notificationSound = notificationSound
+        self.customPrompt = customPrompt
+        self.openAIModel = openAIModel
+        self.maxHistoryCount = maxHistoryCount
+        self.nextDueAt = nextDueAt
+        self.lastSentAt = lastSentAt
+        self.lastError = lastError
+        self.pendingQuestion = pendingQuestion
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case topic
+        case parentStudyId
+        case sortOrder
         case difficultyLevel
         case intervalMinutes
         case enabled
@@ -1805,6 +1906,34 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case createdAt
         case updatedAt
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        topic = try container.decode(String.self, forKey: .topic)
+        parentStudyId = try container.decodeIfPresent(Int.self, forKey: .parentStudyId)
+        sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
+        difficultyLevel = try container.decode(Int.self, forKey: .difficultyLevel)
+        intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound)
+        customPrompt = try container.decode(String.self, forKey: .customPrompt)
+        openAIModel = try container.decode(String.self, forKey: .openAIModel)
+        maxHistoryCount = try container.decode(Int.self, forKey: .maxHistoryCount)
+        nextDueAt = try container.decodeIfPresent(Date.self, forKey: .nextDueAt)
+        lastSentAt = try container.decodeIfPresent(Date.self, forKey: .lastSentAt)
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+        pendingQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .pendingQuestion)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+}
+
+struct BackendQuestionQuota: Decodable, Equatable {
+    var usedCount: Int
+    var monthlyLimit: Int
+    var remainingCount: Int
+    var resetAt: Date
 }
 
 struct BackendRecordsPage: Decodable, Equatable {

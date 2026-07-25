@@ -21,4 +21,5 @@ fun StudyRecordProjection.toRecordResponse() = StudyRecordResponse(
     likeCount = likeCount,
     commentCount = commentCount,
     viewCount = viewCount,
+    studyId = studyId,
 )

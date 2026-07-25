@@ -11,6 +11,8 @@ class StudyEntity(
     var id: Long = 0,
     var deviceId: String = "",
     var userId: Long = 0,
+    var parentStudyId: Long? = null,
+    var sortOrder: Int = 0,
     var topic: String = "",
     var difficultyLevel: Int = 5,
     var intervalMinutes: Int = 15,

@@ -18,6 +18,7 @@ data class StudyRecordResponse(
     val likeCount: Int = 0,
     val commentCount: Int = 0,
     val viewCount: Int = 0,
+    val studyId: Long? = null,
 )
 
 data class RecordsPageResponse(
@@ -29,6 +30,8 @@ data class RecordsPageResponse(
 
 data class StudyRoomResponse(
     val id: Long,
+    val parentStudyId: Long?,
+    val sortOrder: Int,
     val topic: String,
     val difficultyLevel: Int,
     val intervalMinutes: Int,

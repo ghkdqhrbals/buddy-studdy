@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCas
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.study.application.port.inbound.QuestionQuotaUseCase
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
@@ -23,6 +24,7 @@ class StudyWebAdapter(
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
     private val studySyncUseCase: StudySyncUseCase,
+    private val questionQuotaUseCase: QuestionQuotaUseCase,
 ) : StudyWebPort {
     override suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
         studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
@@ -61,11 +63,16 @@ class StudyWebAdapter(
     override suspend fun createQuestion(studyId: Long, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)
 
+    override suspend fun questionQuota(authentication: Authentication) =
+        questionQuotaUseCase.status(authentication.principalOrThrow())
+
     override suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication) =
         studySyncUseCase.createStudy(
             authentication.principalOrThrow(),
             CreateStudyCommand(
                 topic = body.topic,
+                parentStudyId = body.parentStudyId,
+                sortOrder = body.sortOrder,
                 difficultyLevel = body.difficultyLevel,
                 intervalMinutes = body.intervalMinutes,
                 enabled = body.enabled,

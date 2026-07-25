@@ -25,6 +25,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingP
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -312,6 +313,13 @@ class QuestionSchedulerTest {
         override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = null
         override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
             rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findByUserIdAndParentStudyIdAndTopic(
+            userId: Long,
+            parentStudyId: Long?,
+            topic: String,
+        ): StudyEntity? = rows.firstOrNull {
+            it.userId == userId && it.parentStudyId == parentStudyId && it.topic == topic
+        }
         override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
@@ -388,6 +396,12 @@ class QuestionSchedulerTest {
         var consumeCalls = 0
         var refundCalls = 0
         override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
+        override suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus =
+            QuestionQuotaStatus(
+                tierCode = activePlan.tierCode,
+                usedCount = usedCount,
+                monthlyQuestionLimit = activePlan.monthlyQuestionLimit,
+            )
         override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false

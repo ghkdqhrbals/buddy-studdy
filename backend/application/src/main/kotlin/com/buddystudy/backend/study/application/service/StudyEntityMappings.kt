@@ -57,6 +57,7 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         difficultyLevel = difficultyLevel,
         answeredAt = answeredAt,
         publicQuestion = publicQuestion,
+        studyId = studyId,
     ),
     stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
 )

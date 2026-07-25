@@ -21,9 +21,15 @@ struct MobileRootView: View {
                         MobileHomeView()
                             .padding(.horizontal, 16)
                             .navigationDestination(item: $appState.homeStudyRoute) { route in
-                                StudyView(preferredCategoryID: route.categoryID)
-                                    .padding(.horizontal, 16)
-                                    .mobileTabTitle(studyScreenTitle(for: route))
+                                if route.showsTree,
+                                   let categoryID = route.categoryID,
+                                   let studyID = Int(categoryID) {
+                                    MobileStudyTreeView(rootStudyID: studyID)
+                                } else {
+                                    StudyView(preferredCategoryID: route.categoryID)
+                                        .padding(.horizontal, 16)
+                                        .mobileTabTitle(studyScreenTitle(for: route))
+                                }
                             }
                     }
                     .tabItem {
@@ -497,14 +503,6 @@ private struct MobileMyStudyLoginExperience: View {
     var strings: AppStrings
     var onLogin: () -> Void
 
-    private var topics: [(title: String, detail: String, icon: String)] {
-        [
-            (strings.guestPreviewRecordTopicOne, strings.myStudyGuestTopicOne, "square.stack.3d.up"),
-            (strings.guestPreviewRecordTopicTwo, strings.myStudyGuestTopicTwo, "arrow.left.arrow.right"),
-            (strings.guestPreviewRecordTopicThree, strings.myStudyGuestTopicThree, "network")
-        ]
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
@@ -516,41 +514,6 @@ private struct MobileMyStudyLoginExperience: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            VStack(spacing: 0) {
-                ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
-                    HStack(spacing: 12) {
-                        Image(systemName: topic.icon)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.green)
-                            .frame(width: 34, height: 34)
-                            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(topic.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text(topic.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 13)
-                    .padding(.horizontal, 14)
-
-                    if index < topics.count - 1 {
-                        Divider()
-                            .padding(.leading, 60)
-                    }
-                }
-            }
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(strings.myStudyGuestLoginTitle)
@@ -1077,10 +1040,12 @@ private struct MobileHomeView: View {
         if !query.isEmpty,
            query == submittedHomeStudySearchText,
            let searchResults = appState.homeStudySearchResults {
-            return searchResults
+            return searchResults.filter { category in
+                appState.backendStudyRoom(categoryID: category.id)?.parentStudyId == nil
+            }
         }
 
-        let categories = appState.studyCategoriesForDisplay
+        let categories = appState.rootStudyCategoriesForDisplay
         guard !query.isEmpty else {
             return categories
         }
@@ -1230,6 +1195,10 @@ private struct MobileHomeView: View {
                 Task {
                     await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 }
+            } else if appState.isCommunitySessionActive {
+                Task {
+                    await appState.refreshQuestionQuota()
+                }
             }
         }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
@@ -1239,12 +1208,18 @@ private struct MobileHomeView: View {
                 extra: ["isSignedIn=\(isSignedIn)", "scope=\(String(describing: selectedHomeScope))"]
             )
             hasLoadedCommunityQuestions = false
-            guard isSignedIn, selectedHomeScope == .all else {
+            guard isSignedIn else {
                 return
             }
 
-            Task {
-                await loadCommunityQuestionsIfNeeded(userInitiated: false)
+            if selectedHomeScope == .all {
+                Task {
+                    await loadCommunityQuestionsIfNeeded(userInitiated: false)
+                }
+            } else {
+                Task {
+                    await appState.refreshQuestionQuota()
+                }
             }
         }
         .onChange(of: homeStudySearchText) {
@@ -1400,6 +1375,13 @@ private struct MobileHomeView: View {
 
     private var myStudySection: some View {
         Section {
+            if let quota = appState.questionQuota {
+                MobileHomeQuestionQuotaSummary(quota: quota, strings: strings)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
             if filteredStudyCategories.isEmpty {
                 if isRefreshingMyStudyContent {
                     MobileHomeRefreshIndicator()
@@ -1442,6 +1424,40 @@ private struct MobileHomeView: View {
         }
     }
 
+    private struct MobileHomeQuestionQuotaSummary: View {
+        var quota: BackendQuestionQuota
+        var strings: AppStrings
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(quota.remainingCount == 0 ? strings.monthlyQuotaReached : strings.monthlyQuestionQuota)
+                        .font(.subheadline.weight(.semibold))
+
+                    Spacer(minLength: 12)
+
+                    Text(strings.monthlyQuotaUsage(remaining: quota.remainingCount, limit: quota.monthlyLimit))
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+                }
+
+                ProgressView(
+                    value: Double(quota.usedCount),
+                    total: Double(max(quota.monthlyLimit, 1))
+                )
+                .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+                Text(strings.monthlyQuotaReset(quota.resetAt))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
     @ViewBuilder
     private func myStudyCategoryRow(_ category: StudyCategory) -> some View {
         if editMode.isEditing {
@@ -1452,7 +1468,7 @@ private struct MobileHomeView: View {
             )
         } else {
             Button {
-                appState.openStudyCategory(category.id)
+                appState.openStudyTree(category.id)
             } label: {
                 MobileHomeCategoryRow(
                     category: category,
@@ -2131,6 +2147,349 @@ private struct NotificationPublicQuestionsDestination: View {
                 await appState.loadCommunityQuestions(reset: true, userInitiated: false)
             }
         }
+    }
+}
+
+private enum StudyTreeDirection: String, CaseIterable, Identifiable {
+    case vertical
+    case horizontal
+
+    var id: String { rawValue }
+}
+
+private struct StudyTreePlacement: Identifiable {
+    var room: BackendStudyRoom
+    var center: CGPoint
+    var id: Int { room.id }
+}
+
+private struct StudyTreeEdge: Identifiable {
+    var parent: CGPoint
+    var child: CGPoint
+    var id = UUID()
+}
+
+private struct StudyTreeLayoutSnapshot {
+    static let nodeSize = CGSize(width: 148, height: 78)
+    private static let margin: CGFloat = 44
+    private static let siblingSpacing: CGFloat = 34
+    private static let levelSpacing: CGFloat = 86
+
+    var placements: [StudyTreePlacement]
+    var edges: [StudyTreeEdge]
+    var size: CGSize
+
+    init(root: BackendStudyRoom, rooms: [BackendStudyRoom], direction: StudyTreeDirection) {
+        let roomByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+        let childrenByParent = Dictionary(
+            grouping: rooms.filter { $0.parentStudyId != nil },
+            by: { $0.parentStudyId! }
+        ).mapValues {
+            $0.sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.id < $1.id
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+        }
+
+        var logicalPositions: [Int: CGPoint] = [:]
+        var visited = Set<Int>()
+        var nextLeaf: CGFloat = 0
+        _ = Self.assignLogicalPosition(
+            roomID: root.id,
+            depth: 0,
+            childrenByParent: childrenByParent,
+            nextLeaf: &nextLeaf,
+            visited: &visited,
+            positions: &logicalPositions
+        )
+
+        let maxDepth = logicalPositions.values.map(\.y).max() ?? 0
+        let maxLeaf = logicalPositions.values.map(\.x).max() ?? 0
+        let verticalWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
+        let verticalHeight = (maxDepth + 1) * (Self.nodeSize.height + Self.levelSpacing) - Self.levelSpacing + Self.margin * 2
+
+        func renderedCenter(_ point: CGPoint) -> CGPoint {
+            let verticalPoint = CGPoint(
+                x: Self.margin + Self.nodeSize.width / 2 + point.x * (Self.nodeSize.width + Self.siblingSpacing),
+                y: Self.margin + Self.nodeSize.height / 2 + point.y * (Self.nodeSize.height + Self.levelSpacing)
+            )
+            guard direction == .horizontal else {
+                return verticalPoint
+            }
+            return CGPoint(x: verticalPoint.y, y: verticalPoint.x)
+        }
+
+        placements = logicalPositions.compactMap { id, point in
+            guard let room = roomByID[id] else {
+                return nil
+            }
+            return StudyTreePlacement(room: room, center: renderedCenter(point))
+        }
+        .sorted {
+            if $0.center.y == $1.center.y {
+                return $0.center.x < $1.center.x
+            }
+            return $0.center.y < $1.center.y
+        }
+
+        edges = logicalPositions.flatMap { parentID, parentPoint in
+            (childrenByParent[parentID] ?? []).compactMap { child in
+                guard let childPoint = logicalPositions[child.id] else {
+                    return nil
+                }
+                return StudyTreeEdge(
+                    parent: renderedCenter(parentPoint),
+                    child: renderedCenter(childPoint)
+                )
+            }
+        }
+
+        size = direction == .vertical
+            ? CGSize(width: max(verticalWidth, 320), height: max(verticalHeight, 320))
+            : CGSize(width: max(verticalHeight, 320), height: max(verticalWidth, 320))
+    }
+
+    private static func assignLogicalPosition(
+        roomID: Int,
+        depth: Int,
+        childrenByParent: [Int: [BackendStudyRoom]],
+        nextLeaf: inout CGFloat,
+        visited: inout Set<Int>,
+        positions: inout [Int: CGPoint]
+    ) -> CGFloat {
+        guard visited.insert(roomID).inserted else {
+            return nextLeaf
+        }
+
+        let children = childrenByParent[roomID] ?? []
+        let childPositions = children.map { child in
+            assignLogicalPosition(
+                roomID: child.id,
+                depth: depth + 1,
+                childrenByParent: childrenByParent,
+                nextLeaf: &nextLeaf,
+                visited: &visited,
+                positions: &positions
+            )
+        }
+
+        let leafPosition: CGFloat
+        if let first = childPositions.first,
+           let last = childPositions.last {
+            leafPosition = (first + last) / 2
+        } else {
+            leafPosition = nextLeaf
+            nextLeaf += 1
+        }
+        positions[roomID] = CGPoint(x: leafPosition, y: CGFloat(depth))
+        return leafPosition
+    }
+}
+
+private struct MobileStudyTreeView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var direction: StudyTreeDirection = .vertical
+    @State private var childParent: BackendStudyRoom?
+    @State private var editingRoom: BackendStudyRoom?
+
+    var rootStudyID: Int
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    private var root: BackendStudyRoom? {
+        appState.backendStudyRoom(id: rootStudyID)
+    }
+
+    private var snapshot: StudyTreeLayoutSnapshot? {
+        guard let root else {
+            return nil
+        }
+        return StudyTreeLayoutSnapshot(
+            root: root,
+            rooms: appState.backendStudyRooms,
+            direction: direction
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $direction) {
+                Text(strings.treeVertical).tag(StudyTreeDirection.vertical)
+                Text(strings.treeHorizontal).tag(StudyTreeDirection.horizontal)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 260)
+            .padding(.vertical, 12)
+
+            if let snapshot {
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack(alignment: .topLeading) {
+                        Canvas { context, _ in
+                            for edge in snapshot.edges {
+                                var path = Path()
+                                path.move(to: edge.parent)
+                                if direction == .vertical {
+                                    let midpoint = (edge.parent.y + edge.child.y) / 2
+                                    path.addCurve(
+                                        to: edge.child,
+                                        control1: CGPoint(x: edge.parent.x, y: midpoint),
+                                        control2: CGPoint(x: edge.child.x, y: midpoint)
+                                    )
+                                } else {
+                                    let midpoint = (edge.parent.x + edge.child.x) / 2
+                                    path.addCurve(
+                                        to: edge.child,
+                                        control1: CGPoint(x: midpoint, y: edge.parent.y),
+                                        control2: CGPoint(x: midpoint, y: edge.child.y)
+                                    )
+                                }
+                                context.stroke(path, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1.5)
+                            }
+                        }
+
+                        ForEach(snapshot.placements) { placement in
+                            StudyTreeNode(
+                                room: placement.room,
+                                strings: strings,
+                                onAddChild: { childParent = placement.room },
+                                onEdit: { editingRoom = placement.room }
+                            )
+                            .position(placement.center)
+                        }
+                    }
+                    .frame(width: snapshot.size.width, height: snapshot.size.height)
+                }
+            } else {
+                Text(strings.loading)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 260)
+            }
+        }
+        .background(Color(.systemBackground))
+        .navigationTitle(strings.studyTree)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $childParent) { parent in
+            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) {
+                title,
+                difficulty,
+                prompt,
+                model in
+                appState.addChildStudyCategory(
+                    title,
+                    parentStudyID: parent.id,
+                    difficulty: difficulty,
+                    customPrompt: prompt,
+                    openAIModel: model
+                )
+            }
+        }
+        .sheet(item: $editingRoom) { room in
+            StudyCategoryEditorSheet(
+                category: appState.studyCategory(for: room),
+                strings: strings,
+                onDelete: {
+                    appState.deleteStudyCategory(id: String(room.id))
+                }
+            ) {
+                title,
+                difficulty,
+                prompt,
+                model in
+                appState.updateStudyTreeCategory(
+                    roomID: room.id,
+                    title: title,
+                    difficulty: difficulty,
+                    customPrompt: prompt,
+                    openAIModel: model
+                )
+            }
+        }
+        .task {
+            await appState.refreshVisibleData()
+        }
+    }
+}
+
+private struct StudyTreeNode: View {
+    var room: BackendStudyRoom
+    var strings: AppStrings
+    var onAddChild: () -> Void
+    var onEdit: () -> Void
+
+    private var levelColor: Color {
+        switch room.difficultyLevel {
+        case 1...3:
+            return Color.blue
+        case 4...6:
+            return Color.green
+        case 7...8:
+            return Color.orange
+        default:
+            return Color.purple
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            NavigationLink {
+                StudyView(preferredCategoryID: String(room.id))
+                    .padding(.horizontal, 16)
+                    .mobileTabTitle(room.topic)
+            } label: {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(room.topic)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(Difficulty(level: room.difficultyLevel).displayName(language: strings.language))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(levelColor)
+                }
+                .padding(.horizontal, 12)
+                .frame(
+                    width: StudyTreeLayoutSnapshot.nodeSize.width,
+                    height: StudyTreeLayoutSnapshot.nodeSize.height,
+                    alignment: .leading
+                )
+                .background(Color(.secondarySystemBackground))
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(levelColor.opacity(0.72))
+                        .frame(width: 4)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(levelColor.opacity(0.2), lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button(strings.editStudyCategory, action: onEdit)
+                Button(strings.addSubstudy, action: onAddChild)
+            }
+
+            Button(action: onAddChild) {
+                Image(systemName: "plus")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 28, height: 28)
+                    .background(Color(.systemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.addSubstudy)
+            .offset(x: 10, y: -10)
+        }
+        .frame(
+            width: StudyTreeLayoutSnapshot.nodeSize.width,
+            height: StudyTreeLayoutSnapshot.nodeSize.height
+        )
     }
 }
 
@@ -4610,15 +4969,10 @@ private struct MobileHomeCategoryRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: categoryIcon)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.green)
-                .frame(width: 42, height: 42)
-                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(category.title)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .font(.body.weight(.semibold))
 
                 Text(category.difficulty.displayName(language: strings.language))
@@ -4654,19 +5008,6 @@ private struct MobileHomeCategoryRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private var categoryIcon: String {
-        let normalized = category.title.lowercased()
-        if normalized.contains("kafka") {
-            return "arrow.left.arrow.right"
-        }
-        if normalized.contains("microservice") || normalized.contains("마이크로서비스") {
-            return "network"
-        }
-        if normalized.contains("system") || normalized.contains("시스템") || normalized.contains("architecture") {
-            return "square.stack.3d.up"
-        }
-        return "book.closed.fill"
-    }
 }
 
 private struct StudyCategoryEditorSheet: View {
@@ -4679,6 +5020,7 @@ private struct StudyCategoryEditorSheet: View {
     @State private var title: String
     @State private var difficultyLevel: Double
     @State private var customPrompt: String
+    @State private var showsDeleteConfirmation = false
 
     init(
         category: StudyCategory?,
@@ -4734,20 +5076,19 @@ private struct StudyCategoryEditorSheet: View {
                             }
                         }
                     } label: {
-                        Label(strings.recommendedPrompt, systemImage: "sparkles")
+                        Text(strings.recommendedPrompt)
                     }
 
                     TextEditor(text: $customPrompt)
                         .frame(minHeight: 130)
                 }
 
-                if let onDelete {
+                if onDelete != nil {
                     Section {
                         Button(role: .destructive) {
-                            onDelete()
-                            dismiss()
+                            showsDeleteConfirmation = true
                         } label: {
-                            Text(strings.clear)
+                            Text(strings.deleteStudy)
                         }
                     }
                 }
@@ -4768,6 +5109,13 @@ private struct StudyCategoryEditorSheet: View {
                     }
                     .disabled(!canSave)
                 }
+            }
+            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
+                Button(strings.deleteStudy, role: .destructive) {
+                    onDelete?()
+                    dismiss()
+                }
+                Button(strings.cancel, role: .cancel) {}
             }
         }
     }
@@ -5500,7 +5848,6 @@ private struct MobileSettingsView: View {
                     .buttonStyle(.plain)
 
                     Divider()
-                        .padding(.leading, 48)
 
                     Button {
                         appState.openSystemNotificationSettings()
@@ -5515,7 +5862,6 @@ private struct MobileSettingsView: View {
                     .buttonStyle(.plain)
 
                     Divider()
-                        .padding(.leading, 48)
 
                     Menu {
                         ForEach(NotificationSoundOption.allCases) { sound in
@@ -5560,7 +5906,6 @@ private struct MobileSettingsView: View {
 
                     if appState.isDebuggingEnabled {
                         Divider()
-                            .padding(.leading, 48)
 
                         VStack(alignment: .leading, spacing: 6) {
                             TextField(
@@ -5585,27 +5930,7 @@ private struct MobileSettingsView: View {
                                 .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.leading, 48)
                     }
-                }
-
-                MobileSettingsCard(
-                    title: strings.dataSyncSettings,
-                    systemImage: "icloud"
-                ) {
-                    Toggle(
-                        isOn: Binding(
-                            get: { appState.isCloudSyncEnabled },
-                            set: { appState.setCloudSyncEnabled($0) }
-                        )
-                    ) {
-                        MobileSettingsRow(
-                            systemImage: "icloud.fill",
-                            title: strings.iCloudSync,
-                            value: appState.isCloudSyncEnabled ? strings.iCloudSyncOn : strings.iCloudSyncOff
-                        )
-                    }
-                    .tint(.green)
                 }
 
                 HStack(spacing: 14) {
@@ -5614,10 +5939,7 @@ private struct MobileSettingsView: View {
                     Text("·")
                         .foregroundStyle(.tertiary)
 
-                    Link(destination: Self.kofiTipURL) {
-                        Label(strings.tipMe, systemImage: "heart.fill")
-                            .labelStyle(.titleAndIcon)
-                    }
+                    Link(strings.tipMe, destination: Self.kofiTipURL)
                     .accessibilityLabel(strings.supportDeveloper)
                 }
                 .font(.caption)
@@ -5685,22 +6007,20 @@ private struct MobileSettingsView: View {
 
 private struct MobileSettingsCard<Content: View>: View {
     var title: String
-    var systemImage: String
     @ViewBuilder var content: Content
 
     init(
         title: String,
-        systemImage: String,
+        systemImage _: String,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
-        self.systemImage = systemImage
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: systemImage)
+            Text(title)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.secondary)
 
@@ -5714,19 +6034,23 @@ private struct MobileSettingsCard<Content: View>: View {
 }
 
 private struct MobileSettingsRow: View {
-    var systemImage: String
     var title: String
     var value: String
     var showsChevron = false
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.green)
-                .frame(width: 34, height: 34)
-                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    init(
+        systemImage _: String,
+        title: String,
+        value: String,
+        showsChevron: Bool = false
+    ) {
+        self.title = title
+        self.value = value
+        self.showsChevron = showsChevron
+    }
 
+    var body: some View {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -5741,7 +6065,7 @@ private struct MobileSettingsRow: View {
             Spacer(minLength: 8)
 
             if showsChevron {
-                Image(systemName: "arrow.up.right")
+                Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }

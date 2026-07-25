@@ -55,6 +55,7 @@ class StudyRecord private constructor(
         likeCount = stats?.likeCount ?: 0,
         commentCount = stats?.commentCount ?: 0,
         viewCount = stats?.viewCount ?: 0,
+        studyId = question.studyId,
     )
 
     companion object {
@@ -76,6 +77,7 @@ data class StudyRecordState(
     val difficultyLevel: Int,
     val answeredAt: Instant?,
     val publicQuestion: Boolean,
+    val studyId: Long? = null,
 )
 
 data class StudyRecordStats(
@@ -128,4 +130,5 @@ data class StudyRecordProjection(
     val likeCount: Int,
     val commentCount: Int,
     val viewCount: Int,
+    val studyId: Long? = null,
 )

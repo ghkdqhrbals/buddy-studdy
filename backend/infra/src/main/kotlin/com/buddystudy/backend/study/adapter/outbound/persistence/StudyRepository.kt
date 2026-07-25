@@ -53,23 +53,51 @@ class StudyRepository(
             StudyEntity::class.java,
         ).awaitSingleOrNull()
 
+    override suspend fun findByUserIdAndParentStudyIdAndTopic(
+        userId: Long,
+        parentStudyId: Long?,
+        topic: String,
+    ): StudyEntity? {
+        var criteria = Criteria.where("user_id").`is`(userId).and("topic").`is`(topic)
+        criteria = if (parentStudyId == null) {
+            criteria.and("parent_study_id").isNull
+        } else {
+            criteria.and("parent_study_id").`is`(parentStudyId)
+        }
+        return template.selectOne(Query.query(criteria), StudyEntity::class.java).awaitSingleOrNull()
+    }
+
     override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? =
-        template.selectOne(
-            Query.query(Criteria.where("user_id").`is`(userId).and("topic").`is`(topic)),
+        template.select(
+            Query.query(
+                Criteria.where("user_id").`is`(userId)
+                    .and("parent_study_id").isNull
+                    .and("topic").`is`(topic),
+            ).sort(Sort.by(Sort.Direction.ASC, "id")).limit(1),
             StudyEntity::class.java,
-        ).awaitSingleOrNull()
+        ).next().awaitSingleOrNull()
 
     override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> {
         if (topics.isEmpty()) return emptyList()
         return template.select(
-            Query.query(Criteria.where("user_id").`is`(userId).and("topic").`in`(topics)),
+            Query.query(
+                Criteria.where("user_id").`is`(userId)
+                    .and("parent_study_id").isNull
+                    .and("topic").`in`(topics),
+            ),
             StudyEntity::class.java,
         ).collectList().awaitSingle()
     }
 
     override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> {
         val criteria = Criteria.where("user_id").`is`(userId)
-        val query = Query.query(criteria).sort(Sort.by(Sort.Direction.DESC, "updated_at"))
+        val query = Query.query(criteria).sort(
+            Sort.by(
+                Sort.Order.asc("parent_study_id").nullsFirst(),
+                Sort.Order.asc("sort_order"),
+                Sort.Order.asc("id"),
+            ),
+        )
         return template.selectPage(query, Query.query(criteria), StudyEntity::class.java, pageable)
     }
 

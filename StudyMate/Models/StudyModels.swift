@@ -236,6 +236,7 @@ enum AppTab: Int, Hashable {
 struct HomeStudyRoute: Identifiable, Hashable {
     let id = UUID()
     var categoryID: String?
+    var showsTree = false
 }
 
 enum AppRoute: Equatable, Hashable {
@@ -978,6 +979,7 @@ struct GradingResult: Codable, Equatable {
 
 struct StudyRecord: Codable, Equatable, Identifiable {
     var id: String
+    var studyID: Int?
     var question: QuestionItem
     var answer: String?
     var gradingResult: GradingResult?
@@ -991,6 +993,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case studyID = "studyId"
         case question
         case answer
         case gradingResult
@@ -1009,6 +1012,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 
     init(
         id: String = UUID().uuidString,
+        studyID: Int? = nil,
         question: QuestionItem,
         answer: String? = nil,
         gradingResult: GradingResult? = nil,
@@ -1021,6 +1025,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         viewCount: Int = 0
     ) {
         self.id = id
+        self.studyID = studyID
         self.question = question
         self.answer = answer
         self.gradingResult = gradingResult
@@ -1037,6 +1042,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let backendBooleanContainer = try decoder.container(keyedBy: BackendBooleanCodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        studyID = try container.decodeIfPresent(Int.self, forKey: .studyID)
         question = try container.decode(QuestionItem.self, forKey: .question)
         answer = try container.decodeIfPresent(String.self, forKey: .answer)
         gradingResult = try container.decodeIfPresent(GradingResult.self, forKey: .gradingResult)
@@ -1598,6 +1604,28 @@ struct AppStrings {
     }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }
+    var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
+    var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
+    func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
+        text("\(limit)개 중 \(remaining)개 남음", "\(remaining) of \(limit) remaining")
+    }
+    func monthlyQuotaReset(_ resetAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")
+        formatter.timeZone = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return text(
+            "\(formatter.string(from: resetAt))에 초기화",
+            "Resets \(formatter.string(from: resetAt))"
+        )
+    }
+    var studyTree: String { text("학습 트리", "Study Tree") }
+    var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
+    var deleteStudy: String { text("학습 삭제", "Delete Study") }
+    var openQuestions: String { text("질문 열기", "Open Questions") }
+    var treeVertical: String { text("세로", "Vertical") }
+    var treeHorizontal: String { text("가로", "Horizontal") }
     func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")

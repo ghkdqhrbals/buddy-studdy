@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotBlank
 
 data class CreateStudyRequest(
     @field:NotBlank var topic: String = "",
+    var parentStudyId: Long? = null,
+    @field:Min(0) var sortOrder: Int = 0,
     @field:Min(1) @field:Max(10) var difficultyLevel: Int = 5,
     @field:Min(1) @field:Max(1440) var intervalMinutes: Int = 15,
     var enabled: Boolean = true,

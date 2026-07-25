@@ -8,6 +8,7 @@ struct BackendErrorPresentation: Equatable {
     var isPageAccessDenied: Bool
     var requiresEmailVerification: Bool
     var requiresTermsAgreement: Bool
+    var isQuotaExceeded: Bool
     var shouldResetBackendIdentity: Bool
 }
 
@@ -30,6 +31,7 @@ enum BackendErrorPresentationPolicy {
                 isPageAccessDenied: false,
                 requiresEmailVerification: false,
                 requiresTermsAgreement: false,
+                isQuotaExceeded: false,
                 shouldResetBackendIdentity: false
             )
         }
@@ -43,6 +45,7 @@ enum BackendErrorPresentationPolicy {
             isPageAccessDenied: false,
             requiresEmailVerification: false,
             requiresTermsAgreement: false,
+            isQuotaExceeded: false,
             shouldResetBackendIdentity: false
         )
     }
@@ -67,6 +70,7 @@ enum BackendErrorPresentationPolicy {
             isPageAccessDenied: isPageAccessDenied,
             requiresEmailVerification: requiresEmailVerification,
             requiresTermsAgreement: requiresTermsAgreement,
+            isQuotaExceeded: error.backendCode == "QUOTA_EXCEEDED",
             shouldResetBackendIdentity: shouldResetBackendIdentity
         )
     }

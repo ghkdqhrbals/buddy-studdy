@@ -59,10 +59,15 @@ class StudySyncService(
         }
 
         val now = Instant.now()
-        val study = studies.findByUserIdAndTopic(principal.userId, topic)
+        val parentStudy = command.parentStudyId?.let { parentId ->
+            studies.findByIdAndUserId(parentId, principal.userId)
+                ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
+        }
+        val study = studies.findByUserIdAndParentStudyIdAndTopic(principal.userId, parentStudy?.id, topic)
             ?: StudyEntity(
                 deviceId = principal.deviceId,
                 userId = principal.userId,
+                parentStudyId = parentStudy?.id,
                 topic = topic,
                 createdAt = now,
             )
@@ -73,6 +78,8 @@ class StudySyncService(
 
         study.topic = topic
         study.deviceId = principal.deviceId
+        study.parentStudyId = parentStudy?.id
+        study.sortOrder = command.sortOrder.coerceAtLeast(0)
         study.apply(
             StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
@@ -103,8 +110,7 @@ class StudySyncService(
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         val now = Instant.now()
-        questions.softDeleteByStudyId(studyId, principal.userId, now)
-        questions.softDeleteByUserIdAndTopic(principal.userId, study.topic, now)
+        questions.softDeleteByStudySubtree(study.id, principal.userId, now)
         val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)
         if (deleted == 0L) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
@@ -137,6 +143,8 @@ class StudySyncService(
 
         return StudyRoomResponse(
         id = id,
+        parentStudyId = parentStudyId,
+        sortOrder = sortOrder,
         topic = topic,
         difficultyLevel = difficultyLevel,
         intervalMinutes = intervalMinutes,
@@ -201,6 +209,7 @@ class StudySyncService(
             difficultyLevel = difficultyLevel,
             answeredAt = answeredAt,
             publicQuestion = publicQuestion,
+            studyId = studyId,
         ),
         stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )

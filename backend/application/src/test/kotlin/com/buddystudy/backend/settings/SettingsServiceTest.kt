@@ -153,6 +153,13 @@ class SettingsServiceTest {
         override suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long = 0
         override suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? = rows.firstOrNull { it.userId == userId }
         override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? = rows.firstOrNull { it.id == id && it.userId == userId }
+        override suspend fun findByUserIdAndParentStudyIdAndTopic(
+            userId: Long,
+            parentStudyId: Long?,
+            topic: String,
+        ): StudyEntity? = rows.firstOrNull {
+            it.userId == userId && it.parentStudyId == parentStudyId && it.topic == topic
+        }
         override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? {
             findByUserIdAndTopicCalls += 1
             return rows.firstOrNull { it.userId == userId && it.topic == topic }
