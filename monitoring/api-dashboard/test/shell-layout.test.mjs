@@ -31,6 +31,7 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
   const shell = await text("shell.js");
   assert.match(css, /\.side-nav\s*\{[\s\S]*position:\s*fixed/);
   assert.match(css, /\.side-nav\s*\{[\s\S]*background:\s*var\(--nav\)/);
+  assert.match(css, /--nav:\s*#000000/);
   assert.match(css, /\.side-nav-group summary\s*\{[\s\S]*background:\s*var\(--nav-2\)/);
   assert.match(css, /html\.nav-collapsed \.side-nav/);
   assert.match(css, /html\.nav-collapsed \.side-nav-link-label/);

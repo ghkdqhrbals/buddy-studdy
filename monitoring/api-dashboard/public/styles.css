@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   --page: #f6f8fb;
-  --nav: #30343a;
-  --nav-2: #3d4249;
+  --nav: #000000;
+  --nav-2: #171717;
   --surface: #ffffff;
   --surface-soft: #f8fafc;
   --line: #d9e1ec;
@@ -65,7 +65,7 @@ button {
   width: var(--side-nav-width);
   min-height: 0;
   flex-direction: column;
-  border: 1px solid #272a2f;
+  border: 1px solid #000000;
   border-radius: 0;
   background: var(--nav);
   color: #eef4f8;
