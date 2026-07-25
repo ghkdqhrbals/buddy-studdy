@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   --page: #f6f8fb;
-  --nav: #344b60;
-  --nav-2: #405970;
+  --nav: #30343a;
+  --nav-2: #3d4249;
   --surface: #ffffff;
   --surface-soft: #f8fafc;
   --line: #d9e1ec;
@@ -65,7 +65,7 @@ button {
   width: var(--side-nav-width);
   min-height: 0;
   flex-direction: column;
-  border: 1px solid #2f4559;
+  border: 1px solid #272a2f;
   border-radius: 0;
   background: var(--nav);
   color: #eef4f8;
@@ -198,9 +198,9 @@ button {
 }
 
 .side-nav a[aria-current="page"] {
-  background: #f8fafc;
-  color: #1f4464;
-  box-shadow: inset 3px 0 0 #55a8f5;
+  background: #f4f4f5;
+  color: #272a2f;
+  box-shadow: inset 3px 0 0 #a8adb5;
 }
 
 .side-nav a:hover:not([aria-current="page"]) {

@@ -8,6 +8,7 @@ const OPTIONS_EXPORT_PATTERN = /export\s+const\s+options\s*=/;
 const TEST_CONFIG_PATTERN = /export\s+const\s+testConfig\s*=\s*\{([\s\S]*?)\};/;
 const TARGET_URL_PATTERN = /\btargetUrl\s*:\s*["']([^"']+)["']/;
 const TEST_NAME_PATTERN = /\bname\s*:\s*["']([^"']+)["']/;
+const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w$-]*/;
 
 export class ValidationError extends Error {
   constructor(message, details = []) {
@@ -50,6 +51,180 @@ export function normalizeBaseUrl(value) {
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function matchingBrace(source, openIndex) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = openIndex; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function objectLiteralAfter(source, pattern, fromIndex = 0) {
+  const match = pattern.exec(source.slice(fromIndex));
+  if (!match) return null;
+  const start = fromIndex + match.index + match[0].lastIndexOf("{");
+  const end = matchingBrace(source, start);
+  return end < 0 ? null : { start, end, source: source.slice(start, end + 1) };
+}
+
+function readScenarioEntries(source, scenariosObject) {
+  const entries = [];
+  let index = scenariosObject.start + 1;
+  while (index < scenariosObject.end) {
+    while (/[\s,]/.test(source[index] || "")) index += 1;
+    if (index >= scenariosObject.end) break;
+    let name = null;
+    if (source[index] === "'" || source[index] === '"') {
+      const quote = source[index];
+      const start = index + 1;
+      index += 1;
+      while (index < scenariosObject.end && source[index] !== quote) {
+        index += source[index] === "\\" ? 2 : 1;
+      }
+      name = source.slice(start, index);
+      index += 1;
+    } else {
+      const match = source.slice(index).match(IDENTIFIER_PATTERN);
+      if (!match) {
+        index += 1;
+        continue;
+      }
+      name = match[0];
+      index += name.length;
+    }
+    while (/\s/.test(source[index] || "")) index += 1;
+    if (source[index] !== ":") continue;
+    index += 1;
+    while (/\s/.test(source[index] || "")) index += 1;
+    if (source[index] !== "{") {
+      while (index < scenariosObject.end && source[index] !== ",") index += 1;
+      continue;
+    }
+    const end = matchingBrace(source, index);
+    if (end < 0 || end > scenariosObject.end) break;
+    entries.push({ name, source: source.slice(index, end + 1) });
+    index = end + 1;
+  }
+  return entries;
+}
+
+function stringOption(source, key, fallback = null) {
+  const match = source.match(new RegExp(`\\b${key}\\s*:\\s*["']([^"']+)["']`));
+  return match?.[1] ?? fallback;
+}
+
+function numberOption(source, key, fallback = null) {
+  const match = source.match(new RegExp(`\\b${key}\\s*:\\s*(\\d+(?:\\.\\d+)?)`));
+  return match ? Number(match[1]) : fallback;
+}
+
+function scenarioDefinition(name, source) {
+  const durationMatches = [...source.matchAll(DURATION_OPTION_PATTERN)];
+  const durationSeconds = durationMatches.reduce(
+    (total, match) => total + (durationToSeconds(match[1]) || 0),
+    0,
+  );
+  const duration = durationMatches.length === 1
+    ? durationMatches[0][1]
+    : durationSeconds > 0 ? `${durationSeconds}s` : null;
+  const timeUnit = stringOption(source, "timeUnit", "1s");
+  const timeUnitSeconds = durationToSeconds(timeUnit) || 1;
+  const rate = numberOption(source, "rate", 0);
+  const vus = numberOption(source, "vus", 0);
+  const startVus = numberOption(source, "startVUs", 0);
+  const preAllocatedVUs = numberOption(source, "preAllocatedVUs", vus || startVus || 1);
+  const maxVus = numberOption(source, "maxVUs", vus || preAllocatedVUs || startVus || 1);
+  const startTime = stringOption(source, "startTime", "0s");
+  return {
+    name,
+    executor: stringOption(
+      source,
+      "executor",
+      rate > 0 ? "constant-arrival-rate" : "constant-vus",
+    ),
+    exec: stringOption(source, "exec", "default"),
+    rate,
+    timeUnit,
+    targetRps: rate > 0 ? rate / timeUnitSeconds : 0,
+    duration,
+    durationSeconds,
+    startTime,
+    startTimeSeconds: durationToSeconds(startTime) || 0,
+    preAllocatedVUs,
+    maxVus,
+    vus: vus || startVus || preAllocatedVUs,
+  };
+}
+
+export function extractScenarioDefinitions(source) {
+  const optionsMatch = source.match(OPTIONS_EXPORT_PATTERN);
+  if (!optionsMatch) return [];
+  const optionsIndex = optionsMatch.index + optionsMatch[0].length;
+  const optionsObject = objectLiteralAfter(source, /\{/, optionsIndex);
+  if (!optionsObject) return [];
+  const scenariosObject = objectLiteralAfter(optionsObject.source, /\bscenarios\s*:\s*\{/);
+  if (scenariosObject) {
+    const absoluteScenariosObject = {
+      start: optionsObject.start + scenariosObject.start,
+      end: optionsObject.start + scenariosObject.end,
+    };
+    return readScenarioEntries(source, absoluteScenariosObject)
+      .map((entry) => scenarioDefinition(entry.name, entry.source));
+  }
+  return [scenarioDefinition("default", optionsObject.source)];
+}
+
+function peakConcurrentValue(scenarios, selector) {
+  const startTimes = [...new Set(scenarios.map((scenario) => scenario.startTimeSeconds || 0))];
+  return Math.max(...startTimes.map((time) => scenarios.reduce((total, scenario) => {
+    const start = scenario.startTimeSeconds || 0;
+    const end = start + scenario.durationSeconds;
+    const active = start <= time && (scenario.durationSeconds <= 0 || time < end);
+    return total + (active ? Number(selector(scenario)) || 0 : 0);
+  }, 0)), 0);
 }
 
 export function validateScript(code, options = {}) {
@@ -102,10 +277,14 @@ export function validateScript(code, options = {}) {
   }
 
   const durationMatches = [...source.matchAll(DURATION_OPTION_PATTERN)];
-  const durationSeconds = durationMatches.reduce(
-    (total, match) => total + (durationToSeconds(match[1]) || 0),
-    0,
-  );
+  const scenarios = extractScenarioDefinitions(source);
+  const durationSeconds = scenarios.length
+    ? Math.max(...scenarios.map((scenario) =>
+      scenario.startTimeSeconds + scenario.durationSeconds), 0)
+    : durationMatches.reduce(
+      (total, match) => total + (durationToSeconds(match[1]) || 0),
+      0,
+    );
   if (OPTIONS_EXPORT_PATTERN.test(source) && !durationMatches.length) {
     add("Script options must include a bounded duration or maxDuration.");
   }
@@ -123,6 +302,14 @@ export function validateScript(code, options = {}) {
       add(`Script requests ${match[1]} RPS; the TestZone maximum is ${maxTargetRps}.`, match.index);
     }
   }
+  const peakTargetRps = peakConcurrentValue(scenarios, (scenario) => scenario.targetRps);
+  if (peakTargetRps > maxTargetRps) {
+    add(`Script scenarios request ${peakTargetRps.toLocaleString()} peak RPS; the TestZone maximum is ${maxTargetRps}.`);
+  }
+  const peakMaxVus = peakConcurrentValue(scenarios, (scenario) => scenario.maxVus);
+  if (scenarios.length > 1 && peakMaxVus > maxVus) {
+    add(`Script scenarios request ${peakMaxVus.toLocaleString()} peak max VUs; the TestZone maximum is ${maxVus}.`);
+  }
 
   for (const match of source.matchAll(new RegExp(URL_PATTERN.source, "g"))) {
     const literal = match[0];
@@ -136,8 +323,8 @@ export function validateScript(code, options = {}) {
   if (errors.length) throw new ValidationError("Fix the script diagnostics before running the test.", errors);
   const requestedVus = vuMatches.map((match) => Number(match[1]));
   const requestedRates = rateMatches.map((match) => Number(match[1]));
-  const duration = durationMatches.length === 1
-    ? durationMatches[0][1]
+  const duration = scenarios.length === 1 && scenarios[0].duration
+    ? scenarios[0].duration
     : `${durationSeconds}s`;
   const testName = testConfigMatch?.[1].match(TEST_NAME_PATTERN)?.[1]?.trim();
   return {
@@ -148,9 +335,12 @@ export function validateScript(code, options = {}) {
     execution: {
       duration,
       durationSeconds,
-      vus: requestedVus[0] || 1,
-      maxVus: Math.max(...requestedVus, 1),
-      targetRps: Math.max(...requestedRates, 0),
+      vus: scenarios.length
+        ? peakConcurrentValue(scenarios, (scenario) => scenario.preAllocatedVUs)
+        : requestedVus[0] || 1,
+      maxVus: scenarios.length ? peakMaxVus : Math.max(...requestedVus, 1),
+      targetRps: scenarios.length ? peakTargetRps : Math.max(...requestedRates, 0),
+      scenarios,
       targetUrl,
       name: testName || null,
     },

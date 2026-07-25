@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   durationToSeconds,
+  extractScenarioDefinitions,
   validateScript,
   ValidationError,
 } from "../src/validation.mjs";
@@ -36,9 +37,107 @@ test("validateScript accepts a bounded k6 script", () => {
     vus: 10,
     maxVus: 10,
     targetRps: 0,
+    scenarios: [{
+      name: "default",
+      executor: "constant-vus",
+      exec: "default",
+      rate: 0,
+      timeUnit: "1s",
+      targetRps: 0,
+      duration: "30s",
+      durationSeconds: 30,
+      startTime: "0s",
+      startTimeSeconds: 0,
+      preAllocatedVUs: 10,
+      maxVus: 10,
+      vus: 10,
+    }],
     targetUrl: "https://api.ghkdqhrbals.org",
     name: "Studies API",
   });
+});
+
+test("validateScript preserves concurrent k6 scenario plans", () => {
+  const code = VALID_SCRIPT.replace(
+    'export const options = { vus: 10, duration: "30s" };',
+    `export const options = {
+      scenarios: {
+        publicQuestions: {
+          executor: "constant-arrival-rate",
+          exec: "readPublicQuestions",
+          rate: 50,
+          timeUnit: "1s",
+          duration: "30s",
+          preAllocatedVUs: 10,
+          maxVUs: 30,
+        },
+        studySearch: {
+          executor: "constant-arrival-rate",
+          exec: "searchStudies",
+          rate: 20,
+          timeUnit: "1s",
+          duration: "30s",
+          preAllocatedVUs: 5,
+          maxVUs: 20,
+        },
+      },
+    };`,
+  );
+  const validation = validateScript(code, {
+    maxVus: 1000,
+    maxTargetRps: 3000,
+  });
+
+  assert.equal(validation.execution.duration, "30s");
+  assert.equal(validation.execution.durationSeconds, 30);
+  assert.equal(validation.execution.targetRps, 70);
+  assert.equal(validation.execution.vus, 15);
+  assert.equal(validation.execution.maxVus, 50);
+  assert.deepEqual(
+    extractScenarioDefinitions(code).map(({ name, exec, targetRps, maxVus }) =>
+      ({ name, exec, targetRps, maxVus })),
+    [
+      { name: "publicQuestions", exec: "readPublicQuestions", targetRps: 50, maxVus: 30 },
+      { name: "studySearch", exec: "searchStudies", targetRps: 20, maxVus: 20 },
+    ],
+  );
+});
+
+test("scenario capacity uses the peak overlap instead of summing sequential schedules", () => {
+  const code = VALID_SCRIPT.replace(
+    'export const options = { vus: 10, duration: "30s" };',
+    `export const options = {
+      scenarios: {
+        first: {
+          executor: "constant-arrival-rate",
+          rate: 200,
+          timeUnit: "1s",
+          duration: "30s",
+          preAllocatedVUs: 300,
+          maxVUs: 800,
+        },
+        second: {
+          executor: "constant-arrival-rate",
+          rate: 200,
+          timeUnit: "1s",
+          startTime: "30s",
+          duration: "30s",
+          preAllocatedVUs: 300,
+          maxVUs: 800,
+        },
+      },
+    };`,
+  );
+
+  const validation = validateScript(code, {
+    maxVus: 1000,
+    maxTargetRps: 3000,
+  });
+
+  assert.equal(validation.execution.durationSeconds, 60);
+  assert.equal(validation.execution.targetRps, 200);
+  assert.equal(validation.execution.vus, 300);
+  assert.equal(validation.execution.maxVus, 800);
 });
 
 test("validateScript rejects remote imports and excess VUs", () => {

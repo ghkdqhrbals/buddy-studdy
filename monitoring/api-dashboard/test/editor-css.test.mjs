@@ -69,7 +69,6 @@ test("run detail charts use vendored uPlot with cursor tooltips", () => {
   assert.match(chartCode, /plot\.over\.addEventListener\("pointermove",\s*updateFromPointer\)/);
   assert.match(chartCode, /setCursor:/);
   assert.match(chartCode, /legend:\s*\{\s*show:\s*false/);
-  assert.match(chartCode, /label:\s*"RPS"/);
   assert.match(chartCode, /label:\s*"Average"/);
   assert.match(chartCode, /label:\s*"p90"/);
   assert.match(chartCode, /label:\s*"p95"/);
@@ -77,7 +76,7 @@ test("run detail charts use vendored uPlot with cursor tooltips", () => {
   assert.match(chartCode, /label:\s*"HTTP errors"/);
   assert.match(html, /id="runDetailOutcomeChart"/);
   assert.match(html, /id="runDetailLatencyChart"/);
-  assert.match(html, /id="runDetailCompositeChart"/);
+  assert.doesNotMatch(html, /id="runDetailCompositeChart"/);
   assert.doesNotMatch(html, /id="runTrafficChart"|id="runLatencyChart"/);
   assert.doesNotMatch(chartCode, /VUs|point\.vus/);
 });
@@ -98,17 +97,29 @@ test("selected history run renders its time-series inside the detail panel", () 
   const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
   assert.match(detail, /id="runDetailOutcomeChart"/);
   assert.match(detail, /id="runDetailLatencyChart"/);
-  assert.match(detail, /id="runDetailCompositeChart"/);
+  assert.doesNotMatch(detail, /id="runDetailCompositeChart"/);
   assert.match(detail, /id="detailTps"/);
-  assert.match(detail, /id="detailMttfb"/);
-  assert.match(detail, /id="detailMtt"/);
+  assert.match(detail, /id="detailP95"/);
+  assert.match(detail, /id="detailVus"/);
   assert.match(detail, /id="runDetailChartEmpty"/);
   assert.match(css, /\.run-detail-timeline/);
   assert.match(
     javascript,
-    /renderRunCharts\("detail",\s*\{[\s\S]+?outcome:\s*elements\.runDetailOutcomeChart,[\s\S]+?latency:\s*elements\.runDetailLatencyChart,[\s\S]+?composite:\s*elements\.runDetailCompositeChart/,
+    /renderRunCharts\("detail",\s*\{[\s\S]+?outcome:\s*elements\.runDetailOutcomeChart,[\s\S]+?latency:\s*elements\.runDetailLatencyChart/,
   );
   assert.doesNotMatch(detail, /runDetailChartTooltip/);
+});
+
+test("run details expose a multi-scenario plan and metric filter", () => {
+  assert.match(html, /id="runScenarioRows"/);
+  assert.match(html, /id="runScenarioFilter"/);
+  assert.match(html, /<th>Scenario<\/th>[\s\S]+?<th>Executor<\/th>[\s\S]+?<th>Function<\/th>/);
+  assert.match(javascript, /function runScenarios\(run\)/);
+  assert.match(javascript, /function renderScenarioPlan\(run\)/);
+  assert.match(javascript, /function renderScenarioFilter\(run\)/);
+  assert.match(javascript, /point\.scenarios\?\.\[state\.selectedRunScenario\]/);
+  assert.match(css, /\.run-scenario-table/);
+  assert.match(css, /\.run-scenario-filter button\[aria-pressed="true"\]/);
 });
 
 test("run history paginates by ten and can rerun immutable script snapshots", () => {
@@ -198,5 +209,6 @@ test("history is the overview and run details appear only after selecting a row"
   assert.match(javascript, /state\.selectedRunId\s*=\s*null;/);
   assert.match(javascript, /elements\.runDetail\.hidden\s*=\s*!run/);
   assert.match(javascript, /row\.addEventListener\("click",\s*\(\)\s*=>\s*void selectRun\(run\.id\)\)/);
-  assert.match(javascript, /function renderLatencySummary/);
+  assert.match(javascript, /renderScenarioPlan\(run\)/);
+  assert.match(javascript, /renderScenarioSummary\(run\)/);
 });

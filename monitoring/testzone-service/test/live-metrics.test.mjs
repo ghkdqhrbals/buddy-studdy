@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { K6LiveMetricsReader, consumeK6Lines, summarizeLiveBucket } from "../src/live-metrics.mjs";
 
-function point(metric, value, time) {
+function point(metric, value, time, tags = {}) {
   return JSON.stringify({
     type: "Point",
-    data: { metric, value, time },
+    data: { metric, value, time, tags },
   });
 }
 
@@ -42,6 +42,29 @@ test("k6 point stream is aggregated into one live sample per second", () => {
   assert.equal(sample.mttMs, 250);
   assert.equal(sample.mttfbMs, 200);
   assert.equal(sample.vus, 1000);
+});
+
+test("live samples retain per-scenario metrics alongside the aggregate", () => {
+  const time = "2026-07-24T03:11:11.100Z";
+  const lines = [
+    point("http_reqs", 1, time, { scenario: "publicQuestions" }),
+    point("http_req_duration", 120, time, { scenario: "publicQuestions" }),
+    point("http_req_failed", 0, time, { scenario: "publicQuestions" }),
+    point("vus", 8, time, { scenario: "publicQuestions" }),
+    point("http_reqs", 1, time, { scenario: "studySearch" }),
+    point("http_req_duration", 340, time, { scenario: "studySearch" }),
+    point("http_req_failed", 1, time, { scenario: "studySearch" }),
+    point("vus", 5, time, { scenario: "studySearch" }),
+  ];
+
+  const sample = summarizeLiveBucket([...consumeK6Lines(lines).values()][0]);
+
+  assert.equal(sample.requestRate, 2);
+  assert.equal(sample.scenarios.publicQuestions.requestRate, 1);
+  assert.equal(sample.scenarios.publicQuestions.p95Ms, 120);
+  assert.equal(sample.scenarios.publicQuestions.vus, 8);
+  assert.equal(sample.scenarios.studySearch.errorRate, 1);
+  assert.equal(sample.scenarios.studySearch.p95Ms, 340);
 });
 
 test("live reader keeps partial JSONL lines and emits the final second on close", async (context) => {

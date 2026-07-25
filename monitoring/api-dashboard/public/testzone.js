@@ -15,6 +15,7 @@ const API_BASE = "/testzone/api";
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancelling"]);
 const MAX_RUN_CHART_WIDTH = 1200;
 const RUN_CHART_VISIBLE_SAMPLES = 120;
+const SCENARIO_COLORS = ["#2166d1", "#0f8f8b", "#d28a0b", "#8a5bc7", "#c63a3a"];
 const state = {
   status: null,
   projects: [],
@@ -25,6 +26,7 @@ const state = {
   scriptId: null,
   creatingScript: false,
   selectedRunId: null,
+  selectedRunScenario: "all",
   runPage: 1,
   runPageSize: 10,
   runTotal: 0,
@@ -39,7 +41,7 @@ const state = {
   lintTimer: null,
   componentId: null,
   runCharts: {
-    detail: { outcome: null, latency: null, composite: null },
+    detail: { outcome: null, latency: null },
   },
   runChartRanges: {
     detail: null,
@@ -56,10 +58,12 @@ const elementIds = [
   "runPagination", "runPaginationTotal", "runPreviousPageButton", "runPageNumbers",
   "runNextPageButton", "runPageJumpDialog", "runPageJumpForm",
   "runPageJumpTitle", "runPageJumpSelect",
-  "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
-  "runDetailScriptButton", "runDetailStatus", "runDetailOutcomeChart", "runDetailLatencyChart",
-  "runDetailCompositeChart", "detailTps", "detailMttfb", "detailMtt", "detailSuccess", "detailErrors",
-  "detailAverage", "detailMinimum", "detailMedian", "detailMaximum", "detailP90", "detailP95",
+  "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailScenarioCount",
+  "runDetailDuration", "runDetailScriptButton", "runDetailStatus", "runScenarioRows",
+  "runScenarioFilter", "runDetailTimelineDescription", "runDetailOutcomeChart", "runDetailLatencyChart",
+  "runOutcomeChartTitle", "runOutcomeChartSubtitle", "runOutcomeChartLegend",
+  "runLatencyChartTitle", "runLatencyChartSubtitle", "runLatencyChartLegend",
+  "detailTps", "detailP95", "detailErrorRate", "detailVus", "detailDropped",
   "runDetailChartEmpty", "runLogTail", "rerunSelectedRunButton", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
   "editorLineNumbers", "editorPosition", "editorDirtyMark", "editorFeedback",
@@ -557,6 +561,8 @@ function runMetric(run, key) {
     mttfbMs: "mttfbMs",
     successCount: "successCount",
     errorCount: "errorCount",
+    maxVus: "vus",
+    droppedIterations: "droppedIterations",
   };
   return run.live?.[map[key]];
 }
@@ -566,10 +572,166 @@ function formatCount(value) {
   return Number.isFinite(number) ? Math.round(number).toLocaleString() : "-";
 }
 
-function renderLatencySummary(run, targets) {
-  for (const [key, element] of Object.entries(targets)) {
-    element.textContent = formatMilliseconds(run ? runMetric(run, key) : null);
+function runScenarios(run) {
+  if (Array.isArray(run?.options?.scenarios) && run.options.scenarios.length) {
+    return run.options.scenarios;
   }
+  return [{
+    name: "default",
+    executor: run?.options?.targetRps > 0 ? "constant-arrival-rate" : "constant-vus",
+    exec: "default",
+    targetRps: Number(run?.options?.targetRps || 0),
+    rate: Number(run?.options?.targetRps || 0),
+    timeUnit: "1s",
+    duration: run?.options?.duration || "-",
+    preAllocatedVUs: Number(run?.options?.vus || 0),
+    maxVus: Number(run?.options?.maxVus || run?.options?.vus || 0),
+    vus: Number(run?.options?.vus || 0),
+  }];
+}
+
+function scenarioMetrics(run, scenarioName = state.selectedRunScenario) {
+  if (scenarioName === "all") {
+    return {
+      requestRate: runMetric(run, "requestRate"),
+      p95Ms: runMetric(run, "p95Ms"),
+      errorRate: runMetric(run, "errorRate"),
+      vus: runMetric(run, "maxVus") ?? run.options?.maxVus,
+      droppedIterations: runMetric(run, "droppedIterations"),
+    };
+  }
+  const points = state.runSeries
+    .map((point) => point.scenarios?.[scenarioName])
+    .filter(Boolean);
+  if (!points.length) return {};
+  const sum = (key) => points.reduce((total, point) => total + (Number(point[key]) || 0), 0);
+  const maximum = (key) => Math.max(...points.map((point) => Number(point[key]) || 0));
+  const requests = sum("requestRate");
+  const errors = sum("errorCount");
+  return {
+    requestRate: requests / points.length,
+    p95Ms: maximum("p95Ms"),
+    errorRate: requests > 0 ? errors / requests : 0,
+    vus: maximum("vus"),
+    droppedIterations: sum("droppedIterations"),
+  };
+}
+
+function formatScenarioSchedule(scenario) {
+  const start = scenario.startTime && scenario.startTime !== "0s"
+    ? `${scenario.startTime} start · `
+    : "";
+  if (Number(scenario.rate) > 0) {
+    return `${start}${Number(scenario.rate).toLocaleString()} iter/${scenario.timeUnit || "1s"} · ${scenario.duration || "-"}`;
+  }
+  return `${start}${scenario.vus || scenario.preAllocatedVUs || 0} VUs · ${scenario.duration || "-"}`;
+}
+
+function renderScenarioPlan(run) {
+  const scenarios = runScenarios(run);
+  elements.runScenarioRows.replaceChildren(...scenarios.map((scenario, index) => {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    const label = document.createElement("span");
+    label.className = "run-scenario-name";
+    label.dataset.color = String(index % 3);
+    label.textContent = scenario.name;
+    name.append(label);
+    const executor = document.createElement("td");
+    executor.textContent = scenario.executor || "-";
+    const exec = document.createElement("td");
+    exec.textContent = scenario.exec || "default";
+    const schedule = document.createElement("td");
+    schedule.textContent = formatScenarioSchedule(scenario);
+    const rate = document.createElement("td");
+    rate.textContent = Number(scenario.targetRps) > 0
+      ? `${Number(scenario.targetRps).toLocaleString()} iter/s`
+      : `${Number(scenario.vus || 0).toLocaleString()} VUs`;
+    const capacity = document.createElement("td");
+    capacity.textContent = Number(scenario.rate) > 0
+      ? `${Number(scenario.preAllocatedVUs || 0).toLocaleString()} pre / ${Number(scenario.maxVus || 0).toLocaleString()} max`
+      : `${Number(scenario.maxVus || scenario.vus || 0).toLocaleString()} max`;
+    row.append(name, executor, exec, schedule, rate, capacity);
+    return row;
+  }));
+}
+
+function renderScenarioFilter(run) {
+  const scenarios = runScenarios(run);
+  const available = new Set(["all", ...scenarios.map((scenario) => scenario.name)]);
+  if (!available.has(state.selectedRunScenario)) state.selectedRunScenario = "all";
+  const items = [
+    { value: "all", label: "All scenarios" },
+    ...scenarios.map((scenario) => ({ value: scenario.name, label: scenario.name })),
+  ];
+  elements.runScenarioFilter.replaceChildren(...items.map((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = item.label;
+    button.dataset.scenario = item.value;
+    button.setAttribute("aria-pressed", String(item.value === state.selectedRunScenario));
+    button.addEventListener("click", () => {
+      state.selectedRunScenario = item.value;
+      state.runChartRanges.detail = null;
+      renderSelectedRun();
+    });
+    return button;
+  }));
+}
+
+function renderChartLegend(element, items) {
+  element.replaceChildren(...items.map((item) => {
+    const label = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.dataset.color = item.color;
+    swatch.setAttribute("aria-hidden", "true");
+    label.append(swatch, item.label);
+    return label;
+  }));
+}
+
+function renderScenarioSummary(run) {
+  const metrics = scenarioMetrics(run);
+  elements.detailTps.textContent = formatRate(metrics.requestRate);
+  elements.detailP95.textContent = formatMilliseconds(metrics.p95Ms);
+  elements.detailErrorRate.textContent = formatPercent(metrics.errorRate);
+  elements.detailVus.textContent = formatCount(metrics.vus);
+  elements.detailDropped.textContent = formatCount(metrics.droppedIterations);
+  const label = state.selectedRunScenario === "all" ? "All scenarios" : state.selectedRunScenario;
+  elements.runDetailTimelineDescription.textContent =
+    `${label}의 초 단위 처리량과 응답시간을 확인합니다.`;
+  if (state.selectedRunScenario === "all") {
+    const scenarios = runScenarios(run);
+    elements.runOutcomeChartTitle.textContent = "Throughput by scenario";
+    elements.runOutcomeChartSubtitle.textContent = "total / scenario request rate";
+    elements.runLatencyChartTitle.textContent = "p95 latency by scenario";
+    elements.runLatencyChartSubtitle.textContent = "scenario p95";
+    renderChartLegend(elements.runOutcomeChartLegend, [
+      { label: "Total", color: "total" },
+      ...scenarios.map((scenario, index) => ({
+        label: scenario.name,
+        color: String(index % SCENARIO_COLORS.length),
+      })),
+    ]);
+    renderChartLegend(elements.runLatencyChartLegend, scenarios.map((scenario, index) => ({
+      label: scenario.name,
+      color: String(index % SCENARIO_COLORS.length),
+    })));
+    return;
+  }
+  elements.runOutcomeChartTitle.textContent = "Throughput & outcomes";
+  elements.runOutcomeChartSubtitle.textContent = "success / errors per second";
+  elements.runLatencyChartTitle.textContent = "Response time";
+  elements.runLatencyChartSubtitle.textContent = "average / p90 / p95";
+  renderChartLegend(elements.runOutcomeChartLegend, [
+    { label: "HTTP success", color: "success" },
+    { label: "HTTP errors", color: "error" },
+  ]);
+  renderChartLegend(elements.runLatencyChartLegend, [
+    { label: "Average", color: "0" },
+    { label: "p90", color: "3" },
+    { label: "p95", color: "2" },
+  ]);
 }
 
 async function goToRunPage(page) {
@@ -709,6 +871,7 @@ function actionButton(label, handler, danger = false) {
 }
 
 async function selectRun(id) {
+  if (state.selectedRunId !== id) state.selectedRunScenario = "all";
   state.selectedRunId = id;
   state.runSeries = [];
   state.runSeriesId = null;
@@ -750,22 +913,14 @@ function renderSelectedRun() {
   elements.runDetailTitle.textContent = run.name || run.scriptName;
   elements.runDetailMeta.textContent = `${formatDate(run.startedAt || run.createdAt)} · ${run.id}`;
   elements.runDetailTarget.textContent = run.targetUrl || "-";
-  elements.runDetailConfig.textContent = formatRunLoadPlan(run.options);
+  const scenarios = runScenarios(run);
+  elements.runDetailScenarioCount.textContent = scenarios.length.toLocaleString();
+  elements.runDetailDuration.textContent = run.options?.duration || "-";
   elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
   elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
-  renderLatencySummary(run, {
-    averageMs: elements.detailAverage,
-    minimumMs: elements.detailMinimum,
-    medianMs: elements.detailMedian,
-    maximumMs: elements.detailMaximum,
-    p90Ms: elements.detailP90,
-    p95Ms: elements.detailP95,
-  });
-  elements.detailTps.textContent = formatRate(runMetric(run, "tps") ?? runMetric(run, "requestRate"));
-  elements.detailMttfb.textContent = formatMilliseconds(runMetric(run, "mttfbMs"));
-  elements.detailMtt.textContent = formatMilliseconds(runMetric(run, "mttMs") ?? runMetric(run, "averageMs"));
-  elements.detailSuccess.textContent = formatCount(runMetric(run, "successCount"));
-  elements.detailErrors.textContent = formatCount(runMetric(run, "errorCount"));
+  renderScenarioPlan(run);
+  renderScenarioFilter(run);
+  renderScenarioSummary(run);
   elements.runLogTail.textContent = (run.logTail || []).join("\n") || "No k6 log output.";
   drawRunChart();
 }
@@ -854,7 +1009,7 @@ function chartTime(timestampSeconds) {
 }
 
 function runChartData() {
-  const points = [...state.runSeries].sort(
+  const sourcePoints = [...state.runSeries].sort(
     (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
   );
   const metric = (point, key, fallback = null) => {
@@ -862,6 +1017,30 @@ function runChartData() {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   };
+  if (state.selectedRunScenario === "all") {
+    const scenarioNames = runScenarios(selectedRun()).map((scenario) => scenario.name);
+    const timestamps = sourcePoints.map((point) => new Date(point.timestamp).getTime() / 1000);
+    return {
+      mode: "all",
+      scenarioNames,
+      timestamps,
+      outcome: [
+        timestamps,
+        sourcePoints.map((point) => metric(point, "requestRate", "tps")),
+        ...scenarioNames.map((name) => sourcePoints.map((point) =>
+          metric(point.scenarios?.[name] || {}, "requestRate", "tps"))),
+      ],
+      latency: [
+        timestamps,
+        ...scenarioNames.map((name) => sourcePoints.map((point) =>
+          metric(point.scenarios?.[name] || {}, "p95Ms"))),
+      ],
+    };
+  }
+  const points = sourcePoints.map((point) => {
+    const scenario = point.scenarios?.[state.selectedRunScenario];
+    return scenario ? { ...scenario, timestamp: point.timestamp } : null;
+  }).filter(Boolean);
   const timestamps = points.map((point) => new Date(point.timestamp).getTime() / 1000);
   const requestCount = (point) => metric(point, "requestRate", "tps") ?? 0;
   const errorCount = (point) => metric(point, "errorCount")
@@ -869,6 +1048,8 @@ function runChartData() {
   const successCount = (point) => metric(point, "successCount")
     ?? Math.max(0, requestCount(point) - errorCount(point));
   return {
+    mode: "scenario",
+    scenarioNames: [state.selectedRunScenario],
     timestamps,
     outcome: [
       timestamps,
@@ -880,12 +1061,6 @@ function runChartData() {
       points.map((point) => metric(point, "averageMs", "mttMs")),
       points.map((point) => metric(point, "p90Ms")),
       points.map((point) => metric(point, "p95Ms")),
-    ],
-    composite: [
-      timestamps,
-      points.map(requestCount),
-      points.map((point) => metric(point, "averageMs", "mttMs")),
-      points.map(errorCount),
     ],
   };
 }
@@ -968,13 +1143,12 @@ function runChartTooltipPlugin() {
   let tooltip = null;
 
   const tooltipSeriesClasses = new Map([
+    ["Total", "is-total"],
     ["HTTP success", "is-success"],
     ["HTTP errors", "is-error"],
     ["Average", "is-average"],
-    ["Average latency", "is-average-latency"],
     ["p90", "is-p90"],
     ["p95", "is-p95"],
-    ["RPS", "is-rps"],
   ]);
 
   function hideTooltip() {
@@ -1016,7 +1190,7 @@ function runChartTooltipPlugin() {
       const row = document.createElement("div");
       row.className = "run-chart-tooltip-row";
       const seriesClass = tooltipSeriesClasses.get(series.label);
-      if (seriesClass) row.classList.add(seriesClass);
+      row.classList.add(seriesClass || `is-scenario-${seriesIndex % SCENARIO_COLORS.length}`);
       const swatch = document.createElement("span");
       swatch.className = "run-chart-tooltip-swatch";
       swatch.setAttribute("aria-hidden", "true");
@@ -1102,7 +1276,44 @@ function baseRunChartOptions(width, host, scope, range) {
   };
 }
 
-function outcomeChartOptions(width, host, scope, range) {
+function outcomeChartOptions(width, host, scope, range, data) {
+  const series = data.mode === "all"
+    ? [
+        {
+          label: "Total",
+          scale: "rps",
+          stroke: "#30343a",
+          width: 2.7,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : formatRate(value),
+        },
+        ...data.scenarioNames.map((name, index) => ({
+          label: name,
+          scale: "rps",
+          stroke: SCENARIO_COLORS[index % SCENARIO_COLORS.length],
+          width: 2,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : formatRate(value),
+        })),
+      ]
+    : [
+        {
+          label: "HTTP success",
+          scale: "rps",
+          stroke: "#16835f",
+          width: 2.5,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
+        },
+        {
+          label: "HTTP errors",
+          scale: "rps",
+          stroke: "#c63a3a",
+          width: 2,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
+        },
+      ];
   return {
     ...baseRunChartOptions(width, host, scope, range),
     series: [
@@ -1110,22 +1321,7 @@ function outcomeChartOptions(width, host, scope, range) {
         label: "Time",
         value: (_plot, value) => chartTime(value),
       },
-      {
-        label: "HTTP success",
-        scale: "rps",
-        stroke: "#16835f",
-        width: 2.5,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
-      },
-      {
-        label: "HTTP errors",
-        scale: "rps",
-        stroke: "#c63a3a",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
-      },
+      ...series,
     ],
     axes: [
       {
@@ -1146,12 +1342,47 @@ function outcomeChartOptions(width, host, scope, range) {
   };
 }
 
-function latencyChartOptions(width, host, scope, range) {
+function latencyChartOptions(width, host, scope, range, data) {
   const options = baseRunChartOptions(width, host, scope, range);
   options.scales = {
     x: options.scales.x,
     latency: { auto: true, range: positiveScaleRange },
   };
+  const series = data.mode === "all"
+    ? data.scenarioNames.map((name, index) => ({
+        label: name,
+        scale: "latency",
+        stroke: SCENARIO_COLORS[index % SCENARIO_COLORS.length],
+        width: 2.2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      }))
+    : [
+        {
+          label: "Average",
+          scale: "latency",
+          stroke: "#2166d1",
+          width: 2,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+        },
+        {
+          label: "p90",
+          scale: "latency",
+          stroke: "#8a5bc7",
+          width: 2,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+        },
+        {
+          label: "p95",
+          scale: "latency",
+          stroke: "#e4982b",
+          width: 2.5,
+          points: { show: false },
+          value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+        },
+      ];
   return {
     ...options,
     series: [
@@ -1159,30 +1390,7 @@ function latencyChartOptions(width, host, scope, range) {
         label: "Time",
         value: (_plot, value) => chartTime(value),
       },
-      {
-        label: "Average",
-        scale: "latency",
-        stroke: "#2166d1",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
-      },
-      {
-        label: "p90",
-        scale: "latency",
-        stroke: "#8a5bc7",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
-      },
-      {
-        label: "p95",
-        scale: "latency",
-        stroke: "#e4982b",
-        width: 2.5,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
-      },
+      ...series,
     ],
     axes: [
       {
@@ -1203,70 +1411,8 @@ function latencyChartOptions(width, host, scope, range) {
   };
 }
 
-function compositeChartOptions(width, host, scope, range) {
-  const options = baseRunChartOptions(width, host, scope, range);
-  options.scales = {
-    x: options.scales.x,
-    throughput: { auto: true, range: positiveScaleRange },
-    latency: { auto: true, range: positiveScaleRange },
-  };
-  return {
-    ...options,
-    series: [
-      { label: "Time", value: (_plot, value) => chartTime(value) },
-      {
-        label: "RPS",
-        scale: "throughput",
-        stroke: "#2166d1",
-        width: 2.5,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatRate(value),
-      },
-      {
-        label: "Average latency",
-        scale: "latency",
-        stroke: "#8a5bc7",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
-      },
-      {
-        label: "HTTP errors",
-        scale: "throughput",
-        stroke: "#c63a3a",
-        width: 2,
-        points: { show: false },
-        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
-      },
-    ],
-    axes: [
-      {
-        scale: "x",
-        stroke: "#64748b",
-        grid: { stroke: "#e4e9ef", width: 1 },
-        ticks: { stroke: "#cbd5e1", width: 1 },
-        values: (_plot, values) => values.map(chartTime),
-      },
-      {
-        scale: "throughput",
-        side: 3,
-        label: "Requests / sec",
-        stroke: "#2166d1",
-        grid: { stroke: "#e4e9ef", width: 1 },
-      },
-      {
-        scale: "latency",
-        side: 1,
-        label: "Latency (ms)",
-        stroke: "#8a5bc7",
-        grid: { show: false },
-      },
-    ],
-  };
-}
-
 function disposeRunCharts(scope) {
-  for (const kind of ["outcome", "latency", "composite"]) {
+  for (const kind of ["outcome", "latency"]) {
     state.runCharts[scope][kind]?.destroy();
     state.runCharts[scope][kind] = null;
   }
@@ -1283,7 +1429,8 @@ function runChartWidth(host) {
 function renderRunCharts(scope, hosts, emptyState) {
   disposeRunCharts(scope);
   for (const host of Object.values(hosts)) host.classList.remove("is-pannable", "is-panning");
-  const hasPoints = state.runSeries.length > 0;
+  const data = runChartData();
+  const hasPoints = data.timestamps.length > 0;
   emptyState.hidden = hasPoints;
   for (const host of Object.values(hosts)) {
     host.hidden = !hasPoints;
@@ -1297,26 +1444,20 @@ function renderRunCharts(scope, hosts, emptyState) {
     hosts.composite.hidden = true;
     return;
   }
-  const data = runChartData();
   const range = runChartRange(scope, data.timestamps);
   state.runChartRanges[scope] = range;
   for (const host of Object.values(hosts)) {
     host.classList.toggle("is-pannable", data.timestamps.length > RUN_CHART_VISIBLE_SAMPLES);
   }
   state.runCharts[scope].outcome = new window.uPlot(
-    outcomeChartOptions(runChartWidth(hosts.outcome), hosts.outcome, scope, range),
+    outcomeChartOptions(runChartWidth(hosts.outcome), hosts.outcome, scope, range, data),
     data.outcome,
     hosts.outcome,
   );
   state.runCharts[scope].latency = new window.uPlot(
-    latencyChartOptions(runChartWidth(hosts.latency), hosts.latency, scope, range),
+    latencyChartOptions(runChartWidth(hosts.latency), hosts.latency, scope, range, data),
     data.latency,
     hosts.latency,
-  );
-  state.runCharts[scope].composite = new window.uPlot(
-    compositeChartOptions(runChartWidth(hosts.composite), hosts.composite, scope, range),
-    data.composite,
-    hosts.composite,
   );
 }
 
@@ -1324,7 +1465,6 @@ function drawRunChart() {
   renderRunCharts("detail", {
     outcome: elements.runDetailOutcomeChart,
     latency: elements.runDetailLatencyChart,
-    composite: elements.runDetailCompositeChart,
   }, elements.runDetailChartEmpty);
 }
 
@@ -1333,7 +1473,6 @@ function resizeRunCharts() {
     detail: {
       outcome: elements.runDetailOutcomeChart,
       latency: elements.runDetailLatencyChart,
-      composite: elements.runDetailCompositeChart,
     },
   })) {
     for (const [kind, host] of Object.entries(hosts)) {
@@ -1353,8 +1492,14 @@ function formatRunLoadPlan(options = {}) {
   const duration = options.duration || "-";
   const rate = Number(options.targetRps || 0);
   const maxVus = Number(options.maxVus || options.vus || 0);
+  const scenarioCount = Array.isArray(options.scenarios) ? options.scenarios.length : 0;
+  if (scenarioCount > 1) {
+    return rate > 0
+      ? `${scenarioCount} scenarios · ${rate.toLocaleString()} iter/s · ${maxVus.toLocaleString()} max VUs`
+      : `${scenarioCount} scenarios · ${duration} · ${maxVus.toLocaleString()} max VUs`;
+  }
   return rate > 0
-    ? `${duration} · ${rate.toLocaleString()} RPS · ${maxVus.toLocaleString()} max VUs`
+    ? `${duration} · ${rate.toLocaleString()} ${scenarioCount ? "iter/s" : "RPS"} · ${maxVus.toLocaleString()} max VUs`
     : `${duration} · ${maxVus.toLocaleString()} VUs`;
 }
 

@@ -149,32 +149,39 @@ export class InfluxWriter {
   }
 
   async writeLiveSnapshot(run, project, script, snapshot) {
+    const tags = {
+      run_id: run.id,
+      project_id: project.id,
+      project: project.name,
+      script_id: script.id,
+      script: script.name,
+      profile: run.profile,
+    };
+    const fields = (value) => ({
+      requestRate: value.requestRate,
+      tps: value.tps,
+      successCount: value.successCount,
+      errorCount: value.errorCount,
+      averageMs: value.averageMs,
+      minimumMs: value.minimumMs,
+      medianMs: value.medianMs,
+      maximumMs: value.maximumMs,
+      p90Ms: value.p90Ms,
+      p95Ms: value.p95Ms,
+      mttMs: value.mttMs,
+      mttfbMs: value.mttfbMs,
+      errorRate: value.errorRate,
+      vus: value.vus,
+      droppedIterations: value.droppedIterations,
+      progress: snapshot.progress,
+    });
     return this.write([
-      lineProtocol("testzone_run_live", {
-        run_id: run.id,
-        project_id: project.id,
-        project: project.name,
-        script_id: script.id,
-        script: script.name,
-        profile: run.profile,
-      }, {
-        requestRate: snapshot.requestRate,
-        tps: snapshot.tps,
-        successCount: snapshot.successCount,
-        errorCount: snapshot.errorCount,
-        averageMs: snapshot.averageMs,
-        minimumMs: snapshot.minimumMs,
-        medianMs: snapshot.medianMs,
-        maximumMs: snapshot.maximumMs,
-        p90Ms: snapshot.p90Ms,
-        p95Ms: snapshot.p95Ms,
-        mttMs: snapshot.mttMs,
-        mttfbMs: snapshot.mttfbMs,
-        errorRate: snapshot.errorRate,
-        vus: snapshot.vus,
-        droppedIterations: snapshot.droppedIterations,
-        progress: snapshot.progress,
-      }, Date.parse(snapshot.timestamp)),
+      lineProtocol("testzone_run_live", tags, fields(snapshot), Date.parse(snapshot.timestamp)),
+      ...Object.entries(snapshot.scenarios || {}).map(([scenario, value]) =>
+        lineProtocol("testzone_run_live", {
+          ...tags,
+          scenario,
+        }, fields(value), Date.parse(snapshot.timestamp))),
     ]);
   }
 
@@ -225,6 +232,7 @@ export class InfluxWriter {
           project_id: context.projectId,
           script_id: context.scriptId,
           metric: group.metric,
+          scenario: group.tags.scenario,
           api: group.tags.api,
           method: group.tags.method,
           status: group.tags.status,
@@ -261,7 +269,14 @@ export class InfluxWriter {
         await flushSecond();
       }
       currentSecond = second;
-      const key = [metric, tags.api || "", tags.method || "", tags.status || "", tags.group || ""].join("\u0000");
+      const key = [
+        metric,
+        tags.scenario || "",
+        tags.api || "",
+        tags.method || "",
+        tags.status || "",
+        tags.group || "",
+      ].join("\u0000");
       const group = groups.get(key) || { metric, tags, values: [] };
       group.values.push(Number(item.data.value));
       groups.set(key, group);

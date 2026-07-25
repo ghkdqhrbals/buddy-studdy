@@ -98,7 +98,12 @@ test("InfluxWriter imports k6 0.54 points with a top-level metric name", async (
       data: {
         time: "2026-07-24T02:06:03.730Z",
         value: 21.75,
-        tags: { api: "public-questions", method: "GET", status: "200" },
+        tags: {
+          scenario: "publicQuestions",
+          api: "public-questions",
+          method: "GET",
+          status: "200",
+        },
       },
     }),
     "",
@@ -120,6 +125,7 @@ test("InfluxWriter imports k6 0.54 points with a top-level metric name", async (
 
   assert.equal(result.written, 1);
   assert.match(writes[0], /metric=http_req_duration/);
+  assert.match(writes[0], /scenario=publicQuestions/);
   assert.match(writes[0], /api=public-questions/);
 });
 

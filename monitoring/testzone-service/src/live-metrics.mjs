@@ -11,7 +11,7 @@ const TRACKED_METRICS = new Set([
   "vus_max",
 ]);
 
-function emptyBucket(timestamp) {
+function emptyBucket(timestamp, includeScenarios = true) {
   return {
     timestamp,
     requests: 0,
@@ -20,6 +20,7 @@ function emptyBucket(timestamp) {
     waiting: [],
     vus: [],
     droppedIterations: 0,
+    scenarios: includeScenarios ? new Map() : null,
   };
 }
 
@@ -29,7 +30,7 @@ export function summarizeLiveBucket(bucket) {
   const failures = bucket.requests ? errorCount / bucket.requests : 0;
   const latency = summarizeLatencySamples(bucket.durations);
   const waiting = summarizeLatencySamples(bucket.waiting);
-  return {
+  const summary = {
     timestamp: new Date(bucket.timestamp).toISOString(),
     requestRate: bucket.requests,
     tps: bucket.requests,
@@ -42,6 +43,24 @@ export function summarizeLiveBucket(bucket) {
     vus: bucket.vus.length ? Math.max(...bucket.vus) : 0,
     droppedIterations: bucket.droppedIterations,
   };
+  if (bucket.scenarios?.size) {
+    summary.scenarios = Object.fromEntries(
+      [...bucket.scenarios.entries()].map(([name, scenarioBucket]) => [
+        name,
+        summarizeLiveBucket(scenarioBucket),
+      ]),
+    );
+  }
+  return summary;
+}
+
+function addMetric(bucket, metric, value) {
+  if (metric === "http_reqs") bucket.requests += value;
+  if (metric === "http_req_duration") bucket.durations.push(value);
+  if (metric === "http_req_failed") bucket.failures.push(value);
+  if (metric === "http_req_waiting") bucket.waiting.push(value);
+  if (metric === "vus" || metric === "vus_max") bucket.vus.push(value);
+  if (metric === "dropped_iterations") bucket.droppedIterations += value;
 }
 
 export function consumeK6Lines(lines, buckets = new Map()) {
@@ -59,12 +78,13 @@ export function consumeK6Lines(lines, buckets = new Map()) {
     const parsed = Date.parse(item.data?.time);
     const timestamp = Math.floor((Number.isFinite(parsed) ? parsed : Date.now()) / 1_000) * 1_000;
     const bucket = buckets.get(timestamp) || emptyBucket(timestamp);
-    if (metric === "http_reqs") bucket.requests += value;
-    if (metric === "http_req_duration") bucket.durations.push(value);
-    if (metric === "http_req_failed") bucket.failures.push(value);
-    if (metric === "http_req_waiting") bucket.waiting.push(value);
-    if (metric === "vus" || metric === "vus_max") bucket.vus.push(value);
-    if (metric === "dropped_iterations") bucket.droppedIterations += value;
+    addMetric(bucket, metric, value);
+    const scenario = item.data?.tags?.scenario;
+    if (scenario) {
+      const scenarioBucket = bucket.scenarios.get(scenario) || emptyBucket(timestamp, false);
+      addMetric(scenarioBucket, metric, value);
+      bucket.scenarios.set(scenario, scenarioBucket);
+    }
     buckets.set(timestamp, bucket);
   }
   return buckets;

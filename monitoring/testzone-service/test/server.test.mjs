@@ -197,6 +197,21 @@ test("run API starts a saved script instead of returning a copied command", asyn
     vus: 50,
     maxVus: 500,
     targetRps: 300,
+    scenarios: [{
+      name: "publicQuestions",
+      executor: "constant-arrival-rate",
+      exec: "default",
+      rate: 300,
+      timeUnit: "1s",
+      targetRps: 300,
+      duration: "30s",
+      durationSeconds: 30,
+      startTime: "0s",
+      startTimeSeconds: 0,
+      preAllocatedVUs: 50,
+      maxVus: 500,
+      vus: 50,
+    }],
   });
   assert.equal("environmentKeys" in body, false);
 
