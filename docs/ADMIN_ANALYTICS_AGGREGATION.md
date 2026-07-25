@@ -2,8 +2,10 @@
 
 ## Context
 
-Admin analytics uses a separate MySQL database named `buddystudy_aggregation`.
-The primary BuddyStudy database remains the source of truth. The aggregation database stores derived read models for the admin dashboard only.
+Admin analytics stores derived rows in the primary BuddyStudy MySQL database by default.
+This reuses the managed R2DBC pool and avoids a second database becoming a scheduler-only failure point.
+An independent MySQL analytics database remains available only when
+`ADMIN_ANALYTICS_DATABASE_URL` is explicitly configured and provisioned.
 
 ## Goals
 
@@ -22,7 +24,7 @@ The primary BuddyStudy database remains the source of truth. The aggregation dat
 ```mermaid
 flowchart LR
     Source["Primary DB\nusers, questions, notifications, usage"] --> Job["Admin analytics aggregation job"]
-    Job --> Agg["Aggregation DB\nadmin_daily_metrics"]
+    Job --> Agg["Primary DB\nadmin_daily_metrics"]
     Agg --> Admin["/admin dashboard"]
 ```
 
@@ -80,6 +82,9 @@ Rate metrics store the computed rate in `value` and the denominator in `sample_c
 
 ## Operational Notes
 
-- The aggregation database can be rebuilt from the primary database.
+- `admin_daily_metrics` is managed by Flyway with the rest of the primary schema.
+- The derived rows can be rebuilt from primary source tables.
+- Do not set `ADMIN_ANALYTICS_DATABASE_URL` unless the separate MySQL database,
+  credentials, schema migrations, and connection capacity are managed independently.
 - Admin analytics failures should not block user-facing app behavior.
 - Use `ADMIN_ANALYTICS_RECENT_DAYS` and `ADMIN_ANALYTICS_CORRECTION_DAYS` to tune recovery windows.

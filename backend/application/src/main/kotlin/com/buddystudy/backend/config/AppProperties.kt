@@ -84,7 +84,7 @@ data class BuddyStudyProperties(
         var username: String = "",
         var password: String = "",
         var driverClassName: String = "",
-        var databaseName: String = "buddystudy_aggregation",
+        var databaseName: String = "",
     )
 }
 

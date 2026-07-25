@@ -1,5 +1,6 @@
 package com.buddystudy.backend
 
+import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsAggregationUseCase
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.reactive.awaitSingle
 
@@ -18,6 +19,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Instant
+import java.time.LocalDate
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestPropertySource(
@@ -33,6 +35,7 @@ import java.time.Instant
     ],
 )
 class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
+    @Autowired lateinit var analytics: AdminAnalyticsAggregationUseCase
     @Autowired lateinit var databaseClient: DatabaseClient
     @Autowired lateinit var mapper: ObjectMapper
     @LocalServerPort var port: Int = 0
@@ -43,6 +46,7 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
     fun setUpSchema(): Unit = runBlocking {
         databaseClient.sql("delete from scheduled_job_runs").fetch().rowsUpdated().awaitSingle()
         databaseClient.sql("delete from scheduled_jobs").fetch().rowsUpdated().awaitSingle()
+        databaseClient.sql("delete from admin_daily_metrics").fetch().rowsUpdated().awaitSingle()
         databaseClient.sql(
             """
             insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value)
@@ -82,6 +86,22 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
             .bind("finishedAt", Instant.now().minusSeconds(60))
             .fetch().rowsUpdated().awaitSingle()
         Unit
+    }
+
+    @Test
+    fun `admin analytics job writes derived metrics through the primary mysql connection`(): Unit = runBlocking {
+        val date = LocalDate.parse("2026-01-01")
+
+        val refreshed = analytics.refreshRange(date, date)
+        val stored = databaseClient.sql(
+            "select count(*) as total from admin_daily_metrics where metric_date = :metricDate",
+        ).bind("metricDate", date)
+            .map { row, _ -> (row.get("total") as Number).toLong() }
+            .one()
+            .awaitSingle()
+
+        assertThat(refreshed).isEqualTo(9)
+        assertThat(stored).isEqualTo(9)
     }
 
     @Test

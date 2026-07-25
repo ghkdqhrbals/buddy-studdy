@@ -1,27 +1,25 @@
 package com.buddystudy.backend.admin.analytics.adapter.outbound.persistence
 
 import io.r2dbc.spi.ConnectionFactoryOptions
-import kotlinx.coroutines.runBlocking
-
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class AdminAnalyticsR2dbcUrlTest {
     @Test
-    fun `derives aggregation database url from primary mysql url`(): Unit = runBlocking {
-        val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:mysql://buddystudy-db:3306/buddystudy",
-            analyticsDatabaseName = "buddystudy_aggregation",
+    fun `normalizes explicitly configured mysql jdbc url`() {
+        val result = AdminAnalyticsR2dbcUrl.normalizeConfigured(
+            "jdbc:mysql://buddystudy-db:3306/buddystudy_aggregation?serverTimezone=UTC",
         )
 
-        assertThat(result).isEqualTo("r2dbc:mysql://buddystudy-db:3306/buddystudy_aggregation")
+        assertThat(result).isEqualTo(
+            "r2dbc:mysql://buddystudy-db:3306/buddystudy_aggregation?serverZoneId=UTC",
+        )
     }
 
     @Test
-    fun `keeps mysql r2dbc query parameters when deriving aggregation url`(): Unit = runBlocking {
-        val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:mysql://api.ghkdqhrbals.org:3306/buddystudy?sslMode=VERIFY_IDENTITY",
-            analyticsDatabaseName = "buddystudy_aggregation",
+    fun `keeps explicitly configured mysql r2dbc url`() {
+        val result = AdminAnalyticsR2dbcUrl.normalizeConfigured(
+            "r2dbc:mysql://api.ghkdqhrbals.org:3306/buddystudy_aggregation?sslMode=VERIFY_IDENTITY",
         )
 
         assertThat(result).isEqualTo(
@@ -30,20 +28,16 @@ class AdminAnalyticsR2dbcUrlTest {
     }
 
     @Test
-    fun `does not derive for non mysql test datasource`(): Unit = runBlocking {
-        val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:h2:mem:///buddystudy",
-            analyticsDatabaseName = "buddystudy_aggregation",
-        )
+    fun `uses primary datasource when no analytics url is configured`() {
+        val result = AdminAnalyticsR2dbcUrl.normalizeConfigured("")
 
         assertThat(result).isBlank()
     }
 
     @Test
-    fun `does not derive for transient mysql test database`(): Unit = runBlocking {
-        val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:mysql://localhost:33060/test",
-            analyticsDatabaseName = "buddystudy_aggregation",
+    fun `rejects unsupported analytics datasource driver`() {
+        val result = AdminAnalyticsR2dbcUrl.normalizeConfigured(
+            "jdbc:postgresql://buddystudy-db:5432/buddystudy_aggregation",
         )
 
         assertThat(result).isBlank()

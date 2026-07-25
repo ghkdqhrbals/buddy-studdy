@@ -131,4 +131,4 @@ buddystudy:
       username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}
       password: ${ADMIN_ANALYTICS_DATABASE_PASSWORD:${DATABASE_PASSWORD:}}
       driver-class-name: ${ADMIN_ANALYTICS_DATABASE_DRIVER:}
-      database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:buddystudy_aggregation}
+      database-name: ${ADMIN_ANALYTICS_DATABASE_NAME:}
