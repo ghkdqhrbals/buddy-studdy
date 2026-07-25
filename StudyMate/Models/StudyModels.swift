@@ -1497,6 +1497,23 @@ struct AppStrings {
             "Sign in to keep study topics and question settings synced across devices."
         )
     }
+    var myStudyGuestPreviewTitle: String { text("내 방식대로 만드는 학습 공간", "A study space built your way") }
+    var myStudyGuestPreviewSubtitle: String {
+        text(
+            "주제마다 난이도와 질문 방식을 정하고, 필요한 공부를 한곳에서 이어가세요.",
+            "Set the difficulty and question style for each topic, then keep everything in one place."
+        )
+    }
+    var myStudyGuestTopicOne: String { text("실전 중심 · 레벨 6", "Practice focused · Level 6") }
+    var myStudyGuestTopicTwo: String { text("설계 토론 · 레벨 7", "Design discussion · Level 7") }
+    var myStudyGuestTopicThree: String { text("짧은 복습 · 레벨 5", "Quick review · Level 5") }
+    var myStudyGuestLoginTitle: String { text("첫 학습 주제를 만들어보세요", "Create your first study topic") }
+    var myStudyGuestLoginSubtitle: String {
+        text(
+            "로그인하면 주제 설정과 진행 상황이 계정에 안전하게 저장됩니다.",
+            "Sign in to safely keep topic settings and progress with your account."
+        )
+    }
     var recordsLoginBenefit: String {
         text(
             "학습할수록 나만의 기록이 차곡차곡 쌓입니다.",
@@ -1509,9 +1526,9 @@ struct AppStrings {
             "See topic progress and learning patterns at a glance."
         )
     }
-    var myStudyLoginAction: String { text("로그인", "Sign In") }
-    var recordsLoginAction: String { text("로그인", "Sign In") }
-    var statisticsLoginAction: String { text("로그인", "Sign In") }
+    var myStudyLoginAction: String { text("내 학습 시작하기", "Start My Studies") }
+    var recordsLoginAction: String { text("기록 이어가기", "Continue My Records") }
+    var statisticsLoginAction: String { text("성장 확인하기", "See My Progress") }
     var recordsGuestPreviewTitle: String { text("꾸준히 쌓이는 학습 기록", "A learning record that grows with you") }
     var recordsGuestPreviewSubtitle: String {
         text(
@@ -2165,8 +2182,6 @@ struct AppStrings {
     var red: String { text("빨강", "Red") }
     var green: String { text("초록", "Green") }
     var blue: String { text("파랑", "Blue") }
-    var chooseProfilePhoto: String { text("사진 선택", "Choose Photo") }
-    var removeProfilePhoto: String { text("사진 제거", "Remove Photo") }
     var profilePhotoScale: String { text("사진 크기", "Photo Size") }
     var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }

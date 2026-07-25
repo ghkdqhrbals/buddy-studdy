@@ -1,6 +1,5 @@
 import SwiftUI
 #if os(iOS)
-import PhotosUI
 import SafariServices
 import UIKit
 #endif
@@ -225,7 +224,7 @@ private enum MobileProtectedLoginPage {
     func previewTitle(strings: AppStrings) -> String {
         switch self {
         case .myStudy:
-            return HomeFeedScope.my.title(strings: strings)
+            return strings.myStudyGuestPreviewTitle
         case .records:
             return strings.recordsGuestPreviewTitle
         case .statistics:
@@ -236,7 +235,7 @@ private enum MobileProtectedLoginPage {
     func previewSubtitle(strings: AppStrings) -> String {
         switch self {
         case .myStudy:
-            return strings.myStudyLoginBenefit
+            return strings.myStudyGuestPreviewSubtitle
         case .records:
             return strings.recordsGuestPreviewSubtitle
         case .statistics:
@@ -247,7 +246,7 @@ private enum MobileProtectedLoginPage {
     func loginFooterTitle(strings: AppStrings) -> String {
         switch self {
         case .myStudy:
-            return strings.myStudyLoginBenefit
+            return strings.myStudyGuestLoginTitle
         case .records:
             return strings.recordsGuestLoginTitle
         case .statistics:
@@ -258,7 +257,7 @@ private enum MobileProtectedLoginPage {
     func loginFooterSubtitle(strings: AppStrings) -> String {
         switch self {
         case .myStudy:
-            return strings.myStudyLoginBenefit
+            return strings.myStudyGuestLoginSubtitle
         case .records:
             return strings.recordsGuestLoginSubtitle
         case .statistics:
@@ -276,17 +275,7 @@ private struct MobileProtectedLoginPrompt: View {
     var body: some View {
         switch page {
         case .myStudy:
-            VStack(alignment: .leading, spacing: 16) {
-                Text(page.benefitText(strings: strings))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button(action: onLogin) {
-                    MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
-                }
-                .buttonStyle(.plain)
-            }
+            MobileMyStudyLoginExperience(strings: strings, onLogin: onLogin)
         case .records, .statistics:
             MobileProtectedLoginExperience(
                 page: page,
@@ -339,7 +328,11 @@ private struct MobileProtectedLoginPreview: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            MobileGuestWeeklySummary(page: page, strings: strings)
+            if page == .records {
+                MobileGuestWeeklySummary(strings: strings)
+            } else {
+                MobileGuestGrassSummary(strings: strings)
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(page == .records ? strings.guestRecentRecords : strings.guestTopicProgress)
@@ -358,7 +351,6 @@ private struct MobileProtectedLoginPreview: View {
 }
 
 private struct MobileGuestWeeklySummary: View {
-    var page: MobileProtectedLoginPage
     var strings: AppStrings
 
     var body: some View {
@@ -377,9 +369,9 @@ private struct MobileGuestWeeklySummary: View {
                     .frame(height: 44)
 
                 MobileGuestMetric(
-                    title: page == .statistics ? strings.guestTopicCount : strings.guestActivities,
-                    value: page == .statistics ? "3" : "12",
-                    suffix: page == .statistics && strings.language == .korean ? "개" : strings.language == .korean ? "회" : ""
+                    title: strings.guestActivities,
+                    value: "12",
+                    suffix: strings.language == .korean ? "회" : ""
                 )
 
                 Divider()
@@ -417,6 +409,164 @@ private struct MobileGuestWeeklySummary: View {
         let korean = ["월", "화", "수", "목", "금", "토", "일"]
         let english = ["M", "T", "W", "T", "F", "S", "S"]
         return strings.language == .korean ? korean[index] : english[index]
+    }
+}
+
+private struct MobileGuestGrassSummary: View {
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .bottom, spacing: 0) {
+                MobileGuestMetric(
+                    title: strings.guestStudyDays,
+                    value: "18",
+                    suffix: strings.language == .korean ? "일" : ""
+                )
+
+                Divider()
+                    .frame(height: 44)
+
+                MobileGuestMetric(
+                    title: strings.guestTopicCount,
+                    value: "3",
+                    suffix: strings.language == .korean ? "개" : ""
+                )
+
+                Divider()
+                    .frame(height: 44)
+
+                MobileGuestMetric(
+                    title: strings.guestAverageScore,
+                    value: "80",
+                    suffix: strings.language == .korean ? "점" : ""
+                )
+            }
+
+            HStack(alignment: .top, spacing: 3) {
+                ForEach(0..<18, id: \.self) { week in
+                    VStack(spacing: 3) {
+                        ForEach(0..<7, id: \.self) { day in
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(grassColor(level: sampleLevel(week: week, day: day)))
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(1, contentMode: .fit)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    private func sampleLevel(week: Int, day: Int) -> Int {
+        let value = (week * 11 + day * 7 + 3) % 13
+        switch value {
+        case 0...4:
+            return 0
+        case 5...7:
+            return 1
+        case 8...9:
+            return 2
+        case 10...11:
+            return 3
+        default:
+            return 4
+        }
+    }
+
+    private func grassColor(level: Int) -> Color {
+        switch level {
+        case 4:
+            return Color.green.opacity(0.92)
+        case 3:
+            return Color.green.opacity(0.72)
+        case 2:
+            return Color.green.opacity(0.52)
+        case 1:
+            return Color.green.opacity(0.30)
+        default:
+            return Color.secondary.opacity(0.13)
+        }
+    }
+}
+
+private struct MobileMyStudyLoginExperience: View {
+    var strings: AppStrings
+    var onLogin: () -> Void
+
+    private var topics: [(title: String, detail: String, icon: String)] {
+        [
+            (strings.guestPreviewRecordTopicOne, strings.myStudyGuestTopicOne, "arrow.triangle.branch"),
+            (strings.guestPreviewRecordTopicTwo, strings.myStudyGuestTopicTwo, "square.stack.3d.up"),
+            (strings.guestPreviewRecordTopicThree, strings.myStudyGuestTopicThree, "swift")
+        ]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(strings.myStudyGuestPreviewTitle)
+                    .font(.title2.weight(.bold))
+
+                Text(strings.myStudyGuestPreviewSubtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
+                    HStack(spacing: 12) {
+                        Image(systemName: topic.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.green)
+                            .frame(width: 34, height: 34)
+                            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(topic.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text(topic.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 13)
+                    .padding(.horizontal, 14)
+
+                    if index < topics.count - 1 {
+                        Divider()
+                            .padding(.leading, 60)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(strings.myStudyGuestLoginTitle)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(strings.myStudyGuestLoginSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button(action: onLogin) {
+                    MobilePrimaryLoginButtonLabel(title: strings.myStudyLoginAction)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: 620, alignment: .leading)
     }
 }
 
@@ -584,33 +734,12 @@ private struct MobilePrimaryLoginButtonLabel: View {
     }
 }
 
-private struct MobileInlineLoginButtonLabel: View {
-    var title: String
-
-    var body: some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
 private struct MobileRequiredTermsGateSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var marketingAgreed = false
     @State private var legalWebRoute: MobileLegalWebRoute?
+    @State private var isSavingAgreements = false
 
     private var strings: AppStrings { appState.strings }
 
@@ -668,12 +797,19 @@ private struct MobileRequiredTermsGateSheet: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    agreeRequiredTerms()
+                    Task {
+                        await agreeRequiredTerms()
+                    }
                 } label: {
                     HStack {
                         Spacer()
-                        Text(strings.agreeAllAndStart)
-                            .font(.headline.weight(.bold))
+                        if isSavingAgreements {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text(strings.agreeAllAndStart)
+                                .font(.headline.weight(.bold))
+                        }
                         Spacer()
                     }
                     .frame(minHeight: 54)
@@ -681,6 +817,7 @@ private struct MobileRequiredTermsGateSheet: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(isSavingAgreements)
 
                 Button(strings.nextTime) {
                     appState.isRequiredTermsGatePresented = false
@@ -749,13 +886,30 @@ private struct MobileRequiredTermsGateSheet: View {
         return "\(title) [\(suffix)]"
     }
 
-    private func agreeRequiredTerms() {
+    @MainActor
+    private func agreeRequiredTerms() async {
+        guard !isSavingAgreements else {
+            return
+        }
+        isSavingAgreements = true
+        defer {
+            isSavingAgreements = false
+        }
+
         let requiredTypes: [BackendTermsType] = [.termsOfService, .privacyPolicy]
         for type in requiredTypes {
-            appState.saveTermsAgreementInBackground(type: type, isAgreed: true, source: .requiredGate)
+            guard await appState.saveTermsAgreement(type: type, isAgreed: true, source: .requiredGate) else {
+                return
+            }
         }
         if marketingAgreed {
-            appState.saveTermsAgreementInBackground(type: .marketingNotification, isAgreed: true, source: .requiredGate)
+            guard await appState.saveTermsAgreement(
+                type: .marketingNotification,
+                isAgreed: true,
+                source: .requiredGate
+            ) else {
+                return
+            }
         }
         appState.isRequiredTermsGatePresented = false
         dismiss()
@@ -1237,8 +1391,9 @@ private struct MobileHomeView: View {
                 strings: strings,
                 onLogin: { isHomeLoginPagePresented = true }
             )
-            .padding(.vertical, 8)
-            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            .padding(.vertical, 12)
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 18, trailing: 0))
+            .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         }
     }
@@ -1394,8 +1549,6 @@ private struct MobileHomeView: View {
         return HomeProfileAvatar(
             symbolName: appState.profileAvatarSymbolName,
             displayName: appState.communityProfile?.displayName,
-            imageData: appState.profileAvatarImageData,
-            imageURL: appState.communityProfile?.avatarURL,
             colorSeed: signedInProfileColorSeed,
             usesNeutralColor: signedInProfileColorSeed == nil,
             size: 34
@@ -1418,8 +1571,6 @@ private struct MobileHomeView: View {
             HomeProfileAvatar(
                 symbolName: appState.profileAvatarSymbolName,
                 displayName: appState.communityProfile?.displayName,
-                imageData: appState.profileAvatarImageData,
-                imageURL: appState.communityProfile?.avatarURL,
                 colorSeed: signedInProfileColorSeed,
                 usesNeutralColor: signedInProfileColorSeed == nil,
                 size: 34
@@ -2049,54 +2200,20 @@ private struct MobileNotificationRow: View {
 struct HomeProfileAvatar: View {
     var symbolName: String
     var displayName: String?
-    var imageData: Data? = nil
-    var imageURL: URL? = nil
     var colorSeed: String? = "profile"
     var usesNeutralColor: Bool = false
     var size: CGFloat = 34
-    var avatarConfig: [String: String]? = nil
-    var avatarCatalog: AvatarCatalogResponse? = nil
 
     var body: some View {
-        Circle()
-            .fill(Color.secondary.opacity(0.10))
-            .overlay {
-                avatarContent
-            }
+        PixelAvatarGlyph(
+            avatarName: ProfileAvatarOption.canonicalName(for: symbolName),
+            colorSeed: colorSeed ?? "avatar-color-sage",
+            usesNeutralColor: usesNeutralColor
+        )
         .frame(width: size, height: size)
         .clipShape(Circle())
         .contentShape(Circle())
-    }
-
-    @ViewBuilder
-    private var avatarContent: some View {
-        #if os(iOS)
-        if let imageData, let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else if let imageURL {
-            AsyncImage(url: imageURL) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    profilePlaceholder
-                }
-            }
-        } else {
-            profilePlaceholder
-        }
-        #else
-        profilePlaceholder
-        #endif
-    }
-
-    private var profilePlaceholder: some View {
-        Image(systemName: "person.fill")
-            .resizable()
-            .scaledToFit()
-            .padding(size * 0.27)
-            .foregroundStyle(Color.secondary)
+        .accessibilityLabel(displayName ?? "")
     }
 }
 
@@ -2112,18 +2229,11 @@ struct ProfileAvatarSprite: View {
     var size: CGFloat
 
     var body: some View {
-        let palette = PixelAvatarPalette(seed: colorSeed, usesNeutralColor: usesNeutralColor)
-
-        Circle()
-            .fill(palette.background)
-            .overlay {
-                Image(ProfileAvatarOption.assetName(for: symbolName))
-                    .resizable()
-                    .interpolation(.none)
-                    .antialiased(false)
-                    .scaledToFit()
-                    .scaleEffect(1.12)
-            }
+        PixelAvatarGlyph(
+            avatarName: ProfileAvatarOption.canonicalName(for: symbolName),
+            colorSeed: colorSeed,
+            usesNeutralColor: usesNeutralColor
+        )
             .frame(width: size, height: size)
             .clipShape(Circle())
     }
@@ -3233,19 +3343,12 @@ private struct MobileProfileSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
     @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
-    @State private var draftAvatarColorSeed = ""
-    @State private var draftAvatarConfig: [String: String] = [:]
-    @State private var selectedAvatarCategoryKey: String?
+    @State private var draftAvatarColorSeed = "avatar-color-sage"
     @State private var allowPublicQuestionsAccess = true
     @State private var isShowingEmailSignIn = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
     @State private var legalWebRoute: MobileLegalWebRoute?
-    @State private var draftProfilePhotoData: Data?
-    @State private var hasProfilePhotoChanges = false
-    #if os(iOS)
-    @State private var profilePhotoItem: PhotosPickerItem?
-    #endif
 
     private var strings: AppStrings {
         appState.strings
@@ -3263,10 +3366,15 @@ private struct MobileProfileSettingsSheet: View {
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
+        let currentAvatar = ProfileAvatarOption.canonicalName(
+            for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName
+        )
+        let currentColor = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
 
         return trimmedProfileDisplayName != currentDisplayName
             || allowPublicQuestionsAccess != currentPublicQuestions
-            || hasProfilePhotoChanges
+            || draftAvatarSymbolName != currentAvatar
+            || draftAvatarColorSeed != currentColor
     }
 
     private var canSaveProfile: Bool {
@@ -3327,7 +3435,6 @@ private struct MobileProfileSettingsSheet: View {
                                 HomeProfileAvatar(
                                     symbolName: ProfileAvatarOption.defaultSymbolName,
                                     displayName: nil,
-                                    imageData: nil,
                                     colorSeed: nil,
                                     usesNeutralColor: true,
                                     size: 58
@@ -3357,46 +3464,15 @@ private struct MobileProfileSettingsSheet: View {
                     Section {
                         VStack(alignment: .center, spacing: 14) {
                             HomeProfileAvatar(
-                                symbolName: BuddyStudyAvatar.symbolName,
+                                symbolName: draftAvatarSymbolName,
                                 displayName: profileDisplayName,
-                                imageData: draftProfilePhotoData,
-                                imageURL: hasProfilePhotoChanges ? nil : appState.communityProfile?.avatarURL,
-                                colorSeed: nil,
-                                usesNeutralColor: appState.communityProfile == nil,
+                                colorSeed: draftAvatarColorSeed,
+                                usesNeutralColor: false,
                                 size: 94
                             )
                             .padding(.top, 4)
 
-                            #if os(iOS)
-                            HStack(spacing: 10) {
-                                PhotosPicker(selection: $profilePhotoItem, matching: .images) {
-                                    Label(strings.chooseProfilePhoto, systemImage: "photo.on.rectangle")
-                                }
-                                .buttonStyle(.bordered)
-
-                                if draftProfilePhotoData != nil || appState.communityProfile?.avatarURL != nil {
-                                    Button(role: .destructive) {
-                                        draftProfilePhotoData = nil
-                                        profilePhotoItem = nil
-                                        hasProfilePhotoChanges = true
-                                    } label: {
-                                        Text(strings.removeProfilePhoto)
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                            }
-                            .onChange(of: profilePhotoItem) { _, item in
-                                guard let item else { return }
-                                Task {
-                                    guard let data = try? await item.loadTransferable(type: Data.self),
-                                          let normalized = normalizedProfilePhoto(data) else {
-                                        return
-                                    }
-                                    draftProfilePhotoData = normalized
-                                    hasProfilePhotoChanges = true
-                                }
-                            }
-                            #endif
+                            pixelAvatarPicker(strings: strings)
 
                             TextField(strings.profileDisplayName, text: $profileDisplayName)
                                 .font(.title2.weight(.bold))
@@ -3520,13 +3596,12 @@ private struct MobileProfileSettingsSheet: View {
 
                         Task {
                             await appState.updateCommunityProfile(
-                                displayName: trimmedProfileDisplayName
+                                displayName: trimmedProfileDisplayName,
+                                avatarSymbolName: draftAvatarSymbolName,
+                                avatarColorSeed: draftAvatarColorSeed,
+                                avatarMode: "PIXEL",
+                                avatarConfig: nil
                             )
-                            #if os(iOS)
-                            if hasProfilePhotoChanges {
-                                await appState.updateCommunityProfilePhoto(draftProfilePhotoData)
-                            }
-                            #endif
                             dismiss()
                         }
                     } label: {
@@ -3575,6 +3650,8 @@ private struct MobileProfileSettingsSheet: View {
 
                 profileDisplayName = profile.displayName
                 allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
+                draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
+                draftAvatarColorSeed = profile.avatarColorSeed
             }
             .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
                 appState.logMobileAuthView(
@@ -3609,35 +3686,12 @@ private struct MobileProfileSettingsSheet: View {
     private func resetDraftProfile() {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
-        draftProfilePhotoData = appState.profileAvatarImageData
-        hasProfilePhotoChanges = false
-        #if os(iOS)
-        profilePhotoItem = nil
-        #endif
-    }
-
-    #if os(iOS)
-    private func normalizedProfilePhoto(_ data: Data) -> Data? {
-        guard let source = UIImage(data: data) else { return nil }
-        let maximumSide: CGFloat = 640
-        let scale = min(1, maximumSide / max(source.size.width, source.size.height))
-        let targetSize = CGSize(
-            width: max(1, floor(source.size.width * scale)),
-            height: max(1, floor(source.size.height * scale))
+        draftAvatarSymbolName = ProfileAvatarOption.canonicalName(
+            for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName
         )
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let resized = renderer.image { _ in
-            source.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-        var quality: CGFloat = 0.78
-        var encoded = resized.jpegData(compressionQuality: quality)
-        while let data = encoded, data.count > 500 * 1024, quality > 0.32 {
-            quality -= 0.1
-            encoded = resized.jpegData(compressionQuality: quality)
-        }
-        return encoded.flatMap { $0.count <= 512 * 1024 ? $0 : nil }
+        let savedColor = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
+        draftAvatarColorSeed = savedColor.isEmpty ? "avatar-color-sage" : savedColor
     }
-    #endif
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
         guard appState.isCommunitySessionActive else {
@@ -3652,7 +3706,6 @@ private struct MobileProfileSettingsSheet: View {
             HomeProfileAvatar(
                 symbolName: symbolName,
                 displayName: nil,
-                imageData: nil,
                 colorSeed: colorSeed,
                 usesNeutralColor: false,
                 size: 54
@@ -3675,75 +3728,14 @@ private struct MobileProfileSettingsSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func avatarBuilderSection(strings: AppStrings) -> some View {
-        if let catalog = appState.avatarCatalog {
-            let categories = catalog.categories.sorted { lhs, rhs in
-                if lhs.sortOrder == rhs.sortOrder {
-                    return lhs.key < rhs.key
-                }
-                return lhs.sortOrder < rhs.sortOrder
-            }
-            let selectedCategory = categories.first { $0.key == selectedAvatarCategoryKey } ?? categories.first
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(strings.profileCharacter)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    if appState.isLoadingAvatarCatalog {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(categories) { category in
-                            Button {
-                                selectedAvatarCategoryKey = category.key
-                            } label: {
-                                Text(category.title(language: appState.settings.appLanguage))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(selectedAvatarCategoryKey == category.key ? .white : .primary)
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal, 12)
-                                    .background(selectedAvatarCategoryKey == category.key ? Color.accentColor : Color.secondary.opacity(0.10), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-
-                if let selectedCategory {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 74, maximum: 88), spacing: 10)], spacing: 12) {
-                        ForEach(catalog.items(for: selectedCategory)) { item in
-                            Button {
-                                draftAvatarConfig[selectedCategory.slot] = item.key
-                                if selectedCategory.slot == "base" {
-                                    draftAvatarSymbolName = symbolName(forBaseItem: item.key)
-                                }
-                            } label: {
-                                avatarCatalogChoice(
-                                    item: item,
-                                    catalog: catalog,
-                                    config: draftAvatarConfig.merging([selectedCategory.slot: item.key]) { _, next in next },
-                                    isSelected: draftAvatarConfig[selectedCategory.slot] == item.key
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-        } else {
+    private func pixelAvatarPicker(strings: AppStrings) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(strings.profileCharacter)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 60, maximum: 66), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 58, maximum: 66), spacing: 8)], spacing: 8) {
                     ForEach(ProfileAvatarOption.all, id: \.self) { option in
                         Button {
                             draftAvatarSymbolName = option
@@ -3759,53 +3751,32 @@ private struct MobileProfileSettingsSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
 
-    private func avatarCatalogChoice(
-        item: AvatarCatalogItem,
-        catalog: AvatarCatalogResponse,
-        config: [String: String],
-        isSelected: Bool
-    ) -> some View {
-        VStack(spacing: 7) {
-            HomeProfileAvatar(
-                symbolName: symbolName(forBaseItem: config["base"] ?? draftAvatarConfig["base"] ?? item.key),
-                displayName: nil,
-                imageData: nil,
-                colorSeed: draftAvatarColorSeed,
-                usesNeutralColor: false,
-                size: 54,
-                avatarConfig: config,
-                avatarCatalog: catalog
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                Text(strings.profileColor)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            Text(item.displayName(language: appState.settings.appLanguage))
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(ProfileAvatarColorOption.all.prefix(10)) { option in
+                            Button {
+                                draftAvatarColorSeed = option.id
+                            } label: {
+                                colorChoice(
+                                    color: option.color,
+                                    isSelected: draftAvatarColorSeed == option.id
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(option.id)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
         }
-        .frame(width: 82, height: 84)
-        .background(isSelected ? Color.primary.opacity(0.08) : Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.secondary.opacity(0.10), lineWidth: 1)
-        }
-    }
-
-    private func symbolName(forBaseItem itemKey: String) -> String {
-        switch itemKey {
-        case "base-cat":
-            return "pixel-cat-laptop"
-        case "base-fox":
-            return "pixel-fox-scholar"
-        case "base-rabbit":
-            return "pixel-rabbit-pencil"
-        case "base-dog":
-            return "pixel-dog-dachshund-student"
-        default:
-            return draftAvatarSymbolName
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func colorChoice(color: Color, isSelected: Bool) -> some View {
@@ -3815,48 +3786,15 @@ private struct MobileProfileSettingsSheet: View {
 
             if isSelected {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 16, weight: .black))
+                    .font(.system(size: 14, weight: .black))
                     .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.28), radius: 2, x: 0, y: 1)
             }
         }
-        .frame(width: 46, height: 46)
+        .frame(width: 38, height: 38)
         .overlay {
             Circle()
-                .stroke(isSelected ? Color.primary.opacity(0.78) : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+                .stroke(isSelected ? Color.primary.opacity(0.75) : Color.secondary.opacity(0.15), lineWidth: isSelected ? 2 : 1)
         }
-        .overlay {
-            Circle()
-                .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                .padding(4)
-        }
-        .padding(1)
-    }
-
-    private func customColorChoice(isSelected: Bool) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .fill(
-                    AngularGradient(
-                        colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red],
-                        center: .center
-                    )
-                )
-                .frame(width: 58, height: 46)
-
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, Color.accentColor)
-                    .offset(x: 3, y: 3)
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .stroke(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
-        }
-        .accessibilityLabel(strings.customProfileColor)
     }
 }
 
@@ -4378,36 +4316,54 @@ enum ProfileAvatarOption {
 
     static let all = [
         defaultSymbolName,
-        "pixel-cat-laptop",
-        "pixel-cat-geek",
-        "pixel-cat-student",
-        "pixel-cat-wizard",
-        "pixel-cat-gamer",
-        "pixel-cat-robot",
-        "pixel-fox-scholar",
-        "pixel-fox-arctic-coder",
-        "pixel-fox-detective",
-        "pixel-fox-headset",
-        "pixel-rabbit-pencil",
-        "pixel-rabbit-hacker",
-        "pixel-rabbit-wizard",
-        "pixel-rabbit-gamer",
-        "pixel-dog-dachshund-student",
-        "pixel-dog-corgi-reader",
-        "pixel-dog-shiba-geek",
-        "pixel-dog-robot-puppy"
+        "pixel-cat",
+        "pixel-rabbit",
+        "pixel-penguin",
+        "pixel-scholar",
+        "pixel-coder",
+        "pixel-explorer",
+        "pixel-gamer",
+        "pixel-scientist",
+        "pixel-astronaut",
+        "pixel-knight",
+        "pixel-wizard",
+        "pixel-tutor-bot"
     ]
-
-    static func assetName(for symbolName: String) -> String {
-        BuddyStudyAvatar.assetName
-    }
 
     static func glyphName(for symbolName: String) -> String {
         canonicalName(for: symbolName)
     }
 
     static func canonicalName(for symbolName: String) -> String {
-        defaultSymbolName
+        let normalized = symbolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if all.contains(normalized) {
+            return normalized
+        }
+        if normalized.contains("cat") {
+            return "pixel-cat"
+        }
+        if normalized.contains("rabbit") {
+            return "pixel-rabbit"
+        }
+        if normalized.contains("penguin") {
+            return "pixel-penguin"
+        }
+        if normalized.contains("dog") || normalized.contains("pup") || normalized.contains("dachshund") {
+            return "pixel-explorer"
+        }
+        if normalized.contains("robot") {
+            return "pixel-tutor-bot"
+        }
+        if normalized.contains("coder") || normalized.contains("hacker") {
+            return "pixel-coder"
+        }
+        if normalized.contains("wizard") || normalized.contains("mage") {
+            return "pixel-wizard"
+        }
+        if normalized.contains("gamer") {
+            return "pixel-gamer"
+        }
+        return defaultSymbolName
     }
 }
 
@@ -4905,7 +4861,6 @@ struct CommunityQuestionDetailView: View {
                 HomeProfileAvatar(
                     symbolName: author.avatarSymbolName,
                     displayName: author.displayName,
-                    imageURL: author.avatarURL,
                     colorSeed: author.avatarColorSeed,
                     size: 34
                 )
@@ -5159,7 +5114,6 @@ private struct CommunityCommentRow: View {
             HomeProfileAvatar(
                 symbolName: comment.author.avatarSymbolName,
                 displayName: comment.author.displayName,
-                imageURL: comment.author.avatarURL,
                 colorSeed: comment.author.avatarColorSeed,
                 size: 30
             )
@@ -5236,7 +5190,6 @@ private struct CommunityAnswerMessage: View {
                     HomeProfileAvatar(
                         symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
-                        imageURL: author.avatarURL,
                         colorSeed: author.avatarColorSeed,
                         size: 34
                     )
@@ -5821,67 +5774,4 @@ private struct APITrafficLogItemView: View {
         }
         .padding(.vertical, 6)
     }
-}
-
-private struct MobileLogPageButton: View {
-    var systemImage: String
-    var isDisabled: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button {
-            guard !isDisabled else {
-                return
-            }
-
-            action()
-        } label: {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isDisabled ? .tertiary : .primary)
-                .frame(width: 34, height: 30)
-                .background(Color.secondary.opacity(isDisabled ? 0.04 : 0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-    }
-}
-
-private struct MobileLogRow: View {
-    var entry: AppLogEntry
-
-    var body: some View {
-        Text(lineText)
-            .font(.system(size: 10, weight: .regular, design: .monospaced))
-            .foregroundStyle(color)
-            .lineSpacing(0)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.vertical, 1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var lineText: String {
-        "\(Self.dateFormatter.string(from: entry.createdAt)) \(entry.level.displayName.uppercased()) \(entry.message)"
-    }
-
-    private var color: Color {
-        switch entry.level {
-        case .info:
-            .primary
-        case .warning:
-            .orange
-        case .error:
-            .red
-        }
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .medium
-        return formatter
-    }()
 }

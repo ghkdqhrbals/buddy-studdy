@@ -30,7 +30,6 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
-import java.util.Base64
 
 @Service
 class ProfileService(
@@ -68,6 +67,8 @@ class ProfileService(
         val config = validateAvatarConfig(command.avatarConfig, user.id)
         user.avatarMode = command.avatarMode.ifBlank { BUILDER_AVATAR_MODE }.take(32)
         user.avatarConfig = config.toAvatarConfigJson()
+        profilePhotos.delete(user.id)
+        user.avatarUrl = null
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
         config["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
         user.updatedAt = Instant.now()
@@ -97,36 +98,20 @@ class ProfileService(
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
-        command.avatarMode?.let { user.avatarMode = it.take(32) }
+        command.avatarMode?.let { requestedMode ->
+            user.avatarMode = requestedMode.take(32)
+            if (!requestedMode.equals(PHOTO_AVATAR_MODE, ignoreCase = true)) {
+                profilePhotos.delete(user.id)
+                user.avatarUrl = null
+                if (requestedMode.equals(PIXEL_AVATAR_MODE, ignoreCase = true)) {
+                    user.avatarConfig = null
+                }
+            }
+        }
         command.avatarConfig?.let { config ->
             val validated = validateAvatarConfig(config, user.id)
             user.avatarConfig = validated.toAvatarConfigJson()
             validated["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
-        }
-        command.avatarImageBase64?.let { encodedImage ->
-            if (encodedImage.isBlank()) {
-                profilePhotos.delete(user.id)
-                user.avatarUrl = null
-                user.avatarMode = NO_AVATAR_MODE
-                user.avatarConfig = null
-            } else {
-                val contentType = command.avatarImageContentType
-                    ?.trim()
-                    ?.lowercase()
-                    ?.takeIf { it in supportedPhotoContentTypes }
-                    ?: throw validation("Profile photo must be a JPEG, PNG, or WebP image.")
-                val bytes = try {
-                    Base64.getDecoder().decode(encodedImage)
-                } catch (_: IllegalArgumentException) {
-                    throw validation("Profile photo data is not valid base64.")
-                }
-                if (bytes.isEmpty() || bytes.size > MAX_PROFILE_PHOTO_BYTES) {
-                    throw validation("Profile photo must be between 1 byte and 512 KB.")
-                }
-                user.avatarUrl = profilePhotos.save(user.id, contentType, bytes)
-                user.avatarMode = PHOTO_AVATAR_MODE
-                user.avatarConfig = null
-            }
         }
         user.updatedAt = Instant.now()
         val saved = users.save(user)
@@ -222,9 +207,7 @@ class ProfileService(
     companion object {
         private const val BUILDER_AVATAR_MODE = "BUILDER"
         private const val PHOTO_AVATAR_MODE = "PHOTO"
-        private const val NO_AVATAR_MODE = "NONE"
-        private const val MAX_PROFILE_PHOTO_BYTES = 512 * 1024
-        private val supportedPhotoContentTypes = setOf("image/jpeg", "image/png", "image/webp")
+        private const val PIXEL_AVATAR_MODE = "PIXEL"
 
         val defaultAvatarConfig: Map<String, String> = mapOf(
             "base" to "base-cat",

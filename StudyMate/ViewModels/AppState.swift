@@ -1246,8 +1246,6 @@ final class AppState: ObservableObject {
 
         if !hasCompletedOnboarding {
             log(.info, "첫 실행 온보딩이 필요합니다.")
-        } else if hasAPIKeyError {
-            log(.warning, "OpenAI API 키가 비어 있습니다.")
         } else {
             log(.info, "앱 상태를 불러왔습니다.")
         }
@@ -2361,7 +2359,6 @@ final class AppState: ObservableObject {
         guard !trimmedAPIKey.isEmpty || isBackendOpenAIKeyConfigured else {
             hasAPIKeyError = true
             errorMessage = strings.apiKeyEmptyDetailed
-            log(.warning, "시작 시 API 키 검증을 건너뛰었습니다. API 키가 비어 있습니다.")
             return
         }
 
@@ -2908,32 +2905,6 @@ final class AppState: ObservableObject {
             onFailure: { error in
                 handleCommunityError(error)
                 log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
-            },
-            onCompletion: {
-                isUpdatingCommunityProfile = false
-            }
-        )
-    }
-
-    func updateCommunityProfilePhoto(_ imageData: Data?) async {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-photo") else {
-            return
-        }
-        isUpdatingCommunityProfile = true
-        await actionRunner.run(
-            operation: {
-                try await communityUseCase.updateProfilePhoto(
-                    registration: registration,
-                    imageData: imageData
-                )
-            },
-            onSuccess: { profile in
-                updateProfileAvatarImageData(imageData)
-                applyCommunityProfile(profile)
-            },
-            onFailure: { error in
-                handleCommunityError(error)
-                log(.warning, "프로필 사진 저장 실패: \(error.localizedDescription)")
             },
             onCompletion: {
                 isUpdatingCommunityProfile = false
@@ -5428,12 +5399,15 @@ final class AppState: ObservableObject {
 
         await refreshPermissionEvaluations(reason: "terms-agreement")
         await refreshTermsAndNotificationPreferences(reason: "terms-agreement")
-        if activeTerms.filter(\.required).allSatisfy(\.agreed) {
-            isRequiredTermsGatePresented = false
+        let hasAcceptedAllRequiredTerms = [BackendTermsType.termsOfService, .privacyPolicy].allSatisfy { type in
+            activeTerms.first(where: { $0.type == type })?.agreed == true
         }
-        if isAgreed, let retry = pendingTermsRequirementRetry {
-            pendingTermsRequirementRetry = nil
-            await retry()
+        if hasAcceptedAllRequiredTerms {
+            isRequiredTermsGatePresented = false
+            if isAgreed, let retry = pendingTermsRequirementRetry {
+                pendingTermsRequirementRetry = nil
+                await retry()
+            }
         }
         return true
     }
@@ -5454,12 +5428,15 @@ final class AppState: ObservableObject {
                 return
             }
             await self.refreshPermissionEvaluations(reason: "terms-agreement-background")
-            if self.activeTerms.filter(\.required).allSatisfy(\.agreed) {
-                self.isRequiredTermsGatePresented = false
+            let hasAcceptedAllRequiredTerms = [BackendTermsType.termsOfService, .privacyPolicy].allSatisfy { type in
+                self.activeTerms.first(where: { $0.type == type })?.agreed == true
             }
-            if isAgreed, let retry = self.pendingTermsRequirementRetry {
-                self.pendingTermsRequirementRetry = nil
-                await retry()
+            if hasAcceptedAllRequiredTerms {
+                self.isRequiredTermsGatePresented = false
+                if isAgreed, let retry = self.pendingTermsRequirementRetry {
+                    self.pendingTermsRequirementRetry = nil
+                    await retry()
+                }
             }
         }
     }

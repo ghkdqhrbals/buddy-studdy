@@ -32,4 +32,29 @@ final class PageAccessPolicyTests: XCTestCase {
 
         XCTAssertTrue(session.isCurrent(session.generation))
     }
+
+    func testTermsAgreementBackendErrorRoutesToAgreementGate() throws {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "TERMS_AGREEMENT_REQUIRED",
+            "code": 302,
+            "message": "Latest terms agreement is required.",
+            "requestId": "request-1",
+            "status": 403
+          }
+        }
+        """
+        let envelope = try JSONDecoder().decode(
+            BackendAPIErrorResponse.self,
+            from: Data(payload.utf8)
+        )
+        let error = RemotePushBackendError.httpStatus(403, payload, envelope.error)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.requiresTermsAgreement)
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertNil(resolution.featureMessage)
+    }
 }

@@ -7,8 +7,6 @@ data class ProfileUpdateRequest(
     val avatarColorSeed: String? = null,
     val avatarMode: String? = null,
     val avatarConfig: Map<String, String>? = null,
-    val avatarImageBase64: String? = null,
-    val avatarImageContentType: String? = null,
 )
 
 data class AvatarUpdateRequest(

@@ -561,16 +561,33 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(ProfileAvatarOption.defaultSymbolName, "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-buddy"), "pixel-fox")
         XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-robot"), "pixel-tutor-bot")
-        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "sparkles"), "pixel-chick")
-        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-book-pup"), "ProfileAvatarBookPup")
-        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-fox"), "ProfileAvatarFox")
-        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-owl"), "ProfileAvatarOwl")
-        XCTAssertEqual(ProfileAvatarOption.assetName(for: "pixel-deer"), "ProfileAvatarDeer")
-        XCTAssertEqual(ProfileAvatarOption.all.count, 20)
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "sparkles"), "pixel-fox")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-book-pup"), "pixel-explorer")
+        XCTAssertEqual(ProfileAvatarOption.canonicalName(for: "pixel-cat-laptop"), "pixel-cat")
+        XCTAssertEqual(ProfileAvatarOption.all.count, 13)
         XCTAssertEqual(ProfileAvatarOption.all.first, "pixel-fox")
         XCTAssertTrue(ProfileAvatarOption.all.allSatisfy { $0.hasPrefix("pixel-") })
         XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-buddy"))
-        XCTAssertFalse(ProfileAvatarOption.all.contains("pixel-scholar"))
+        XCTAssertTrue(ProfileAvatarOption.all.contains("pixel-scholar"))
+    }
+
+    func testLoadingPixelAvatarCacheRemovesLegacyProfilePhotoData() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveProfileAvatarImageData(Data([0x01, 0x02, 0x03]))
+        let useCase = CommunityProfileCacheUseCase(
+            repository: SettingsStoreCommunityProfileCacheRepository(settingsStore: store)
+        )
+
+        let cache = useCase.loadAvatarCache { "avatar-color-sage" }
+
+        XCTAssertNil(cache.imageData)
+        XCTAssertNil(store.loadProfileAvatarImageData())
     }
 
     @MainActor

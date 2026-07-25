@@ -319,11 +319,10 @@ Response:
 }
 ```
 
-`PATCH /api/v1/profile` also accepts `avatarImageBase64` and
-`avatarImageContentType` (`image/jpeg`, `image/png`, or `image/webp`) for a
-profile photo up to 512 KB. Send an empty `avatarImageBase64` to remove the
-photo. The returned `avatarUrl` is a public, read-only
-`GET /api/v1/profile/photo/{userId}` URL.
+`PATCH /api/v1/profile` accepts the pixel-avatar fields
+`avatarSymbolName`, `avatarColorSeed`, and `avatarMode`. New profile-photo
+uploads are not supported. Saving a non-photo avatar removes any legacy
+profile photo associated with the account.
 
 Profile endpoints:
 

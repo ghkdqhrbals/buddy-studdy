@@ -25,7 +25,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.Optional
-import java.util.Base64
 
 class ProfileServiceAccountDeletionTest {
     private val users = InMemoryUserPort()
@@ -87,29 +86,32 @@ class ProfileServiceAccountDeletionTest {
     }
 
     @Test
-    fun `update profile stores and serves a user photo without a generated avatar`(): Unit = runBlocking {
+    fun `switching to a pixel avatar removes the legacy profile photo`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
                 provider = "GOOGLE",
-                providerId = "photo-user",
-                email = "photo@example.com",
+                providerId = "pixel-user",
+                email = "pixel@example.com",
                 status = "ACTIVE",
-                displayName = "Photo User",
+                displayName = "Pixel User",
+                avatarUrl = "https://api.example.com/api/v1/profile/photo/1",
+                avatarMode = "PHOTO",
             )
         )
-        val bytes = "jpeg-bytes".toByteArray()
+        photos.save(activeUser.id, "image/jpeg", "photo".toByteArray())
 
         val response = service.updateProfile(
-            Principal(activeUser.id, "dev-photo", 1, false, "ACTIVE"),
+            Principal(activeUser.id, "dev-pixel", 1, false, "ACTIVE"),
             com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand(
-                avatarImageBase64 = Base64.getEncoder().encodeToString(bytes),
-                avatarImageContentType = "image/jpeg",
+                avatarSymbolName = "pixel-coder",
+                avatarColorSeed = "avatar-color-sage",
+                avatarMode = "PIXEL",
             ),
         )
 
-        assertThat(response.avatarUrl).contains("/api/v1/profile/photo/${activeUser.id}")
-        assertThat(response.avatarMode).isEqualTo("PHOTO")
-        assertThat(service.profilePhoto(activeUser.id).bytes).isEqualTo(bytes)
+        assertThat(response.avatarMode).isEqualTo("PIXEL")
+        assertThat(response.avatarUrl).isNull()
+        assertThat(photos.load(activeUser.id)).isNull()
     }
 
     @Test

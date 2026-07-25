@@ -637,15 +637,17 @@ private struct HistoryRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 13)
+        .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.secondary.opacity(0.1) : Color.secondary.opacity(0.055))
+        .background(
+            isSelected ? Color.green.opacity(0.10) : Color(.secondarySystemBackground)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.secondary.opacity(0.18) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(isSelected ? Color.green.opacity(0.34) : Color.primary.opacity(0.04), lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .textSelection(.disabled)
     }
 

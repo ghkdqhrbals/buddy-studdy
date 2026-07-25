@@ -100,19 +100,13 @@ private struct StudyMateiOSBootstrapView: View {
 private struct FloatingAPIDebugOverlay: View {
     @EnvironmentObject private var appState: AppState
     @State private var isExpanded = false
-    @State private var selectedSource: DebugLogSource = .app
     @State private var committedOffset = CGSize(width: 12, height: 74)
     @State private var suppressTapAction = false
     @State private var selectedLogID: APITrafficLogEntry.ID?
-    @State private var selectedAppLogID: AppLogEntry.ID?
     @GestureState private var dragTranslation: CGSize = .zero
 
     private var recentLogs: [APITrafficLogEntry] {
         Array(appState.apiTrafficLogs.prefix(100))
-    }
-
-    private var recentAppLogs: [AppLogEntry] {
-        appState.appLogs
     }
 
     private var selectedLog: APITrafficLogEntry? {
@@ -122,15 +116,6 @@ private struct FloatingAPIDebugOverlay: View {
         }
 
         return recentLogs.first
-    }
-
-    private var selectedAppLog: AppLogEntry? {
-        if let selectedAppLogID,
-           let selectedAppLog = recentAppLogs.first(where: { $0.id == selectedAppLogID }) {
-            return selectedAppLog
-        }
-
-        return recentAppLogs.first
     }
 
     private var latestLog: APITrafficLogEntry? {
@@ -232,19 +217,7 @@ private struct FloatingAPIDebugOverlay: View {
 
             if isExpanded {
                 Divider()
-
-                Picker("Log source", selection: $selectedSource) {
-                    Text("App").tag(DebugLogSource.app)
-                    Text("API").tag(DebugLogSource.api)
-                }
-                .pickerStyle(.segmented)
-
-                switch selectedSource {
-                case .app:
-                    appLogContent
-                case .api:
-                    apiLogContent
-                }
+                apiLogContent
             }
         }
         .padding(10)
@@ -254,50 +227,6 @@ private struct FloatingAPIDebugOverlay: View {
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
-    }
-
-    @ViewBuilder
-    private var appLogContent: some View {
-        if recentAppLogs.isEmpty {
-            Text("아직 앱 로그가 없습니다.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Recent App Logs")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Text("\(appState.appLogPageStart)-\(appState.appLogPageEnd)/\(appState.appLogTotalCount)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: apiLogRowSpacing) {
-                        ForEach(recentAppLogs) { log in
-                            Button {
-                                selectedAppLogID = log.id
-                            } label: {
-                                appLogRow(log, isSelected: selectedAppLog?.id == log.id)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: appLogListHeight, alignment: .top)
-
-                if let selectedAppLog {
-                    Divider()
-                    debugSection(title: "Message", value: selectedAppLog.message, isError: selectedAppLog.level == .error)
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -370,38 +299,6 @@ private struct FloatingAPIDebugOverlay: View {
         }
     }
 
-    private func appLogRow(_ entry: AppLogEntry, isSelected: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text(entry.level.displayName)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(entry.level == .error ? .red : (entry.level == .warning ? .orange : .secondary))
-
-                Text(entry.createdAt.formatted(date: .omitted, time: .standard))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 4)
-            }
-
-            Text(entry.message)
-                .font(.caption2.monospaced())
-                .foregroundStyle(entry.level == .error ? .red : .primary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.04))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
-        }
-        .contentShape(Rectangle())
-    }
-
     private func apiLogRow(_ entry: APITrafficLogEntry, isSelected: Bool) -> some View {
         HStack(spacing: 7) {
             Text(entry.method)
@@ -448,15 +345,6 @@ private struct FloatingAPIDebugOverlay: View {
         let contentHeight = (CGFloat(visibleRows) * apiLogRowHeight)
             + (CGFloat(max(0, visibleRows - 1)) * apiLogRowSpacing)
         return min(apiLogListMaxHeight, contentHeight)
-    }
-
-    private var appLogListHeight: CGFloat {
-        guard !recentAppLogs.isEmpty else {
-            return 0
-        }
-
-        let visibleRows = min(recentAppLogs.count, 5)
-        return min(190, CGFloat(visibleRows) * 42)
     }
 
     private var apiLogRowHeight: CGFloat {
@@ -624,10 +512,6 @@ private struct FloatingAPIDebugOverlay: View {
     }
 }
 
-private enum DebugLogSource: Hashable {
-    case app
-    case api
-}
 #endif
 
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {

@@ -104,8 +104,6 @@ private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
     avatarColorSeed = avatarColorSeed,
     avatarMode = avatarMode,
     avatarConfig = avatarConfig,
-    avatarImageBase64 = avatarImageBase64,
-    avatarImageContentType = avatarImageContentType,
 )
 
 private fun AvatarUpdateRequest.toCommand() = AvatarUpdateCommand(

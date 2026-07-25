@@ -947,7 +947,7 @@ private struct StatsOverviewSection: View {
             }
         }
         .padding(14)
-        .background(Color.secondary.opacity(0.055))
+        .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -1234,13 +1234,13 @@ private struct StatsYearGrass: View {
     private func color(for count: Int) -> Color {
         switch count {
         case 6...:
-            return .accentColor
+            return Color.green.opacity(0.94)
         case 4...5:
-            return .accentColor.opacity(0.78)
+            return Color.green.opacity(0.74)
         case 2...3:
-            return .accentColor.opacity(0.54)
+            return Color.green.opacity(0.54)
         case 1:
-            return .accentColor.opacity(0.32)
+            return Color.green.opacity(0.31)
         default:
             return Color.secondary.opacity(0.13)
         }

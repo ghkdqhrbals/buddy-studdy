@@ -118,16 +118,6 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
-    func updateProfilePhoto(
-        registration: RemotePushRegistration,
-        imageData: Data?
-    ) async throws -> CommunityUserProfile {
-        try await backendClient.updateProfilePhoto(
-            registration: registration,
-            imageData: imageData
-        )
-    }
-
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
         try await backendClient.withdrawMyProfile(registration: registration)
     }

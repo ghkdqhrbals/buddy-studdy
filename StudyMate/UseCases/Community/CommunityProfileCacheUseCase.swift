@@ -15,6 +15,10 @@ struct CommunityProfileCacheUseCase {
     }
 
     func loadAvatarCache(generateColorSeed: () -> String) -> CommunityProfileAvatarCache {
+        if repository.loadProfileAvatarImageData() != nil {
+            repository.saveProfileAvatarImageData(nil)
+        }
+
         let colorSeed: String
         if let cachedColorSeed = repository.loadProfileAvatarColorSeed()?.trimmingCharacters(in: .whitespacesAndNewlines),
            !cachedColorSeed.isEmpty {
@@ -27,7 +31,7 @@ struct CommunityProfileCacheUseCase {
 
         return CommunityProfileAvatarCache(
             symbolName: repository.loadProfileAvatarSymbolName(),
-            imageData: repository.loadProfileAvatarImageData(),
+            imageData: nil,
             colorSeed: colorSeed,
             config: repository.loadProfileAvatarConfig()
         )
