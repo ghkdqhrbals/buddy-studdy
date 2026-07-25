@@ -2,13 +2,13 @@
 
 ## Decision
 
-BuddyStudy runtime persistence uses Spring Data R2DBC with the PostgreSQL R2DBC driver. The migration covers the complete database request path:
+BuddyStudy runtime persistence uses Spring Data R2DBC with the MySQL R2DBC driver. The migration covers the complete database request path:
 
 - WebFlux controllers and security filters call suspending inbound ports.
 - Application services implement suspending use cases.
 - Outbound persistence ports expose suspending operations.
 - Persistence adapters use coroutine repositories, `R2dbcEntityTemplate`, or `DatabaseClient`.
-- PostgreSQL connections come from `r2dbc-pool`.
+- MySQL connections come from `r2dbc-pool`.
 - Reactive transactions are propagated through Reactor context.
 
 JPA, Hibernate, Hikari, `JdbcTemplate`, and `EntityManager` are not used for runtime requests. Flyway deliberately keeps a JDBC connection for startup-only schema migration.
@@ -24,12 +24,12 @@ sequenceDiagram
     participant C as Client
     participant T as Request or worker thread
     participant J as JPA/JDBC
-    participant P as PostgreSQL
+    participant P as MySQL
 
     C->>T: Request
     T->>J: Repository call
     J->>P: Blocking socket operation
-    Note over T,P: Thread remains occupied while PostgreSQL works
+    Note over T,P: Thread remains occupied while MySQL works
     P-->>J: Rows
     J-->>T: Managed entity
     T-->>C: Response
@@ -43,7 +43,7 @@ sequenceDiagram
     participant E as Netty event loop
     participant K as Coroutine
     participant R as R2DBC driver
-    participant P as PostgreSQL
+    participant P as MySQL
 
     C->>E: Request
     E->>K: Start suspend handler
@@ -111,7 +111,7 @@ Scheduled question processing uses a two-phase lease:
 - Use `DatabaseClient` for joins, aggregates, upserts, locking/claim queries, or database-specific SQL.
 - Keep SQL in outbound persistence adapters. Application services depend on outbound ports rather than R2DBC APIs.
 - Use parameter binding for all values. The shared indexed-binding helper expands collection arguments into individual bind markers.
-- PostgreSQL natural-key counters and read models use explicit upsert statements so concurrent updates do not rely on a read-then-insert race.
+- MySQL natural-key counters and read models use explicit upsert statements so concurrent updates do not rely on a read-then-insert race.
 
 ## Pool And Backpressure
 
@@ -123,19 +123,19 @@ Current defaults:
 | Maximum connections | 10 | `DB_POOL_MAX` |
 | Maximum idle time | 30 minutes | `DB_POOL_MAX_IDLE_TIME` |
 | Maximum acquisition wait | 5 seconds | `DB_POOL_MAX_ACQUIRE_TIME` |
-| Runtime URL | `r2dbc:postgresql://localhost:5432/buddystudy` | `R2DBC_DATABASE_URL` |
+| Runtime URL | `r2dbc:mysql://localhost:3306/buddystudy` | `R2DBC_DATABASE_URL` |
 
-R2DBC allows many suspended requests, but PostgreSQL still executes work through a finite number of connections. An unbounded number of accepted requests can therefore become an unbounded pending-acquisition queue. The pool, API timeout, scheduler batch size, and database connection limit must be tuned together.
+R2DBC allows many suspended requests, but MySQL still executes work through a finite number of connections. An unbounded number of accepted requests can therefore become an unbounded pending-acquisition queue. The pool, API timeout, scheduler batch size, and database connection limit must be tuned together.
 
-Do not raise `DB_POOL_MAX` solely to improve RPS. More connections can increase context switching, lock contention, working-set memory, and query latency. First fix query plans and transaction duration, then increase concurrency only while PostgreSQL CPU, I/O, locks, and memory remain healthy.
+Do not raise `DB_POOL_MAX` solely to improve RPS. More connections can increase context switching, lock contention, working-set memory, and query latency. First fix query plans and transaction duration, then increase concurrency only while MySQL CPU, I/O, locks, and memory remain healthy.
 
 ## Flyway And Schema Compatibility
 
 Flyway remains JDBC because it runs synchronously before request serving. Configure it separately from runtime R2DBC:
 
 ```text
-R2DBC_DATABASE_URL=r2dbc:postgresql://db:5432/buddystudy
-DATABASE_URL=jdbc:postgresql://db:5432/buddystudy
+R2DBC_DATABASE_URL=r2dbc:mysql://db:3306/buddystudy
+DATABASE_URL=jdbc:mysql://db:3306/buddystudy
 DATABASE_USERNAME=...
 DATABASE_PASSWORD=...
 ```
@@ -159,11 +159,11 @@ The database request path is non-blocking. Deliberate blocking boundaries are is
 - Redis Stream `XREAD BLOCK`: invoked only by Spring `@Scheduled` polling threads; stream publication and ACK use reactive Redis APIs.
 - JavaMail SMTP: the library is synchronous, so delivery runs on `Dispatchers.IO`.
 
-Google OAuth, LibreTranslate, Slack, APNs, Redis request operations, and PostgreSQL runtime access use asynchronous clients. A new blocking integration must either be replaced with an asynchronous client or be explicitly isolated and load-tested.
+Google OAuth, LibreTranslate, Slack, APNs, Redis request operations, and MySQL runtime access use asynchronous clients. A new blocking integration must either be replaced with an asynchronous client or be explicitly isolated and load-tested.
 
 ## Performance Expectations
 
-R2DBC is expected to reduce platform-thread growth when concurrency is high and requests spend meaningful time waiting for PostgreSQL. It does not guarantee higher RPS or lower latency. Results depend on query cost, pool size, transaction duration, database capacity, serialization, security lookups, external APIs, and client behavior.
+R2DBC is expected to reduce platform-thread growth when concurrency is high and requests spend meaningful time waiting for MySQL. It does not guarantee higher RPS or lower latency. Results depend on query cost, pool size, transaction duration, database capacity, serialization, security lookups, external APIs, and client behavior.
 
 Use the existing load harness at stages of 1,000, 1,500, 2,000, 2,500, and 3,000 requested RPS. Compare identical MVC/JDBC and WebFlux/R2DBC builds using:
 
@@ -173,7 +173,7 @@ Use the existing load harness at stages of 1,000, 1,500, 2,000, 2,500, and 3,000
 - RSS, JVM heap/non-heap, allocation rate, and GC pauses;
 - total JVM threads and Reactor Netty event-loop utilization;
 - R2DBC acquired, idle, pending, timeout, and acquisition latency metrics;
-- PostgreSQL active connections, CPU, I/O, query latency, lock waits, and deadlocks.
+- MySQL active connections, CPU, I/O, query latency, lock waits, and deadlocks.
 
 Warm both variants, use the same dataset and indexes, run at least three rounds per stage, and report variance. A health endpoint or empty-table test is not representative of application persistence.
 
@@ -201,7 +201,7 @@ Then verify:
 - no request-path `.block()`, `runBlocking`, or JDBC data access;
 - security session/device lookup suspends through R2DBC;
 - mutation paths explicitly save changed relational entities;
-- integration tests exercise PostgreSQL-specific SQL using Testcontainers;
+- integration tests exercise MySQL-specific SQL using Testcontainers;
 - Flyway can migrate the same schema before R2DBC startup;
 - rollback, generated IDs, upserts, pagination, and concurrent claim behavior are covered.
 

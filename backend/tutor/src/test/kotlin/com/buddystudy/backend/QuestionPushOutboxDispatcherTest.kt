@@ -27,7 +27,7 @@ import java.time.Instant
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class QuestionPushOutboxDispatcherTest : PostgresIntegrationTestSupport() {
+class QuestionPushOutboxDispatcherTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var outbox: QuestionPushOutboxRepository
 
     @BeforeEach

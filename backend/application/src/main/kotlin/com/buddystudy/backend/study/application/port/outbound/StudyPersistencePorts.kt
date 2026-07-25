@@ -119,23 +119,3 @@ interface QuestionMembershipPort {
     suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
     suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
 }
-
-interface QuestionSearchTranslationPort {
-    suspend fun translateSearchText(
-        sourceLanguage: String,
-        targetLanguage: String,
-        topic: String,
-        question: String,
-        answer: String?,
-        feedback: String?,
-        explanation: String?,
-    ): TranslatedQuestionSearchText
-}
-
-data class TranslatedQuestionSearchText(
-    val topic: String,
-    val question: String,
-    val answer: String?,
-    val feedback: String?,
-    val explanation: String?,
-)

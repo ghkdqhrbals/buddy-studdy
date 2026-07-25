@@ -9,12 +9,12 @@ Linux host or Linux VM. Do not use Docker Desktop Kubernetes for this runtime.
 Linux host or VM
   systemd
     k3s
-      PostgreSQL
-      Redis Cluster + Redis Cluster proxy
+      MySQL
+      Redis
       BuddyStuddy backend
       Admin frontend
       LibreTranslate
-      PostgreSQL backup CronJob
+      MySQL backup CronJob
 ```
 
 ## Why k3s
@@ -30,20 +30,17 @@ better fit for a small always-on single-node server.
 - 2 vCPU / 4 GiB memory minimum recommended.
 - Ports:
   - `30080/tcp`: backend NodePort
-  - `30432/tcp`: PostgreSQL NodePort
-  - `30379/tcp`: Redis Cluster proxy NodePort
+  - `30432/tcp`: MySQL NodePort
+  - `6379/tcp`: Redis host port
 - Images must be available in GHCR, or configure `ghcr-pull-secret`.
 
 ## Persistent Data
 
 k3s stores BuddyStuddy data on the host:
 
-- PostgreSQL: `/var/lib/buddystudy/postgres`
-- Redis:
-  - `/var/lib/buddystudy/redis/redis-0`
-  - `/var/lib/buddystudy/redis/redis-1`
-  - `/var/lib/buddystudy/redis/redis-2`
-- PostgreSQL backups: `/var/lib/buddystudy/backups/postgres`
+- MySQL: `/var/lib/buddystudy/mysql`
+- Redis: `/var/lib/buddystudy/redis/standalone`
+- MySQL backups: `/var/lib/buddystudy/backups/mysql`
 
 The Kubernetes PV reclaim policy is `Retain`. Do not delete these host
 directories unless data loss is intended.
@@ -86,27 +83,22 @@ Cloudflared should run on the same Linux host and route:
 
 - `api.lowfidev.cloud` -> `http://localhost:30080`
 - DB administration via Tailscale/private network -> `<host-ip>:30432`
-- Redis administration via Tailscale/private network -> `<host-ip>:30379`
+- Redis administration via Tailscale/private network -> `<host-ip>:6379`
 
-Do not expose PostgreSQL or Redis publicly without a private network or
+Do not expose MySQL or Redis publicly without a private network or
 additional authentication layer.
 
 ## Migration From Docker Desktop Kubernetes
 
 1. Stop writes from the app/backend.
-2. Dump PostgreSQL from the old runtime:
-   ```sh
-   pg_dump -h <old-host> -p 5432 -U buddystudy -d buddystudy -Fc > buddystudy.dump
-   pg_dump -h <old-host> -p 5432 -U buddystudy -d buddystudy_aggregation -Fc > buddystudy_aggregation.dump
-   ```
+2. Export and transform the old PostgreSQL data according to
+   [`MYSQL_MIGRATION.md`](../MYSQL_MIGRATION.md). PostgreSQL dumps cannot be
+   restored directly with the MySQL client.
 3. Install k3s and apply manifests on the Linux host.
-4. Restore into the new PostgreSQL:
-   ```sh
-   pg_restore -h <new-host> -p 30432 -U buddystudy -d buddystudy --clean --if-exists buddystudy.dump
-   pg_restore -h <new-host> -p 30432 -U buddystudy -d buddystudy_aggregation --clean --if-exists buddystudy_aggregation.dump
-   ```
-5. Redis is cache/stream runtime state. Recreate Redis Cluster rather than
-   copying Docker Desktop Redis node metadata.
+4. Import the transformed rows into MySQL, validate row counts and foreign-key
+   integrity, then set each table's next `AUTO_INCREMENT` value.
+5. Redis is cache/stream runtime state. Recreate the standalone Redis instance
+   rather than copying Docker Desktop runtime metadata.
 6. Switch Cloudflared/DNS to the k3s host.
 7. Verify `/health`, DB, Redis, scheduler, push, and admin dashboard.
 
@@ -120,8 +112,8 @@ additional authentication layer.
   ```sh
   sudo journalctl -u k3s -f
   ```
-- Redis Cluster health:
+- Redis health:
   ```sh
   kubectl -n buddystudy exec buddystudy-redis-0 -- \
-    sh -c 'redis-cli -a "$REDIS_PASSWORD" cluster info'
+    sh -c 'redis-cli -a "$REDIS_PASSWORD" ping'
   ```

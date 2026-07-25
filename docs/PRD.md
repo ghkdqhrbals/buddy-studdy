@@ -70,7 +70,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Sync And Push
 
-1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in PostgreSQL.
+1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in MySQL.
 2. The app keeps records only as an in-memory view cache during a running session. It must not persist study records in a local SQLite database.
 3. iCloud/CloudKit sync is no longer exposed or enabled; backend persistence is the active sync path.
 4. Only the regular OpenAI API key is supported; admin keys are not supported.

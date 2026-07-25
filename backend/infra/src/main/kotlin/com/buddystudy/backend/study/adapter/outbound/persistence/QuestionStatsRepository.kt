@@ -66,12 +66,12 @@ class QuestionStatsPersistenceAdapter(
             ) values (
                 :questionId, :likeCount, :commentCount, :viewCount, :verifiedAt, :updatedAt
             )
-            on conflict (question_id) do update set
-                like_count = excluded.like_count,
-                comment_count = excluded.comment_count,
-                view_count = excluded.view_count,
-                verified_at = excluded.verified_at,
-                updated_at = excluded.updated_at
+            on duplicate key update
+                like_count = values(like_count),
+                comment_count = values(comment_count),
+                view_count = values(view_count),
+                verified_at = values(verified_at),
+                updated_at = values(updated_at)
             """.trimIndent(),
         ).bind("questionId", entity.questionId)
             .bind("likeCount", entity.likeCount)

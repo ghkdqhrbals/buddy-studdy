@@ -4,7 +4,6 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
@@ -248,8 +247,6 @@ class NotificationServiceTest {
 
     private class FakeRedisEventOutbox : RedisEventOutboxPort {
         val notifications = mutableListOf<NotificationRequestCommand>()
-
-        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long = 1
 
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             notifications += command

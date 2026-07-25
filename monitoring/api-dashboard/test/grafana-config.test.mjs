@@ -162,8 +162,8 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     "Root disk",
     "Network counters",
     "R2DBC connection pool",
-    "PostgreSQL CPU",
-    "PostgreSQL connections",
+    "MySQL CPU",
+    "MySQL connections",
     "Redis activity",
     "Redis failures",
   ]) {
@@ -183,18 +183,18 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     /dbPoolMaxAllocated/,
   );
   assert.match(
-    panels.get("PostgreSQL CPU")?.targets[0].expr ?? "",
+    panels.get("MySQL CPU")?.targets[0].expr ?? "",
     /databaseCpuPercent/,
   );
   assert.match(
-    panels.get("PostgreSQL connections")?.targets[2].expr ?? "",
+    panels.get("MySQL connections")?.targets[2].expr ?? "",
     /databaseMaxConnections/,
   );
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
 });
 
-test("backend deploy starts a log-only PostgreSQL runtime collector", async () => {
+test("backend deploy starts a log-only MySQL runtime collector", async () => {
   const [deployTemplate, collector] = await Promise.all([
     fs.readFile(backendDeployTemplatePath, "utf8"),
     fs.readFile(databaseCollectorPath, "utf8"),
@@ -208,7 +208,8 @@ test("backend deploy starts a log-only PostgreSQL runtime collector", async () =
   assert.match(deployTemplate, /docker volume create buddystudy-profile-photos/);
   assert.match(deployTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
   assert.match(collector, /docker stats --no-stream/);
-  assert.match(collector, /current_setting\('max_connections'\)/);
+  assert.match(collector, /@@max_connections/);
+  assert.match(collector, /performance_schema\.threads/);
   assert.match(collector, /databaseCpuPercent/);
   assert.match(collector, /databaseMaxConnections/);
   assert.doesNotMatch(collector, /POSTGRES_PASSWORD/);

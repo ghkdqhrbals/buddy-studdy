@@ -5,7 +5,5 @@ resources:
   - ../kubernetes
 
 patches:
-  - path: patches/postgres-linux-hostpath.yaml
-  - path: patches/redis-linux-hostpath-0.yaml
-  - path: patches/redis-linux-hostpath-1.yaml
-  - path: patches/redis-linux-hostpath-2.yaml
+  - path: patches/mysql-linux-hostpath.yaml
+  - path: patches/redis-linux-hostpath.yaml

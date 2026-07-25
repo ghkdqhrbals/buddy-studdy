@@ -174,7 +174,7 @@ class ScheduledJobRunPersistenceAdapter(
 }
 
 @Repository
-class PostgresAdvisoryJobLockAdapter(
+class MySqlAdvisoryJobLockAdapter(
     private val connectionFactory: ConnectionFactory,
 ) : JobLockPort {
     private val heldConnections = ConcurrentHashMap<String, Connection>()
@@ -183,9 +183,9 @@ class PostgresAdvisoryJobLockAdapter(
         if (heldConnections.containsKey(jobName)) return false
         val connection = connectionFactory.create().awaitSingle()
         return try {
-            val result = connection.createStatement("select pg_try_advisory_lock(hashtext($1)) as acquired")
+            val result = connection.createStatement("select get_lock(?, 0) as acquired")
                 .bind(0, jobName).execute().awaitSingle()
-            val acquired = result.map { row, _ -> row.get("acquired", java.lang.Boolean::class.java)!!.booleanValue() }
+            val acquired = result.map { row, _ -> (row.get("acquired") as Number).toInt() == 1 }
                 .awaitSingle()
             if (acquired && heldConnections.putIfAbsent(jobName, connection) == null) true
             else {
@@ -201,14 +201,14 @@ class PostgresAdvisoryJobLockAdapter(
     override suspend fun release(jobName: String) {
         val connection = heldConnections.remove(jobName) ?: return
         try {
-            val result = connection.createStatement("select pg_advisory_unlock(hashtext($1)) as released")
+            val result = connection.createStatement("select release_lock(?) as released")
                 .bind(0, jobName)
                 .execute()
                 .awaitSingle()
             val released = result
-                .map { row, _ -> row.get("released", java.lang.Boolean::class.java)?.booleanValue() ?: false }
+                .map { row, _ -> (row.get("released") as? Number)?.toInt() == 1 }
                 .awaitSingle()
-            check(released) { "PostgreSQL advisory lock was not held for job: $jobName" }
+            check(released) { "MySQL advisory lock was not held for job: $jobName" }
         } finally {
             connection.close().awaitFirstOrNull()
         }

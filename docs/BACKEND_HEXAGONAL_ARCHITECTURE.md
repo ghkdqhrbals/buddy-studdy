@@ -2,14 +2,14 @@
 
 ## Context
 
-BuddyStudy backend is a Spring Boot Kotlin service that owns device registration, authentication, study settings, question generation, grading, records, public questions, reports, statistics, APNs push, OpenAI calls, PostgreSQL persistence, and Redis stream coordination.
+BuddyStudy backend is a Spring Boot Kotlin service that owns device registration, authentication, study settings, question generation, grading, records, public questions, reports, statistics, APNs push, OpenAI calls, MySQL persistence, and Redis stream coordination.
 
 The backend is split into Gradle modules: `domain`, `application`, `infra`, and `tutor`. Each module is still grouped by feature packages such as `auth`, `study`, `community`, and `settings`.
 
 ## Goals
 
 - Keep API behavior stable while changing internal structure.
-- Make use cases testable without Spring, PostgreSQL, APNs, OpenAI, or Redis.
+- Make use cases testable without Spring, MySQL, APNs, OpenAI, or Redis.
 - Separate incoming adapters, application ports, application services, domain model, and outgoing adapters.
 - Keep each feature domain readable: `auth`, `study`, `community`, `profile`, `settings`, `admin`.
 - Avoid a large-bang rewrite; migrate one use-case group at a time.
@@ -17,7 +17,7 @@ The backend is split into Gradle modules: `domain`, `application`, `infra`, and 
 ## Non-Goals
 
 - Changing API paths or response contracts.
-- Replacing JPA, PostgreSQL, Redis stream coordinator, APNs, or OpenAI.
+- Replacing JPA, MySQL, Redis stream coordinator, APNs, or OpenAI.
 - Introducing CQRS or event sourcing for all domain state.
 - Moving iOS client logic in this refactor.
 

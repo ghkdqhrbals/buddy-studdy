@@ -2,7 +2,7 @@
 
 This harness compares BuddyStudy's MVC/JDBC reference (`eca7e320`) with the
 current WebFlux/R2DBC runtime under the same fixture, JVM-visible CPU count,
-heap, PostgreSQL pool size, and request validation rules.
+heap, MySQL pool size, and request validation rules.
 
 It deliberately uses two load models:
 
@@ -57,7 +57,7 @@ GENERATOR_NETWORK_CAPACITY_MBPS=<measured-link-capacity>
 backend/loadtest/run-comparison.sh
 ```
 
-Use the MacBook Pro as the API/PostgreSQL/Redis target and the MacBook Air as
+Use the MacBook Pro as the API/MySQL/Redis target and the MacBook Air as
 the generator:
 
 ```bash
@@ -128,7 +128,7 @@ telemetry at equal throughput.
 - JVM: process CPU/RSS, heap, non-heap, direct memory, allocation, GC, OS and
   JVM threads.
 - Runtime: Tomcat busy workers or Reactor Netty pending work.
-- PostgreSQL: CPU, memory, connections, active/waiting queries, buffer cache
+- MySQL: CPU, memory, connections, active/waiting queries, buffer cache
   hit rate.
 - Redis: CPU, memory, clients, operations, misses, eviction, rejection.
 - Generator: host and process CPU, memory use, RSS, transmitted and received
@@ -143,7 +143,7 @@ Each run creates:
 
 - `raw/`: untouched k6 and nGrinder summaries
 - `timeseries/`: one-second tool series
-- `telemetry/`: target JVM, PostgreSQL, and Redis JSONL
+- `telemetry/`: target JVM, MySQL, and Redis JSONL
 - `generator-telemetry/`: load-generator JSONL
 - `diagnostics/` and `jfr/`: diagnostic-profile artifacts
 - `recovery/`: internal readiness samples collected during cooldown; excluded
@@ -185,7 +185,7 @@ summaries.
   NIC errors/drops occur, configured network capacity reaches 95%, or mandatory
   generator telemetry is absent.
 - k6 saturation starts when achieved throughput is under 95% of target, error
-  rate exceeds 1%, dropped iterations occur, or PostgreSQL waiting queries are
+  rate exceeds 1%, dropped iterations occur, or MySQL waiting queries are
   observed.
 - The immediately preceding stage is sustainable only with error rate below
   0.1% and no dropped requests.
@@ -219,5 +219,5 @@ rendering, and deterministic normalization tests:
 backend/loadtest/static-check.sh
 ```
 
-All real load runs use disposable local PostgreSQL and Redis containers. Never
+All real load runs use disposable local MySQL and Redis containers. Never
 point this harness at production.

@@ -20,7 +20,7 @@ conclusion requires both tools to reproduce the same direction.
 | Reactive candidate | Explicit WebFlux ref, normally `HEAD` |
 | JVM heap | 512 MiB fixed |
 | JVM visible processors | 4 |
-| PostgreSQL pool | 10 |
+| MySQL pool | 10 |
 | Fixture | 1 user, 100 studies, 500 public questions |
 | Logging | API exchange logger off for primary capacity |
 | Background jobs | Disabled |
@@ -36,7 +36,7 @@ remain fixed.
 1. Record both machine specifications and tool versions; reject generator
    clock skew over two seconds or insufficient target disk.
 2. Build both Git refs.
-3. Start disposable PostgreSQL and Redis and seed the fixed fixture.
+3. Start disposable MySQL and Redis and seed the fixed fixture.
 4. Run body-validating smoke checks.
 5. Run three alternating k6 rounds from 1,000 through 3,000 RPS for each
    isolated API: public questions, then authenticated studies.
@@ -62,7 +62,7 @@ a time series and makes transient throughput or latency collapse visible.
 
 The load generator must not steal CPU, memory bandwidth, or sockets from the
 API and database. The MacBook Air runs k6 or the temporary nGrinder stack. The
-MacBook Pro runs both candidate APIs, PostgreSQL, and Redis. Generator
+MacBook Pro runs both candidate APIs, MySQL, and Redis. Generator
 telemetry is a validity gate rather than an informational afterthought.
 The metadata records the generator's CPU count, memory, disk headroom,
 architecture, k6/Docker versions, round-trip time, and measured clock skew so a

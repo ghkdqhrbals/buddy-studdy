@@ -7,16 +7,16 @@ metadata:
 ---
 apiVersion: v1
 data:
-  ADMIN_ANALYTICS_DATABASE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy_aggregation
+  ADMIN_ANALYTICS_DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy_aggregation?serverTimezone=UTC
   ADMIN_ANALYTICS_DATABASE_USERNAME: buddystudy
   APP_PORT: "8080"
   BUDDYSTUDY_STREAMS_KEY: buddystudy-events-v1
   BUDDYSTUDY_TRANSLATION_BASE_URL: http://buddystudy-libretranslate:5000
-  DATABASE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
+  DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy?serverTimezone=UTC
   DATABASE_USERNAME: buddystudy
   ENABLE_OPENAPI_DOCS: "false"
-  FLYWAY_ENABLED: "false"
-  FLYWAY_LOCATIONS: filesystem:/app/db/migration
+  FLYWAY_ENABLED: "true"
+  FLYWAY_LOCATIONS: classpath:db/migration-mysql
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
@@ -27,6 +27,7 @@ data:
   MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: "15"
   MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"
   MONITORING_SERVICE_NAME: BuddyStudy backend
+  R2DBC_DATABASE_URL: r2dbc:mysql://buddystudy-mysql:3306/buddystudy?serverZoneId=UTC
   REACTION_STREAM_ENABLED: "true"
   REDIS_HOST: buddystudy-redis
   REDIS_PORT: "6379"
@@ -34,9 +35,9 @@ data:
   SCHEDULER_BATCH_SIZE: "50"
   SCHEDULER_ENABLED: "true"
   SPRING_CLOUD_AWS_SECRETSMANAGER_ENABLED: "false"
-  SPRING_DATASOURCE_URL: jdbc:postgresql://buddystudy-postgres:5432/buddystudy
+  SPRING_DATASOURCE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy?serverTimezone=UTC
   SPRING_DATASOURCE_USERNAME: buddystudy
-  SPRING_FLYWAY_ENABLED: "false"
+  SPRING_FLYWAY_ENABLED: "true"
   SPRING_PROFILES_ACTIVE: dev
 kind: ConfigMap
 metadata:
@@ -48,15 +49,14 @@ metadata:
 apiVersion: v1
 data:
   01-create-aggregation-db.sql: |
-    SELECT 'CREATE DATABASE buddystudy_aggregation'
-    WHERE NOT EXISTS (
-      SELECT FROM pg_database WHERE datname = 'buddystudy_aggregation'
-    )\gexec
+    CREATE DATABASE IF NOT EXISTS buddystudy_aggregation
+      CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    GRANT ALL PRIVILEGES ON buddystudy_aggregation.* TO 'buddystudy'@'%';
 kind: ConfigMap
 metadata:
   labels:
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres-init
+  name: buddystudy-mysql-init
   namespace: buddystudy
 ---
 apiVersion: v1
@@ -116,18 +116,18 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/name: buddystudy-mysql
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres
+  name: buddystudy-mysql
   namespace: buddystudy
 spec:
   ports:
-  - name: postgres
+  - name: mysql
     nodePort: 30432
-    port: 5432
-    targetPort: postgres
+    port: 3306
+    targetPort: mysql
   selector:
-    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/name: buddystudy-mysql
     app.kubernetes.io/part-of: buddystudy
   type: NodePort
 ---
@@ -152,16 +152,16 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   labels:
-    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/name: buddystudy-mysql
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres-data
+  name: buddystudy-mysql-data
 spec:
   accessModes:
   - ReadWriteOnce
   capacity:
     storage: 20Gi
   hostPath:
-    path: /Users/gyuminhwangbo/data/buddystudy/db/postgres
+    path: /Users/gyuminhwangbo/data/buddystudy/db/mysql
     type: DirectoryOrCreate
   persistentVolumeReclaimPolicy: Retain
   storageClassName: buddystudy-local
@@ -204,7 +204,7 @@ kind: PersistentVolumeClaim
 metadata:
   labels:
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres-backups
+  name: buddystudy-mysql-backups
   namespace: buddystudy
 spec:
   accessModes:
@@ -218,7 +218,7 @@ kind: PersistentVolumeClaim
 metadata:
   labels:
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres-data
+  name: buddystudy-mysql-data
   namespace: buddystudy
 spec:
   accessModes:
@@ -228,7 +228,7 @@ spec:
       storage: 20Gi
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystudy-postgres
+      app.kubernetes.io/name: buddystudy-mysql
   storageClassName: buddystudy-local
 ---
 apiVersion: v1
@@ -343,7 +343,7 @@ spec:
         readinessProbe:
           failureThreshold: 12
           httpGet:
-            path: /health
+            path: /api/v1/health/dependencies
             port: http
           initialDelaySeconds: 15
           periodSeconds: 10
@@ -424,71 +424,72 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   labels:
-    app.kubernetes.io/name: buddystudy-postgres
+    app.kubernetes.io/name: buddystudy-mysql
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres
+  name: buddystudy-mysql
   namespace: buddystudy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: buddystudy-postgres
+      app.kubernetes.io/name: buddystudy-mysql
       app.kubernetes.io/part-of: buddystudy
-  serviceName: buddystudy-postgres
+  serviceName: buddystudy-mysql
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: buddystudy-postgres
+        app.kubernetes.io/name: buddystudy-mysql
         app.kubernetes.io/part-of: buddystudy
     spec:
       containers:
       - env:
-        - name: POSTGRES_DB
+        - name: MYSQL_DATABASE
           value: buddystudy
-        - name: POSTGRES_USER
+        - name: MYSQL_USER
           value: buddystudy
-        - name: POSTGRES_PASSWORD
+        - name: MYSQL_PASSWORD
           valueFrom:
             secretKeyRef:
               key: DATABASE_PASSWORD
               name: buddystudy-backend-secret
-        image: postgres:16-alpine
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_PASSWORD
+              name: buddystudy-backend-secret
+        image: mysql:8.4
         imagePullPolicy: IfNotPresent
         livenessProbe:
           exec:
             command:
-            - pg_isready
-            - -U
-            - buddystudy
-            - -d
-            - buddystudy
-          initialDelaySeconds: 30
+            - sh
+            - -c
+            - mysqladmin ping -h 127.0.0.1 -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent
+          initialDelaySeconds: 40
           periodSeconds: 20
-        name: postgres
+        name: mysql
         ports:
-        - containerPort: 5432
-          name: postgres
+        - containerPort: 3306
+          name: mysql
         readinessProbe:
           exec:
             command:
-            - pg_isready
-            - -U
-            - buddystudy
-            - -d
-            - buddystudy
-          initialDelaySeconds: 5
+            - sh
+            - -c
+            - mysqladmin ping -h 127.0.0.1 -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent
+          initialDelaySeconds: 10
           periodSeconds: 10
         volumeMounts:
-        - mountPath: /var/lib/postgresql/data
+        - mountPath: /var/lib/mysql
           name: data
         - mountPath: /docker-entrypoint-initdb.d
           name: init-scripts
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: buddystudy-postgres-data
+          claimName: buddystudy-mysql-data
       - configMap:
-          name: buddystudy-postgres-init
+          name: buddystudy-mysql-init
         name: init-scripts
 ---
 apiVersion: apps/v1
@@ -565,9 +566,9 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   labels:
-    app.kubernetes.io/name: buddystudy-postgres-backup
+    app.kubernetes.io/name: buddystudy-mysql-backup
     app.kubernetes.io/part-of: buddystudy
-  name: buddystudy-postgres-backup
+  name: buddystudy-mysql-backup
   namespace: buddystudy
 spec:
   failedJobsHistoryLimit: 3
@@ -579,7 +580,7 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: buddystudy-postgres-backup
+            app.kubernetes.io/name: buddystudy-mysql-backup
             app.kubernetes.io/part-of: buddystudy
         spec:
           containers:
@@ -587,25 +588,29 @@ spec:
             - sh
             - -c
             - |
-              set -euo pipefail
+              set -eu
               ts="$(date -u +%Y%m%dT%H%M%SZ)"
               mkdir -p /backups
-              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy > "/backups/buddystudy-${ts}.dump"
-              pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy_aggregation > "/backups/buddystudy-aggregation-${ts}.dump"
-              find /backups -type f -name "buddystudy*.dump" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
+              mysqldump --single-transaction --quick --routines --triggers \
+                -h "${MYSQL_HOST}" -u "${MYSQL_USER}" buddystudy \
+                | gzip > "/backups/buddystudy-${ts}.sql.gz"
+              mysqldump --single-transaction --quick --routines --triggers \
+                -h "${MYSQL_HOST}" -u "${MYSQL_USER}" buddystudy_aggregation \
+                | gzip > "/backups/buddystudy-aggregation-${ts}.sql.gz"
+              find /backups -type f -name "buddystudy*.sql.gz" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
             env:
-            - name: PGHOST
-              value: buddystudy-postgres
-            - name: PGUSER
+            - name: MYSQL_HOST
+              value: buddystudy-mysql
+            - name: MYSQL_USER
               value: buddystudy
-            - name: PGPASSWORD
+            - name: MYSQL_PWD
               valueFrom:
                 secretKeyRef:
                   key: DATABASE_PASSWORD
                   name: buddystudy-backend-secret
             - name: BACKUP_RETENTION_DAYS
               value: "14"
-            image: postgres:16-alpine
+            image: mysql:8.4
             imagePullPolicy: IfNotPresent
             name: backup
             volumeMounts:
@@ -615,6 +620,6 @@ spec:
           volumes:
           - name: backups
             persistentVolumeClaim:
-              claimName: buddystudy-postgres-backups
+              claimName: buddystudy-mysql-backups
   schedule: 0 18 * * *
   successfulJobsHistoryLimit: 3

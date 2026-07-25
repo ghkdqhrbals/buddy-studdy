@@ -7,8 +7,6 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
-import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
@@ -59,7 +57,6 @@ class StudyService(
     private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteManager,
     private val recordWriter: StudyRecordWriteManager,
-    private val questionSearch: QuestionSearchSyncManager,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
     @RequirePermission(Permissions.STUDY_CREATE)
@@ -160,7 +157,6 @@ class StudyService(
             recordId = recordId,
             answer = answer,
             grade = graded,
-            user = user,
             now = Instant.now(),
         )
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
@@ -175,7 +171,7 @@ class StudyService(
         } else {
             questions.findVisibleByUserAndQuery(principal.userId, includePending = false, search, pageable)
         }
-        return RecordsPageResponse(page.content.toRecordResponses(language), page.totalElements, limit, offset)
+        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
     }
 
     @Transactional(readOnly = true)
@@ -194,7 +190,6 @@ class StudyService(
         return question.toStudyRecord(questionStats.findById(id))
             .toProjection()
             .toRecordResponse()
-            .withTranslatedText(questionSearch.findIndexedQuestion(question.id, language))
     }
 
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
@@ -303,17 +298,13 @@ class StudyService(
         return questionCoverage.selectNext(study.id)
     }
 
-    private suspend fun List<QuestionEntity>.toRecordResponses(language: String = "ko"): List<StudyRecordResponse> {
+    private suspend fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
-        val translatedByQuestionId = associate { question ->
-            question.id to questionSearch.findIndexedQuestion(question.id, language)
-        }
         return map { question ->
             question.toStudyRecord(statsByQuestionId[question.id])
                 .toProjection()
                 .toRecordResponse()
-                .withTranslatedText(translatedByQuestionId[question.id])
         }
     }
 }
@@ -356,18 +347,6 @@ private suspend fun String.normalizedQuestionKey(): String =
     lowercase()
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()
-
-private suspend fun StudyRecordResponse.withTranslatedText(translated: QuestionSearchEntity?): StudyRecordResponse {
-    if (translated == null) return this
-    return copy(
-        question = question.copy(question = translated.question),
-        answer = translated.answer ?: answer,
-        gradingResult = gradingResult?.copy(
-            feedback = translated.feedback ?: gradingResult.feedback,
-            explanation = translated.explanation ?: gradingResult.explanation,
-        ),
-    )
-}
 
 internal val studyNotificationMapper = jacksonObjectMapper().findAndRegisterModules()
 

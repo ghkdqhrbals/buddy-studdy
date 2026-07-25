@@ -1,7 +1,5 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
-import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -26,7 +24,6 @@ class ScheduledQuestionWriteManager(
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
-    private val outbox: RedisEventOutboxPort,
     private val notifications: PublishNotificationUseCase,
 ) {
     @Transactional
@@ -55,14 +52,6 @@ class ScheduledQuestionWriteManager(
         questionKeys.markQuestionCreated(questionKey, now)
         study.markScheduleCompleted(now)
         studies.save(study)
-        outbox.appendQuestionCreated(
-            QuestionCreatedOutboxEvent(
-                eventId = "question-created-${saved.id}",
-                questionId = saved.id,
-                language = appLanguage,
-                createdAt = now,
-            ),
-        )
         notifications.publish(saved.toQuestionNotification(study, appLanguage))
         return saved
     }

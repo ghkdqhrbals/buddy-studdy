@@ -41,7 +41,7 @@ dependencies {
     implementation("org.jooq:jooq:3.21.6")
     implementation("org.jooq:jooq-kotlin-coroutines:3.21.6")
 
-    runtimeOnly("org.postgresql:r2dbc-postgresql")
+    runtimeOnly("io.asyncer:r2dbc-mysql")
     runtimeOnly("io.r2dbc:r2dbc-pool")
 
     jooqCodegen("org.jooq:jooq-meta-extensions:3.21.6")
@@ -51,28 +51,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-val flywayMigrations = fileTree(project(":tutor").projectDir.resolve("src/main/resources/db/migration")) {
-    include("V*__*.sql")
-}
-val outboxDdlFile = layout.buildDirectory.file("generated-jooq/redis-event-outbox.sql")
-val prepareOutboxJooqDdl by tasks.registering {
-    inputs.files(flywayMigrations)
-    outputs.file(outboxDdlFile)
-
-    doLast {
-        val migrations = flywayMigrations.files
-            .filter { it.readText().contains("redis_event_outbox", ignoreCase = true) }
-            .sortedBy { file ->
-                file.name.substringAfter('V').substringBefore("__")
-                    .split('.', '_')
-                    .joinToString(".") { part -> part.padStart(10, '0') }
-            }
-        check(migrations.isNotEmpty()) { "No Flyway migration defines redis_event_outbox." }
-        val output = outboxDdlFile.get().asFile
-        output.parentFile.mkdirs()
-        output.writeText(migrations.joinToString("\n\n") { it.readText() })
-    }
-}
+val outboxDdlFile = projectDir.resolve("src/main/resources/jooq/redis-event-outbox.sql")
 
 jooq {
     configuration {
@@ -83,7 +62,7 @@ jooq {
                 properties {
                     property {
                         key = "scripts"
-                        value = outboxDdlFile.get().asFile.absolutePath
+                        value = outboxDdlFile.absolutePath
                     }
                     property {
                         key = "sort"
@@ -114,8 +93,7 @@ jooq {
 }
 
 tasks.named("jooqCodegen") {
-    dependsOn(prepareOutboxJooqDdl)
-    inputs.files(flywayMigrations)
+    inputs.file(outboxDdlFile)
 }
 
 tasks.named("compileKotlin") {

@@ -21,7 +21,7 @@ import org.thymeleaf.spring6.SpringTemplateEngine
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ],
 )
-class AdminPageRouteTest : PostgresIntegrationTestSupport() {
+class AdminPageRouteTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var context: ApplicationContext
     @Autowired lateinit var controller: AdminPageController
 

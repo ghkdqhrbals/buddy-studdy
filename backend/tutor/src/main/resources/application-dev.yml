@@ -4,7 +4,7 @@ spring:
       on-profile: dev
     import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}
   r2dbc:
-    url: ${R2DBC_DATABASE_URL:r2dbc:postgresql://localhost:5432/buddystudy}
+    url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:buddystudy}
     password: ${DATABASE_PASSWORD:local-password}
   flyway:

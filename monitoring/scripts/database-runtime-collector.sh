@@ -2,7 +2,7 @@
 set -eu
 
 interval_seconds="${DATABASE_METRICS_INTERVAL_SECONDS:-30}"
-postgres_container="${POSTGRES_CONTAINER:-buddystudy-db}"
+mysql_container="${MYSQL_CONTAINER:-buddystudy-db}"
 
 number_or_null() {
   case "${1:-}" in
@@ -19,7 +19,7 @@ while true; do
   captured_at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
   captured_at_epoch_ms="$(( $(date +%s) * 1000 ))"
   resource_sample="$(
-    docker stats --no-stream --format '{{.CPUPerc}}|{{.MemPerc}}' "${postgres_container}" 2>/dev/null \
+    docker stats --no-stream --format '{{.CPUPerc}}|{{.MemPerc}}' "${mysql_container}" 2>/dev/null \
       | head -n 1 \
       | tr -d '%'
   )"
@@ -35,12 +35,16 @@ while true; do
   fi
   connection_sample="$(
     docker exec \
-      -e PGUSER="${POSTGRES_USER}" \
-      -e PGDATABASE="${POSTGRES_DB}" \
-      "${postgres_container}" \
-      psql -At -F '|' -c \
-      "select current_setting('max_connections')::int, count(*)::int, count(*) filter (where state = 'active')::int from pg_stat_activity;" \
-      2>/dev/null || true
+      -e MYSQL_PWD="${MYSQL_PASSWORD}" \
+      "${mysql_container}" \
+      mysql -N -B -h 127.0.0.1 -u "${MYSQL_USER}" "${MYSQL_DATABASE}" -e \
+      "select @@max_connections,
+              count(*),
+              coalesce(sum(processlist_command <> 'Sleep'), 0)
+       from performance_schema.threads
+       where type = 'FOREGROUND' and processlist_id is not null;" \
+      2>/dev/null \
+      | tr '\t' '|' || true
   )"
 
   max_connections=""

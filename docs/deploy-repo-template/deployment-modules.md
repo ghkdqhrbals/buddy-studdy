@@ -7,7 +7,7 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only PostgreSQL runtime observer |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
@@ -53,16 +53,17 @@ deployment.
   Secrets Manager. Required values such as `OPENAI_API_KEY` must be validated
   before writing the container env file so an optional Spring config import
   cannot silently start a partially configured backend.
-- PostgreSQL credentials and connection URLs are owned by the
-  `buddystudy/prod/postgres` secret. It contains `dbname`, `username`,
+- MySQL credentials and connection URLs are owned by the
+  `buddystudy/prod/mysql` secret. It contains `dbname`, `username`,
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC
   and R2DBC settings from that secret. A legacy host password file is migrated
   into the secret once and is not the continuing configuration source.
 - The backend deploy runs `buddystudy-db-metrics`, a port-free Docker CLI
-  observer that logs PostgreSQL container CPU, total/active connections, and
+  observer that logs MySQL container CPU, total/active connections, and
   the live `max_connections` setting every 30 seconds. Promtail forwards these
-  `database_runtime` records to Loki. The observer receives no database
-  password and is not a Prometheus/exporter service.
+  `database_runtime` records to Loki. The observer receives its MySQL password
+  through a private container environment, never logs it, and is not a
+  Prometheus/exporter service.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.

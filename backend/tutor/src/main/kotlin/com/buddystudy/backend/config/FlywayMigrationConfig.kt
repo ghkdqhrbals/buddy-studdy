@@ -1,7 +1,7 @@
 package com.buddystudy.backend.config
 
 import org.flywaydb.core.Flyway
-import org.postgresql.ds.PGSimpleDataSource
+import com.mysql.cj.jdbc.MysqlDataSource
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -15,7 +15,7 @@ class FlywayMigrationConfig {
         val dataSource = FlywayDataSourceSettings.from(environment).toDataSource()
         return Flyway.configure()
             .dataSource(dataSource)
-            .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration").split(",").map { it.trim() }.toTypedArray())
+            .locations(*environment.getProperty("spring.flyway.locations", "classpath:db/migration-mysql").split(",").map { it.trim() }.toTypedArray())
             .baselineOnMigrate(environment.getProperty("spring.flyway.baseline-on-migrate", Boolean::class.java, true))
             .baselineVersion(environment.getProperty("spring.flyway.baseline-version", "0"))
             .validateOnMigrate(
@@ -55,11 +55,11 @@ internal data class FlywayDataSourceSettings(
     val username: String,
     val password: String,
 ) {
-    fun toDataSource(): PGSimpleDataSource =
-        PGSimpleDataSource().also {
+    fun toDataSource(): MysqlDataSource =
+        MysqlDataSource().also {
             it.setURL(url)
             it.user = username
-            it.password = password
+            it.setPassword(password)
         }
 
     companion object {
@@ -68,7 +68,7 @@ internal data class FlywayDataSourceSettings(
                 url =
                     environment.firstNonBlank("spring.flyway.url", "DATABASE_URL")
                         ?: environment.firstNonBlank("spring.r2dbc.url")?.toJdbcUrl()
-                        ?: "jdbc:postgresql://localhost:5432/buddystudy",
+                        ?: "jdbc:mysql://localhost:3306/buddystudy?serverTimezone=UTC",
                 username =
                     environment.firstNonBlank(
                         "spring.flyway.user",
@@ -91,7 +91,9 @@ internal data class FlywayDataSourceSettings(
 
         private fun String.toJdbcUrl(): String =
             when {
-                startsWith("r2dbc:postgresql:") -> replaceFirst("r2dbc:postgresql:", "jdbc:postgresql:")
+                startsWith("r2dbc:mysql:") ->
+                    replaceFirst("r2dbc:mysql:", "jdbc:mysql:")
+                        .replace("serverZoneId=", "serverTimezone=")
                 startsWith("r2dbc:") -> removePrefix("r2dbc:").let { "jdbc:$it" }
                 else -> this
             }

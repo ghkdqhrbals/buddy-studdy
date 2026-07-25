@@ -6,8 +6,8 @@ BuddyStudy emits one flat `runtime_metrics` JSON log every 30 seconds. Promtail
 forwards the container log to Loki, and the server dashboard derives runtime,
 database-pool, Reactor Netty, and host-resource charts from those samples.
 The backend deployment also runs a port-free `buddystudy-db-metrics` observer.
-It samples the PostgreSQL container with `docker stats` and reads
-`pg_stat_activity` plus the live `max_connections` setting, then emits one
+It samples the MySQL container with `docker stats` and reads
+`performance_schema.threads` plus the live `@@max_connections` setting, then emits one
 `database_runtime` JSON log every 30 seconds.
 
 This keeps production monitoring compatible with the small-host PLG deployment:
@@ -15,7 +15,7 @@ This keeps production monitoring compatible with the small-host PLG deployment:
 ```text
 Backend Native Image
   -> structured runtime_metrics log
-PostgreSQL + Docker Engine
+MySQL + Docker Engine
   -> structured database_runtime log
 Both
   -> Promtail
@@ -60,8 +60,8 @@ The collector follows these rules:
 | Network | `/proc/net/dev` | Loopback is excluded |
 | Open files | `/proc/self/fd` | Linux process descriptor count |
 | Database pressure | Spring Boot `r2dbc.pool.*` Micrometer gauges | Acquired, allocated, idle, pending, configured limits |
-| PostgreSQL connection ceiling | `current_setting('max_connections')` and `pg_stat_activity` | Actual server limit plus total and active sessions |
-| PostgreSQL CPU | Docker Engine `stats` for `buddystudy-db` | Container CPU percentage; collected without Prometheus or an exposed metrics port |
+| MySQL connection ceiling | `@@max_connections` and `performance_schema.threads` | Actual server limit plus total foreground and non-sleep sessions |
+| MySQL CPU | Docker Engine `stats` for `buddystudy-db` | Container CPU percentage; collected without Prometheus or an exposed metrics port |
 | Event loop | Reactor Netty Micrometer gauges | Pending tasks, active connections, direct memory |
 | Heap, threads, GC, classes | Micrometer JVM binders | Standard source across JVM and Native Image when available |
 | Binder fallback | R2DBC `PoolMetrics` and `ManagementFactory` | Used per metric when the standard binder is absent |
@@ -76,10 +76,11 @@ Micrometer binders. Their values are sampled into the structured log rather
 than exposing a public metrics endpoint or adding a Prometheus container to the
 small production host.
 
-Grafana does not collect PostgreSQL CPU or settings by itself. The lightweight
+Grafana does not collect MySQL CPU or settings by itself. The lightweight
 observer supplies those measurements through the existing log pipeline. It
-mounts the Docker socket, runs no network listener, receives only the database
-name and user, and never receives or logs the PostgreSQL password.
+mounts the Docker socket, runs no network listener, and receives the database
+credentials only through its private container environment. The password is
+used by the MySQL client and is never written to logs.
 
 ## Failure Diagnosis
 
@@ -94,13 +95,13 @@ When traffic and latency charts have data but runtime charts do not:
 5. Treat missing MXBean-only values as a runtime capability issue, not as proof
    that CPU, memory, or threads are zero.
 
-When R2DBC pool charts have data but PostgreSQL CPU or connection settings do
+When R2DBC pool charts have data but MySQL CPU or connection settings do
 not:
 
 1. Confirm `buddystudy-db-metrics` is running.
 2. Search Loki for `{container="buddystudy-db-metrics"} |= "database_runtime "`.
-3. Confirm the observer can reach the Docker socket and execute read-only
-   `psql` queries inside `buddystudy-db`.
+3. Confirm the observer can reach the Docker socket and execute the
+   `performance_schema.threads` query inside `buddystudy-db`.
 
 The server dashboard surfaces all three states:
 

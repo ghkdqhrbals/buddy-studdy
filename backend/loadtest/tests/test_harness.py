@@ -72,7 +72,11 @@ class HarnessTests(unittest.TestCase):
                     {
                         "process": {"cpu_percent": 50, "rss_bytes": 100, "os_threads": 20},
                         "actuator": {"jvm.heap.used": 50},
-                        "postgres": {"connections_waiting": 0, "blks_hit": 10, "blks_read": 0},
+                        "mysql": {
+                            "connections_waiting": 0,
+                            "buffer_pool_read_requests": 10,
+                            "buffer_pool_reads": 0,
+                        },
                         "redis": {},
                         "containers": {},
                     }

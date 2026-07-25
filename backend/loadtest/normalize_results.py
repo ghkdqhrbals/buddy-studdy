@@ -104,13 +104,13 @@ def server_resources(rows):
     app_rss = nested_values(rows, "process", "rss_bytes")
     app_threads = nested_values(rows, "process", "os_threads")
     actuator = lambda name: nested_values(rows, "actuator", name)
-    postgres = lambda name: nested_values(rows, "postgres", name)
+    mysql = lambda name: nested_values(rows, "mysql", name)
     redis = lambda name: nested_values(rows, "redis", name)
-    pg_cpu = nested_values(
-        rows, "containers", "buddystudy-loadtest-postgres", "cpu_percent"
+    mysql_cpu = nested_values(
+        rows, "containers", "buddystudy-loadtest-mysql", "cpu_percent"
     )
-    pg_memory = nested_values(
-        rows, "containers", "buddystudy-loadtest-postgres", "memory_bytes"
+    mysql_memory = nested_values(
+        rows, "containers", "buddystudy-loadtest-mysql", "memory_bytes"
     )
     redis_cpu = nested_values(
         rows, "containers", "buddystudy-loadtest-redis", "cpu_percent"
@@ -118,10 +118,8 @@ def server_resources(rows):
     redis_memory = nested_values(
         rows, "containers", "buddystudy-loadtest-redis", "memory_bytes"
     )
-    block_hits = postgres("blks_hit")
-    block_reads = postgres("blks_read")
-    hit_delta = counter_delta(block_hits)
-    read_delta = counter_delta(block_reads)
+    read_requests = counter_delta(mysql("buffer_pool_read_requests"))
+    physical_reads = counter_delta(mysql("buffer_pool_reads"))
     allocated = actuator("jvm.gc.allocated.count")
     promoted = actuator("jvm.gc.promoted.count")
     gc_pause_count = actuator("jvm.gc.pause.count")
@@ -145,16 +143,16 @@ def server_resources(rows):
         "nettyPendingTasksPeak": maximum(
             actuator("reactor.pending_tasks") + actuator("reactor.pending_tasks.value")
         ),
-        "databaseConnectionsPeak": maximum(postgres("connections_total")),
-        "databaseActivePeak": maximum(postgres("connections_active")),
-        "databaseWaitingPeak": maximum(postgres("connections_waiting")),
+        "databaseConnectionsPeak": maximum(mysql("connections_total")),
+        "databaseActivePeak": maximum(mysql("connections_active")),
+        "databaseWaitingPeak": maximum(mysql("connections_waiting")),
         "databaseCacheHitPercent": (
-            hit_delta / (hit_delta + read_delta) * 100
-            if hit_delta + read_delta
+            max(0.0, 1 - (physical_reads / read_requests)) * 100
+            if read_requests
             else 100.0
         ),
-        "databaseCpuP95": percentile(pg_cpu, 0.95),
-        "databaseMemoryPeakBytes": maximum(pg_memory),
+        "databaseCpuP95": percentile(mysql_cpu, 0.95),
+        "databaseMemoryPeakBytes": maximum(mysql_memory),
         "redisCpuP95": percentile(redis_cpu, 0.95),
         "redisMemoryPeakBytes": maximum(redis_memory),
         "redisConnectionsPeak": maximum(redis("connected_clients")),

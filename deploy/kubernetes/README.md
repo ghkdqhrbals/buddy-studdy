@@ -12,12 +12,12 @@ or hang its local API server when used as a long-running server runtime.
 - `namespace.yaml`: shared namespace.
 - `config/`: non-secret environment configuration.
 - `secrets/`: placeholder Kubernetes secrets. These are not applied by kustomize.
-- `postgres/`: PostgreSQL StatefulSet, service, hostPath PV/PVC, and init script.
+- `mysql/`: MySQL StatefulSet, service, hostPath PV/PVC, and init script.
 - `redis/`: single-node Redis StatefulSet, service, and hostPath PV/PVC.
 - `libretranslate/`: LibreTranslate Deployment, service, and model PVC.
 - `backend/`: BuddyStudy backend Deployment and service.
 - `admin-frontend/`: admin web frontend Deployment and service.
-- `backup/`: daily PostgreSQL dump CronJob.
+- `backup/`: daily MySQL dump CronJob.
 
 ## Apply
 
@@ -81,7 +81,7 @@ Backend Kubernetes readiness probes use:
 GET /api/v1/health/dependencies
 ```
 
-This endpoint checks only hard serving dependencies such as PostgreSQL and
+This endpoint checks only hard serving dependencies such as MySQL and
 Redis. Do not point Kubernetes readiness probes at
 `/api/v1/health/readiness`, because that endpoint also checks scheduler
 freshness and is meant for external alerting.
@@ -101,7 +101,7 @@ operational cause without taking healthy API pods out of service.
 
 The Mac Kubernetes target stores state on the host:
 
-- PostgreSQL: `/Users/gyuminhwangbo/data/buddystudy/db/postgres`
+- MySQL: `/Users/gyuminhwangbo/data/buddystudy/db/mysql`
 - Redis: `/Users/gyuminhwangbo/data/buddystudy/redis/standalone`
 
 The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
@@ -114,7 +114,7 @@ The Mac Kubernetes target exposes fixed NodePorts. Do not use persistent
 network path and can conflict with Kubernetes services after restarts.
 
 - Backend API: `localhost:30080`
-- PostgreSQL: `localhost:30432`
+- MySQL: `localhost:30432`
 - Redis: `localhost:6379`
 
 Cloudflare should be used in two different modes:
@@ -133,7 +133,7 @@ compatibility TCP hostnames:
 For normal DB/Redis access, run `deploy/cloudflared/setup-private-route.sh` or
 use Tailscale, then connect to:
 
-- PostgreSQL: `<macbook-air-lan-ip-or-tailscale-ip>:30432`
+- MySQL: `<macbook-air-lan-ip-or-tailscale-ip>:30432`
 - Redis: `<macbook-air-lan-ip-or-tailscale-ip>:6379`
 
 The `buddystudy-redis-proxy` deployment is intentionally removed because it

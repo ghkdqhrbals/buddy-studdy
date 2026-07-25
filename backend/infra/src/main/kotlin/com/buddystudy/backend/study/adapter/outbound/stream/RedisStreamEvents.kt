@@ -58,19 +58,6 @@ data class QuestionPushRequestedPayload(
     val createdAt: Instant,
 )
 
-data class QuestionCreatedEvent(
-    val questionId: Long,
-    val language: String,
-    val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
-) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_CREATED, eventId)
-
-data class QuestionCreatedPayload(
-    val questionId: Long,
-    val language: String,
-    val createdAt: Instant,
-)
-
 private val redisStreamEventMapper = jacksonObjectMapper()
     .registerModule(JavaTimeModule())
     .setDefaultPropertyInclusion(Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
@@ -81,19 +68,6 @@ fun QuestionPushRequestedEvent.toRedisStreamFields(): Map<String, String> =
         "eventId" to eventId,
         "eventType" to eventType.name,
         "payload" to redisStreamEventMapper.writeValueAsString(toPayload()),
-    )
-
-fun QuestionCreatedEvent.toRedisStreamFields(): Map<String, String> =
-    mapOf(
-        "eventId" to eventId,
-        "eventType" to eventType.name,
-        "payload" to redisStreamEventMapper.writeValueAsString(
-            QuestionCreatedPayload(
-                questionId = questionId,
-                language = language,
-                createdAt = createdAt,
-            )
-        ),
     )
 
 private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =

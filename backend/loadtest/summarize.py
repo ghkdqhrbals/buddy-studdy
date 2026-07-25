@@ -127,10 +127,8 @@ def load_telemetry_run(directory, runtime, round_number, scenario, target_rps=No
     gc_time = sample_values(samples, "actuator", "jvm.gc.pause.total_time")
     gc_max = sample_values(samples, "actuator", "jvm.gc.pause.max")
     allocated = sample_values(samples, "actuator", "jvm.gc.allocated.count")
-    pg_blks_read = sample_values(samples, "postgres", "blks_read")
-    pg_blks_hit = sample_values(samples, "postgres", "blks_hit")
-    block_reads = counter_delta(pg_blks_read)
-    block_hits = counter_delta(pg_blks_hit)
+    buffer_reads = counter_delta(sample_values(samples, "mysql", "buffer_pool_reads"))
+    buffer_read_requests = counter_delta(sample_values(samples, "mysql", "buffer_pool_read_requests"))
 
     return {
         "samples": len(samples),
@@ -163,12 +161,15 @@ def load_telemetry_run(directory, runtime, round_number, scenario, target_rps=No
             "reactor.pending_tasks",
             "reactor.pending_tasks.value",
         ),
-        "pg_connections_max": max_value(sample_values(samples, "postgres", "connections_total")),
-        "pg_active_max": max_value(sample_values(samples, "postgres", "connections_active")),
-        "pg_waiting_max": max_value(sample_values(samples, "postgres", "connections_waiting")),
-        "pg_cache_hit_percent": (block_hits / (block_hits + block_reads) * 100) if block_hits + block_reads else 100.0,
-        "postgres_cpu_median": median_value(container_values(samples, "buddystudy-loadtest-postgres", "cpu_percent")),
-        "postgres_memory_peak_mib": max_value(container_values(samples, "buddystudy-loadtest-postgres", "memory_bytes")) / 1024**2,
+        "mysql_connections_max": max_value(sample_values(samples, "mysql", "connections_total")),
+        "mysql_active_max": max_value(sample_values(samples, "mysql", "connections_active")),
+        "mysql_waiting_max": max_value(sample_values(samples, "mysql", "connections_waiting")),
+        "mysql_cache_hit_percent": (
+            max(0.0, 1 - (buffer_reads / buffer_read_requests)) * 100
+            if buffer_read_requests else 100.0
+        ),
+        "mysql_cpu_median": median_value(container_values(samples, "buddystudy-loadtest-mysql", "cpu_percent")),
+        "mysql_memory_peak_mib": max_value(container_values(samples, "buddystudy-loadtest-mysql", "memory_bytes")) / 1024**2,
         "redis_cpu_median": median_value(container_values(samples, "buddystudy-loadtest-redis", "cpu_percent")),
         "redis_memory_peak_mib": max_value(container_values(samples, "buddystudy-loadtest-redis", "memory_bytes")) / 1024**2,
         "redis_ops_max": max_value(sample_values(samples, "redis", "instantaneous_ops_per_sec")),
@@ -312,7 +313,7 @@ def main():
                 "",
                 "## Pools and Dependencies",
                 "",
-                "| Endpoint | Target RPS | Runtime | DB pool acquired / pending max | HTTP work active / queued max | PostgreSQL total / active / waiting max | PG cache hit | PG CPU / memory MiB | Redis CPU / memory MiB / ops max |",
+                "| Endpoint | Target RPS | Runtime | DB pool acquired / pending max | HTTP work active / queued max | MySQL total / active / waiting max | InnoDB cache hit | MySQL CPU / memory MiB | Redis CPU / memory MiB / ops max |",
                 "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
@@ -329,9 +330,9 @@ def main():
                     lines.append(
                         f"| {scenario} | {target_rps} | {label} | "
                         f"{pool_active:.0f} / {pool_pending:.0f} | "
-                        f"{worker_active:.0f} / {worker_queued:.0f} | {row['pg_connections_max']:.0f} / "
-                        f"{row['pg_active_max']:.0f} / {row['pg_waiting_max']:.0f} | {row['pg_cache_hit_percent']:.2f}% | "
-                        f"{row['postgres_cpu_median']:.1f}% / {row['postgres_memory_peak_mib']:.1f} | "
+                        f"{worker_active:.0f} / {worker_queued:.0f} | {row['mysql_connections_max']:.0f} / "
+                        f"{row['mysql_active_max']:.0f} / {row['mysql_waiting_max']:.0f} | {row['mysql_cache_hit_percent']:.2f}% | "
+                        f"{row['mysql_cpu_median']:.1f}% / {row['mysql_memory_peak_mib']:.1f} | "
                         f"{row['redis_cpu_median']:.1f}% / {row['redis_memory_peak_mib']:.1f} / {row['redis_ops_max']:.0f} |"
                     )
 

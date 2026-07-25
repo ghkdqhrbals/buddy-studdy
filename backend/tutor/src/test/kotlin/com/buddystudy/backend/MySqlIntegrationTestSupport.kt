@@ -2,11 +2,11 @@ package com.buddystudy.backend
 
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.containers.MySQLContainer
 
-abstract class PostgresIntegrationTestSupport {
+abstract class MySqlIntegrationTestSupport {
     companion object {
-        private val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        private val mysql: MySQLContainer<*> = MySQLContainer("mysql:8.4")
             .withDatabaseName("buddystudy")
             .withUsername("buddystudy")
             .withPassword("buddystudy")
@@ -16,13 +16,14 @@ abstract class PostgresIntegrationTestSupport {
         @JvmStatic
         fun databaseProperties(registry: DynamicPropertyRegistry) {
             registry.add("spring.r2dbc.url") {
-                "r2dbc:postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
+                "r2dbc:mysql://${mysql.host}:${mysql.firstMappedPort}/${mysql.databaseName}?serverZoneId=UTC"
             }
-            registry.add("spring.r2dbc.username", postgres::getUsername)
-            registry.add("spring.r2dbc.password", postgres::getPassword)
-            registry.add("spring.flyway.url", postgres::getJdbcUrl)
-            registry.add("spring.flyway.user", postgres::getUsername)
-            registry.add("spring.flyway.password", postgres::getPassword)
+            registry.add("spring.r2dbc.username", mysql::getUsername)
+            registry.add("spring.r2dbc.password", mysql::getPassword)
+            registry.add("spring.flyway.url", mysql::getJdbcUrl)
+            registry.add("spring.flyway.user", mysql::getUsername)
+            registry.add("spring.flyway.password", mysql::getPassword)
+            registry.add("spring.flyway.locations") { "classpath:db/migration-mysql" }
             registry.add("spring.flyway.enabled") { true }
             registry.add("spring.flyway.validate-on-migrate") { false }
             registry.add("buddystudy.analytics.datasource.database-name") { "" }

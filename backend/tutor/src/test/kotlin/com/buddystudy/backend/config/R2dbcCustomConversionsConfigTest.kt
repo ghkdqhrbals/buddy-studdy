@@ -8,7 +8,7 @@ import java.time.ZoneOffset
 
 class R2dbcCustomConversionsConfigTest {
     @Test
-    fun `converts PostgreSQL offset timestamps to instants`() {
+    fun `converts offset timestamps to instants`() {
         val source = OffsetDateTime.of(2026, 7, 23, 14, 35, 27, 0, ZoneOffset.ofHours(9))
 
         val result = OffsetDateTimeToInstantConverter.convert(source)

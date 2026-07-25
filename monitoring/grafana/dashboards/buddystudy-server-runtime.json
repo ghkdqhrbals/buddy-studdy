@@ -624,7 +624,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
-      "description": "PostgreSQL container CPU utilization sampled with Docker stats every 30 seconds.",
+      "description": "MySQL container CPU utilization sampled with Docker stats every 30 seconds.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -671,11 +671,11 @@
       "targets": [
         {
           "expr": "last_over_time({container=\"buddystudy-db-metrics\"} |= \"database_runtime \" | pattern \"<_> database_runtime <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json databaseCpuPercent=\"databaseCpuPercent\" | unwrap databaseCpuPercent | __error__=\"\" [1m])",
-          "legendFormat": "PostgreSQL CPU",
+          "legendFormat": "MySQL CPU",
           "refId": "A"
         }
       ],
-      "title": "PostgreSQL CPU",
+      "title": "MySQL CPU",
       "type": "timeseries"
     },
     {
@@ -683,7 +683,7 @@
         "type": "loki",
         "uid": "buddystudy-loki"
       },
-      "description": "PostgreSQL pg_stat_activity usage compared with the live max_connections setting.",
+      "description": "MySQL foreground sessions from performance_schema compared with the live max_connections setting.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -742,7 +742,7 @@
           "refId": "C"
         }
       ],
-      "title": "PostgreSQL connections",
+      "title": "MySQL connections",
       "type": "timeseries"
     },
     {

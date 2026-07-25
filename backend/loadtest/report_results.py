@@ -226,7 +226,7 @@ def main():
             f"- Total runs: {len(data['runs'])}",
             f"- Invalid runs: {len(invalid)}",
             "- A run is invalid when load-generator CPU p95 exceeds 80%, memory use exceeds 95%, NIC errors/drops occur, configured link utilization reaches 95%, or mandatory generator telemetry is missing.",
-            "- k6 saturation: achieved throughput below 95% of target, errors above 1%, dropped iterations, or observed PostgreSQL waiting queries.",
+            "- k6 saturation: achieved throughput below 95% of target, errors above 1%, dropped iterations, or observed MySQL waiting queries.",
             "- Sustainable stage: error rate below 0.1%, no dropped iterations, and no saturation signal.",
         ]
     )

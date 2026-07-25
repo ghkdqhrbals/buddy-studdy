@@ -15,7 +15,7 @@ import reactor.core.publisher.Mono
 import java.util.function.BiFunction
 import org.junit.jupiter.api.Test
 
-class PostgresAdvisoryJobLockAdapterTest {
+class MySqlAdvisoryJobLockAdapterTest {
     @Test
     fun `consumes unlock result before returning connection`(): Unit = runBlocking {
         val factory = mock(ConnectionFactory::class.java)
@@ -26,9 +26,9 @@ class PostgresAdvisoryJobLockAdapterTest {
         val releaseResult = mock(Result::class.java)
 
         `when`(factory.create()).thenReturn(Mono.just(connection))
-        `when`(connection.createStatement("select pg_try_advisory_lock(hashtext($1)) as acquired"))
+        `when`(connection.createStatement("select get_lock(?, 0) as acquired"))
             .thenReturn(acquireStatement)
-        `when`(connection.createStatement("select pg_advisory_unlock(hashtext($1)) as released"))
+        `when`(connection.createStatement("select release_lock(?) as released"))
             .thenReturn(releaseStatement)
         `when`(acquireStatement.bind(0, "admin-analytics-recent")).thenReturn(acquireStatement)
         `when`(releaseStatement.bind(0, "admin-analytics-recent")).thenReturn(releaseStatement)
@@ -40,7 +40,7 @@ class PostgresAdvisoryJobLockAdapterTest {
             .thenReturn(Mono.just(true))
         `when`(connection.close()).thenReturn(Mono.empty())
 
-        val adapter = PostgresAdvisoryJobLockAdapter(factory)
+        val adapter = MySqlAdvisoryJobLockAdapter(factory)
 
         assertThat(adapter.tryAcquire("admin-analytics-recent")).isTrue()
         adapter.release("admin-analytics-recent")

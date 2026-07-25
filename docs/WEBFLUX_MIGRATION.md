@@ -2,7 +2,7 @@
 
 ## Current Decision
 
-BuddyStudy runs Spring WebFlux on Reactor Netty and uses Kotlin coroutines at the application boundary. Runtime PostgreSQL access is R2DBC, so authentication, controller, service, and database work can suspend without reserving one platform thread while waiting for database I/O.
+BuddyStudy runs Spring WebFlux on Reactor Netty and uses Kotlin coroutines at the application boundary. Runtime MySQL access is R2DBC, so authentication, controller, service, and database work can suspend without reserving one platform thread while waiting for database I/O.
 
 This document describes the HTTP runtime. The persistence design, transaction semantics, migration risks, and operational tuning are documented in [R2DBC_MIGRATION.md](R2DBC_MIGRATION.md).
 
@@ -15,7 +15,7 @@ sequenceDiagram
     participant S as WebFlux Security
     participant A as Suspend Use Case
     participant R as R2DBC Pool
-    participant P as PostgreSQL
+    participant P as MySQL
 
     C->>N: HTTP request
     N->>S: WebFilter chain
@@ -32,7 +32,7 @@ sequenceDiagram
     N-->>C: HTTP response
 ```
 
-No `webflux-blocking-*` executor exists in the current runtime. Netty event-loop threads initiate asynchronous work and are released while PostgreSQL is processing it.
+No `webflux-blocking-*` executor exists in the current runtime. Netty event-loop threads initiate asynchronous work and are released while MySQL is processing it.
 
 ## MVC And WebFlux
 
@@ -46,11 +46,11 @@ No `webflux-blocking-*` executor exists in the current runtime. Netty event-loop
 | Primary concurrency bound | Servlet threads and JDBC pool | R2DBC connections, pending acquisition, DB capacity |
 | Overload symptom | Worker/connection queue growth | Pending pool acquisition, tail latency, timeouts |
 
-WebFlux does not make CPU-heavy work faster. It also does not increase PostgreSQL query capacity. Its main benefit is avoiding a platform thread per waiting request when the complete call path is non-blocking.
+WebFlux does not make CPU-heavy work faster. It also does not increase MySQL query capacity. Its main benefit is avoiding a platform thread per waiting request when the complete call path is non-blocking.
 
 ## Boundaries
 
-- PostgreSQL request-path I/O uses R2DBC.
+- MySQL request-path I/O uses R2DBC.
 - Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is deliberately confined to Spring scheduler threads, then coroutine listeners launch suspend handlers.
 - Request and response logging streams bounded payload previews without joining unbounded bodies.
 - Flyway uses JDBC only during startup because migration execution is not request traffic.
@@ -81,6 +81,6 @@ cd backend
 ./gradlew :tutor:dependencies --configuration runtimeClasspath
 ```
 
-The runtime classpath must include WebFlux and R2DBC and must not include Spring MVC, Spring Data JPA, Hibernate, or Hikari. The PostgreSQL JDBC driver remains intentionally present for Flyway startup migrations.
+The runtime classpath must include WebFlux and R2DBC and must not include Spring MVC, Spring Data JPA, Hibernate, or Hikari. The MySQL JDBC driver remains intentionally present for Flyway startup migrations.
 
-The executable comparison harness is in [backend/loadtest/README.md](../backend/loadtest/README.md). Compare MVC/JDBC and WebFlux/R2DBC using the same dataset, JVM limits, PostgreSQL instance, Redis instance, warm-up, and arrival-rate stages. A comparison based only on average response time is not sufficient.
+The executable comparison harness is in [backend/loadtest/README.md](../backend/loadtest/README.md). Compare MVC/JDBC and WebFlux/R2DBC using the same dataset, JVM limits, MySQL instance, Redis instance, warm-up, and arrival-rate stages. A comparison based only on average response time is not sufficient.

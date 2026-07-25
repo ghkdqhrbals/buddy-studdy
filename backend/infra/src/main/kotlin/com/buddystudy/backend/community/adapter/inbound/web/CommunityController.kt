@@ -128,7 +128,7 @@ class CommunitySearchV2Controller(
 ) {
     @Operation(
         summary = "Search public completed questions v2",
-        description = "Searches the question_search read model backed by PostgreSQL full-text search. V1 public question listing remains unchanged.",
+        description = "Searches public completed questions directly from the canonical questions table.",
     )
     @ApiResponses(ApiResponse(responseCode = "200", description = "Public questions returned from search v2."))
     @GetMapping("/public/questions/search")

@@ -1,9 +1,9 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: buddystudy-postgres-backup
+  name: buddystudy-mysql-backup
   labels:
-    app.kubernetes.io/name: buddystudy-postgres-backup
+    app.kubernetes.io/name: buddystudy-mysql-backup
 spec:
   schedule: "0 18 * * *"
   successfulJobsHistoryLimit: 3
@@ -13,29 +13,33 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: buddystudy-postgres-backup
+            app.kubernetes.io/name: buddystudy-mysql-backup
         spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              image: postgres:16-alpine
+              image: mysql:8.4
               imagePullPolicy: IfNotPresent
               command:
                 - sh
                 - -c
                 - |
-                  set -euo pipefail
+                  set -eu
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
                   mkdir -p /backups
-                  pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy > "/backups/buddystudy-${ts}.dump"
-                  pg_dump -Fc -h "${PGHOST}" -U "${PGUSER}" -d buddystudy_aggregation > "/backups/buddystudy-aggregation-${ts}.dump"
-                  find /backups -type f -name "buddystudy*.dump" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
+                  mysqldump --single-transaction --quick --routines --triggers \
+                    -h "${MYSQL_HOST}" -u "${MYSQL_USER}" buddystudy \
+                    | gzip > "/backups/buddystudy-${ts}.sql.gz"
+                  mysqldump --single-transaction --quick --routines --triggers \
+                    -h "${MYSQL_HOST}" -u "${MYSQL_USER}" buddystudy_aggregation \
+                    | gzip > "/backups/buddystudy-aggregation-${ts}.sql.gz"
+                  find /backups -type f -name "buddystudy*.sql.gz" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
               env:
-                - name: PGHOST
-                  value: buddystudy-postgres
-                - name: PGUSER
+                - name: MYSQL_HOST
+                  value: buddystudy-mysql
+                - name: MYSQL_USER
                   value: buddystudy
-                - name: PGPASSWORD
+                - name: MYSQL_PWD
                   valueFrom:
                     secretKeyRef:
                       name: buddystudy-backend-secret
@@ -48,15 +52,14 @@ spec:
           volumes:
             - name: backups
               persistentVolumeClaim:
-                claimName: buddystudy-postgres-backups
+                claimName: buddystudy-mysql-backups
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: buddystudy-postgres-backups
+  name: buddystudy-mysql-backups
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 10Gi
-

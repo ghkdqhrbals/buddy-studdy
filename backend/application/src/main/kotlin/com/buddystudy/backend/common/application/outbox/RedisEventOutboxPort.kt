@@ -3,15 +3,7 @@ package com.buddystudy.backend.common.application.outbox
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import java.time.Instant
 
-data class QuestionCreatedOutboxEvent(
-    val eventId: String,
-    val questionId: Long,
-    val language: String,
-    val createdAt: Instant,
-)
-
 enum class RedisOutboxEventType {
-    QUESTION_CREATED,
     NOTIFICATION_REQUESTED,
 }
 
@@ -26,7 +18,6 @@ data class ClaimedRedisOutboxEvent(
 )
 
 interface RedisEventOutboxPort {
-    suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long
     suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant = Instant.now()): Long
     suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent>
     suspend fun markPublished(id: Long, publishedAt: Instant): Boolean

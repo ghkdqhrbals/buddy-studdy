@@ -13,7 +13,7 @@ The Kubernetes services expose fixed local NodePorts on the Mac:
 
 ```text
 Backend API: localhost:30080
-PostgreSQL:   localhost:30432
+MySQL:       localhost:30432
 Redis:        localhost:30379
 ```
 
@@ -52,8 +52,8 @@ Cloudflare Tunnel TCP hostnames are not direct public TCP sockets. Use
 `cloudflared access tcp` locally, then connect your client to the local port:
 
 ```sh
-cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:15432
-psql "postgresql://<user>:<password>@localhost:15432/buddystudy"
+cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:13306
+mysql -h 127.0.0.1 -P 13306 -u <user> -p buddystudy
 ```
 
 ```sh

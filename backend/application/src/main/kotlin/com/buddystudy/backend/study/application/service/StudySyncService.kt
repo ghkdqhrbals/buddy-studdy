@@ -1,7 +1,6 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
@@ -33,7 +32,6 @@ class StudySyncService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
-    private val questionSearch: QuestionSearchSyncManager,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
     override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
@@ -105,8 +103,6 @@ class StudySyncService(
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         val now = Instant.now()
-        questionSearch.removeIndexedStudy(studyId, principal.userId)
-        questionSearch.removeIndexedStudyTopic(principal.userId, study.topic)
         questions.softDeleteByStudyId(studyId, principal.userId, now)
         questions.softDeleteByUserIdAndTopic(principal.userId, study.topic, now)
         val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)

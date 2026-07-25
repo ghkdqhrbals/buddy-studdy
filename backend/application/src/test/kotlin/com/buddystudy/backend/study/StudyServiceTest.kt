@@ -4,14 +4,8 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
-import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
-import com.buddystudy.backend.community.application.port.outbound.QuestionSearchPort
-import com.buddystudy.backend.community.application.port.outbound.SearchResult
-import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
@@ -26,10 +20,8 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingP
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionSearchTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
-import com.buddystudy.backend.study.application.port.outbound.TranslatedQuestionSearchText
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
@@ -37,7 +29,6 @@ import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
 import com.buddystudy.backend.study.application.service.StudyRecordWriteManager
 import com.buddystudy.backend.study.application.service.StudyService
-import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -62,13 +53,6 @@ class StudyServiceTest {
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
-    private val questionSearch = QuestionSearchSyncManager(
-        BuddyStudyProperties(),
-        questions,
-        users,
-        FakeQuestionSearchPort(),
-        FakeQuestionSearchTranslator(),
-    )
     private val service = StudyService(
         properties = properties,
         studies = serviceStudies,
@@ -88,11 +72,9 @@ class StudyServiceTest {
             questionEmbeddings = questionEmbeddings,
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
-            outbox = FakeRedisEventOutbox(),
             notifications = FakeNotificationPublisher(),
         ),
-        recordWriter = StudyRecordWriteManager(questions, questionCoverage, questionSearch),
-        questionSearch = questionSearch,
+        recordWriter = StudyRecordWriteManager(questions, questionCoverage),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -731,43 +713,6 @@ class StudyServiceTest {
             commands += command
             return true
         }
-    }
-
-    private class FakeRedisEventOutbox : RedisEventOutboxPort {
-        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long = 1
-        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long = 1
-        override suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent> = emptyList()
-        override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = true
-        override suspend fun markRetry(
-            id: Long,
-            attempts: Int,
-            nextAttemptAt: Instant,
-            error: String,
-            updatedAt: Instant,
-        ): Boolean = true
-    }
-
-    private class FakeQuestionSearchTranslator : QuestionSearchTranslationPort {
-        override suspend fun translateSearchText(
-            sourceLanguage: String,
-            targetLanguage: String,
-            topic: String,
-            question: String,
-            answer: String?,
-            feedback: String?,
-            explanation: String?,
-        ): TranslatedQuestionSearchText =
-            TranslatedQuestionSearchText(topic, question, answer, feedback, explanation)
-    }
-
-    private class FakeQuestionSearchPort : QuestionSearchPort {
-        override suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity = entity
-        override suspend fun deleteByQuestionId(questionId: Long): Long = 0
-        override suspend fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
-        override suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
-        override suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult = SearchResult(emptyList(), 0)
-        override suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
-        override suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? = null
     }
 
 }

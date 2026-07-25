@@ -76,12 +76,11 @@ Repository variables:
 - `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
 - `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
 - `rsc-coordinator`: Redis Stream Coordinator on Docker network port `8080`, deployed from a GHCR native-image artifact.
-- `buddystudy-db`: private PostgreSQL container on Docker network port `5432`.
-- `buddystudy-postgres-data`: persistent Docker volume for PostgreSQL data.
+- `buddystudy-db`: private MySQL container on Docker network port `3306`.
+- `buddystudy-mysql-data`: persistent Docker volume for MySQL data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
-- `backups/`: local host directory (`/opt/buddystudy-backend/backups`) where `pg_dump` files are written before each deploy.
-- `buddystudy-postgres-data` retains live DB data across restarts and redeploys.
+- `buddystudy-mysql-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
 - If `COORDINATOR_BACKEND_URL` is configured, Nginx also serves `https://coordinator.ghkdqhrbals.org/*` and proxies it to that backend URL.
 - If `COORDINATOR_BACKEND_URL` is configured, `https://api.ghkdqhrbals.org/coord/*` redirects to the coordinator hostname to keep coordinator traffic out of BuddyStudy backend logs.
@@ -115,7 +114,7 @@ The backend workflow expects the EC2 runner to match:
 runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
 ```
 
-Use an ARM instance such as `t4g.medium` when backend, Postgres, Redis,
+Use an ARM instance such as `t4g.medium` when backend, MySQL, Redis,
 coordinator, nginx, and promtail share the host.
 
 ## Admin Frontend Deploy
@@ -127,7 +126,7 @@ directory. The app repository's `Build Admin Frontend Image` workflow dispatches
 Frontend**.
 
 The admin deploy workflow owns only the `buddystudy-admin-frontend` container.
-It must not rebuild backend, recreate Postgres, recreate Loki/Grafana, or run
+It must not rebuild backend, recreate MySQL, recreate Loki/Grafana, or run
 runtime health checks.
 
 ## Monitoring Deploy
@@ -155,7 +154,7 @@ The separate TestZone workflow creates or replaces:
 
 - `buddystudy-testzone-service`: bounded k6 runner and JavaScript workspace API.
 - `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
-- approved disposable PostgreSQL, Redis, or Kafka containers only when a user
+- approved disposable MySQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.
 
 EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
@@ -219,7 +218,7 @@ The deploy process uses a blue/green rolling pattern:
 3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
 4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
 
-Only one scheduler leader is active during overlap windows. PostgreSQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
+Only one scheduler leader is active during overlap windows. MySQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
@@ -251,13 +250,17 @@ different internal name.
 
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 
-## Backup restore (deploy host)
+## Backup restore
 
 ```sh
-docker run --rm \
-  -e PGPASSWORD="<postgres-password>" \
+gunzip -c /absolute/path/buddystudy-<timestamp>.sql.gz | docker run --rm -i \
+  -e MYSQL_PWD="<mysql-password>" \
   --network buddystudy-net \
-  -v "/opt/buddystudy-backend/backups:/backups:ro" \
-  postgres:16-alpine \
-  pg_restore -h buddystudy-db -U buddystudy -d buddystudy /backups/buddystudy-<timestamp>.dump
+  mysql:8.4 \
+  mysql -h buddystudy-db -u buddystudy buddystudy
 ```
+
+The PostgreSQL-to-MySQL cutover is not an in-place container replacement.
+Follow [`MYSQL_MIGRATION.md`](../MYSQL_MIGRATION.md), retain the old
+PostgreSQL volume for rollback, and update `buddystudy/prod/mysql` only after
+row-count and API validation.

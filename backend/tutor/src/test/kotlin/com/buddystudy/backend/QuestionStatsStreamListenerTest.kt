@@ -24,7 +24,7 @@ import org.springframework.test.context.TestPropertySource
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class QuestionStatsStreamListenerTest : PostgresIntegrationTestSupport() {
+class QuestionStatsStreamListenerTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var handler: QuestionStatsStreamEventHandler
     @Autowired lateinit var stats: QuestionStatsPort
 

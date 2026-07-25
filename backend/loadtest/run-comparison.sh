@@ -118,9 +118,9 @@ JAVA_HOME_DIR="$(cd "$(dirname "$JAVA_BIN")/.." && pwd)"
 JCMD_BIN="$JAVA_HOME_DIR/bin/jcmd"
 JFR_BIN="$JAVA_HOME_DIR/bin/jfr"
 
-POSTGRES_CONTAINER="buddystudy-loadtest-postgres"
+MYSQL_CONTAINER="buddystudy-loadtest-mysql"
 REDIS_CONTAINER="buddystudy-loadtest-redis"
-POSTGRES_PORT="${POSTGRES_PORT:-55432}"
+MYSQL_PORT="${MYSQL_PORT:-53306}"
 REDIS_PORT="${REDIS_PORT:-56379}"
 APP_PORT="${APP_PORT:-18080}"
 TARGET_BASE_URL="${TARGET_HOST:-http://127.0.0.1:$APP_PORT}"
@@ -225,7 +225,7 @@ stop_ngrinder() {
 cleanup() {
   cleanup_app
   stop_ngrinder
-  docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f "$MYSQL_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
   if [[ -d "$WORK_DIR/mvc" ]]; then
     git -C "$REPO_DIR" worktree remove --force "$WORK_DIR/mvc" >/dev/null 2>&1 || true
   fi
@@ -340,20 +340,22 @@ start_ngrinder() {
 }
 
 start_dependencies() {
-  docker rm -f "$POSTGRES_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
-  docker run -d --name "$POSTGRES_CONTAINER" \
+  docker rm -f "$MYSQL_CONTAINER" "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+  docker run -d --name "$MYSQL_CONTAINER" \
     --cpus="$JVM_CPU_COUNT" --memory=1g \
-    -p "$POSTGRES_PORT:5432" \
-    -e POSTGRES_DB=buddystudy \
-    -e POSTGRES_USER=buddystudy \
-    -e POSTGRES_PASSWORD=benchmark-password \
-    postgres:16-alpine >/dev/null
+    -p "$MYSQL_PORT:3306" \
+    -e MYSQL_DATABASE=buddystudy \
+    -e MYSQL_USER=buddystudy \
+    -e MYSQL_PASSWORD=benchmark-password \
+    -e MYSQL_ROOT_PASSWORD=benchmark-root-password \
+    mysql:8.4 >/dev/null
   docker run -d --name "$REDIS_CONTAINER" \
     --cpus=1 --memory=256m \
     -p "$REDIS_PORT:6379" redis:7-alpine >/dev/null
 
   for _ in $(seq 1 60); do
-    if docker exec "$POSTGRES_CONTAINER" pg_isready -U buddystudy -d buddystudy >/dev/null 2>&1 && \
+    if docker exec "$MYSQL_CONTAINER" mysqladmin ping -h 127.0.0.1 -u buddystudy \
+         -pbenchmark-password --silent >/dev/null 2>&1 && \
        docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null | grep -q PONG; then
       return
     fi
@@ -364,8 +366,8 @@ start_dependencies() {
 }
 
 reset_dependencies() {
-  docker exec "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U buddystudy -d buddystudy \
-    -c 'drop schema public cascade; create schema public;' >/dev/null
+  docker exec "$MYSQL_CONTAINER" mysql -u root -pbenchmark-root-password \
+    -e 'drop database if exists buddystudy; create database buddystudy character set utf8mb4 collate utf8mb4_0900_ai_ci; grant all privileges on buddystudy.* to '\''buddystudy'\''@'\''%'\'';' >/dev/null
   docker exec "$REDIS_CONTAINER" redis-cli FLUSHALL >/dev/null
 }
 
@@ -408,8 +410,8 @@ start_app() {
   env \
     APP_PORT="$APP_PORT" \
     SPRING_PROFILES_ACTIVE=benchmark \
-    DATABASE_URL="jdbc:postgresql://127.0.0.1:$POSTGRES_PORT/buddystudy" \
-    R2DBC_DATABASE_URL="r2dbc:postgresql://127.0.0.1:$POSTGRES_PORT/buddystudy" \
+    DATABASE_URL="jdbc:mysql://127.0.0.1:$MYSQL_PORT/buddystudy?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" \
+    R2DBC_DATABASE_URL="r2dbc:mysql://127.0.0.1:$MYSQL_PORT/buddystudy" \
     DATABASE_USERNAME=buddystudy \
     DATABASE_PASSWORD=benchmark-password \
     DB_POOL_MAX="$DB_POOL_MAX" \
@@ -456,9 +458,11 @@ seed_data() {
     -d '{"platform":"ios","language":"ko","timezone":"Asia/Seoul","apnsEnvironment":"sandbox","apnsToken":""}')"
   ACCESS_TOKEN="$(jq -er '.accessToken' <<<"$registration")"
   DEVICE_ID="$(jq -er '.deviceId' <<<"$registration")"
-  docker exec -i "$POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 \
-    -v "device_id=$DEVICE_ID" -U buddystudy -d buddystudy \
-    <"$SCRIPT_DIR/fixtures/seed.sql" >/dev/null
+  {
+    printf "set @device_id = '%s';\n" "$DEVICE_ID"
+    cat "$SCRIPT_DIR/fixtures/seed.sql"
+  } | docker exec -i "$MYSQL_CONTAINER" mysql -u buddystudy \
+    -pbenchmark-password buddystudy >/dev/null
   write_token_file
 }
 
@@ -469,7 +473,7 @@ start_server_telemetry() {
     --base-url "http://127.0.0.1:$APP_PORT" \
     --output "$output" \
     --interval "$TELEMETRY_INTERVAL" \
-    --postgres-container "$POSTGRES_CONTAINER" \
+    --mysql-container "$MYSQL_CONTAINER" \
     --redis-container "$REDIS_CONTAINER" &
   TELEMETRY_PID=$!
 }

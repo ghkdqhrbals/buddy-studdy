@@ -20,7 +20,10 @@ class AdminAnalyticsDataSourceConfig {
         primaryConnectionFactory: ConnectionFactory,
     ): AdminAnalyticsDatabaseClient {
         val datasource = properties.analytics.datasource
-        val configured = datasource.url.replace("jdbc:postgresql:", "r2dbc:postgresql:")
+        val configured =
+            datasource.url
+                .replace("jdbc:mysql:", "r2dbc:mysql:")
+                .replace("serverTimezone=", "serverZoneId=")
         val analyticsUrl = configured.ifBlank { AdminAnalyticsR2dbcUrl.derive(primaryUrl, datasource.databaseName) }
         if (analyticsUrl.isBlank()) {
             return AdminAnalyticsDatabaseClient(DatabaseClient.create(primaryConnectionFactory))
@@ -42,7 +45,7 @@ internal object AdminAnalyticsR2dbcUrl {
     private val databasePath = Regex("""/([^/?]+)(\?.*)?$""")
 
     fun derive(primaryUrl: String, analyticsDatabaseName: String): String {
-        if (!primaryUrl.startsWith("r2dbc:postgresql:") || analyticsDatabaseName.isBlank()) return ""
+        if (!primaryUrl.startsWith("r2dbc:mysql:") || analyticsDatabaseName.isBlank()) return ""
         val result = databasePath.find(primaryUrl) ?: return ""
         if (result.groupValues.getOrNull(1).orEmpty() != "buddystudy") return ""
         val query = result.groupValues.getOrNull(2).orEmpty()

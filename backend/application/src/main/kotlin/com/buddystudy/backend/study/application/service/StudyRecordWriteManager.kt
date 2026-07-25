@@ -1,15 +1,11 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import com.buddystudy.backend.common.application.transaction.afterReactiveCommit
-import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.entity.QuestionEntity
-import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -19,17 +15,13 @@ import java.time.Instant
 class StudyRecordWriteManager(
     private val questions: QuestionPort,
     private val questionCoverage: QuestionCoveragePort,
-    private val questionSearch: QuestionSearchSyncManager,
 ) {
-    private val log = LoggerFactory.getLogger(javaClass)
-
     @Transactional
     suspend fun answer(
         userId: Long,
         recordId: Long,
         answer: String,
         grade: GradedAnswer?,
-        user: UserEntity?,
         now: Instant,
     ): QuestionEntity {
         val question = lockRecord(recordId, userId)
@@ -55,18 +47,14 @@ class StudyRecordWriteManager(
                 )
             }
         }
-        return questions.save(question).also { saved ->
-            refreshSearchAfterCommit(saved, user)
-        }
+        return questions.save(question)
     }
 
     @Transactional
     suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().skip())
-        return questions.save(question).also { saved ->
-            refreshSearchAfterCommit(saved, null)
-        }
+        return questions.save(question)
     }
 
     @Transactional
@@ -74,25 +62,13 @@ class StudyRecordWriteManager(
         lockRecord(recordId, userId)
         val deleted = questions.softDelete(recordId, userId, now)
         check(deleted == 1) { "Expected one record to be deleted, but updated $deleted." }
-        afterReactiveCommit {
-            runCatching { questionSearch.removeIndexedQuestion(recordId) }
-                .onFailure { error ->
-                    log.warn(
-                        "record_search_delete_after_commit_failed questionId={} error={}",
-                        recordId,
-                        error.message,
-                    )
-                }
-        }
     }
 
     @Transactional
     suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity {
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().restrictPublicity(isPublic))
-        return questions.save(question).also { saved ->
-            refreshSearchAfterCommit(saved, null)
-        }
+        return questions.save(question)
     }
 
     private suspend fun lockRecord(recordId: Long, userId: Long): QuestionEntity =
@@ -103,21 +79,4 @@ class StudyRecordWriteManager(
                 "Record not found.",
             )
 
-    private suspend fun refreshSearchAfterCommit(question: QuestionEntity, user: UserEntity?) {
-        afterReactiveCommit {
-            runCatching {
-                if (user == null) {
-                    questionSearch.refreshIndexedQuestion(question)
-                } else {
-                    questionSearch.refreshIndexedQuestion(question, user)
-                }
-            }.onFailure { error ->
-                log.warn(
-                    "record_search_refresh_after_commit_failed questionId={} error={}",
-                    question.id,
-                    error.message,
-                )
-            }
-        }
-    }
 }

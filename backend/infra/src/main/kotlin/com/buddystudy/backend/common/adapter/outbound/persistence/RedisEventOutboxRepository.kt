@@ -1,7 +1,6 @@
 package com.buddystudy.backend.common.adapter.outbound.persistence
 
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.jooq.tables.RedisEventOutbox.REDIS_EVENT_OUTBOX
@@ -10,11 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirst
-import kotlinx.coroutines.reactive.awaitFirstOrNull
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
-import java.time.OffsetDateTime
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 @Component
@@ -22,20 +20,6 @@ class RedisEventOutboxRepository(
     private val jooq: JooqR2dbcExecutor,
     private val objectMapper: ObjectMapper,
 ) : RedisEventOutboxPort {
-    override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long =
-        append(
-            eventId = event.eventId,
-            eventType = RedisOutboxEventType.QUESTION_CREATED,
-            payloadJson = objectMapper.writeValueAsString(
-                QuestionCreatedPayload(
-                    questionId = event.questionId,
-                    language = event.language,
-                    createdAt = event.createdAt,
-                ),
-            ),
-            createdAt = event.createdAt,
-        )
-
     override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
         append(
             eventId = command.eventId,
@@ -52,14 +36,14 @@ class RedisEventOutboxRepository(
     ): List<ClaimedRedisOutboxEvent> = jooq.withDsl { dsl ->
         if (limit <= 0) return@withDsl emptyList()
         val table = REDIS_EVENT_OUTBOX
-        val nowOffset = now.toOffsetDateTime()
+        val nowOffset = now.toUtcLocalDateTime()
         val ids = dsl
             .select(table.ID)
             .from(table)
             .where(
                 table.STATUS.eq(PENDING)
                     .and(table.NEXT_ATTEMPT_AT.le(nowOffset))
-                    .or(table.STATUS.eq(PROCESSING).and(table.CLAIMED_AT.le(staleBefore.toOffsetDateTime()))),
+                    .or(table.STATUS.eq(PROCESSING).and(table.CLAIMED_AT.le(staleBefore.toUtcLocalDateTime()))),
             )
             .orderBy(table.CREATED_AT.asc(), table.ID.asc())
             .limit(limit)
@@ -91,14 +75,14 @@ class RedisEventOutboxRepository(
                     payloadVersion = record.payloadVersion,
                     payloadJson = record.payloadJson,
                     attempts = record.attempts,
-                    createdAt = record.createdAt.toInstant(),
+                    createdAt = record.createdAt.toInstant(ZoneOffset.UTC),
                 )
             }
     }
 
     override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = jooq.withDsl { dsl ->
         val table = REDIS_EVENT_OUTBOX
-        val now = publishedAt.toOffsetDateTime()
+        val now = publishedAt.toUtcLocalDateTime()
         dsl.update(table)
             .set(table.STATUS, PUBLISHED)
             .set(table.PUBLISHED_AT, now)
@@ -120,10 +104,10 @@ class RedisEventOutboxRepository(
         dsl.update(table)
             .set(table.STATUS, PENDING)
             .set(table.ATTEMPTS, attempts)
-            .set(table.NEXT_ATTEMPT_AT, nextAttemptAt.toOffsetDateTime())
+            .set(table.NEXT_ATTEMPT_AT, nextAttemptAt.toUtcLocalDateTime())
             .setNull(table.CLAIMED_AT)
             .set(table.LAST_ERROR, error.take(MAX_ERROR_LENGTH))
-            .set(table.UPDATED_AT, updatedAt.toOffsetDateTime())
+            .set(table.UPDATED_AT, updatedAt.toUtcLocalDateTime())
             .where(table.ID.eq(id).and(table.STATUS.eq(PROCESSING)))
             .awaitFirst() == 1
     }
@@ -135,8 +119,8 @@ class RedisEventOutboxRepository(
         createdAt: Instant,
     ): Long = jooq.withDsl { dsl ->
         val table = REDIS_EVENT_OUTBOX
-        val now = createdAt.toOffsetDateTime()
-        val inserted = dsl.insertInto(table)
+        val now = createdAt.toUtcLocalDateTime()
+        dsl.insertInto(table)
             .set(table.EVENT_ID, eventId)
             .set(table.EVENT_TYPE, eventType.name)
             .set(table.PAYLOAD_VERSION, PAYLOAD_VERSION)
@@ -148,23 +132,16 @@ class RedisEventOutboxRepository(
             .set(table.UPDATED_AT, now)
             .onConflict(table.EVENT_TYPE, table.EVENT_ID)
             .doNothing()
-            .returning(table.ID)
-            .awaitFirstOrNull()
-            ?.id
-        inserted ?: dsl.select(table.ID)
-                .from(table)
-                .where(table.EVENT_TYPE.eq(eventType.name).and(table.EVENT_ID.eq(eventId)))
-                .awaitFirst()
-                .value1()
+            .awaitFirst()
+
+        dsl.select(table.ID)
+            .from(table)
+            .where(table.EVENT_TYPE.eq(eventType.name).and(table.EVENT_ID.eq(eventId)))
+            .awaitFirst()
+            .value1()
     }
 
-    private fun Instant.toOffsetDateTime(): OffsetDateTime = atOffset(ZoneOffset.UTC)
-
-    private data class QuestionCreatedPayload(
-        val questionId: Long,
-        val language: String,
-        val createdAt: Instant,
-    )
+    private fun Instant.toUtcLocalDateTime(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)
 
     private companion object {
         const val PENDING = "PENDING"

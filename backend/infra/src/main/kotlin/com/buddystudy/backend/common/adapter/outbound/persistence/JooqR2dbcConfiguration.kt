@@ -20,7 +20,7 @@ class JooqR2dbcConfiguration {
         val dialect = if (connectionFactory.metadata.name.contains("H2", ignoreCase = true)) {
             SQLDialect.H2
         } else {
-            SQLDialect.POSTGRES
+            SQLDialect.MYSQL
         }
         return JooqR2dbcExecutor(connectionFactory, dialect)
     }

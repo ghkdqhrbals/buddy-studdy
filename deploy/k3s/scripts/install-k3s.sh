@@ -15,12 +15,10 @@ INSTALL_K3S_CHANNEL="${INSTALL_K3S_CHANNEL:-stable}"
 K3S_EXEC="${K3S_EXEC:-server --disable=traefik --write-kubeconfig-mode=644}"
 
 mkdir -p \
-  /var/lib/buddystudy/postgres \
-  /var/lib/buddystudy/redis/redis-0 \
-  /var/lib/buddystudy/redis/redis-1 \
-  /var/lib/buddystudy/redis/redis-2 \
+  /var/lib/buddystudy/mysql \
+  /var/lib/buddystudy/redis/standalone \
   /var/lib/buddystudy/libretranslate \
-  /var/lib/buddystudy/backups/postgres
+  /var/lib/buddystudy/backups/mysql
 
 curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL="$INSTALL_K3S_CHANNEL" K3S_EXEC="$K3S_EXEC" sh -
 

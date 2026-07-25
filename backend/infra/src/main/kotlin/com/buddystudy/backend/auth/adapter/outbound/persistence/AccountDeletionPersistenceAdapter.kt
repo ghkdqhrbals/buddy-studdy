@@ -43,7 +43,6 @@ class AccountDeletionPersistenceAdapter(
         update("delete from reports where reporter_user_id = :userId or question_id in (:questionIds)", userId, ids)
         update("delete from question_comments where user_id = :userId or question_id in (:questionIds)", userId, ids)
         update("delete from question_likes where user_id = :userId or question_id in (:questionIds)", userId, ids)
-        update("delete from question_search where user_id = :userId or question_id in (:questionIds)", userId, ids)
         update("delete from question_stats where question_id in (:questionIds)", userId, ids)
         update("delete from question_embeddings where user_id = :userId or question_id in (:questionIds)", userId, ids)
         update("delete from question_push_outbox where user_id = :userId or question_id in (:questionIds) or study_id in (:studyIds)", userId, ids)

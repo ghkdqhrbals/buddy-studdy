@@ -11,7 +11,7 @@ tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessAot>("processAot") 
     args("--spring.profiles.active=aot")
     systemProperties(
         mapOf(
-            "spring.r2dbc.url" to "r2dbc:postgresql://localhost:5432/buddystudy",
+            "spring.r2dbc.url" to "r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC",
             "spring.r2dbc.username" to "buddystudy",
             "spring.r2dbc.password" to "aot-build-only",
         ),
@@ -80,21 +80,21 @@ dependencies {
     implementation("org.aspectj:aspectjweaver")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
-    implementation("org.postgresql:postgresql")
+    implementation("com.mysql:mysql-connector-j")
     implementation("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
-    runtimeOnly("org.postgresql:r2dbc-postgresql")
+    runtimeOnly("io.asyncer:r2dbc-mysql")
     runtimeOnly("io.r2dbc:r2dbc-pool")
-    runtimeOnly("org.flywaydb:flyway-database-postgresql")
+    runtimeOnly("org.flywaydb:flyway-mysql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.r2dbc:r2dbc-h2")
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
-    testImplementation("org.testcontainers:postgresql:1.21.3")
+    testImplementation("org.testcontainers:mysql:1.21.3")
 }
 
 kotlin {

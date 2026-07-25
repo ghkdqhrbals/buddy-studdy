@@ -48,8 +48,8 @@ After the route is active, enable Cloudflare WARP on the client machine and
 connect directly to the MacBook Air node IP:
 
 ```txt
-PostgreSQL host: <macbook-air-lan-ip>
-PostgreSQL port: 30432
+MySQL host: <macbook-air-lan-ip>
+MySQL port: 30432
 Database: buddystudy
 User: buddystudy
 
@@ -77,11 +77,11 @@ orphan-process cleanup cannot take the public routes offline.
 If WARP private routing is unavailable, keep using local Access TCP proxies:
 
 ```sh
-cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:15432
+cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:13306
 cloudflared access tcp --hostname redis.lowfidev.cloud --url localhost:16379
 ```
 
-Then connect local clients to `localhost:15432` or `localhost:16379`.
+Then connect local clients to `localhost:13306` or `localhost:16379`.
 
 ## Troubleshooting
 

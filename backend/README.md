@@ -2,7 +2,7 @@
 
 Spring Boot Kotlin backend for BuddyStudy study settings, records, grading, statistics source data, and scheduled APNs question delivery.
 
-This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this PostgreSQL-backed service.
+This backend is the operational source of truth for the iOS app. The app may cache data locally for UI responsiveness, but production reads and writes should go through this MySQL-backed service.
 
 ## Module Structure
 
@@ -24,7 +24,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Generates due questions with OpenAI.
 - Publishes scheduled push jobs through Redis Streams and consumes them with the backend's lightweight polling consumers.
 - Sends APNs remote notifications to iPhone from the stream consumer.
-- Runs in Docker with PostgreSQL stored on a mounted volume.
+- Runs in Docker with MySQL stored on a mounted volume.
 
 ## Runtime Secrets
 
@@ -38,9 +38,9 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: fallback APNs environment. Scheduled delivery uses each registered device's `apnsEnvironment`, so one backend can serve both debug `sandbox` tokens and TestFlight/App Store `production` tokens.
 - `BACKEND_API_TOKEN`: optional shared token required for admin endpoints if set.
-- `R2DBC_DATABASE_URL`: required runtime PostgreSQL R2DBC connection string, for example `r2dbc:postgresql://db:5432/buddystudy`.
-- `DATABASE_URL`: Flyway startup JDBC connection string, for example `jdbc:postgresql://db:5432/buddystudy`.
-- `DATABASE_USERNAME`, `DATABASE_PASSWORD`: PostgreSQL credentials.
+- `R2DBC_DATABASE_URL`: required runtime MySQL R2DBC connection string, for example `r2dbc:mysql://db:3306/buddystudy`.
+- `DATABASE_URL`: Flyway startup JDBC connection string, for example `jdbc:mysql://db:3306/buddystudy`.
+- `DATABASE_USERNAME`, `DATABASE_PASSWORD`: MySQL credentials.
 - `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
@@ -61,7 +61,7 @@ cd backend
 docker compose up --build
 ```
 
-Local runs use PostgreSQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=dev`.
+Local runs use MySQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=dev`.
 
 For iPhone testing against a backend running on this Mac, see [Local Backend Tunnel](../docs/LOCAL_BACKEND_TUNNEL.md).
 
@@ -77,7 +77,7 @@ docker build -t buddystudy-backend ./backend
 docker run --rm -p 8080:8080 --env-file .env -v buddystudy-data:/data buddystudy-backend
 ```
 
-For a local PostgreSQL-backed stack:
+For a local MySQL-backed stack:
 
 ```sh
 cd backend
@@ -91,7 +91,7 @@ cd backend
 docker run --rm -v "$PWD:/workspace" -w /workspace gradle:8.14.2-jdk24-alpine gradle --no-daemon test :tutor:bootJar
 ```
 
-The tests cover Spring context startup, coroutine services, R2DBC persistence, PostgreSQL-specific SQL through Testcontainers, and core service behavior.
+The tests cover Spring context startup, coroutine services, R2DBC persistence, MySQL-specific SQL through Testcontainers, and core service behavior.
 
 ## API
 
@@ -171,28 +171,27 @@ external alerts without removing otherwise healthy API pods from service.
 
 ### DB Backups
 
-- Data is persisted with Docker volume `buddystudy-postgres-data`.
-- In deploy workflow, a logical backup is generated on each rollout as:
-  `backups/buddystudy-YYYYMMDDTHHMMSS.dump`.
-- Locally, `docker compose` also starts a dedicated backup service (`buddystudy-db-backups`) that writes
-  daily states to that same 14-day retention policy.
+- Data is persisted with Docker volume `buddystudy-mysql-data`.
+- Local `docker compose` starts a dedicated backup service that writes
+  `buddystudy-YYYYMMDDTHHMMSS.sql.gz` snapshots with a 14-day retention policy.
+- Production must use a scheduled `mysqldump --single-transaction` job or a
+  provider-managed snapshot policy before rollout.
 
 Backup artifacts are written to the mounted backup volume:
 
 - `buddystudy-db-backups` (local compose)
 - `backups/` (deploy host)
 
-Backup files older than 14 days are removed automatically.
+Local backup files older than 14 days are removed automatically.
 
-Example restore command on the deploy host:
+Example restore command:
 
 ```sh
-docker run --rm \
-  -e PGPASSWORD="<postgres-password>" \
+gunzip -c /absolute/path/buddystudy-20260101T000000Z.sql.gz | docker run --rm -i \
+  -e MYSQL_PWD="<mysql-password>" \
   --network buddystudy-net \
-  -v "<absolute-path-to-backups>:/backups:ro" \
-  postgres:16-alpine \
-  pg_restore -h buddystudy-db -U buddystudy -d buddystudy /backups/buddystudy-20260101T000000.dump
+  mysql:8.4 \
+  mysql -h buddystudy-db -u buddystudy buddystudy
 ```
 
 Client apps should not call OpenAI directly. They should register a backend device, upload settings/API key to this service, and use the question/grading endpoints.
@@ -200,7 +199,7 @@ Client apps should not call OpenAI directly. They should register a backend devi
 ## Database Migrations
 
 The `dev` profile starts with Flyway enabled by default. The `prod` profile keeps Flyway disabled unless `FLYWAY_ENABLED=true`. Runtime access uses `spring.r2dbc.*`; Flyway uses its separate startup JDBC configuration.
-Migration files live under `tutor/src/main/resources/db/migration`.
+MySQL migration files live under `tutor/src/main/resources/db/migration-mysql`.
 
 If a running database was deployed before user-level OpenAI settings, apply the equivalent patch manually:
 

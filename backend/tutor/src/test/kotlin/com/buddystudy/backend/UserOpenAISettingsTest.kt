@@ -30,7 +30,7 @@ import org.springframework.test.context.TestPropertySource
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class UserOpenAISettingsTest : PostgresIntegrationTestSupport() {
+class UserOpenAISettingsTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
     @Autowired lateinit var settings: SettingsService
     @Autowired lateinit var admin: AdminService

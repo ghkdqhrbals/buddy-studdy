@@ -21,7 +21,7 @@ import org.springframework.test.context.TestPropertySource
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class BackendSmokeTest : PostgresIntegrationTestSupport() {
+class BackendSmokeTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
     @Autowired lateinit var context: ApplicationContext
 

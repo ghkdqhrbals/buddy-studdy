@@ -30,7 +30,7 @@ import java.net.http.HttpResponse
     ]
 )
 @ExtendWith(OutputCaptureExtension::class)
-class SecurityIntegrationTest : PostgresIntegrationTestSupport() {
+class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var login: LoginService
     @LocalServerPort var port: Int = 0
 

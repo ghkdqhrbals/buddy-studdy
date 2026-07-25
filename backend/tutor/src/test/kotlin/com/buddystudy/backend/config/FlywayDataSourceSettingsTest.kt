@@ -9,22 +9,37 @@ class FlywayDataSourceSettingsTest {
     fun `uses effective R2DBC settings when Flyway and environment credentials are absent`() {
         val environment =
             MockEnvironment()
-                .withProperty("spring.r2dbc.url", "r2dbc:postgresql://localhost:5432/buddystudy")
+                .withProperty("spring.r2dbc.url", "r2dbc:mysql://localhost:3306/buddystudy")
                 .withProperty("spring.r2dbc.username", "buddystudy")
                 .withProperty("spring.r2dbc.password", "local-password")
 
         val settings = FlywayDataSourceSettings.from(environment)
 
-        assertThat(settings.url).isEqualTo("jdbc:postgresql://localhost:5432/buddystudy")
+        assertThat(settings.url).isEqualTo("jdbc:mysql://localhost:3306/buddystudy")
         assertThat(settings.username).isEqualTo("buddystudy")
         assertThat(settings.password).isEqualTo("local-password")
+    }
+
+    @Test
+    fun `maps the R2DBC MySQL timezone option to JDBC`() {
+        val environment =
+            MockEnvironment()
+                .withProperty(
+                    "spring.r2dbc.url",
+                    "r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC",
+                )
+
+        val settings = FlywayDataSourceSettings.from(environment)
+
+        assertThat(settings.url)
+            .isEqualTo("jdbc:mysql://localhost:3306/buddystudy?serverTimezone=UTC")
     }
 
     @Test
     fun `prefers dedicated Flyway settings`() {
         val environment =
             MockEnvironment()
-                .withProperty("spring.flyway.url", "jdbc:postgresql://db:5432/migrations")
+                .withProperty("spring.flyway.url", "jdbc:mysql://db:3306/migrations")
                 .withProperty("spring.flyway.user", "flyway-user")
                 .withProperty("spring.flyway.password", "flyway-password")
                 .withProperty("DATABASE_USERNAME", "database-user")
@@ -34,26 +49,23 @@ class FlywayDataSourceSettingsTest {
 
         val settings = FlywayDataSourceSettings.from(environment)
 
-        assertThat(settings.url).isEqualTo("jdbc:postgresql://db:5432/migrations")
+        assertThat(settings.url).isEqualTo("jdbc:mysql://db:3306/migrations")
         assertThat(settings.username).isEqualTo("flyway-user")
         assertThat(settings.password).isEqualTo("flyway-password")
     }
 
     @Test
-    fun `creates an explicit PostgreSQL data source for native runtime`() {
+    fun `creates an explicit MySQL data source for native runtime`() {
         val settings =
             FlywayDataSourceSettings(
-                url = "jdbc:postgresql://db:5432/migrations?sslmode=require",
+                url = "jdbc:mysql://db:3306/migrations?useSSL=true",
                 username = "flyway-user",
                 password = "flyway-password",
             )
 
         val dataSource = settings.toDataSource()
 
-        assertThat(dataSource.serverNames).containsExactly("db")
-        assertThat(dataSource.portNumbers).containsExactly(5432)
-        assertThat(dataSource.databaseName).isEqualTo("migrations")
-        assertThat(dataSource.sslMode).isEqualTo("require")
+        assertThat(dataSource.getURL()).isEqualTo("jdbc:mysql://db:3306/migrations?useSSL=true")
         assertThat(dataSource.user).isEqualTo("flyway-user")
         assertThat(dataSource.password).isEqualTo("flyway-password")
     }

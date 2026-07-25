@@ -7,9 +7,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
-import com.buddystudy.backend.community.application.port.outbound.QuestionSearchPort
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
-import com.buddystudy.backend.community.application.port.outbound.SearchResult
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
@@ -18,7 +16,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
-import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -35,7 +32,6 @@ class CommunityServiceTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
-    private val search = FakeQuestionSearchPort()
     private val notificationPublisher = FakeNotificationPublisher()
     private val service = CommunityService(
         users = users,
@@ -45,7 +41,6 @@ class CommunityServiceTest {
         comments = FakeQuestionCommentPort(),
         reports = FakeReportPort(),
         reactions = FakeReactionPublisher(),
-        search = search,
         notifications = notificationPublisher,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
@@ -56,8 +51,6 @@ class CommunityServiceTest {
         users.rows += UserEntity(id = 11, providerId = "u11", displayName = "Author B")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
         questions.rows += publicQuestion(id = 101, userId = 11, topic = "SwiftUI")
-        search.rows += searchRow(questionId = 100, userId = 10, topic = "Redis")
-        search.rows += searchRow(questionId = 101, userId = 11, topic = "SwiftUI")
         questionStats.rows += QuestionStatsEntity(questionId = 100, likeCount = 2, commentCount = 1, viewCount = 20)
         questionStats.rows += QuestionStatsEntity(questionId = 101, likeCount = 3, commentCount = 2, viewCount = 30)
         likes.rows += QuestionLikeEntity(questionId = 101, userId = 7)
@@ -76,34 +69,18 @@ class CommunityServiceTest {
     }
 
     @Test
-    fun `public question v2 overlays translated search text in response`(): Unit = runBlocking {
+    fun `public question v2 returns canonical question text`(): Unit = runBlocking {
         users.rows += UserEntity(id = 7, providerId = "viewer", displayName = "Viewer", appLanguage = "en")
         users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "원본 주제")
-        search.rows += QuestionSearchEntity(
-            questionId = 100,
-            language = "en",
-            userId = 10,
-            topic = "Translated topic",
-            question = "Translated question",
-            answer = "Translated answer",
-            feedback = "Translated feedback",
-            explanation = "Translated explanation",
-            authorDisplayName = "Author",
-            publicQuestion = true,
-            score = 90,
-            answeredAt = Instant.parse("2026-06-10T01:00:00Z"),
-            createdAt = Instant.parse("2026-06-10T00:00:00Z"),
-        )
-
         val response = service.getPublicQuestionsV2(principal, query = null, language = "en", limit = 20, offset = 0)
 
         val question = response.questions.single()
         assertThat(question.topic).isEqualTo("원본 주제")
-        assertThat(question.question).isEqualTo("Translated question")
-        assertThat(question.answer).isEqualTo("Translated answer")
-        assertThat(question.gradingResult?.feedback).isEqualTo("Translated feedback")
-        assertThat(question.gradingResult?.explanation).isEqualTo("Translated explanation")
+        assertThat(question.question).isEqualTo("Question 원본 주제")
+        assertThat(question.answer).isEqualTo("Answer")
+        assertThat(question.gradingResult?.feedback).isEqualTo("Good")
+        assertThat(question.gradingResult?.explanation).isEqualTo("Because")
     }
 
     @Test
@@ -176,22 +153,6 @@ class CommunityServiceTest {
         publicQuestion = true,
         createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
         updatedAt = Instant.parse("2026-06-10T01:00:00Z"),
-    )
-
-    private fun searchRow(questionId: Long, userId: Long, topic: String) = QuestionSearchEntity(
-        questionId = questionId,
-        language = "ko",
-        userId = userId,
-        topic = topic,
-        question = "Question $topic",
-        answer = "Answer",
-        feedback = "Good",
-        explanation = "Because",
-        authorDisplayName = "Author",
-        publicQuestion = true,
-        score = 90,
-        answeredAt = Instant.parse("2026-06-10T01:00:00Z"),
-        createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(questionId),
     )
 
     private class FakeUserPort : UserPort {
@@ -313,28 +274,6 @@ class CommunityServiceTest {
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {
         override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean = true
-    }
-
-    private class FakeQuestionSearchPort : QuestionSearchPort {
-        val rows = mutableListOf<QuestionSearchEntity>()
-        override suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity {
-            rows += entity
-            return entity
-        }
-        override suspend fun deleteByQuestionId(questionId: Long): Long = 0
-        override suspend fun deleteByStudyId(studyId: Long, userId: Long): Long = 0
-        override suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long = 0
-        override suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult =
-            rows
-                .filter { it.language == language }
-                .sortedByDescending { it.createdAt }
-                .let { SearchResult(it.map { row -> row.questionId }, it.size.toLong()) }
-
-        override suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
-            rows.firstOrNull { it.questionId == questionId && it.language == language }
-
-        override suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity? =
-            rows.firstOrNull { it.questionId == questionId && it.language == language }
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

@@ -26,7 +26,7 @@ import java.net.http.HttpResponse
         "springdoc.swagger-ui.url=/v3/api-docs",
     ]
 )
-class OpenApiDocumentationTest : PostgresIntegrationTestSupport() {
+class OpenApiDocumentationTest : MySqlIntegrationTestSupport() {
     @LocalServerPort var port: Int = 0
 
     @Test

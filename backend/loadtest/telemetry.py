@@ -132,26 +132,33 @@ def actuator_sample(base_url, available):
     return values
 
 
-def postgres_sample(container):
+def mysql_sample(container):
     sql = """
-select json_build_object(
-  'connections_total', (select count(*) from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()),
-  'connections_active', (select count(*) from pg_stat_activity where datname = current_database() and state = 'active' and pid <> pg_backend_pid()),
-  'connections_idle', (select count(*) from pg_stat_activity where datname = current_database() and state = 'idle' and pid <> pg_backend_pid()),
-  'connections_waiting', (select count(*) from pg_stat_activity where datname = current_database() and state = 'active' and wait_event is not null and pid <> pg_backend_pid()),
-  'xact_commit', xact_commit,
-  'xact_rollback', xact_rollback,
-  'blks_read', blks_read,
-  'blks_hit', blks_hit,
-  'temp_files', temp_files,
-  'temp_bytes', temp_bytes,
-  'deadlocks', deadlocks,
-  'tup_returned', tup_returned,
-  'tup_fetched', tup_fetched
-) from pg_stat_database where datname = current_database();
+select json_object(
+  'connections_total', max(if(variable_name = 'Threads_connected', variable_value, null)),
+  'connections_active', max(if(variable_name = 'Threads_running', variable_value, null)),
+  'connections_waiting', (
+    select count(*) from performance_schema.threads
+    where type = 'FOREGROUND' and processlist_state like 'Waiting%'
+  ),
+  'commits', max(if(variable_name = 'Com_commit', variable_value, null)),
+  'rollbacks', max(if(variable_name = 'Com_rollback', variable_value, null)),
+  'buffer_pool_reads', max(if(variable_name = 'Innodb_buffer_pool_reads', variable_value, null)),
+  'buffer_pool_read_requests', max(if(variable_name = 'Innodb_buffer_pool_read_requests', variable_value, null)),
+  'created_tmp_disk_tables', max(if(variable_name = 'Created_tmp_disk_tables', variable_value, null)),
+  'deadlocks', max(if(variable_name = 'Innodb_deadlocks', variable_value, null)),
+  'rows_read', max(if(variable_name = 'Innodb_rows_read', variable_value, null)),
+  'rows_inserted', max(if(variable_name = 'Innodb_rows_inserted', variable_value, null)),
+  'rows_updated', max(if(variable_name = 'Innodb_rows_updated', variable_value, null)),
+  'rows_deleted', max(if(variable_name = 'Innodb_rows_deleted', variable_value, null))
+)
+from performance_schema.global_status;
 """
     output = run(
-        ["docker", "exec", container, "psql", "-At", "-U", "buddystudy", "-d", "buddystudy", "-c", sql],
+        [
+            "docker", "exec", "-e", "MYSQL_PWD=benchmark-password", container,
+            "mysql", "-N", "-B", "-u", "buddystudy", "buddystudy", "-e", sql,
+        ],
         timeout=2.0,
     )
     try:
@@ -247,7 +254,7 @@ def main():
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--interval", type=float, default=2.0)
-    parser.add_argument("--postgres-container", required=True)
+    parser.add_argument("--mysql-container", required=True)
     parser.add_argument("--redis-container", required=True)
     args = parser.parse_args()
 
@@ -268,9 +275,9 @@ def main():
                 "process": process_sample(args.pid),
                 "load_generator": process_sample(args.load_generator_pid) if args.load_generator_pid else {},
                 "actuator": actuator,
-                "postgres": postgres_sample(args.postgres_container),
+                "mysql": mysql_sample(args.mysql_container),
                 "redis": redis_sample(args.redis_container),
-                "containers": container_samples([args.postgres_container, args.redis_container]),
+                "containers": container_samples([args.mysql_container, args.redis_container]),
             }
             handle.write(json.dumps(sample, separators=(",", ":")) + "\n")
             delay = args.interval - (time.monotonic() - started)

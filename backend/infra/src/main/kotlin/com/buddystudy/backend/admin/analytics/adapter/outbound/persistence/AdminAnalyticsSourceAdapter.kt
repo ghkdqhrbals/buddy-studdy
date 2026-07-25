@@ -41,7 +41,7 @@ class AdminAnalyticsSourceAdapter(
     private suspend fun averageLatency(start: Instant, end: Instant): Double =
         client.sql(
             """
-            select coalesce(avg(extract(epoch from (answered_at - created_at))), 0) from questions
+            select coalesce(avg(timestampdiff(microsecond, created_at, answered_at) / 1000000.0), 0) from questions
             where answered_at >= :start and answered_at < :end and created_at is not null and deleted_at is null
             """.trimIndent(),
         ).bind("start", start).bind("end", end)
@@ -59,7 +59,7 @@ class AdminAnalyticsSourceAdapter(
             .map { row, _ -> (row.get(0) as Number).toLong() }.one().awaitSingleOrNull() ?: 0
 
     private suspend fun quotaUsed(date: LocalDate): Long =
-        client.sql("select coalesce(sum(system_question_count), 0) from user_monthly_question_usage where year_month = :yearMonth")
+        client.sql("select coalesce(sum(system_question_count), 0) from user_monthly_question_usage where usage_month = :yearMonth")
             .bind("yearMonth", date.toString().take(7))
             .map { row, _ -> (row.get(0) as Number).toLong() }.one().awaitSingleOrNull() ?: 0
 

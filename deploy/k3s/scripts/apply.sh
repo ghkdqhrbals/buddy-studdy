@@ -12,10 +12,7 @@ KUBECTL="${KUBECTL:-kubectl}"
 "$KUBECTL" -n buddystudy delete job buddystudy-redis-cluster-init buddystudy-redis-stream-coordinator-bootstrap --ignore-not-found
 "$KUBECTL" apply -k "$K3S_DIR"
 
-"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-postgres --timeout=180s
-"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-redis-0 --timeout=240s
-"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-redis-1 --timeout=240s
-"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-redis-2 --timeout=240s
-"$KUBECTL" -n buddystudy wait --for=condition=complete job/buddystudy-redis-cluster-init --timeout=180s || true
+"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-mysql --timeout=180s
+"$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-redis --timeout=240s
 "$KUBECTL" -n buddystudy rollout status deploy/buddystudy-backend --timeout=240s
 "$KUBECTL" -n buddystudy rollout status deploy/buddystudy-admin-frontend --timeout=180s

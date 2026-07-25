@@ -2,7 +2,7 @@
 
 ## Context
 
-Admin analytics uses a separate PostgreSQL database named `buddystudy_aggregation`.
+Admin analytics uses a separate MySQL database named `buddystudy_aggregation`.
 The primary BuddyStudy database remains the source of truth. The aggregation database stores derived read models for the admin dashboard only.
 
 ## Goals
@@ -56,7 +56,7 @@ Each run stores:
 - start/end time, duration, summary, error message
 - retry source run id when applicable
 
-The runtime uses PostgreSQL advisory locks per job name so the same job does not run concurrently on multiple scheduler threads or application instances.
+The runtime uses MySQL advisory locks per job name so the same job does not run concurrently on multiple scheduler threads or application instances.
 
 Admin APIs:
 

@@ -3,7 +3,6 @@ package com.buddystudy.backend.common.adapter.inbound.scheduler
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -81,8 +80,8 @@ class RedisEventOutboxDispatcherTest {
         createdAt: Instant = Instant.parse("2026-07-22T23:59:00Z"),
     ) = ClaimedRedisOutboxEvent(
         id = 7,
-        eventId = "question-created-42",
-        eventType = RedisOutboxEventType.QUESTION_CREATED,
+        eventId = "notification-requested-42",
+        eventType = RedisOutboxEventType.NOTIFICATION_REQUESTED,
         payloadVersion = 1,
         payloadJson = """{"questionId":42}""",
         attempts = attempts,
@@ -110,8 +109,6 @@ class RedisEventOutboxDispatcherTest {
         var claimCalls = 0
         val published = mutableListOf<Pair<Long, Instant>>()
         val retries = mutableListOf<RetryCall>()
-
-        override suspend fun appendQuestionCreated(event: QuestionCreatedOutboxEvent): Long = error("unused")
 
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
             error("unused")

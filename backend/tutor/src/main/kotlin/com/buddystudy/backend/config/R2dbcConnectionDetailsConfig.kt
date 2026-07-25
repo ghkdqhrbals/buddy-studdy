@@ -7,10 +7,13 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
 import org.springframework.core.convert.converter.Converter
 import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.convert.WritingConverter
 import org.springframework.data.r2dbc.convert.R2dbcCustomConversions
-import org.springframework.data.r2dbc.dialect.PostgresDialect
+import org.springframework.data.r2dbc.dialect.MySqlDialect
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 @Configuration(proxyBeanMethods = false)
 class R2dbcConnectionDetailsConfig {
@@ -21,14 +24,26 @@ class R2dbcConnectionDetailsConfig {
     @Bean
     fun r2dbcCustomConversions(): R2dbcCustomConversions =
         R2dbcCustomConversions.of(
-            PostgresDialect.INSTANCE,
+            MySqlDialect.INSTANCE,
             OffsetDateTimeToInstantConverter,
+            LocalDateTimeToInstantConverter,
+            InstantToLocalDateTimeConverter,
         )
 }
 
 @ReadingConverter
 internal object OffsetDateTimeToInstantConverter : Converter<OffsetDateTime, Instant> {
     override fun convert(source: OffsetDateTime): Instant = source.toInstant()
+}
+
+@ReadingConverter
+internal object LocalDateTimeToInstantConverter : Converter<LocalDateTime, Instant> {
+    override fun convert(source: LocalDateTime): Instant = source.toInstant(ZoneOffset.UTC)
+}
+
+@WritingConverter
+internal object InstantToLocalDateTimeConverter : Converter<Instant, LocalDateTime> {
+    override fun convert(source: Instant): LocalDateTime = LocalDateTime.ofInstant(source, ZoneOffset.UTC)
 }
 
 internal class EnvironmentR2dbcConnectionDetails(
@@ -69,7 +84,9 @@ internal class EnvironmentR2dbcConnectionDetails(
 
     private fun String.toR2dbcUrl(): String =
         when {
-            startsWith("jdbc:postgresql:") -> replaceFirst("jdbc:postgresql:", "r2dbc:postgresql:")
+            startsWith("jdbc:mysql:") ->
+                replaceFirst("jdbc:mysql:", "r2dbc:mysql:")
+                    .replace("serverTimezone=", "serverZoneId=")
             startsWith("jdbc:") -> removePrefix("jdbc:").let { "r2dbc:$it" }
             else -> this
         }

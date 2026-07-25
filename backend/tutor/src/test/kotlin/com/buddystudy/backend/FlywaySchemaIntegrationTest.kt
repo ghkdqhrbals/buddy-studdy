@@ -17,7 +17,7 @@ import org.springframework.test.context.TestPropertySource
 @SpringBootTest
 @TestPropertySource(
     properties = [
-        "spring.flyway.locations=classpath:db/migration",
+        "spring.flyway.locations=classpath:db/migration-mysql",
         "buddystudy.scheduler.enabled=false",
         "buddystudy.scheduler.processing-timeout-seconds=30",
         "buddystudy.streams.enabled=false",
@@ -26,7 +26,7 @@ import org.springframework.test.context.TestPropertySource
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class FlywaySchemaIntegrationTest : PostgresIntegrationTestSupport() {
+class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter

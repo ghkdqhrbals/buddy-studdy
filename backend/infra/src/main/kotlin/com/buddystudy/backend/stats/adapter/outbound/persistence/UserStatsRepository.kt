@@ -4,7 +4,6 @@ import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.stats.application.port.outbound.UserStatsOverview
 import com.buddystudy.backend.stats.application.port.outbound.UserStatsPort
 import com.buddystudy.stats.domain.entity.UserStatsEntity
-import io.r2dbc.spi.ConnectionFactory
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
@@ -18,9 +17,7 @@ import java.time.LocalDate
 @Repository
 class UserStatsRepository(
     private val template: R2dbcEntityTemplate,
-    connectionFactory: ConnectionFactory,
 ) : UserStatsPort {
-    private val postgres = connectionFactory.metadata.name.contains("PostgreSQL", ignoreCase = true)
 
     @Transactional
     override suspend fun replaceAll(rows: Collection<UserStatsEntity>) {
@@ -30,10 +27,6 @@ class UserStatsRepository(
 
     @Transactional
     override suspend fun syncAll(rows: Collection<UserStatsEntity>) {
-        if (!postgres) {
-            replaceAll(rows)
-            return
-        }
         if (rows.isEmpty()) {
             template.delete(UserStatsEntity::class.java).all().awaitSingle()
             return
@@ -44,7 +37,7 @@ class UserStatsRepository(
             create temporary table if not exists tmp_user_stats_sync (
                 user_id bigint not null, stat_date date not null,
                 topic_key varchar(255) not null, difficulty_level integer not null
-            ) on commit drop
+            )
             """.trimIndent(),
         ).fetch().rowsUpdated().awaitSingle()
         client.sql("truncate table tmp_user_stats_sync").fetch().rowsUpdated().awaitSingle()
@@ -57,13 +50,14 @@ class UserStatsRepository(
         }
         client.sql(
             """
-            delete from user_stats us where not exists (
-                select 1 from tmp_user_stats_sync tmp
-                where tmp.user_id = us.user_id and tmp.stat_date = us.stat_date
-                  and tmp.topic_key = us.topic_key and tmp.difficulty_level = us.difficulty_level
-            )
+            delete us from user_stats us
+            left join tmp_user_stats_sync tmp
+              on tmp.user_id = us.user_id and tmp.stat_date = us.stat_date
+             and tmp.topic_key = us.topic_key and tmp.difficulty_level = us.difficulty_level
+            where tmp.user_id is null
             """.trimIndent(),
         ).fetch().rowsUpdated().awaitSingle()
+        client.sql("drop temporary table if exists tmp_user_stats_sync").fetch().rowsUpdated().awaitSingle()
     }
 
     override suspend fun findByUser(
@@ -169,11 +163,11 @@ class UserStatsRepository(
             ) values (
                 :userId, :statDate, :topicKey, :topic, :difficultyLevel, :responseCount,
                 :scoreCount, :scoreSum, :bestScore, :correctCount, :latestAt, :createdAt, :updatedAt
-            ) on conflict (user_id, stat_date, topic_key, difficulty_level) do update set
-                topic = excluded.topic, response_count = excluded.response_count,
-                score_count = excluded.score_count, score_sum = excluded.score_sum,
-                best_score = excluded.best_score, correct_count = excluded.correct_count,
-                latest_at = excluded.latest_at, updated_at = excluded.updated_at
+            ) on duplicate key update
+                topic = values(topic), response_count = values(response_count),
+                score_count = values(score_count), score_sum = values(score_sum),
+                best_score = values(best_score), correct_count = values(correct_count),
+                latest_at = values(latest_at), updated_at = values(updated_at)
         """.trimIndent()
     }
 }

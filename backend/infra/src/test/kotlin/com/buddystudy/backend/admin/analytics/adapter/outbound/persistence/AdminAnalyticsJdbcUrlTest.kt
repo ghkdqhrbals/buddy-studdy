@@ -8,29 +8,29 @@ import org.junit.jupiter.api.Test
 
 class AdminAnalyticsR2dbcUrlTest {
     @Test
-    fun `derives aggregation database url from primary postgres url`(): Unit = runBlocking {
+    fun `derives aggregation database url from primary mysql url`(): Unit = runBlocking {
         val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:postgresql://buddystudy-db:5432/buddystudy",
+            primaryUrl = "r2dbc:mysql://buddystudy-db:3306/buddystudy",
             analyticsDatabaseName = "buddystudy_aggregation",
         )
 
-        assertThat(result).isEqualTo("r2dbc:postgresql://buddystudy-db:5432/buddystudy_aggregation")
+        assertThat(result).isEqualTo("r2dbc:mysql://buddystudy-db:3306/buddystudy_aggregation")
     }
 
     @Test
-    fun `keeps postgres r2dbc query parameters when deriving aggregation url`(): Unit = runBlocking {
+    fun `keeps mysql r2dbc query parameters when deriving aggregation url`(): Unit = runBlocking {
         val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:postgresql://api.ghkdqhrbals.org:5432/buddystudy?sslmode=require",
+            primaryUrl = "r2dbc:mysql://api.ghkdqhrbals.org:3306/buddystudy?sslMode=VERIFY_IDENTITY",
             analyticsDatabaseName = "buddystudy_aggregation",
         )
 
         assertThat(result).isEqualTo(
-            "r2dbc:postgresql://api.ghkdqhrbals.org:5432/buddystudy_aggregation?sslmode=require",
+            "r2dbc:mysql://api.ghkdqhrbals.org:3306/buddystudy_aggregation?sslMode=VERIFY_IDENTITY",
         )
     }
 
     @Test
-    fun `does not derive for non postgres test datasource`(): Unit = runBlocking {
+    fun `does not derive for non mysql test datasource`(): Unit = runBlocking {
         val result = AdminAnalyticsR2dbcUrl.derive(
             primaryUrl = "r2dbc:h2:mem:///buddystudy",
             analyticsDatabaseName = "buddystudy_aggregation",
@@ -40,9 +40,9 @@ class AdminAnalyticsR2dbcUrlTest {
     }
 
     @Test
-    fun `does not derive for transient postgres test database`(): Unit = runBlocking {
+    fun `does not derive for transient mysql test database`(): Unit = runBlocking {
         val result = AdminAnalyticsR2dbcUrl.derive(
-            primaryUrl = "r2dbc:postgresql://localhost:54322/test",
+            primaryUrl = "r2dbc:mysql://localhost:33060/test",
             analyticsDatabaseName = "buddystudy_aggregation",
         )
 
@@ -52,7 +52,7 @@ class AdminAnalyticsR2dbcUrlTest {
     @Test
     fun `uses primary credentials when derived analytics url has none`() {
         val result = AdminAnalyticsR2dbcUrl.options(
-            analyticsUrl = "r2dbc:postgresql://localhost:5432/buddystudy_aggregation",
+            analyticsUrl = "r2dbc:mysql://localhost:3306/buddystudy_aggregation",
             configuredUsername = "",
             configuredPassword = "",
             primaryUsername = "buddystudy",
@@ -66,7 +66,7 @@ class AdminAnalyticsR2dbcUrlTest {
     @Test
     fun `keeps credentials embedded in analytics url ahead of primary credentials`() {
         val result = AdminAnalyticsR2dbcUrl.options(
-            analyticsUrl = "r2dbc:postgresql://analytics:analytics-password@localhost:5432/buddystudy_aggregation",
+            analyticsUrl = "r2dbc:mysql://analytics:analytics-password@localhost:3306/buddystudy_aggregation",
             configuredUsername = "",
             configuredPassword = "",
             primaryUsername = "buddystudy",
@@ -80,7 +80,7 @@ class AdminAnalyticsR2dbcUrlTest {
     @Test
     fun `configured analytics credentials override url and primary credentials`() {
         val result = AdminAnalyticsR2dbcUrl.options(
-            analyticsUrl = "r2dbc:postgresql://url-user:url-password@localhost:5432/buddystudy_aggregation",
+            analyticsUrl = "r2dbc:mysql://url-user:url-password@localhost:3306/buddystudy_aggregation",
             configuredUsername = "configured-user",
             configuredPassword = "configured-password",
             primaryUsername = "buddystudy",

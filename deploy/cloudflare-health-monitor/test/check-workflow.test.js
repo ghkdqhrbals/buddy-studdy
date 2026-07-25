@@ -312,18 +312,17 @@ test("deploy repo monitoring template persists Loki and Grafana state", () => {
 
 test("k3s operations docs describe the actual exposed node ports", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/k3s/README.md"), "utf8");
-  const postgresManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/postgres/postgres.yaml"), "utf8");
+  const mysqlManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/mysql/mysql.yaml"), "utf8");
   const redisManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/redis/redis.yaml"), "utf8");
 
-  const postgresNodePort = postgresManifest.match(/nodePort:\s*(\d+)/)?.[1];
-  const redisNodePort = redisManifest.match(/name:\s*buddystudy-redis-external[\s\S]*?nodePort:\s*(\d+)/)?.[1];
+  const mysqlNodePort = mysqlManifest.match(/nodePort:\s*(\d+)/)?.[1];
+  const redisHostPort = redisManifest.match(/hostPort:\s*(\d+)/)?.[1];
 
-  assert.equal(postgresNodePort, "30432");
-  assert.equal(redisNodePort, "30379");
-  assert.match(readme, new RegExp(`^.*${postgresNodePort}.*PostgreSQL.*$`, "m"));
-  assert.match(readme, new RegExp(`^.*${redisNodePort}.*Redis.*$`, "m"));
-  assert.doesNotMatch(readme, /PostgreSQL:[^\n]*<host-ip>:5432/);
-  assert.doesNotMatch(readme, /Redis[^:\n]*:[^\n]*<host-ip>:6379/);
+  assert.equal(mysqlNodePort, "30432");
+  assert.equal(redisHostPort, "6379");
+  assert.match(readme, new RegExp(`^.*${mysqlNodePort}.*MySQL.*$`, "m"));
+  assert.match(readme, new RegExp(`^.*${redisHostPort}.*Redis.*$`, "m"));
+  assert.doesNotMatch(readme, /MySQL:[^\n]*<host-ip>:3306/);
 });
 
 test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
@@ -675,26 +674,14 @@ test("deploy repo backend template wires scheduler readiness policy into backend
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=\$\{MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\}/);
 });
 
-test("kubernetes backend config enables coordinator readiness for external monitor", () => {
-  const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
+test("kubernetes backend config does not depend on an undeployed stream coordinator", () => {
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
-  const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 
-  assert.match(applicationConfig, /coordinator-readiness-enabled:\s*\$\{MONITORING_COORDINATOR_READINESS_ENABLED:false\}/);
   for (const text of [backendConfig, combinedManifest]) {
-    assert.match(text, /MONITORING_COORDINATOR_READINESS_ENABLED:\s*"true"/);
-    assert.match(text, /MONITORING_COORDINATOR_BASE_URL:\s*"http:\/\/buddystudy-redis-stream-coordinator:8080"/);
-    assert.match(text, /MONITORING_COORDINATOR_TIMEOUT_MS:\s*"3000"/);
+    assert.doesNotMatch(text, /MONITORING_COORDINATOR_/);
+    assert.doesNotMatch(text, /buddystudy-redis-stream-coordinator/);
   }
-  assert.match(deployTemplate, /REACTION_STREAM_COORDINATOR_BASE_URL:\s*\$\{\{\s*vars\.REACTION_STREAM_COORDINATOR_BASE_URL\s*\|\|\s*'http:\/\/rsc-coordinator:8080'\s*\}\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_READINESS_ENABLED:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_READINESS_ENABLED\s*\|\|\s*'true'\s*\}\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_BASE_URL:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_BASE_URL\s*\|\|\s*'http:\/\/rsc-coordinator:8080'\s*\}\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_TIMEOUT_MS:\s*\$\{\{\s*vars\.MONITORING_COORDINATOR_TIMEOUT_MS\s*\|\|\s*'3000'\s*\}\}/);
-  assert.match(deployTemplate, /REACTION_STREAM_COORDINATOR_BASE_URL=\$\{REACTION_STREAM_COORDINATOR_BASE_URL\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_READINESS_ENABLED=\$\{MONITORING_COORDINATOR_READINESS_ENABLED\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_BASE_URL=\$\{MONITORING_COORDINATOR_BASE_URL\}/);
-  assert.match(deployTemplate, /MONITORING_COORDINATOR_TIMEOUT_MS=\$\{MONITORING_COORDINATOR_TIMEOUT_MS\}/);
 });
 
 test("backend scheduler readiness defaults and seed migrations cover every managed scheduler job", () => {
@@ -704,9 +691,9 @@ test("backend scheduler readiness defaults and seed migrations cover every manag
   );
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const migrations = fs
-    .readdirSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration"))
+    .readdirSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration-mysql"))
     .filter((entry) => entry.endsWith(".sql"))
-    .map((entry) => fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration", entry), "utf8"))
+    .map((entry) => fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration-mysql", entry), "utf8"))
     .join("\n");
 
   for (const jobName of managedJobNames()) {

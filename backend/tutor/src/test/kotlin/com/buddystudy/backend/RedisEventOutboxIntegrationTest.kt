@@ -1,6 +1,5 @@
 package com.buddystudy.backend
 
-import com.buddystudy.backend.common.application.outbox.QuestionCreatedOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
@@ -28,44 +27,33 @@ import java.util.UUID
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ],
 )
-class RedisEventOutboxIntegrationTest : PostgresIntegrationTestSupport() {
+class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var outbox: RedisEventOutboxPort
     @Autowired lateinit var rollbackWriter: RollbackWriter
 
     @Test
-    fun `event type scopes idempotency key and retry remains claimable`(): Unit = runBlocking {
+    fun `notification idempotency and retry remain claimable`(): Unit = runBlocking {
         val suffix = UUID.randomUUID().toString()
-        val eventId = "question-created-$suffix"
+        val eventId = "notification-requested-$suffix"
         val now = Instant.parse("2030-07-23T00:00:00Z")
 
-        val questionId = outbox.appendQuestionCreated(
-            QuestionCreatedOutboxEvent(
-                eventId = eventId,
-                questionId = 42,
-                language = "ko",
-                createdAt = now,
-            ),
-        )
-        val duplicateQuestionId = outbox.appendQuestionCreated(
-            QuestionCreatedOutboxEvent(
-                eventId = eventId,
-                questionId = 42,
-                language = "ko",
-                createdAt = now,
-            ),
-        )
-        val notificationId = outbox.appendNotification(
+        fun command() =
             NotificationRequestCommand(
                 eventId = eventId,
                 userId = 1,
                 title = "BuddyStudy",
                 body = "Question",
-            ),
+            )
+        val notificationId = outbox.appendNotification(
+            command(),
+            createdAt = now,
+        )
+        val duplicateNotificationId = outbox.appendNotification(
+            command(),
             createdAt = now,
         )
 
-        assertThat(duplicateQuestionId).isEqualTo(questionId)
-        assertThat(notificationId).isNotEqualTo(questionId)
+        assertThat(duplicateNotificationId).isEqualTo(notificationId)
 
         val claimed = outbox.claimBatch(
             now = now,
@@ -73,14 +61,9 @@ class RedisEventOutboxIntegrationTest : PostgresIntegrationTestSupport() {
             limit = 100,
         ).filter { it.eventId == eventId }
         assertThat(claimed.map { it.eventType })
-            .containsExactlyInAnyOrder(
-                RedisOutboxEventType.QUESTION_CREATED,
-                RedisOutboxEventType.NOTIFICATION_REQUESTED,
-            )
+            .containsExactly(RedisOutboxEventType.NOTIFICATION_REQUESTED)
 
-        val published = claimed.first()
-        val retry = claimed.last()
-        assertThat(outbox.markPublished(published.id, now)).isTrue()
+        val retry = claimed.single()
         assertThat(
             outbox.markRetry(
                 id = retry.id,
@@ -131,13 +114,14 @@ class RedisEventOutboxIntegrationTest : PostgresIntegrationTestSupport() {
     ) {
         @Transactional
         open suspend fun appendAndFail(eventId: String, now: Instant) {
-            outbox.appendQuestionCreated(
-                QuestionCreatedOutboxEvent(
+            outbox.appendNotification(
+                NotificationRequestCommand(
                     eventId = eventId,
-                    questionId = 99,
-                    language = "ko",
-                    createdAt = now,
+                    userId = 1,
+                    title = "BuddyStudy",
+                    body = "Question",
                 ),
+                createdAt = now,
             )
             throw IllegalStateException("force rollback")
         }

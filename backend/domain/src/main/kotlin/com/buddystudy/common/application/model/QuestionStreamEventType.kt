@@ -1,7 +1,6 @@
 package com.buddystudy.common.application.model
 
 enum class QuestionStreamEventType {
-    QUESTION_CREATED,
     QUESTION_PUSH_REQUESTED,
     CONTENT_VIEWED,
     QUESTION_LIKED,

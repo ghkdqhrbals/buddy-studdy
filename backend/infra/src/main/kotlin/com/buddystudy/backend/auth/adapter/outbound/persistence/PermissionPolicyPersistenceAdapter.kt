@@ -44,14 +44,14 @@ class PermissionPolicyPersistenceAdapter(
             """
             select id, code, version, title, url, content_hash, required, mutable
             from (
-                select distinct on (t.code) t.id, t.code, t.version, t.title, t.url, t.content_hash,
-                       tcr.required, tcr.mutable, tcr.display_order
+                select t.id, t.code, t.version, t.title, t.url, t.content_hash,
+                       tcr.required, tcr.mutable, tcr.display_order,
+                       row_number() over (partition by t.code order by t.effective_at desc, t.id desc) as rn
                 from term_context_requirements tcr join terms t on t.code = tcr.terms_code
                 where tcr.context = 'SIGNUP' and tcr.effective_at <= :now
                   and (tcr.retired_at is null or tcr.retired_at > :now)
                   and t.effective_at <= :now and (t.retired_at is null or t.retired_at > :now)
-                order by t.code, t.effective_at desc, t.id desc
-            ) active_terms order by display_order, id
+            ) active_terms where rn = 1 order by display_order, id
             """.trimIndent(),
         ).bind("now", now)
             .map { row, _ -> row.toActiveTermsProjection() }
@@ -105,15 +105,14 @@ class PermissionPolicyPersistenceAdapter(
             """
             insert into notification_preferences (user_id, device_id, preference_key, enabled, created_at, updated_at)
             values (:userId, :deviceId, :key, :enabled, :now, :now)
-            on conflict (user_id, preference_key) where user_id is not null
-            do update set enabled = excluded.enabled, device_id = excluded.device_id, updated_at = excluded.updated_at
+            on duplicate key update
+                enabled = values(enabled), device_id = values(device_id), updated_at = values(updated_at)
             """.trimIndent()
         } else {
             """
             insert into notification_preferences (user_id, device_id, preference_key, enabled, created_at, updated_at)
             values (null, :deviceId, :key, :enabled, :now, :now)
-            on conflict (device_id, preference_key) where user_id is null
-            do update set enabled = excluded.enabled, updated_at = excluded.updated_at
+            on duplicate key update enabled = values(enabled), updated_at = values(updated_at)
             """.trimIndent()
         }
         var spec = client.sql(sql).bind("deviceId", deviceId).bind("key", key).bind("enabled", enabled).bind("now", now)
@@ -141,13 +140,13 @@ class PermissionPolicyPersistenceAdapter(
             """
             select greatest(coalesce(t.monthly_question_limit, 0) - coalesce(u.system_question_count, 0), 0) as remaining
             from users usr
-            left join lateral (
-                select m.tier from user_memberships m where m.user_id = usr.id and m.status = 'ACTIVE'
+            left join user_membership_tiers t on t.tier_code = coalesce((
+                select m.tier from user_memberships m
+                where m.user_id = usr.id and m.status = 'ACTIVE'
                   and (m.expires_at is null or m.expires_at > :now)
                 order by m.updated_at desc, m.id desc limit 1
-            ) m on true
-            left join user_membership_tiers t on t.tier_code = coalesce(m.tier, 'TIER1')
-            left join user_monthly_question_usage u on u.user_id = usr.id and u.year_month = :yearMonth
+            ), 'TIER1')
+            left join user_monthly_question_usage u on u.user_id = usr.id and u.usage_month = :yearMonth
             where usr.id = :userId
             """.trimIndent(),
         ).bind("now", now).bind("yearMonth", yearMonth).bind("userId", userId)

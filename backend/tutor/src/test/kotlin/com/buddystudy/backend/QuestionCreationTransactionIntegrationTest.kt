@@ -35,7 +35,7 @@ import java.time.Instant
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ],
 )
-class QuestionCreationTransactionIntegrationTest : PostgresIntegrationTestSupport() {
+class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository

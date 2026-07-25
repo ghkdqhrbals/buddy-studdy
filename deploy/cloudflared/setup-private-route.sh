@@ -33,11 +33,11 @@ Private route registered.
 
 With Cloudflare WARP enabled, connect clients to:
 
-  PostgreSQL: ${LAN_IP}:5432
+  MySQL: ${LAN_IP}:3306
   Redis:      ${LAN_IP}:6379
 
 Keep hostname TCP routes only as compatibility fallbacks:
 
-  cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:15432
+  cloudflared access tcp --hostname db.lowfidev.cloud --url localhost:13306
   cloudflared access tcp --hostname redis.lowfidev.cloud --url localhost:16379
 EOF

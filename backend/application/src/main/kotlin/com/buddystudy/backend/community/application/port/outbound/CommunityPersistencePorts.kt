@@ -2,7 +2,6 @@ package com.buddystudy.backend.community.application.port.outbound
 
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
-import com.buddystudy.community.domain.entity.QuestionSearchEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -23,18 +22,3 @@ interface QuestionCommentPort {
 interface ReportPort {
     suspend fun save(entity: ReportEntity): ReportEntity
 }
-
-interface QuestionSearchPort {
-    suspend fun save(entity: QuestionSearchEntity): QuestionSearchEntity
-    suspend fun deleteByQuestionId(questionId: Long): Long
-    suspend fun deleteByStudyId(studyId: Long, userId: Long): Long
-    suspend fun deleteByUserIdAndTopic(userId: Long, topic: String): Long
-    suspend fun searchPublic(query: String?, language: String, limit: Int, offset: Int): SearchResult
-    suspend fun findByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
-    suspend fun findPublicByQuestionIdAndLanguage(questionId: Long, language: String): QuestionSearchEntity?
-}
-
-data class SearchResult(
-    val questionIds: List<Long>,
-    val totalCount: Long,
-)

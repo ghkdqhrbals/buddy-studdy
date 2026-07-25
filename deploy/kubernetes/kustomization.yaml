@@ -6,12 +6,12 @@ namespace: buddystudy
 resources:
   - namespace.yaml
   - config/backend-config.yaml
-  - postgres/postgres.yaml
+  - mysql/mysql.yaml
   - redis/redis.yaml
   - libretranslate/libretranslate.yaml
   - backend/backend.yaml
   - admin-frontend/admin-frontend.yaml
-  - backup/postgres-backup.yaml
+  - backup/mysql-backup.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: buddystudy

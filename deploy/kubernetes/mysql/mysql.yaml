@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buddystudy-mysql-init
+data:
+  01-create-aggregation-db.sql: |
+    CREATE DATABASE IF NOT EXISTS buddystudy_aggregation
+      CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    GRANT ALL PRIVILEGES ON buddystudy_aggregation.* TO 'buddystudy'@'%';
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: buddystudy-mysql-data
+  labels:
+    app.kubernetes.io/name: buddystudy-mysql
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: buddystudy-local
+  hostPath:
+    path: /Users/gyuminhwangbo/data/buddystudy/db/mysql
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: buddystudy-mysql-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: buddystudy-local
+  resources:
+    requests:
+      storage: 20Gi
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buddystudy-mysql
+  labels:
+    app.kubernetes.io/name: buddystudy-mysql
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: buddystudy-mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      nodePort: 30432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: buddystudy-mysql
+  labels:
+    app.kubernetes.io/name: buddystudy-mysql
+spec:
+  serviceName: buddystudy-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: buddystudy-mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: buddystudy-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              value: buddystudy
+            - name: MYSQL_USER
+              value: buddystudy
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: DATABASE_PASSWORD
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: buddystudy-backend-secret
+                  key: DATABASE_PASSWORD
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: buddystudy-mysql-data
+        - name: init-scripts
+          configMap:
+            name: buddystudy-mysql-init

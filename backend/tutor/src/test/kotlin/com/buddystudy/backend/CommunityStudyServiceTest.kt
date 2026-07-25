@@ -14,7 +14,6 @@ import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionLik
 import com.buddystudy.backend.community.adapter.outbound.persistence.ReportRepository
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.service.CommunityService
-import com.buddystudy.backend.community.application.service.QuestionSearchSyncManager
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -44,7 +43,7 @@ import java.time.Instant
         "buddystudy.auth.jwt-secret=test-jwt-secret",
     ]
 )
-class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
+class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var databaseClient: DatabaseClient
     @Autowired lateinit var community: CommunityService
     @Autowired lateinit var study: StudyService
@@ -56,7 +55,6 @@ class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
-    @Autowired lateinit var questionSearch: QuestionSearchSyncManager
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -66,14 +64,19 @@ class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
 
     @BeforeEach
     fun setUp() = runBlocking {
-        databaseClient.sql(
-            """
-            truncate table
-                reports, question_comments, question_likes, question_stats,
-                question_search, questions, studies, users
-            restart identity cascade
-            """.trimIndent(),
-        ).fetch().rowsUpdated().awaitSingle()
+        listOf(
+            "reports",
+            "question_comments",
+            "question_likes",
+            "question_stats",
+            "questions",
+            "studies",
+            "user_roles",
+            "user_term_agreements",
+            "users",
+        ).forEach { table ->
+            databaseClient.sql("delete from $table").fetch().rowsUpdated().awaitSingle()
+        }
         author = users.save(user("author", "Author", allowPublic = true))
         viewer = users.save(user("viewer", "Viewer", allowPublic = true))
         hiddenAuthor = users.save(user("hidden", "Hidden", allowPublic = false))
@@ -87,8 +90,6 @@ class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
         pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         answeredPublicQuestion(hiddenAuthor, "SwiftUI", createdAt = now.plusSeconds(1))
         answeredPublicQuestion(author, "SwiftUI", createdAt = now, deletedAt = now.plusSeconds(10))
-        questionSearch.refreshIndexedQuestion(visible)
-
         val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(1)
@@ -104,8 +105,6 @@ class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         pendingPublicQuestion(author, "SwiftUI", createdAt = now)
-        listOf(newest, older).forEach { questionSearch.refreshIndexedQuestion(it) }
-
         val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)
@@ -113,14 +112,12 @@ class CommunityStudyServiceTest : PostgresIntegrationTestSupport() {
     }
 
     @Test
-    fun `public questions v2 reads from search table and only returns public answered records`(): Unit = runBlocking {
+    fun `public questions v2 reads canonical questions and only returns public answered records`(): Unit = runBlocking {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
         val private = answeredPublicQuestion(author, "Private", createdAt = now.plusSeconds(3), publicQuestion = false)
         val pending = pendingPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(4))
         val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden", createdAt = now.plusSeconds(5))
-        listOf(newest, older, private, pending, hidden).forEach { questionSearch.refreshIndexedQuestion(it) }
-
         val response = community.getPublicQuestionsV2(principal = null, query = null, language = "ko", limit = 10, offset = 0)
 
         assertThat(response.totalCount).isEqualTo(2)

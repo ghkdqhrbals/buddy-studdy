@@ -46,7 +46,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           BACKEND_MASTER_KEY: ${{ secrets.BACKEND_MASTER_KEY }}
           BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
-          POSTGRES_SECRET_ID: buddystudy/prod/postgres
+          MYSQL_SECRET_ID: buddystudy/prod/mysql
           APP_SECRET_ID: buddystudy/prod
           GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
           APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
@@ -86,12 +86,12 @@ jobs:
 
           mkdir -p nginx/certs letsencrypt
 
-          POSTGRES_SECRET_JSON="$(aws secretsmanager get-secret-value \
+          MYSQL_SECRET_JSON="$(aws secretsmanager get-secret-value \
             --region ap-northeast-2 \
-            --secret-id "${POSTGRES_SECRET_ID}" \
+            --secret-id "${MYSQL_SECRET_ID}" \
             --query SecretString \
             --output text 2>/dev/null || true)"
-          POSTGRES_SECRET_ORIGINAL_JSON="${POSTGRES_SECRET_JSON}"
+          MYSQL_SECRET_ORIGINAL_JSON="${MYSQL_SECRET_JSON}"
           APP_SECRET_JSON="$(aws secretsmanager get-secret-value \
             --region ap-northeast-2 \
             --secret-id "${APP_SECRET_ID}" \
@@ -103,52 +103,52 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${POSTGRES_SECRET_JSON}" ]; then
-            if [ ! -s .postgres_password ]; then
-              openssl rand -hex 32 > .postgres_password
+          if [ -z "${MYSQL_SECRET_JSON}" ]; then
+            if [ ! -s .mysql_password ]; then
+              openssl rand -hex 32 > .mysql_password
             fi
-            POSTGRES_PASSWORD="$(cat .postgres_password)"
-            POSTGRES_SECRET_JSON="$(
-              POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" python3 -c \
-                'import json, os; print(json.dumps({"dbname":"buddystudy","username":"buddystudy","password":os.environ["POSTGRES_PASSWORD"],"jdbcUrl":"jdbc:postgresql://buddystudy-db:5432/buddystudy","r2dbcUrl":"r2dbc:postgresql://buddystudy-db:5432/buddystudy"}))'
+            MYSQL_PASSWORD="$(cat .mysql_password)"
+            MYSQL_SECRET_JSON="$(
+              MYSQL_PASSWORD="${MYSQL_PASSWORD}" python3 -c \
+                'import json, os; print(json.dumps({"dbname":"buddystudy","username":"buddystudy","password":os.environ["MYSQL_PASSWORD"],"jdbcUrl":"jdbc:mysql://buddystudy-db:3306/buddystudy?serverTimezone=UTC","r2dbcUrl":"r2dbc:mysql://buddystudy-db:3306/buddystudy"}))'
             )"
             aws secretsmanager create-secret \
               --region ap-northeast-2 \
-              --name "${POSTGRES_SECRET_ID}" \
-              --secret-string "${POSTGRES_SECRET_JSON}" >/dev/null
-            POSTGRES_SECRET_ORIGINAL_JSON="${POSTGRES_SECRET_JSON}"
+              --name "${MYSQL_SECRET_ID}" \
+              --secret-string "${MYSQL_SECRET_JSON}" >/dev/null
+            MYSQL_SECRET_ORIGINAL_JSON="${MYSQL_SECRET_JSON}"
           fi
 
-          POSTGRES_SECRET_JSON="$(
-            SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c \
-              'import json, os; secret=json.loads(os.environ["SECRET_JSON"]); database=secret.get("dbname") or "buddystudy"; secret.update({"dbname":database,"username":secret.get("username") or "buddystudy","jdbcUrl":secret.get("jdbcUrl") or f"jdbc:postgresql://buddystudy-db:5432/{database}","r2dbcUrl":secret.get("r2dbcUrl") or f"r2dbc:postgresql://buddystudy-db:5432/{database}"}); secret.get("password") or (_ for _ in ()).throw(SystemExit("PostgreSQL password is missing from the AWS secret.")); print(json.dumps(secret))'
+          MYSQL_SECRET_JSON="$(
+            SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c \
+              'import json, os; secret=json.loads(os.environ["SECRET_JSON"]); database=secret.get("dbname") or "buddystudy"; secret.update({"dbname":database,"username":secret.get("username") or "buddystudy","jdbcUrl":secret.get("jdbcUrl") or f"jdbc:mysql://buddystudy-db:3306/{database}?serverTimezone=UTC","r2dbcUrl":secret.get("r2dbcUrl") or f"r2dbc:mysql://buddystudy-db:3306/{database}"}); secret.get("password") or (_ for _ in ()).throw(SystemExit("MySQL password is missing from the AWS secret.")); print(json.dumps(secret))'
           )"
-          if [ "${POSTGRES_SECRET_JSON}" != "${POSTGRES_SECRET_ORIGINAL_JSON}" ]; then
+          if [ "${MYSQL_SECRET_JSON}" != "${MYSQL_SECRET_ORIGINAL_JSON}" ]; then
             aws secretsmanager put-secret-value \
               --region ap-northeast-2 \
-              --secret-id "${POSTGRES_SECRET_ID}" \
-              --secret-string "${POSTGRES_SECRET_JSON}" >/dev/null
+              --secret-id "${MYSQL_SECRET_ID}" \
+              --secret-string "${MYSQL_SECRET_JSON}" >/dev/null
           fi
 
-          POSTGRES_DB="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')"
-          POSTGRES_USER="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')"
-          POSTGRES_PASSWORD="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
-          DATABASE_URL="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["jdbcUrl"])')"
-          R2DBC_DATABASE_URL="$(SECRET_JSON="${POSTGRES_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["r2dbcUrl"])')"
-          printf '%s' "${POSTGRES_PASSWORD}" > .postgres_password
-          printf '%s' "${POSTGRES_SECRET_ID}" > .postgres_secret_name
-          chmod 600 .postgres_password
-          chmod 600 .postgres_secret_name 2>/dev/null || true
+          MYSQL_DATABASE="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')"
+          MYSQL_USER="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')"
+          MYSQL_PASSWORD="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
+          DATABASE_URL="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["jdbcUrl"])')"
+          R2DBC_DATABASE_URL="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["r2dbcUrl"])')"
+          printf '%s' "${MYSQL_PASSWORD}" > .mysql_password
+          printf '%s' "${MYSQL_SECRET_ID}" > .mysql_secret_name
+          chmod 600 .mysql_password
+          chmod 600 .mysql_secret_name 2>/dev/null || true
 
           cat > .env <<ENV
           SPRING_PROFILES_ACTIVE=prod
           FLYWAY_ENABLED=true
           DATABASE_URL=${DATABASE_URL}
-          DATABASE_USERNAME=${POSTGRES_USER}
-          DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+          DATABASE_USERNAME=${MYSQL_USER}
+          DATABASE_PASSWORD=${MYSQL_PASSWORD}
           R2DBC_DATABASE_URL=${R2DBC_DATABASE_URL}
-          R2DBC_DATABASE_USERNAME=${POSTGRES_USER}
-          R2DBC_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+          R2DBC_DATABASE_USERNAME=${MYSQL_USER}
+          R2DBC_DATABASE_PASSWORD=${MYSQL_PASSWORD}
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
           OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -183,9 +183,10 @@ jobs:
           chmod 600 .env
 
           cat > db.env <<ENV
-          POSTGRES_DB=${POSTGRES_DB}
-          POSTGRES_USER=${POSTGRES_USER}
-          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          MYSQL_DATABASE=${MYSQL_DATABASE}
+          MYSQL_USER=${MYSQL_USER}
+          MYSQL_PASSWORD=${MYSQL_PASSWORD}
+          MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
           ENV
           chmod 600 db.env
 
@@ -193,7 +194,7 @@ jobs:
           docker pull "${IMAGE_REF}"
           docker pull "${COORDINATOR_IMAGE_REF}"
           docker pull nginx:1.27-alpine
-          docker pull postgres:16-alpine
+          docker pull mysql:8.4
           docker pull certbot/certbot:v2.11.0
           docker pull grafana/promtail:3.3.2
           docker pull docker:27-cli
@@ -219,7 +220,7 @@ jobs:
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
-          docker volume create buddystudy-postgres-data >/dev/null
+          docker volume create buddystudy-mysql-data >/dev/null
           docker volume create buddystudy-profile-photos >/dev/null
 
           docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
@@ -294,6 +295,15 @@ jobs:
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
           if docker inspect buddystudy-db >/dev/null 2>&1; then
+            DATABASE_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-db)"
+            case "${DATABASE_IMAGE}" in
+              mysql:8.4|mysql:8.4.*)
+                ;;
+              *)
+                echo "buddystudy-db uses ${DATABASE_IMAGE}. Migrate PostgreSQL data with the MySQL cutover runbook before deployment." >&2
+                exit 1
+                ;;
+            esac
             docker start buddystudy-db >/dev/null
             docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
           else
@@ -302,17 +312,18 @@ jobs:
               --network buddystudy-net \
               --restart unless-stopped \
               --env-file db.env \
-              -p 5432:5432 \
-              -v buddystudy-postgres-data:/var/lib/postgresql/data \
-              postgres:16-alpine
+              -p 3306:3306 \
+              -v buddystudy-mysql-data:/var/lib/mysql \
+              mysql:8.4
           fi
 
           for attempt in $(seq 1 60); do
-            if docker exec buddystudy-db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
+            if docker exec -e MYSQL_PWD="${MYSQL_PASSWORD}" buddystudy-db \
+              mysqladmin ping -h 127.0.0.1 -u "${MYSQL_USER}" --silent >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 60 ]; then
-              echo "PostgreSQL did not become ready." >&2
+              echo "MySQL did not become ready." >&2
               docker logs buddystudy-db || true
               exit 1
             fi
@@ -600,7 +611,7 @@ jobs:
           fi
           docker image prune -f
 
-      - name: Deploy PostgreSQL runtime observer
+      - name: Deploy MySQL runtime observer
         env:
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
         run: |
@@ -608,7 +619,7 @@ jobs:
 
           docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
           if [ -z "${REMOTE_LOKI_PUSH_URL}" ]; then
-            echo "REMOTE_LOKI_PUSH_URL is empty; PostgreSQL runtime observer is disabled."
+            echo "REMOTE_LOKI_PUSH_URL is empty; MySQL runtime observer is disabled."
             exit 0
           fi
 
@@ -625,18 +636,19 @@ jobs:
             -o monitoring/database-runtime-collector.sh
           chmod 700 monitoring/database-runtime-collector.sh
 
-          POSTGRES_DB="$(
+          MYSQL_DATABASE="$(
             docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
-              | sed -n 's/^POSTGRES_DB=//p' \
+              | sed -n 's/^MYSQL_DATABASE=//p' \
               | head -n 1
           )"
-          POSTGRES_USER="$(
+          MYSQL_USER="$(
             docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
-              | sed -n 's/^POSTGRES_USER=//p' \
+              | sed -n 's/^MYSQL_USER=//p' \
               | head -n 1
           )"
-          if [ -z "${POSTGRES_DB}" ] || [ -z "${POSTGRES_USER}" ]; then
-            echo "Could not resolve PostgreSQL database/user from the running container." >&2
+          MYSQL_PASSWORD="$(cat .mysql_password)"
+          if [ -z "${MYSQL_DATABASE}" ] || [ -z "${MYSQL_USER}" ] || [ -z "${MYSQL_PASSWORD}" ]; then
+            echo "Could not resolve MySQL database credentials from the running container." >&2
             exit 1
           fi
 
@@ -645,9 +657,10 @@ jobs:
             --restart unless-stopped \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-            -e POSTGRES_DB="${POSTGRES_DB}" \
-            -e POSTGRES_USER="${POSTGRES_USER}" \
-            -e POSTGRES_CONTAINER=buddystudy-db \
+            -e MYSQL_DATABASE="${MYSQL_DATABASE}" \
+            -e MYSQL_USER="${MYSQL_USER}" \
+            -e MYSQL_PASSWORD="${MYSQL_PASSWORD}" \
+            -e MYSQL_CONTAINER=buddystudy-db \
             -e DATABASE_METRICS_INTERVAL_SECONDS=30 \
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
             -v "$PWD/monitoring/database-runtime-collector.sh:/collector.sh:ro" \

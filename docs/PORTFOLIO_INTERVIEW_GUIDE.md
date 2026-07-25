@@ -10,7 +10,7 @@ BuddyStudy is an iOS AI tutor that turns a topic and difficulty into short
 questions, preserves answer drafts, grades answers through OpenAI, and converts
 the resulting records into topic-level learning statistics. The SwiftUI client
 does not call OpenAI directly. A Kotlin Spring backend owns identity, terms,
-question generation, grading, schedules, APNs, PostgreSQL data, Redis Streams,
+question generation, grading, schedules, APNs, MySQL data, Redis Streams,
 and monitoring. I also built an API-log and server dashboard, a repeatable k6
 benchmark, and separate deployment pipelines for the backend, admin,
 monitoring, and external health monitor.
@@ -34,7 +34,7 @@ Question and grading writes are transactional. Events that must reach Redis are
 first appended to an outbox in the same R2DBC transaction. A polling dispatcher
 claims rows with `FOR UPDATE SKIP LOCKED`, publishes with an idempotency key, and
 retries with a lease and exponential backoff. This gives at-least-once delivery
-without pretending that Redis publication and PostgreSQL commit are one atomic
+without pretending that Redis publication and MySQL commit are one atomic
 operation.
 
 For performance, I compared MVC/JDBC and WebFlux/R2DBC under the same CPU, heap,
@@ -75,7 +75,7 @@ universally faster.
   hyphens, width, diacritics, and simple camelCase.
 - Difficulty and score combined into an estimated 1-10 ability range.
 - Search, sort, pagination, topic detail, and trend visualization.
-- Incremental PostgreSQL read model using dirty keys rather than rebuilding all
+- Incremental MySQL read model using dirty keys rather than rebuilding all
   history after every answer.
 
 The write transaction adds only the affected
@@ -104,7 +104,7 @@ so the proposed seven-second list cache is not described as a deployed feature.
 ### Avatar Image Cost
 
 The current default is a Reddit-style avatar builder, not a user-photo upload
-pipeline. PostgreSQL stores catalog item keys, categories, compatibility,
+pipeline. MySQL stores catalog item keys, categories, compatibility,
 z-index, unlocks, and a compact user config. The iOS app composes fixed slots
 from bundled assets and locally cached catalog data. This avoids per-user image
 blobs, CDN variants, and repeated profile-image downloads. Photo upload and
@@ -139,7 +139,7 @@ SwiftUI iOS
   -> Spring WebFlux + Kotlin coroutines
   -> application use cases
   -> outbound ports
-  -> PostgreSQL (R2DBC), Redis Streams, OpenAI, APNs
+  -> MySQL (R2DBC), Redis Streams, OpenAI, APNs
 ```
 
 ### Why Hexagonal Boundaries
@@ -177,13 +177,13 @@ be saved explicitly.
 The transactional outbox addresses the dual-write problem:
 
 ```text
-business write + outbox row (one PostgreSQL transaction)
+business write + outbox row (one MySQL transaction)
   -> polling claim with SKIP LOCKED
   -> Redis Stream publish
   -> mark published
 ```
 
-A crash can happen after Redis accepts an event and before PostgreSQL marks the
+A crash can happen after Redis accepts an event and before MySQL marks the
 row published. Consumers therefore deduplicate by `(event_type, event_id)`.
 
 ### Why Redis Streams
@@ -196,7 +196,7 @@ surface at the current traffic and team size.
 
 The current guarantee comes from:
 
-- one PostgreSQL transaction for the business row and outbox row;
+- one MySQL transaction for the business row and outbox row;
 - a unique `(event_type, event_id)` producer key;
 - leased `SKIP LOCKED` claims and exponential retry;
 - event-id deduplication in consumers;
@@ -220,10 +220,10 @@ must not be attributed to Redis 8.2.
   health endpoint is excluded from capacity conclusions.
 - 1,000, 1,500, 2,000, 2,500, and 3,000 requested RPS.
 - Three alternating-order rounds, median reported.
-- Same PostgreSQL fixture, Redis, 4 visible CPUs, 512 MiB heap, and 10 DB
+- Same MySQL fixture, Redis, 4 visible CPUs, 512 MiB heap, and 10 DB
   connections.
 - p50, p90, p95, p99, HTTP RPS, successful RPS, failure rate, and dropped work.
-- CPU, RSS, heap, direct memory, thread counts, DB pool, PostgreSQL, Redis, GC,
+- CPU, RSS, heap, direct memory, thread counts, DB pool, MySQL, Redis, GC,
   and allocation telemetry.
 - JFR and a row-count control experiment for bottleneck localization.
 
@@ -251,7 +251,7 @@ sustained-load conclusion.
 
 - The isolated studies result attributes saturation to that API rather than a
   synthetic route or a mixed workload.
-- Non-blocking waiting did not increase PostgreSQL capacity.
+- Non-blocking waiting did not increase MySQL capacity.
 - Unbounded admission converted a small pool into thousands of in-process
   waiters and five-second timeouts.
 - The 100-row entity materialization and response path was the largest measured
@@ -287,7 +287,7 @@ sustained-load conclusion.
 ### Network Segmentation
 
 - Public HTTPS services are routed through Cloudflare Tunnel and Nginx.
-- PostgreSQL and Redis are not intended for direct public administration.
+- MySQL and Redis are not intended for direct public administration.
 - Operator access uses a Cloudflare WARP private `/32` route.
 - Compatibility TCP access requires a local `cloudflared access tcp` proxy.
 - Loki and Grafana bind to `127.0.0.1`; the authenticated dashboard proxy is the
@@ -363,7 +363,7 @@ must become cheaper before pool tuning.
 
 ### “How do you prevent event loss?”
 
-The event is written to a PostgreSQL outbox in the business transaction. A
+The event is written to a MySQL outbox in the business transaction. A
 dispatcher publishes it later. This prevents the business row from committing
 without a durable publication intent. Delivery is at-least-once, so consumers
 deduplicate.
@@ -372,7 +372,7 @@ deduplicate.
 
 Redis was already operated, and the required semantics were consumer groups,
 ACK, pending-entry recovery, and replay rather than long-term event retention
-or broad multi-team streaming. Transactional outbox solves the PostgreSQL/Redis
+or broad multi-team streaming. Transactional outbox solves the MySQL/Redis
 dual-write boundary. The cost is at-least-once delivery and explicit consumer
 idempotency. Kafka becomes reasonable when retention, partition scale, replay
 volume, or organizational fan-out exceeds this simpler operating model.

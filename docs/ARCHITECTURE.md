@@ -64,7 +64,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `backend/`
   - Spring Boot Kotlin APNs push backend.
   - Runs Spring WebFlux on Reactor Netty with Kotlin suspending controllers, use cases, persistence ports, and security lookups.
-  - Uses Spring Data R2DBC and the PostgreSQL R2DBC driver for runtime database access. Request-path persistence does not use JPA, Hibernate, Hikari, JDBC, or a blocking executor.
+  - Uses Spring Data R2DBC and the MySQL R2DBC driver for runtime database access. Request-path persistence does not use JPA, Hibernate, Hikari, JDBC, or a blocking executor.
   - Uses reactive transaction context for suspending `@Transactional` methods. Entity mutation must be persisted explicitly because Spring Data Relational does not provide JPA dirty checking, lazy loading, or managed entity sessions.
   - Uses JDBC only during application startup when Flyway migrations are enabled. Runtime details and migration trade-offs are documented in [`R2DBC_MIGRATION.md`](R2DBC_MIGRATION.md) and [`WEBFLUX_MIGRATION.md`](WEBFLUX_MIGRATION.md).
   - The backend is organized as multi-module hexagonal architecture: `domain`, `application`, `infra`, and executable `tutor`.
@@ -73,9 +73,9 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Topic-level statistics calculation is separated into `backend/application/src/main/kotlin/com/buddystudy/backend/stats/StatsService.kt` and is consumed by study application services.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.
-  - Uses a private Dockerized PostgreSQL container with a persistent named volume.
+  - Uses a private Dockerized MySQL container with a persistent named volume.
   - Calls OpenAI for API-key validation, question generation, and answer grading.
-  - Stores generated questions in PostgreSQL before sending APNs notifications.
+  - Stores generated questions in MySQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
   - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through direct Redis Streams.
   - Transactional domain writes append typed events to `redis_event_outbox` in the same R2DBC transaction. A single polling dispatcher claims rows with `FOR UPDATE SKIP LOCKED`, publishes them to Redis Streams, and retries failures with a lease and exponential backoff.
@@ -97,7 +97,7 @@ Manual action / pull-to-refresh / backend scheduled interval
 -> AppState.generateQuestion
 -> RemotePushBackendClient.createQuestion
 -> backend POST /api/v1/me/questions
--> backend calls OpenAI and stores an ungraded StudyRecord in PostgreSQL
+-> backend calls OpenAI and stores an ungraded StudyRecord in MySQL
 -> SettingsStore caches the returned StudyRecord
 -> current question updates only when it is safe to activate
 -> APNs notification is sent by the backend for scheduled questions
@@ -111,7 +111,7 @@ User answer
 -> backend calls OpenAI and persists score, feedback, and explanation
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records
--> backend stats are refreshed from PostgreSQL records
+-> backend stats are refreshed from MySQL records
 ```
 
 ## Sync Model
@@ -127,7 +127,7 @@ User answer
 
 - iPhone registers for remote notifications through `UIApplication`.
 - iPhone app timers only run while the app process is active. For locked/background delivery, the app opportunistically pre-generates at most one pending question notification when entering background and schedules it for the configured interval. If a question notification is already pending, it does not create another. `BGAppRefresh` is also requested at the next due date, but iOS does not guarantee exact wake-up timing.
-- The Spring Boot Kotlin backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in PostgreSQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, publishes push jobs through Redis Streams, and sends APNs alerts from the backend stream consumer.
+- The Spring Boot Kotlin backend is the production path for server-scheduled APNs delivery. It stores APNs tokens and schedules in MySQL, keeps user OpenAI keys encrypted at rest when provided, creates due questions with OpenAI, stores them in the `questions`/records tables, publishes push jobs through Redis Streams, and sends APNs alerts from the backend stream consumer.
 - Scheduled delivery requires an APNs token. If a backend device exists without a token, the scheduler defers the due item instead of generating an undeliverable push.
 
 ## Community Identity
@@ -138,7 +138,7 @@ User answer
 - User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion immediately removes the active profile, sign-in mappings, public questions, and related study records, then reconnects the current device to an anonymous user.
 - Public question rows expose only the author's public profile fields: display name, bio, pixel-avatar symbol, and color seed. The iOS app renders the avatar locally and does not upload or display user photos.
 - Question publicity defaults to private unless the signed-in user enables public sharing.
-- Reports are stored in PostgreSQL and can optionally be emailed to the operator Gmail through SMTP settings.
+- Reports are stored in MySQL and can optionally be emailed to the operator Gmail through SMTP settings.
 
 ## Topic Statistics
 
@@ -149,11 +149,11 @@ User answer
 - Topic range is estimated from difficulty level and score, then widened by small sample size and conflicting evidence.
 - Backend topic statistics are a materialized read model in `user_stats`.
 - `questions` remains the source of truth. Answer grading and record deletion mark only the affected `(user_id, stat_date, topic_key, difficulty_level)` bucket in `user_stats_dirty_keys`.
-- The refresh job processes dirty keys in bounded batches and recomputes each bucket with PostgreSQL aggregation instead of loading all questions into application memory.
+- The refresh job processes dirty keys in bounded batches and recomputes each bucket with MySQL aggregation instead of loading all questions into application memory.
 - Dirty key processing is at-least-once and idempotent: recalculating the same bucket deletes and reinserts only that bucket's `user_stats` rows.
 - Refresh claims dirty rows with `FOR UPDATE SKIP LOCKED`; if the process crashes before commit, the transaction rolls back and the dirty rows remain for the next run.
 - Refresh deletes a dirty row only when its `updated_at` still matches the claimed value. If a new answer/delete updates the same bucket during refresh, the dirty row is kept and retried in a later batch.
-- H2/test environments fall back to a full rebuild path; production PostgreSQL uses incremental dirty-key refresh.
+- H2/test environments fall back to a full rebuild path; production MySQL uses incremental dirty-key refresh.
 
 ## Build And Verification
 
