@@ -90,7 +90,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(({container=~\"buddystudy-backend.*\"} |= \"api_exchange \")[1m]))",
+          "expr": "sum(rate(({container=~\"buddystudy-backend.*\"} |= \"api_exchange \")[1m])) or vector(0)",
           "legendFormat": "requests",
           "queryType": "instant",
           "refId": "A"

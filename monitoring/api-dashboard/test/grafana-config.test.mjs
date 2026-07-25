@@ -107,6 +107,7 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   assert.equal(panels.get("Request rate")?.fieldConfig.defaults.unit, "reqps");
   assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /api_exchange/);
   assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /sum\(rate\(/);
+  assert.match(panels.get("Request rate")?.targets[0].expr ?? "", /or vector\(0\)/);
   assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
