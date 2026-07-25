@@ -45,6 +45,9 @@ k3s stores BuddyStuddy data on the host:
 The Kubernetes PV reclaim policy is `Retain`. Do not delete these host
 directories unless data loss is intended.
 
+Redis stores both an `everysec` AOF and compressed, checksummed RDB snapshots
+under `/var/lib/buddystudy/redis/standalone`.
+
 ## Install k3s
 
 Run on the Linux host:

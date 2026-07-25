@@ -325,6 +325,27 @@ test("k3s operations docs describe the actual exposed node ports", () => {
   assert.doesNotMatch(readme, /MySQL:[^\n]*<host-ip>:3306/);
 });
 
+test("Redis runtime enables AOF and RDB persistence on a retained volume", () => {
+  const redisManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/redis/redis.yaml"), "utf8");
+  const dockerCompose = fs.readFileSync(path.join(repoRoot, "backend/docker-compose.yml"), "utf8");
+  const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
+
+  for (const text of [redisManifest, dockerCompose]) {
+    assert.match(text, /appendonly[\s\S]*yes/);
+    assert.match(text, /appendfsync[\s\S]*everysec/);
+    assert.match(text, /aof-use-rdb-preamble[\s\S]*yes/);
+    assert.match(text, /save[\s\S]*3600[\s\S]*1/);
+    assert.match(text, /save[\s\S]*300[\s\S]*100/);
+    assert.match(text, /save[\s\S]*60[\s\S]*10000/);
+    assert.match(text, /rdbcompression[\s\S]*yes/);
+    assert.match(text, /rdbchecksum[\s\S]*yes/);
+    assert.match(text, /\/data/);
+  }
+  assert.match(combinedManifest, /appendfsync everysec/);
+  assert.match(combinedManifest, /rdbcompression yes/);
+  assert.match(combinedManifest, /persistentVolumeReclaimPolicy:\s*Retain/);
+});
+
 test("deploy repo backend template wires scheduler Slack webhook into backend env", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
 

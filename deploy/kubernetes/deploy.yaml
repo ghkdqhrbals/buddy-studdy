@@ -523,6 +523,16 @@ spec:
             --bind 0.0.0.0 \
             --protected-mode no \
             --appendonly yes \
+            --appendfsync everysec \
+            --aof-use-rdb-preamble yes \
+            --auto-aof-rewrite-percentage 100 \
+            --auto-aof-rewrite-min-size 64mb \
+            --save 3600 1 \
+            --save 300 100 \
+            --save 60 10000 \
+            --rdbcompression yes \
+            --rdbchecksum yes \
+            --dbfilename dump.rdb \
             --dir /data \
             --requirepass "$REDIS_PASSWORD"
         env:
@@ -557,6 +567,7 @@ spec:
         volumeMounts:
         - mountPath: /data
           name: data
+      terminationGracePeriodSeconds: 30
       volumes:
       - name: data
         persistentVolumeClaim:

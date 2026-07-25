@@ -491,6 +491,16 @@ export class ComponentManager {
         "--maxmemory", `${config.maxMemoryMb}mb`,
         "--maxmemory-policy", config.evictionPolicy,
         "--appendonly", "yes",
+        "--appendfsync", "everysec",
+        "--aof-use-rdb-preamble", "yes",
+        "--auto-aof-rewrite-percentage", "100",
+        "--auto-aof-rewrite-min-size", "64mb",
+        "--save", "3600", "1",
+        "--save", "300", "100",
+        "--save", "60", "10000",
+        "--rdbcompression", "yes",
+        "--rdbchecksum", "yes",
+        "--dbfilename", "dump.rdb",
         "--dir", "/data",
       );
     }

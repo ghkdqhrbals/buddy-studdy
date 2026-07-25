@@ -107,6 +107,11 @@ The Mac Kubernetes target stores state on the host:
 The PV reclaim policy is `Retain`; deleting Kubernetes workloads must not delete
 these host directories.
 
+Redis enables both AOF and RDB persistence. AOF uses `appendfsync everysec` and
+automatic rewrite; RDB creates compressed, checksummed snapshots after
+`3600s/1`, `300s/100`, or `60s/10000` writes. Both formats are stored in the
+same retained Redis data volume.
+
 ## External Access
 
 The Mac Kubernetes target exposes fixed NodePorts. Do not use persistent

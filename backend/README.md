@@ -25,6 +25,8 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Publishes scheduled push jobs through Redis Streams and consumes them with the backend's lightweight polling consumers.
 - Sends APNs remote notifications to iPhone from the stream consumer.
 - Runs in Docker with MySQL stored on a mounted volume.
+- Persists Redis with AOF (`appendfsync everysec`) and compressed, checksummed
+  RDB snapshots in the mounted `/data` volume.
 
 ## Runtime Secrets
 

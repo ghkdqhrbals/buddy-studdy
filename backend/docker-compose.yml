@@ -62,7 +62,35 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --aof-use-rdb-preamble
+      - "yes"
+      - --auto-aof-rewrite-percentage
+      - "100"
+      - --auto-aof-rewrite-min-size
+      - 64mb
+      - --save
+      - "3600"
+      - "1"
+      - --save
+      - "300"
+      - "100"
+      - --save
+      - "60"
+      - "10000"
+      - --rdbcompression
+      - "yes"
+      - --rdbchecksum
+      - "yes"
+      - --dbfilename
+      - dump.rdb
+      - --dir
+      - /data
     volumes:
       - buddystudy-redis-data:/data
     healthcheck:
@@ -71,6 +99,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    stop_grace_period: 30s
 
   backup:
     image: mysql:8.4

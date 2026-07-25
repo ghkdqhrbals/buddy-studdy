@@ -35,6 +35,13 @@ test("ComponentManager deploys, recreates on restart, and removes an approved is
     && entry.includes("--label")
     && entry.includes("testzone.managed=true")
   )));
+  const redisRun = commands.find((entry) => entry[0] === "docker" && entry[1] === "run");
+  assert.ok(redisRun.includes("--appendonly"));
+  assert.ok(redisRun.includes("--appendfsync"));
+  assert.ok(redisRun.includes("--aof-use-rdb-preamble"));
+  assert.ok(redisRun.includes("--save"));
+  assert.ok(redisRun.includes("--rdbcompression"));
+  assert.ok(redisRun.includes("--rdbchecksum"));
 
   const restarted = await manager.restart("redis");
   assert.equal(restarted.status, "running");
