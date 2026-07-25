@@ -945,6 +945,16 @@ function runChartPanPlugin(host, scope) {
 function runChartTooltipPlugin() {
   let tooltip = null;
 
+  const tooltipSeriesClasses = new Map([
+    ["HTTP success", "is-success"],
+    ["HTTP errors", "is-error"],
+    ["Average", "is-average"],
+    ["Average latency", "is-average-latency"],
+    ["p90", "is-p90"],
+    ["p95", "is-p95"],
+    ["RPS", "is-rps"],
+  ]);
+
   function hideTooltip() {
     if (tooltip) tooltip.hidden = true;
   }
@@ -983,9 +993,11 @@ function runChartTooltipPlugin() {
       const value = plot.data[seriesIndex + 1][index];
       const row = document.createElement("div");
       row.className = "run-chart-tooltip-row";
+      const seriesClass = tooltipSeriesClasses.get(series.label);
+      if (seriesClass) row.classList.add(seriesClass);
       const swatch = document.createElement("span");
       swatch.className = "run-chart-tooltip-swatch";
-      swatch.style.background = typeof series.stroke === "string" ? series.stroke : "#64748b";
+      swatch.setAttribute("aria-hidden", "true");
       const label = document.createElement("span");
       label.className = "run-chart-tooltip-label";
       label.textContent = series.label;

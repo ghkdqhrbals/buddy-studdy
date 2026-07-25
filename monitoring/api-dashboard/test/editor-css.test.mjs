@@ -58,8 +58,13 @@ test("run detail charts use vendored uPlot with cursor tooltips", () => {
   assert.match(html, /vendor\/uplot\/uPlot\.iife\.min\.js\?v=1\.6\.32/);
   assert.match(html, /vendor\/uplot\/uPlot\.min\.css\?v=1\.6\.32/);
   assert.match(css, /\.run-chart-tooltip/);
+  assert.match(css, /\.run-chart-tooltip-row\.is-success/);
+  assert.match(css, /--tooltip-series-color/);
+  assert.match(css, /\.run-chart-tooltip-swatch[\s\S]+background:\s*var\(--tooltip-series-color\)/);
   assert.match(chartCode, /new window\.uPlot/);
   assert.match(chartCode, /function runChartTooltipPlugin/);
+  assert.match(chartCode, /tooltipSeriesClasses/);
+  assert.doesNotMatch(chartCode, /swatch\.style\.background/);
   assert.match(chartCode, /function nearestTimestampIndex/);
   assert.match(chartCode, /plot\.over\.addEventListener\("pointermove",\s*updateFromPointer\)/);
   assert.match(chartCode, /setCursor:/);

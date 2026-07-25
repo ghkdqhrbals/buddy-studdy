@@ -571,21 +571,47 @@ body {
 }
 
 .run-chart-tooltip-row {
+  --tooltip-series-color: #64748b;
   display: grid;
-  grid-template-columns: 8px minmax(42px, 1fr) auto;
+  grid-template-columns: 18px minmax(54px, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+}
+
+.run-chart-tooltip-row.is-success {
+  --tooltip-series-color: #16835f;
+}
+
+.run-chart-tooltip-row.is-error {
+  --tooltip-series-color: #c63a3a;
+}
+
+.run-chart-tooltip-row.is-average,
+.run-chart-tooltip-row.is-rps {
+  --tooltip-series-color: #2166d1;
+}
+
+.run-chart-tooltip-row.is-p90,
+.run-chart-tooltip-row.is-average-latency {
+  --tooltip-series-color: #8a5bc7;
+}
+
+.run-chart-tooltip-row.is-p95 {
+  --tooltip-series-color: #c87500;
 }
 
 .run-chart-tooltip-swatch {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
+  width: 16px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--tooltip-series-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tooltip-series-color), #000 12%);
 }
 
 .run-chart-tooltip-label {
-  color: var(--tz-muted);
+  color: var(--tooltip-series-color);
   font-size: 10px;
+  font-weight: 750;
 }
 
 .run-chart-tooltip-value {
